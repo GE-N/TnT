@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, open, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -13,8 +13,30 @@ export type LaunchResult = {
   screenshot?: string; error?: string; confirmedAt?: string;
 };
 
-export function createRunner(options: { artifactDirectory: string; execute: Execute; captureDelayMs?: number }) {
+export function createRunner(options: { artifactDirectory: string; execute: Execute; captureDelayMs?: number; ownershipDirectory?: string }) {
+  const owned = new Set<string>();
   const runner = {
+    async acquireDevice(id: string) {
+      if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new Error('Select a valid simulator identifier.');
+      if (owned.size) throw new Error('A device operation is already in progress. Wait for cleanup before retrying.');
+      owned.add(id);
+      const base = options.ownershipDirectory ?? options.artifactDirectory;
+      const path = join(base, 'device-ownership.lock');
+      try {
+        await mkdir(base, { recursive: true });
+        const handle = await open(path, 'wx', 0o600);
+        try { await handle.writeFile(JSON.stringify({ pid: process.pid, deviceId: id, acquiredAt: new Date().toISOString() })); }
+        finally { await handle.close(); }
+      } catch (error) {
+        owned.delete(id);
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('A device operation is already in progress, or ownership survived a runner crash. Inspect .tnt/device-ownership.lock and stop its owned processes before recovery.');
+        throw error;
+      }
+      return async () => { await unlink(path); owned.delete(id); };
+    },
+    async checkApp(deviceId: string, bundleId: string) {
+      await options.execute('/usr/bin/xcrun', ['simctl', 'get_app_container', deviceId, bundleId, 'app']);
+    },
     async devices(): Promise<Device[]> {
       const { stdout } = await options.execute('/usr/bin/xcrun', ['simctl', 'list', 'devices', 'booted', '-j']);
       const data = JSON.parse(stdout) as { devices: Record<string, { udid: string; name: string; state: string; isAvailable: boolean }[]> };
@@ -29,6 +51,8 @@ export function createRunner(options: { artifactDirectory: string; execute: Exec
       if (typeof input.deviceId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.deviceId)) {
         throw new Error('Select a valid simulator identifier.');
       }
+      const release = await runner.acquireDevice(input.deviceId);
+      try {
       const device = (await runner.devices()).find(device => device.id === input.deviceId);
       if (!device) throw new Error('Select an available, already-running simulator and refresh the device list.');
       const id = randomUUID();
@@ -53,6 +77,7 @@ export function createRunner(options: { artifactDirectory: string; execute: Exec
       }
       await writeFile(join(directory, 'result.json'), JSON.stringify(result, null, 2));
       return result;
+      } finally { await release(); }
     },
     async result(id: string): Promise<LaunchResult> {
       if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error('Invalid launch identifier.');

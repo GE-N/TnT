@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Device, LaunchResult } from '../server/runner.js';
 import './style.css';
+import { Scenarios } from './scenarios.js';
 
 type Status = { ready: boolean; devices: Device[]; token: string; tool: string; node?: string; error?: string };
 
@@ -10,6 +11,7 @@ function App() {
   const [deviceId, setDeviceId] = useState('');
   const [bundleId, setBundleId] = useState('');
   const [busy, setBusy] = useState(false);
+  const [scenarioBusy, setScenarioBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<LaunchResult>();
   const [screen, setScreen] = useState('');
@@ -75,7 +77,7 @@ function App() {
             <label htmlFor="bundle">App bundle identifier</label>
             <input id="bundle" value={bundleId} onChange={event => setBundleId(event.target.value)} placeholder="com.example.App" autoComplete="off" spellCheck={false} disabled={busy} required maxLength={255} />
             <p className="field-hint">Use the bundle ID of the app installed on this device.</p>
-            <button className="primary" type="submit" disabled={!ready || busy || !bundleId.trim()}>{busy ? 'Working…' : 'Launch app'}<span aria-hidden="true">↗</span></button>
+            <button className="primary" type="submit" disabled={!ready || busy || scenarioBusy || !bundleId.trim()}>{busy ? 'Working…' : 'Launch app'}<span aria-hidden="true">↗</span></button>
           </form>
           {(error || status?.error) && <div className="notice error" role="alert">{error || status?.error}</div>}
           {status?.ready && !status.devices.length && <div className="notice">No ready devices found. Open an iOS simulator, then refresh.</div>}
@@ -90,7 +92,8 @@ function App() {
           </>}
         </section>
       </div>
-      <footer><span>iOS first · Local execution</span><span>Screen picking, YAML scenarios and mocks follow in later tickets.</span></footer>
+      <Scenarios token={status?.token ?? ''} deviceId={deviceId} bundleId={bundleId} launchBusy={busy} onRunning={setScenarioBusy} />
+      <footer><span>iOS first · Local execution</span><span>Screen picking and mocks follow in later tickets.</span></footer>
     </main>
   </div>;
 }

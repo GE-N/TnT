@@ -5,6 +5,8 @@ import { readFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { createRunner, type Execute } from './runner.js';
 import { createApiHandler } from './http.js';
+import { createScenarios } from './scenarios.js';
+import { createMaestro } from './maestro.js';
 
 const exec = promisify(execFile);
 const execute: Execute = async (file, args) => {
@@ -20,7 +22,8 @@ const execute: Execute = async (file, args) => {
 const port = Number(process.env.PORT ?? 4317);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('PORT must be an integer from 1024 to 65535.');
 const artifactDirectory = resolve('.tnt/launches');
-const runner = createRunner({ artifactDirectory, execute });
+const runner = createRunner({ artifactDirectory, execute, ownershipDirectory: resolve('.tnt') });
+const scenarios = createScenarios({ root: resolve('.tnt'), runner, maestro: createMaestro() });
 const production = process.argv.includes('--production');
 const server = createServer();
 let serve: (request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse) => void;
@@ -42,6 +45,6 @@ if (production) {
   const vite = await createViteServer({ server: { middlewareMode: true, hmr: { server } }, appType: 'spa' });
   serve = (request, response) => vite.middlewares(request, response);
 }
-server.on('request', createApiHandler(runner, artifactDirectory, serve));
+server.on('request', createApiHandler(runner, artifactDirectory, serve, scenarios));
 server.on('error', error => { console.error('Unable to start workbench:', error.message); process.exitCode = 1; });
 server.listen(port, '127.0.0.1', () => console.log(`TnT workbench: http://127.0.0.1:${port} (${production ? 'production' : 'development'})`));

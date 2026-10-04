@@ -3,9 +3,11 @@ import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { createRunner } from './runner.js';
+import type { createScenarios } from './scenarios.js';
 
 export function createApiHandler(runner: ReturnType<typeof createRunner>, artifactDirectory: string,
-  fallback?: (request: IncomingMessage, response: ServerResponse) => void) {
+  fallback?: (request: IncomingMessage, response: ServerResponse) => void,
+  scenarios?: ReturnType<typeof createScenarios>) {
   const token = randomBytes(32).toString('hex');
   let launching = false;
   return async (request: IncomingMessage, response: ServerResponse) => {
@@ -33,6 +35,23 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       if (request.headers['x-tnt-token'] !== token) return json(403, { error: 'Refresh the workbench to establish a runner session.' });
       if (request.method === 'POST' && request.headers.origin !== `http://${host}`) return json(403, { error: 'A same-origin workbench request is required.' });
       if (request.method === 'POST' && !request.headers['content-type']?.startsWith('application/json')) return json(415, { error: 'Send JSON.' });
+      if (scenarios) {
+        if (request.method === 'POST' && url.pathname === '/api/workspaces') return json(200, await scenarios.save(await readJson(request)));
+        const workspace = /^\/api\/workspaces\/([0-9a-f-]{36})$/.exec(url.pathname);
+        if (request.method === 'GET' && workspace) return json(200, await scenarios.workspace(workspace[1]));
+        if (request.method === 'POST' && url.pathname === '/api/runs') return json(202, await scenarios.start(await readJson(request)));
+        const run = /^\/api\/runs\/([0-9a-f-]{36})(?:\/(cancel|artifact))?$/.exec(url.pathname);
+        if (run) {
+          if (request.method === 'POST' && run[2] === 'cancel') return json(200, await scenarios.cancel(run[1]));
+          if (request.method === 'GET' && !run[2]) return json(200, await scenarios.result(run[1]));
+          if (request.method === 'GET' && run[2] === 'artifact') {
+            const name = url.searchParams.get('name') ?? '';
+            const content = await scenarios.artifact(run[1], name);
+            response.writeHead(200, { 'Content-Type': name.endsWith('.png') ? 'image/png' : 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+            return response.end(content);
+          }
+        }
+      }
       if (request.method === 'POST' && url.pathname === '/api/launches') {
         if (launching) return json(409, { error: 'A launch is already in progress. Wait before launching again.' });
         launching = true;
@@ -66,6 +85,14 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       return json(code === 'ENOENT' ? 404 : 400, { error: message(error) });
     }
   };
+}
+
+async function readJson(request: IncomingMessage) {
+  let body = '';
+  for await (const chunk of request) { body += chunk.toString(); if (Buffer.byteLength(body) > 110_000) throw new Error('Scenario request exceeds 110 KB.'); }
+  const value = JSON.parse(body);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Provide a JSON object.');
+  return value;
 }
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Runner operation failed.'; }
