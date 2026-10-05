@@ -1,6 +1,6 @@
 # TnT · Mobile Test Workbench
 
-Local browser UI and Mac runner for mobile UI testing. Select a running iOS simulator, launch an installed app, and execute an authored Maestro scenario ([issue #3](https://github.com/GE-N/TnT/issues/3)).
+Local browser UI and Mac runner for mobile UI testing. Select a running iOS simulator, launch an installed app, and execute an authored Maestro scenario ([issue #3](https://github.com/GE-N/TnT/issues/3)), or pick a reviewed executable step from a screenshot ([issue #4](https://github.com/GE-N/TnT/issues/4)).
 
 ## Start
 
@@ -44,8 +44,20 @@ This slice uses single-flow workspaces. External files and authored artifact pat
 
 Device operations are serialized, including app launches. A filesystem ownership lock also excludes another runner using the same `.tnt` root. **Cancel run** terminates the owned CLI process group and waits for cleanup before releasing ownership. Runs time out after five minutes. Cleanup reports the actual process outcome; no Mockoon instance is allocated, and app data is not restored. A crash or unverified cleanup retains ownership conservatively. Inspect `.tnt/device-ownership.lock`, stop its owned CLI/helpers, and only then remove the stale lock before retrying. Automated crash recovery and mock restoration belong to later reliability slices.
 
-No mock controller, picker, canvas editor, or default-action handler is implemented yet.
+## Pick a simulator element
 
-Tests target the public runner and its HTTP boundary. Fixture command responses are confined to external tool boundaries; real-device checks are recorded in [launch verification](docs/launch-verification.md) and [scenario verification](docs/scenario-verification.md).
+Below the YAML editor, choose **Refresh screen**, click the captured screenshot, then select a hierarchy candidate explicitly. Overlapping elements remain separate candidates. The browser translates its displayed image coordinates into the screenshot's pixel space; the runner normalizes Maestro's logical bounds against the captured PNG dimensions. Screenshot capture follows hierarchy completion within two seconds; the pair is sequential, not an atomic device snapshot.
+
+Choose tap, input (tap followed by `inputText`), visible, or not-visible. Edit the selector YAML using literal `text`/`id`, `index`, `enabled`, or `childOf`, `containsChild`, `above`, `below`, `leftOf`, and `rightOf` constraints. Labels are escaped and anchored in executable Maestro YAML; the form does not accept arbitrary regex or runtime expressions. **Preview selector** shows capture matches and executable YAML. Ambiguous selectors cannot be saved until an explicit constraint/index identifies the selected candidate. Maestro keeps deeper basic matches and orders indices top-to-bottom, then left-to-right. Preview exposes eligible candidates separately; index is a deliberate choice: use **Test selector** to verify it against Maestro. The preview is not proof of a real device match.
+
+Unlabeled/custom controls may have no semantic selector. **Choose targeted identifier** uses an identifier on the candidate; **Permit identifier constraint** deliberately enables an inspected identifier in an edited hierarchy constraint. **Choose coordinate fallback** uses the clicked point and requires deliberate selection; coordinates support tap/input only, depend on layout, and must stay inside the chosen candidate. Do not put secrets in generated literal input text; use confidential runtime inputs in authored flows instead.
+
+**Test selector** runs a real visible assertion without tapping. **Save step** appends the reviewed command(s) to the current workspace. **Save & run step** saves them and executes just those commands against the current simulator UI, without relaunching/resetting the app or rerunning earlier commands. Results, snapshots, cleanup, and artifacts use the existing scenario result panel. Not-visible against a currently visible picked element deliberately fails.
+
+Captures are ephemeral, held in memory (at most eight), and expire after two minutes or a runner restart. Temporary screenshot files are removed after capture. Before saving/executing, the runner reacquires device ownership and checks the reviewed target, bounds, ancestry, selector matches, device, and screen dimensions. Unrelated status-bar changes do not invalidate semantic selectors. Coordinate fallbacks conservatively require the whole screenshot/hierarchy to remain identical; animations or clock changes can require refresh. Captured review identity is bound to the exact isolated flow and retained in the execution snapshot. There is always a small interval between validation and the actual device command; Maestro's real result remains authoritative. Capture and freshness inspection use the same owned-process cleanup policy as execution, with a 30-second hierarchy timeout.
+
+No mock controller, canvas editor, or default-action handler is implemented yet.
+
+Tests target the public runner and its HTTP boundary. Fixture command responses are confined to external tool boundaries; real-device checks are recorded in [launch verification](docs/launch-verification.md) and [scenario verification](docs/scenario-verification.md), and [picker verification](docs/picker-verification.md).
 
 The full product specification is [GitHub issue #1](https://github.com/GE-N/TnT/issues/1).

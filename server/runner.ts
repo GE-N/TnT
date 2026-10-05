@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile, open, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createPicker, InspectionCleanupError, type Inspector } from './picker.js';
 
 export type CommandResult = { stdout: string; stderr: string };
 export type Execute = (file: string, args: string[]) => Promise<CommandResult>;
@@ -13,10 +14,10 @@ export type LaunchResult = {
   screenshot?: string; error?: string; confirmedAt?: string;
 };
 
-export function createRunner(options: { artifactDirectory: string; execute: Execute; captureDelayMs?: number; ownershipDirectory?: string }) {
+export function createRunner(options: { artifactDirectory: string; execute: Execute; captureDelayMs?: number; ownershipDirectory?: string; inspector?: Inspector }) {
   const owned = new Set<string>();
   const runner = {
-    async acquireDevice(id: string) {
+    async acquireDevice(id: string, captureId?: string, reviewId?: string) {
       if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new Error('Select a valid simulator identifier.');
       if (owned.size) throw new Error('A device operation is already in progress. Wait for cleanup before retrying.');
       owned.add(id);
@@ -32,7 +33,10 @@ export function createRunner(options: { artifactDirectory: string; execute: Exec
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('A device operation is already in progress, or ownership survived a runner crash. Inspect .tnt/device-ownership.lock and stop its owned processes before recovery.');
         throw error;
       }
-      return async () => { await unlink(path); owned.delete(id); };
+      const release = async () => { await unlink(path); owned.delete(id); };
+      try { if (captureId !== undefined) await picker.assertFresh(captureId, id, reviewId); }
+      catch (error) { if (!(error instanceof InspectionCleanupError)) await release(); throw error; }
+      return release;
     },
     async checkApp(deviceId: string, bundleId: string) {
       await options.execute('/usr/bin/xcrun', ['simctl', 'get_app_container', deviceId, bundleId, 'app']);
@@ -92,5 +96,6 @@ export function createRunner(options: { artifactDirectory: string; execute: Exec
       return result;
     },
   };
-  return runner;
+  const picker = createPicker({ ...options, devices: runner.devices, acquireDevice: runner.acquireDevice });
+  return { ...runner, picker };
 }

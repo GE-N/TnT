@@ -68,8 +68,8 @@ function App() {
         <section className="panel launch-panel" aria-labelledby="launch-heading">
           <div className="panel-heading"><span className="section-number">01</span><div><h2 id="launch-heading">Launch configuration</h2><p>Your Mac. Your simulator. Your app.</p></div></div>
           <form onSubmit={launch}>
-            <div className="label-row"><label htmlFor="device">Ready simulator</label><button className="text-button" type="button" onClick={() => void refresh()} disabled={busy}>↻ Refresh</button></div>
-            <select id="device" value={deviceId} onChange={event => setDeviceId(event.target.value)} disabled={busy || !status?.devices.length}>
+            <div className="label-row"><label htmlFor="device">Ready simulator</label><button className="text-button" type="button" onClick={() => void refresh()} disabled={busy || scenarioBusy}>↻ Refresh</button></div>
+            <select id="device" value={deviceId} onChange={event => setDeviceId(event.target.value)} disabled={busy || scenarioBusy || !status?.devices.length}>
               {!status?.devices.length && <option value="">No running simulator</option>}
               {status?.devices.map(device => <option key={device.id} value={device.id}>{device.name} · {device.runtime.replace('com.apple.CoreSimulator.SimRuntime.', '')}</option>)}
             </select>
@@ -93,7 +93,7 @@ function App() {
         </section>
       </div>
       <Scenarios token={status?.token ?? ''} deviceId={deviceId} bundleId={bundleId} launchBusy={busy} onRunning={setScenarioBusy} />
-      <footer><span>iOS first · Local execution</span><span>Screen picking and mocks follow in later tickets.</span></footer>
+      <footer><span>iOS first · Local execution</span><span>Pick reviewed steps from the simulator · Mocks follow in later tickets.</span></footer>
     </main>
   </div>;
 }

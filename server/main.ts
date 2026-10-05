@@ -22,8 +22,9 @@ const execute: Execute = async (file, args) => {
 const port = Number(process.env.PORT ?? 4317);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('PORT must be an integer from 1024 to 65535.');
 const artifactDirectory = resolve('.tnt/launches');
-const runner = createRunner({ artifactDirectory, execute, ownershipDirectory: resolve('.tnt') });
-const scenarios = createScenarios({ root: resolve('.tnt'), runner, maestro: createMaestro() });
+const maestro = createMaestro();
+const runner = createRunner({ artifactDirectory, execute, ownershipDirectory: resolve('.tnt'), inspector: maestro });
+const scenarios = createScenarios({ root: resolve('.tnt'), runner, maestro });
 const production = process.argv.includes('--production');
 const server = createServer();
 let serve: (request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse) => void;

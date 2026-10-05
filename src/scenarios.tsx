@@ -1,5 +1,7 @@
+import { runnerClient } from './runner-client.js';
 import { useEffect, useState, useRef } from 'react';
 import type { Run, Workspace } from '../server/scenarios.js';
+import { Picker } from './picker.js';
 
 export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: { token: string; deviceId: string; bundleId: string; launchBusy: boolean; onRunning: (running: boolean) => void }) {
   const [name, setName] = useState('Home screen');
@@ -8,18 +10,14 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   const [inputs, setInputs] = useState('');
   const [run, setRun] = useState<Run>();
   const [submitting, setSubmitting] = useState(false);
+  const [pickerBusy, setPickerBusy] = useState(false);
   const [error, setError] = useState('');
   const [artifact, setArtifact] = useState<{ name: string; text?: string; image?: string }>();
   const artifactSequence = useRef(0);
   const running = run?.status === 'running';
-  useEffect(() => { onRunning(running || submitting); }, [running, submitting, onRunning]);
+  useEffect(() => { onRunning(running || submitting || pickerBusy); }, [running, submitting, pickerBusy, onRunning]);
   const headers = { 'X-TnT-Token': token, 'Content-Type': 'application/json' };
-  async function api(path: string, body?: unknown) {
-    const response = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body) });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error ?? 'Scenario operation failed.');
-    return result;
-  }
+  const api = runnerClient(token);
   useEffect(() => {
     if (!running || !run) return;
     let stopped = false;
@@ -56,6 +54,16 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     } catch (error) { setError(error instanceof Error ? error.message : 'Scenario request failed.'); }
     finally { setSubmitting(false); }
   }
+  async function savePicked(yaml: string) {
+    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml });
+    setWorkspaceId(workspace.id); setYaml(workspace.yaml);
+  }
+  async function executePicked(flowYaml: string, captureId: string, pickerReviewId: string) {
+    artifactSequence.current++; setArtifact(undefined); setError('');
+    const workspace: Workspace = await api('/api/workspaces', { name: 'Picked step — ' + name.slice(0, 100), yaml: flowYaml });
+    const next = await api('/api/runs', { workspaceId: workspace.id, deviceId, captureId, pickerReviewId });
+    artifactSequence.current++; setArtifact(undefined); setRun(next);
+  }
   async function cancel() {
     setError('');
     try { setRun(await api('/api/runs/' + run?.id + '/cancel', {})); }
@@ -79,13 +87,13 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   return <section className="panel scenario-panel" aria-labelledby="scenario-heading">
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Run an authored scenario</h2><p>Saved YAML is the executable authority. Each run gets its own snapshot.</p></div></div>
     <div className="scenario-grid"><div className="scenario-editor">
-      <label htmlFor="scenario-name">Scenario name</label><input id="scenario-name" value={name} onChange={event => setName(event.target.value)} maxLength={120} />
-      <div className="label-row"><label htmlFor="scenario-yaml">Maestro YAML</label><button className="text-button" disabled={!bundleId} onClick={() => setYaml(`appId: ${bundleId}\n---\n- launchApp\n- assertVisible: Home\n`)}>Use launch app ID</button></div>
-      <textarea id="scenario-yaml" value={yaml} onChange={event => setYaml(event.target.value)} spellCheck={false} maxLength={100_000} />
+      <label htmlFor="scenario-name">Scenario name</label><input id="scenario-name" value={name} disabled={pickerBusy} onChange={event => setName(event.target.value)} maxLength={120} />
+      <div className="label-row"><label htmlFor="scenario-yaml">Maestro YAML</label><button className="text-button" disabled={!bundleId || pickerBusy} onClick={() => setYaml(`appId: ${bundleId}\n---\n- launchApp\n- assertVisible: Home\n`)}>Use launch app ID</button></div>
+      <textarea id="scenario-yaml" value={yaml} disabled={pickerBusy} onChange={event => setYaml(event.target.value)} spellCheck={false} maxLength={100_000} />
       <p className="field-hint">Single-flow workspace; external files and custom artifact paths are unsupported. Edits during a run apply to the next run.</p>
       <label htmlFor="runtime-inputs">Confidential runtime inputs (optional JSON)</label><input id="runtime-inputs" type="password" value={inputs} onChange={event => setInputs(event.target.value)} autoComplete="off" placeholder={'{"PASSWORD":"value"}'} />
       <p className="field-hint">Use uppercase names and reference them as ${'{NAME}'} in YAML. Values are never saved. Runs with inputs withhold raw logs and images. Keep secrets out of authored YAML.</p>
-      <div className="scenario-actions"><button className="confirm" onClick={() => void submit(false)} disabled={submitting}>Save workspace</button><button className="primary" onClick={() => void submit(true)} disabled={!deviceId || !token || submitting || running || launchBusy}>{submitting ? 'Preparing…' : 'Run scenario'}</button>{running && <button className="confirm" onClick={() => void cancel()}>Cancel run</button>}</div>
+      <div className="scenario-actions"><button className="confirm" onClick={() => void submit(false)} disabled={submitting || pickerBusy}>Save workspace</button><button className="primary" onClick={() => void submit(true)} disabled={!deviceId || !token || submitting || running || launchBusy || pickerBusy}>{submitting ? 'Preparing…' : 'Run scenario'}</button>{running && <button className="confirm" onClick={() => void cancel()}>Cancel run</button>}</div>
       {workspaceId && <p className="artifact-id">Workspace: {workspaceId}</p>}
       {error && <div role="alert" className="notice error">{error}</div>}
     </div><div className="scenario-result" aria-live="polite">
@@ -102,5 +110,6 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
         {artifact && <div className="artifact-view"><p className="artifact-id">{artifact.name}</p>{artifact.image ? <img className="device-screen" src={artifact.image} alt="Captured failure screen" /> : <pre>{artifact.text}</pre>}</div>}
       </>}
     </div></div>
+    <Picker token={token} deviceId={deviceId} yaml={yaml} disabled={launchBusy || running || submitting} onBusy={setPickerBusy} onSave={savePicked} onExecute={executePicked} />
   </section>;
 }

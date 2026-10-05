@@ -11,7 +11,7 @@ export type Cleanup = { verified: boolean; detail: string };
 export type Run = {
   id: string; deviceId: string; startedAt: string; finishedAt?: string;
   status: 'running' | 'passed' | 'assertion-failed' | 'tool-error' | 'cancelled';
-  snapshot: { id: string; workspaceId: string; name: string; yaml: string; steps: Step[]; toolVersions: { maestro: string; node: string }; runtimeInputPolicy: string };
+  snapshot: { id: string; workspaceId: string; name: string; yaml: string; steps: Step[]; toolVersions: { maestro: string; node: string }; runtimeInputPolicy: string; pickerReference?: { captureId: string; reviewId: string; capturedAt: string } };
   steps: Step[]; log: string; error?: string; expectedFailure?: unknown;
   cleanup: Cleanup; artifacts: string[]; mappingNote: string;
 };
@@ -41,12 +41,14 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       return workspace;
     },
     async workspace(id: string): Promise<Workspace> { return readRecord(await directory('workspaces', id), 'workspace.json'); },
-    async start(input: { workspaceId: string; deviceId: string; runtimeInputs?: unknown }): Promise<Run> {
+    async start(input: { workspaceId: string; deviceId: string; runtimeInputs?: unknown; captureId?: string; pickerReviewId?: string }): Promise<Run> {
       const runtimeInputs = validateInputs(input.runtimeInputs);
       const confidential = Object.keys(runtimeInputs).length > 0;
       const workspace = await service.workspace(input.workspaceId);
       const { appId, steps } = validate(workspace.yaml);
-      const release = await options.runner.acquireDevice(input.deviceId);
+      if ((input.captureId === undefined) !== (input.pickerReviewId === undefined)) throw new Error('Provide both capture and reviewed step identity.');
+      const pickerReference = input.captureId ? options.runner.picker.assertReview(input.captureId, input.pickerReviewId!, workspace.yaml) : undefined;
+      const release = await options.runner.acquireDevice(input.deviceId, input.captureId, input.pickerReviewId);
       try {
         const device = (await options.runner.devices()).find(device => device.id === input.deviceId);
         if (!device) throw new Error('Select an available, already-running simulator and refresh.');
@@ -55,7 +57,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
         const id = randomUUID();
         const path = await directory('runs', id);
         const runtimeInputPolicy = confidential ? 'Confidential runtime inputs supplied: values are omitted; raw logs, evaluated metadata, and images are withheld. Temporary tool artifacts are deleted on cleanup. Historical snapshots cannot replay omitted inputs.' : 'No runtime inputs supplied. Keep secrets out of authored YAML. No inherited application environment is forwarded.';
-        const snapshot = { id: createHash('sha256').update(JSON.stringify({ workspace, steps, version, device, runtimeInputPolicy, node: process.version })).digest('hex'), workspaceId: workspace.id, name: workspace.name, yaml: workspace.yaml, steps, toolVersions: { maestro: version, node: process.version }, runtimeInputPolicy };
+        const snapshot = { id: createHash('sha256').update(JSON.stringify({ workspace, steps, version, device, runtimeInputPolicy, pickerReference, node: process.version })).digest('hex'), workspaceId: workspace.id, name: workspace.name, yaml: workspace.yaml, steps, toolVersions: { maestro: version, node: process.version }, runtimeInputPolicy, pickerReference };
         const run: Run = { id, deviceId: device.id, startedAt: new Date().toISOString(), status: 'running', snapshot, steps: structuredClone(steps), log: '', cleanup: { verified: false, detail: 'Pending' }, artifacts: [], mappingNote: 'Command outcomes will be mapped after execution; unsupported details remain unavailable.' };
         await writeFile(join(path, 'flow.yaml'), workspace.yaml);
         await writeFile(join(path, 'snapshot.json'), JSON.stringify(snapshot, null, 2));

@@ -35,6 +35,21 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       if (request.headers['x-tnt-token'] !== token) return json(403, { error: 'Refresh the workbench to establish a runner session.' });
       if (request.method === 'POST' && request.headers.origin !== `http://${host}`) return json(403, { error: 'A same-origin workbench request is required.' });
       if (request.method === 'POST' && !request.headers['content-type']?.startsWith('application/json')) return json(415, { error: 'Send JSON.' });
+      if (request.method === 'POST' && url.pathname === '/api/picker/captures') return json(200, await runner.picker.capture(await readJson(request)));
+      if (request.method === 'POST' && url.pathname === '/api/picker/candidates') return json(200, runner.picker.candidates(await readJson(request)));
+      if (request.method === 'POST' && url.pathname === '/api/picker/preview') return json(200, runner.picker.preview(await readJson(request)));
+      if (request.method === 'POST' && url.pathname === '/api/picker/step') {
+        const input = await readJson(request);
+        const step = runner.picker.buildStep(input);
+        const release = await runner.acquireDevice(input.deviceId, input.captureId, step.reviewId);
+        try { return json(200, step); } finally { await release(); }
+      }
+      const capture = /^\/api\/picker\/captures\/([0-9a-f-]{36})\/screen$/.exec(url.pathname);
+      if (request.method === 'GET' && capture) {
+        const image = await runner.picker.screen(capture[1]);
+        response.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        return response.end(image);
+      }
       if (scenarios) {
         if (request.method === 'POST' && url.pathname === '/api/workspaces') return json(200, await scenarios.save(await readJson(request)));
         const workspace = /^\/api\/workspaces\/([0-9a-f-]{36})$/.exec(url.pathname);
