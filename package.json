@@ -14,6 +14,8 @@
     "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@mockoon/cli": "9.9.0",
+    "@mockoon/commons": "9.9.0",
     "fast-xml-parser": "5.11.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -27,5 +29,8 @@
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vite": "8.3.2"
+  },
+  "overrides": {
+    "@faker-js/faker": "10.6.0"
   }
 }

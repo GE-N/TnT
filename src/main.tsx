@@ -93,7 +93,7 @@ function App() {
         </section>
       </div>
       <Scenarios token={status?.token ?? ''} deviceId={deviceId} bundleId={bundleId} launchBusy={busy} onRunning={setScenarioBusy} />
-      <footer><span>iOS first · Local execution</span><span>Pick reviewed steps from the simulator · Mocks follow in later tickets.</span></footer>
+      <footer><span>iOS first · Local execution</span><span>Pick reviewed steps from the simulator · Isolated mock scenarios and reusable assertions.</span></footer>
     </main>
   </div>;
 }

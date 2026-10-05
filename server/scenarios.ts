@@ -3,15 +3,17 @@ import { join, resolve, sep } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { parseAllDocuments } from 'yaml';
 import { XMLParser } from 'fast-xml-parser';
+import { createMockSession, validateMock, type MockPlan, type MockResult } from './mockoon.js';
 import type { createRunner } from './runner.js';
 
-export type Workspace = { id: string; name: string; yaml: string };
+export type Workspace = { id: string; name: string; yaml: string; flows?: Record<string, string>; mock?: MockPlan };
 export type Step = { id: string; command: string; expected?: unknown; status: 'unavailable' | 'passed' | 'failed' | 'skipped' };
 export type Cleanup = { verified: boolean; detail: string };
 export type Run = {
   id: string; deviceId: string; startedAt: string; finishedAt?: string;
-  status: 'running' | 'passed' | 'assertion-failed' | 'tool-error' | 'cancelled';
-  snapshot: { id: string; workspaceId: string; name: string; yaml: string; steps: Step[]; toolVersions: { maestro: string; node: string }; runtimeInputPolicy: string; pickerReference?: { captureId: string; reviewId: string; capturedAt: string } };
+  status: 'running' | 'passed' | 'assertion-failed' | 'tool-error' | 'setup-error' | 'cancelled';
+  mock?: MockResult;
+  snapshot: { flows?: Record<string, string>; mock?: MockPlan; expectedPath?: { from: string; to: string }; id: string; workspaceId: string; name: string; yaml: string; steps: Step[]; toolVersions: { maestro: string; node: string; mockoon?: string }; runtimeInputPolicy: string; pickerReference?: { captureId: string; reviewId: string; capturedAt: string } };
   steps: Step[]; log: string; error?: string; expectedFailure?: unknown;
   cleanup: Cleanup; artifacts: string[]; mappingNote: string;
 };
@@ -34,9 +36,12 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     return path;
   }
   const service = {
-    async save(input: { id?: string; name: string; yaml: string }): Promise<Workspace> {
+    async save(input: { id?: string; name: string; yaml: string; flows?: Record<string,string>; mock?: unknown }): Promise<Workspace> {
       if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 120 || typeof input.yaml !== 'string' || Buffer.byteLength(input.yaml) > 100_000) throw new Error('Provide a scenario name and YAML up to 100 KB.');
-      const workspace = { id: input.id ? validId(input.id) : randomUUID(), name: input.name.trim(), yaml: input.yaml };
+      const flows = validateFlows(input.flows);
+      const mock = validateMock(input.mock);
+      if (Buffer.byteLength(JSON.stringify({flows,mock})) > 900_000) throw new Error('Combined reusable flows and mock environment exceed 900 KB.');
+      const workspace = { flows, mock, id: input.id ? validId(input.id) : randomUUID(), name: input.name.trim(), yaml: input.yaml };
       await writeRecord(join(await directory('workspaces', workspace.id), 'workspace.json'), workspace);
       return workspace;
     },
@@ -45,7 +50,10 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const runtimeInputs = validateInputs(input.runtimeInputs);
       const confidential = Object.keys(runtimeInputs).length > 0;
       const workspace = await service.workspace(input.workspaceId);
-      const { appId, steps } = validate(workspace.yaml);
+      validateFlows(workspace.flows);
+      validateMock(workspace.mock);
+      const { appId, steps } = validate(workspace.yaml, workspace.flows);
+      for (const flow of Object.values(workspace.flows ?? {})) { if (validate(flow, workspace.flows).appId !== appId) throw new Error('Reusable flows must declare the same appId as the scenario.'); }
       if ((input.captureId === undefined) !== (input.pickerReviewId === undefined)) throw new Error('Provide both capture and reviewed step identity.');
       const pickerReference = input.captureId ? options.runner.picker.assertReview(input.captureId, input.pickerReviewId!, workspace.yaml) : undefined;
       const release = await options.runner.acquireDevice(input.deviceId, input.captureId, input.pickerReviewId);
@@ -57,7 +65,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
         const id = randomUUID();
         const path = await directory('runs', id);
         const runtimeInputPolicy = confidential ? 'Confidential runtime inputs supplied: values are omitted; raw logs, evaluated metadata, and images are withheld. Temporary tool artifacts are deleted on cleanup. Historical snapshots cannot replay omitted inputs.' : 'No runtime inputs supplied. Keep secrets out of authored YAML. No inherited application environment is forwarded.';
-        const snapshot = { id: createHash('sha256').update(JSON.stringify({ workspace, steps, version, device, runtimeInputPolicy, pickerReference, node: process.version })).digest('hex'), workspaceId: workspace.id, name: workspace.name, yaml: workspace.yaml, steps, toolVersions: { maestro: version, node: process.version }, runtimeInputPolicy, pickerReference };
+        const snapshot = { flows: workspace.flows, mock: workspace.mock, expectedPath: workspace.mock ? { from: workspace.mock.fromScreen, to: workspace.mock.toScreen } : undefined, id: createHash('sha256').update(JSON.stringify({ workspace, steps, version, device, runtimeInputPolicy, pickerReference, node: process.version })).digest('hex'), workspaceId: workspace.id, name: workspace.name, yaml: workspace.yaml, steps, toolVersions: { maestro: version, node: process.version, mockoon: workspace.mock ? '9.9.0' : undefined }, runtimeInputPolicy, pickerReference };
         const run: Run = { id, deviceId: device.id, startedAt: new Date().toISOString(), status: 'running', snapshot, steps: structuredClone(steps), log: '', cleanup: { verified: false, detail: 'Pending' }, artifacts: [], mappingNote: 'Command outcomes will be mapped after execution; unsupported details remain unavailable.' };
         await writeFile(join(path, 'flow.yaml'), workspace.yaml);
         await writeFile(join(path, 'snapshot.json'), JSON.stringify(snapshot, null, 2));
@@ -66,6 +74,9 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
         controllers.set(id, controller);
         const done = (async () => {
           let privateDirectory: string | undefined;
+          let mock: ReturnType<typeof createMockSession> | undefined;
+          let phase: 'setup' | 'execution' = 'setup';
+          run.cleanup = { verified: true, detail: 'No tool process allocated yet.' };
           try {
             if (confidential) {
               const privateRoot = join(options.root, 'private');
@@ -73,7 +84,17 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
               privateDirectory = await mkdtemp(join(privateRoot, id + '-'));
             }
             const executionDirectory = privateDirectory ?? path;
-            const execution = await options.maestro.run({ directory: executionDirectory, flow: join(path, 'flow.yaml'), deviceId: device.id, signal: controller.signal, runtimeInputs });
+            if (privateDirectory) await writeFile(join(executionDirectory, 'flow.yaml'), workspace.yaml);
+            for (const [name, yaml] of Object.entries(workspace.flows ?? {})) await writeFile(join(executionDirectory, name), yaml);
+            if (workspace.mock) {
+              mock = createMockSession(workspace.mock, executionDirectory);
+              run.mock = mock.result;
+              await mock.prepare(controller.signal);
+              await writeRecord(join(path, 'result.json'), run);
+            }
+            if (controller.signal.aborted) throw new Error('Run cancelled before execution.');
+            phase = 'execution';
+            const execution = await options.maestro.run({ directory: executionDirectory, flow: join(executionDirectory, 'flow.yaml'), deviceId: device.id, signal: controller.signal, runtimeInputs });
             run.log = confidential ? 'Raw logs withheld because confidential runtime inputs were supplied.' : execution.log;
             run.cleanup = execution.cleanup;
             const files = await listFiles(executionDirectory);
@@ -89,10 +110,18 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
             if (failedAssertion) { run.error = confidential ? 'Assertion failed. Evaluated detail withheld for confidential inputs.' : failedAssertion.metadata.error?.message; run.expectedFailure = confidential ? run.steps.find(step => step.status === 'failed')?.expected : failedAssertion.command.assertConditionCommand.condition; }
             else if (run.status === 'tool-error') run.error = 'Maestro did not report a successful scenario or a structured assertion failure. Inspect raw logs.';
           } catch (error) {
-            run.status = controller.signal.aborted ? 'cancelled' : 'tool-error';
+            run.status = controller.signal.aborted ? 'cancelled' : phase === 'setup' ? 'setup-error' : 'tool-error';
             run.error = confidential ? 'Tool execution failed. Detail withheld for confidential inputs.' : error instanceof Error ? error.message : 'Tool execution failed.';
-            run.cleanup = { verified: false, detail: 'Tool adapter failed; cleanup could not be verified.' };
+            if (mock && phase === 'setup') mock.result.intent.status = 'failed';
+            if (phase === 'execution') run.cleanup = { verified: false, detail: 'Tool adapter failed; cleanup could not be verified.' };
           } finally {
+            if (mock) {
+              await mock.evidence(confidential);
+              const mockCleanup = await mock.cleanup();
+              run.cleanup = { verified: run.cleanup.verified && mockCleanup.verified, detail: run.cleanup.detail + ' ' + mockCleanup.detail };
+            }
+            // Never expose the controller environment file through the artifact API.
+            run.artifacts = run.artifacts.filter(name => name !== 'mock-environment.json');
             if (privateDirectory) {
               try { await rm(privateDirectory, { recursive: true, force: true }); run.cleanup.detail += ' Confidential temporary artifacts removed.'; }
               catch { run.cleanup = { verified: false, detail: 'Confidential temporary artifact removal could not be verified.' }; }
@@ -140,13 +169,13 @@ function validateInputs(value: unknown): Record<string, string> {
   return Object.fromEntries(entries);
 }
 
-function validate(yaml: string) {
+function validate(yaml: string, flows: Record<string,string> = {}, ancestors: string[] = [], verified = new Set<string>()) {
   const documents = parseAllDocuments(yaml);
   if (documents.length !== 2 || documents.some(doc => doc.errors.length)) throw new Error('Invalid Maestro YAML: use an appId header, --- separator, and command list.');
   const config = documents[0].toJS();
   const commands = documents[1].toJS();
-  rejectFileReferences(config);
-  rejectFileReferences(commands);
+  rejectFileReferences(config, flows, ancestors, verified);
+  rejectFileReferences(commands, flows, ancestors, verified);
   if (typeof config?.appId !== 'string' || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(config.appId) || !Array.isArray(commands) || !commands.length) throw new Error('Provide a literal installed appId and at least one Maestro command.');
   const steps: Step[] = commands.map((value, index) => {
     const command = typeof value === 'string' ? value : value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value)[0] : undefined;
@@ -155,11 +184,29 @@ function validate(yaml: string) {
   });
   return { appId: config.appId as string, steps };
 }
-function rejectFileReferences(value: unknown) {
+function validateFlows(value: unknown): Record<string,string> | undefined {
+  if (value === undefined) return;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 20) throw new Error('Provide up to 20 reusable YAML flows.');
+  const entries = Object.entries(value);
+  if (entries.some(([name,yaml]) => !/^[A-Za-z][A-Za-z0-9_-]{0,63}\.yaml$/.test(name) || name === 'flow.yaml' || typeof yaml !== 'string' || Buffer.byteLength(yaml) > 100_000)) throw new Error('Reusable flow names must be simple .yaml filenames, with content up to 100 KB.');
+  const flows = Object.fromEntries(entries) as Record<string,string>;
+  for (const [name,yaml] of entries) validate(yaml as string, flows, [name]);
+  return flows;
+}
+function rejectFileReferences(value: unknown, flows: Record<string,string>, ancestors: string[], verified: Set<string>) {
   if (!value || typeof value !== 'object') return;
   for (const [key, child] of Object.entries(value)) {
-    if (['file', 'runScript', 'addMedia', 'takeScreenshot', 'startRecording'].includes(key) || (key === 'runFlow' && typeof child === 'string')) throw new Error('External file references and authored artifact paths are unsupported in single-flow workspaces. Use inline commands.');
-    rejectFileReferences(child);
+    if (['runScript', 'addMedia', 'takeScreenshot', 'startRecording'].includes(key)) throw new Error('External file references and authored artifact paths are unsupported.');
+    if (key === 'runFlow' && (typeof child === 'string' || (child && typeof child === 'object' && 'file' in child))) {
+      const name = typeof child === 'string' ? child : (child as {file: unknown}).file;
+      if (typeof name !== 'string' || !Object.hasOwn(flows,name)) throw new Error('External file references require a declared reusable YAML flow.');
+      if (ancestors.includes(name) || ancestors.length >= 10) throw new Error('Recursive or excessively nested reusable flow reference.');
+      if (!verified.has(name)) { validate(flows[name],flows,[...ancestors,name],verified); verified.add(name); }
+      if (typeof child === 'object') { const {file, ...other} = child as Record<string,unknown>; rejectFileReferences(other,flows,ancestors,verified); }
+      continue;
+    }
+    if (key === 'file') throw new Error('External file references are unsupported outside declared runFlow calls.');
+    rejectFileReferences(child, flows, ancestors, verified);
   }
 }
 async function listFiles(base: string, prefix = ''): Promise<string[]> {
@@ -167,7 +214,7 @@ async function listFiles(base: string, prefix = ''): Promise<string[]> {
   return (await Promise.all(entries.map(entry => entry.isDirectory() ? listFiles(base, prefix + entry.name + '/') : entry.isFile() ? [prefix + entry.name] : []))).flat();
 }
 function mapResults(run: Run, commands: any[]) {
-  const keys: Record<string, string> = { launchApp: 'launchAppCommand', assertVisible: 'assertConditionCommand', assertNotVisible: 'assertConditionCommand', tapOn: 'tapOnElement', inputText: 'inputTextCommand' };
+  const keys: Record<string, string> = { launchApp: 'launchAppCommand', assertVisible: 'assertConditionCommand', assertNotVisible: 'assertConditionCommand', tapOn: 'tapOnElement', inputText: 'inputTextCommand', runFlow: 'runFlowCommand' };
   const events = commands.filter(entry => entry.metadata?.depth === 0 && !entry.command?.defineVariablesCommand && !entry.command?.applyConfigurationCommand);
   if (events.length > run.steps.length || run.steps.some((step, index) => !keys[step.command] || (events[index] && !events[index].command?.[keys[step.command]]))) {
     run.mappingNote = 'Unsupported or ambiguous command mapping. Raw command metadata is available; step outcomes are unavailable.'; return;

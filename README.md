@@ -61,3 +61,11 @@ No mock controller, canvas editor, or default-action handler is implemented yet.
 Tests target the public runner and its HTTP boundary. Fixture command responses are confined to external tool boundaries; real-device checks are recorded in [launch verification](docs/launch-verification.md) and [scenario verification](docs/scenario-verification.md), and [picker verification](docs/picker-verification.md).
 
 The full product specification is [GitHub issue #1](https://github.com/GE-N/TnT/issues/1).
+
+## Mock response scenarios and reusable assertions (#5)
+
+Import an existing Mockoon 9.9 environment under **API response scenario**. Choose a dedicated port (default 4320), a real test backend fallback, and an existing endpoint/response variant. Configure the simulator app's API base URL to the dedicated port before running; the workbench does not infer or change app networking. State resets and response selection must be acknowledged before the first YAML command. The original environment is never edited.
+
+Pick and **Save step** for the trigger, then append a parameterized reusable assertion with the expected page text. **Run scenario** executes the complete YAML and snapshots its declared reusable files. The picker’s isolated execution buttons continue to execute only the reviewed picked command. Results show expected screen labels, mock intent, independently observed server transactions, and cleanup. Missing traffic is unavailable, even when a UI assertion passes.
+
+Declared reusable flows use flat `.yaml` filenames and the same literal app ID. Other external file references remain unsupported. Cancellation stops owned Maestro and Mockoon processes before device release. See [verification and remaining real-app proof inputs](docs/mock-verification.md); #5 is not release-complete without the target API maintenance journey.

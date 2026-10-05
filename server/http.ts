@@ -104,7 +104,7 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
 
 async function readJson(request: IncomingMessage) {
   let body = '';
-  for await (const chunk of request) { body += chunk.toString(); if (Buffer.byteLength(body) > 110_000) throw new Error('Scenario request exceeds 110 KB.'); }
+  for await (const chunk of request) { body += chunk.toString(); if (Buffer.byteLength(body) > 1_100_000) throw new Error('Scenario request exceeds 1.1 MB.'); }
   const value = JSON.parse(body);
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Provide a JSON object.');
   return value;

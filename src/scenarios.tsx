@@ -1,11 +1,19 @@
 import { runnerClient } from './runner-client.js';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import type { Run, Workspace } from '../server/scenarios.js';
+import { MockSetup } from './mock-setup.js';
+import type { MockPlan } from '../server/mockoon.js';
+import { parseAllDocuments } from 'yaml';
 import { Picker } from './picker.js';
 
 export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: { token: string; deviceId: string; bundleId: string; launchBusy: boolean; onRunning: (running: boolean) => void }) {
   const [name, setName] = useState('Home screen');
   const [yaml, setYaml] = useState('appId: com.example.HybridApp\n---\n- launchApp\n- assertVisible: Home\n');
+  const [mock,setMock]=useState<MockPlan>();
+  const [mockError,setMockError]=useState('');
+  const [flows,setFlows]=useState('{}');
+  const [expectedPage,setExpectedPage]=useState('');
+  const setMockPlan=useCallback((plan:MockPlan|undefined,error:string)=>{setMock(plan);setMockError(error);},[]);
   const [workspaceId, setWorkspaceId] = useState('');
   const [inputs, setInputs] = useState('');
   const [run, setRun] = useState<Run>();
@@ -33,7 +41,8 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   }, [run?.id, running]);
   useEffect(() => () => { if (artifact?.image) URL.revokeObjectURL(artifact.image); }, [artifact?.image]);
   async function save() {
-    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml });
+    if(mockError) throw new Error(mockError);
+    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml, flows: JSON.parse(flows), mock });
     setWorkspaceId(workspace.id);
     return workspace;
   }
@@ -55,7 +64,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     finally { setSubmitting(false); }
   }
   async function savePicked(yaml: string) {
-    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml });
+    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml, flows: JSON.parse(flows), mock });
     setWorkspaceId(workspace.id); setYaml(workspace.yaml);
   }
   async function executePicked(flowYaml: string, captureId: string, pickerReviewId: string) {
@@ -84,13 +93,28 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       }
     } catch (error) { if (sequence === artifactSequence.current) setError(error instanceof Error ? error.message : 'Artifact unavailable.'); }
   }
+  function addAssertion() {
+    try {
+      if(!expectedPage.trim()) throw new Error('Enter the expected page text.');
+      const docs=parseAllDocuments(yaml);
+      if(docs.length!==2 || docs.some(doc=>doc.errors.length) || !Array.isArray(docs[1].toJS())) throw new Error('Repair the scenario YAML before adding a reusable assertion.');
+      const appId=docs[0].toJS().appId;
+      const nextFlows=JSON.parse(flows);
+      nextFlows['maintenance.yaml']='appId: '+JSON.stringify(appId)+'\n---\n- assertVisible: ${EXPECTED_PAGE}\n';
+      docs[1].add({runFlow:{file:'maintenance.yaml',env:{EXPECTED_PAGE:'^'+expectedPage.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$'}}});
+      setFlows(JSON.stringify(nextFlows,null,2));setYaml(docs[0].toString()+docs[1].toString());setError('');
+    } catch(error){setError(error instanceof Error?error.message:'Cannot add assertion.');}
+  }
   return <section className="panel scenario-panel" aria-labelledby="scenario-heading">
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Run an authored scenario</h2><p>Saved YAML is the executable authority. Each run gets its own snapshot.</p></div></div>
+    <MockSetup disabled={running||submitting||pickerBusy} onChange={setMockPlan}/>
     <div className="scenario-grid"><div className="scenario-editor">
+      <label htmlFor="expected-page">Expected page text for reusable assertion</label><input id="expected-page" value={expectedPage} onChange={event=>setExpectedPage(event.target.value)} disabled={running||submitting||pickerBusy}/><button className="confirm" disabled={running||submitting||pickerBusy} onClick={addAssertion}>Append reusable assertion</button>
+      <label htmlFor="reusable-flows">Reusable YAML flows (JSON filename → YAML)</label><textarea id="reusable-flows" value={flows} onChange={event=>setFlows(event.target.value)} disabled={running||submitting||pickerBusy} spellCheck={false}/>
       <label htmlFor="scenario-name">Scenario name</label><input id="scenario-name" value={name} disabled={pickerBusy} onChange={event => setName(event.target.value)} maxLength={120} />
       <div className="label-row"><label htmlFor="scenario-yaml">Maestro YAML</label><button className="text-button" disabled={!bundleId || pickerBusy} onClick={() => setYaml(`appId: ${bundleId}\n---\n- launchApp\n- assertVisible: Home\n`)}>Use launch app ID</button></div>
       <textarea id="scenario-yaml" value={yaml} disabled={pickerBusy} onChange={event => setYaml(event.target.value)} spellCheck={false} maxLength={100_000} />
-      <p className="field-hint">Single-flow workspace; external files and custom artifact paths are unsupported. Edits during a run apply to the next run.</p>
+      <p className="field-hint">Reusable files declared above are snapshotted with the scenario; other external files and custom artifact paths are unsupported. Edits during a run apply to the next run.</p>
       <label htmlFor="runtime-inputs">Confidential runtime inputs (optional JSON)</label><input id="runtime-inputs" type="password" value={inputs} onChange={event => setInputs(event.target.value)} autoComplete="off" placeholder={'{"PASSWORD":"value"}'} />
       <p className="field-hint">Use uppercase names and reference them as ${'{NAME}'} in YAML. Values are never saved. Runs with inputs withhold raw logs and images. Keep secrets out of authored YAML.</p>
       <div className="scenario-actions"><button className="confirm" onClick={() => void submit(false)} disabled={submitting || pickerBusy}>Save workspace</button><button className="primary" onClick={() => void submit(true)} disabled={!deviceId || !token || submitting || running || launchBusy || pickerBusy}>{submitting ? 'Preparing…' : 'Run scenario'}</button>{running && <button className="confirm" onClick={() => void cancel()}>Cancel run</button>}</div>
@@ -98,13 +122,15 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       {error && <div role="alert" className="notice error">{error}</div>}
     </div><div className="scenario-result" aria-live="polite">
       {!run ? <div className="empty-state"><h3>Your scenario result</h3><p>Run a saved flow on the selected simulator to see its real outcome and artifacts.</p></div> : <>
+        {run.snapshot.expectedPath && <div className="expected-path"><span>{run.snapshot.expectedPath.from}</span><span>→</span><span>Expected: {run.snapshot.expectedPath.to} · {run.status}</span></div>}
+        {run.mock && <div className="mock-evidence"><h3>Mock intent: {run.mock.intent.status}</h3><p>{run.mock.intent.method.toUpperCase()} /{run.mock.intent.endpoint} · HTTP {run.mock.intent.httpStatus}</p><p>{run.mock.intent.failureSemantics}</p><h3>Observed requests: {run.mock.evidence.status}</h3><p className="field-hint">{run.mock.evidence.detail}</p>{run.mock.evidence.transactions.map((transaction,index)=><p key={index}>{transaction.method.toUpperCase()} {transaction.path} → {transaction.statusCode} {transaction.proxied?'(forwarded)':'(mocked)'}</p>)}<p>Mock cleanup: {run.mock.cleanup.detail}</p></div>}
         <div className="label-row"><h3>{run.snapshot.name}</h3><span className={'result-tag ' + run.status}>{run.status}</span></div>
         {run.error && <div className="notice error">{run.error}</div>}
         <p>Cleanup ({running ? 'pending' : run.cleanup.verified ? 'verified' : 'failed'}): {run.cleanup.detail}</p>
         <p className="field-hint">{run.mappingNote}</p>
         <ol className="step-results">{run.steps.map(step => <li key={step.id}><code>{step.command}</code><span>{step.status}</span></li>)}</ol>
         {run.expectedFailure && <details open><summary>Failed expected assertion</summary><pre>{JSON.stringify(run.expectedFailure, null, 2)}</pre></details>}
-        <details><summary>Executed snapshot &amp; versions</summary><p className="artifact-id">Run: {run.id}<br />Snapshot: {run.snapshot.id}<br />Maestro: {run.snapshot.toolVersions.maestro} · Node: {run.snapshot.toolVersions.node}</p><pre>{run.snapshot.yaml}</pre><p>{run.snapshot.runtimeInputPolicy}</p></details>
+        <details><summary>Executed snapshot &amp; versions</summary><p className="artifact-id">Run: {run.id}<br />Snapshot: {run.snapshot.id}<br />Maestro: {run.snapshot.toolVersions.maestro} · Node: {run.snapshot.toolVersions.node}</p><pre>{run.snapshot.yaml}</pre>{Object.entries(run.snapshot.flows??{}).map(([name,yaml])=><div key={name}><h4>{name}</h4><pre>{yaml}</pre></div>)}<p>{run.snapshot.runtimeInputPolicy}</p></details>
         <details open={run.status !== 'passed'}><summary>Raw runner log</summary><pre>{run.log || 'Waiting for Maestro to finish…'}</pre></details>
         <div className="artifact-list">{run.artifacts.map(name => <button className="text-button" key={name} disabled={submitting || running} onClick={() => void inspect(name)}>{name}</button>)}</div>
         {artifact && <div className="artifact-view"><p className="artifact-id">{artifact.name}</p>{artifact.image ? <img className="device-screen" src={artifact.image} alt="Captured failure screen" /> : <pre>{artifact.text}</pre>}</div>}
