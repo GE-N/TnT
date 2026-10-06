@@ -11,3 +11,7 @@
 .result-tag.path-failed{color:#edac9b}
 
 .workspace-open{padding:18px 24px;display:flex;align-items:center;gap:14px;border-bottom:1px solid #2b382f}.workspace-open label{margin:0;white-space:nowrap}.workspace-open .confirm{white-space:nowrap}.screen-test>span:first-child{min-width:0;overflow-wrap:anywhere}@media(max-width:700px){.workspace-open{flex-wrap:wrap}}
+
+.yaml-step { padding: 16px; margin: 12px 0; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; }
+.yaml-step pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.yaml-step button { margin: 8px 8px 0 0; }
