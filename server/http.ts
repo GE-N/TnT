@@ -35,6 +35,8 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       if (request.headers['x-tnt-token'] !== token) return json(403, { error: 'Refresh the workbench to establish a runner session.' });
       if (request.method === 'POST' && request.headers.origin !== `http://${host}`) return json(403, { error: 'A same-origin workbench request is required.' });
       if (request.method === 'POST' && !request.headers['content-type']?.startsWith('application/json')) return json(415, { error: 'Send JSON.' });
+      const apps = /^\/api\/devices\/([^/]+)\/apps$/.exec(url.pathname);
+      if (request.method === 'GET' && apps) return json(200, await runner.apps(apps[1]));
       if (request.method === 'POST' && url.pathname === '/api/picker/captures') return json(200, await runner.picker.capture(await readJson(request)));
       if (request.method === 'POST' && url.pathname === '/api/picker/candidates') return json(200, runner.picker.candidates(await readJson(request)));
       if (request.method === 'POST' && url.pathname === '/api/picker/preview') return json(200, runner.picker.preview(await readJson(request)));

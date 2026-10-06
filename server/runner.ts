@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile, open, unlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, open, unlink, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -7,6 +8,7 @@ import { createPicker, InspectionCleanupError, type Inspector } from './picker.j
 export type CommandResult = { stdout: string; stderr: string };
 export type Execute = (file: string, args: string[]) => Promise<CommandResult>;
 export type Device = { id: string; name: string; runtime: string };
+export type InstalledApp = { bundleId: string; name: string; type: 'user' | 'system' };
 
 export type LaunchResult = {
   id: string; deviceId: string; deviceName: string; bundleId: string; startedAt: string;
@@ -47,6 +49,26 @@ export function createRunner(options: { artifactDirectory: string; execute: Exec
       return Object.entries(data.devices).flatMap(([runtime, devices]) => devices
         .filter(device => device.state === 'Booted' && device.isAvailable)
         .map(device => ({ id: device.udid, name: device.name, runtime })));
+    },
+    async apps(deviceId: string): Promise<{ deviceId: string; apps: InstalledApp[] }> {
+      if (typeof deviceId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deviceId)) throw new Error('Select a valid simulator identifier.');
+      if (!(await runner.devices()).some(device => device.id === deviceId)) throw new Error('Select an available, already-running simulator and refresh the device list.');
+      const { stdout } = await options.execute('/usr/bin/xcrun', ['simctl', 'listapps', deviceId]);
+      const directory = await mkdtemp(join(tmpdir(), 'tnt-apps-'));
+      try {
+        const path = join(directory, 'apps.plist');
+        await writeFile(path, stdout, { mode: 0o600 });
+        const converted = await options.execute('/usr/bin/plutil', ['-convert', 'json', '-o', '-', path]);
+        const data: unknown = JSON.parse(converted.stdout);
+        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('The simulator returned an unreadable app list. Refresh apps to retry.');
+        const apps: InstalledApp[] = Object.entries(data).map(([bundleId, value]) => {
+          if (!value || typeof value !== 'object' || !('ApplicationType' in value) || !['User', 'System'].includes(String(value.ApplicationType))) throw new Error('The simulator returned an unsupported app classification. Refresh apps to retry.');
+          const metadata = value as Record<string, unknown>;
+          const name = [metadata.CFBundleDisplayName, metadata.CFBundleName, bundleId].find(value => typeof value === 'string' && value.trim()) as string;
+          return { bundleId, name, type: metadata.ApplicationType === 'System' ? 'system' : 'user' };
+        });
+        return { deviceId, apps: apps.sort((a, b) => a.name.localeCompare(b.name) || a.bundleId.localeCompare(b.bundleId)) };
+      } finally { await rm(directory, { recursive: true, force: true }); }
     },
     async launch(input: { deviceId: string; bundleId: string }): Promise<LaunchResult> {
       if (typeof input.bundleId !== 'string' || input.bundleId.length > 255 || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(input.bundleId)) {
