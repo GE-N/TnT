@@ -51,6 +51,7 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         return response.end(image);
       }
       if (scenarios) {
+        if (request.method === 'POST' && url.pathname === '/api/canvas/references') return json(200, await scenarios.references(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces') return json(200, await scenarios.save(await readJson(request)));
         const workspace = /^\/api\/workspaces\/([0-9a-f-]{36})$/.exec(url.pathname);
         if (request.method === 'GET' && workspace) return json(200, await scenarios.workspace(workspace[1]));

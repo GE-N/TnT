@@ -2,17 +2,17 @@ import { useEffect, useState } from 'react';
 import type { MockPlan } from '../server/mockoon.js';
 import type { Environment } from '@mockoon/commons';
 
-export function MockSetup({disabled,onChange}: {disabled:boolean;onChange:(plan:MockPlan|undefined,error:string)=>void}) {
-  const [enabled,setEnabled]=useState(false);
-  const [environment,setEnvironment]=useState<Environment>();
-  const [routeId,setRouteId]=useState('');
-  const [responseId,setResponseId]=useState('');
-  const [port,setPort]=useState('4320');
-  const [backendUrl,setBackendUrl]=useState('');
-  const [fromScreen,setFromScreen]=useState('');
-  const [toScreen,setToScreen]=useState('');
-  const [failureSemantics,setFailureSemantics]=useState('');
-  const [passthrough,setPassthrough]=useState<string[]>([]);
+export function MockSetup({disabled,onChange,initialPlan}: {disabled:boolean;initialPlan?:MockPlan;onChange:(plan:MockPlan|undefined,error:string)=>void}) {
+  const [enabled,setEnabled]=useState(Boolean(initialPlan));
+  const [environment,setEnvironment]=useState<Environment|undefined>(initialPlan?.environment);
+  const [routeId,setRouteId]=useState(initialPlan?.routeId??'');
+  const [responseId,setResponseId]=useState(initialPlan?.responseId??'');
+  const [port,setPort]=useState(String(initialPlan?.port??4320));
+  const [backendUrl,setBackendUrl]=useState(initialPlan?.backendUrl??'');
+  const [fromScreen,setFromScreen]=useState(initialPlan?.fromScreen??'');
+  const [toScreen,setToScreen]=useState(initialPlan?.toScreen??'');
+  const [failureSemantics,setFailureSemantics]=useState(initialPlan?.failureSemantics??'');
+  const [passthrough,setPassthrough]=useState<string[]>(initialPlan?.passthroughRouteIds??[]);
   const [importError,setImportError]=useState('');
   const route=environment?.routes.find(route=>route.uuid===routeId);
   const response=route?.responses.find(response=>response.uuid===responseId);

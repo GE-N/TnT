@@ -69,3 +69,11 @@ Import an existing Mockoon 9.9 environment under **API response scenario**. Choo
 Pick and **Save step** for the trigger, then append a parameterized reusable assertion with the expected page text. **Run scenario** executes the complete YAML and snapshots its declared reusable files. The picker’s isolated execution buttons continue to execute only the reviewed picked command. Results show expected screen labels, mock intent, independently observed server transactions, and cleanup. Missing traffic is unavailable, even when a UI assertion passes.
 
 Declared reusable flows use flat `.yaml` filenames and the same literal app ID. Other external file references remain unsupported. Cancellation stops owned Maestro and Mockoon processes before device release. See [verification and remaining real-app proof inputs](docs/mock-verification.md); #5 is not release-complete without the target API maintenance journey.
+
+## Screen test canvas (#7)
+
+Choose **Create screen canvas**, add one node per app screen, and associate current YAML commands or declared reusable flows in the screen inspector. Drag headers or use arrow keys to arrange screens; zoom and scroll to inspect the graph. Optional reference screenshots are local annotations up to 250 KB. Reopen saved work using its workspace ID; graph, YAML, reusable flows and mock configuration are restored, while the route must be explicitly selected again.
+
+Connect a source action and destination assertion, add a response-condition explanation, then create an explicitly ordered scenario path. Select it before **Run scenario**. YAML owns execution: the selected route must match its existing command order. Stale/broken/ambiguous references block the selected route and require explicit repair. The executed result canvas uses an immutable graph snapshot, reports verified outcomes after execution, and fails an unverified required destination instead of switching branches. Shared screens expose their reusable assertion flows.
+
+Setup/default-action handlers remain unavailable until #6. The actual API maintenance-route integration gate remains outstanding; see [canvas evidence and limits](docs/canvas-verification.md).

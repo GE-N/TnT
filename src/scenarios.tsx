@@ -1,6 +1,8 @@
 import { runnerClient } from './runner-client.js';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import type { Run, Workspace } from '../server/scenarios.js';
+import {CanvasEditor,CanvasBoard} from './canvas.js';
+import type {CanvasGraph,CanvasDiagnostic,CatalogEntry} from '../server/canvas.js';
 import { MockSetup } from './mock-setup.js';
 import type { MockPlan } from '../server/mockoon.js';
 import { parseAllDocuments } from 'yaml';
@@ -9,6 +11,13 @@ import { Picker } from './picker.js';
 export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: { token: string; deviceId: string; bundleId: string; launchBusy: boolean; onRunning: (running: boolean) => void }) {
   const [name, setName] = useState('Home screen');
   const [yaml, setYaml] = useState('appId: com.example.HybridApp\n---\n- launchApp\n- assertVisible: Home\n');
+  const [openWorkspaceId,setOpenWorkspaceId]=useState('');
+  const [loadedMock,setLoadedMock]=useState<MockPlan>();
+  const [loadRevision,setLoadRevision]=useState(0);
+  const [canvas,setCanvas]=useState<CanvasGraph>();
+  const [pathId,setPathId]=useState('');
+  const [catalog,setCatalog]=useState<CatalogEntry[]>([]);
+  const [canvasDiagnostics,setCanvasDiagnostics]=useState<CanvasDiagnostic[]>([]);
   const [mock,setMock]=useState<MockPlan>();
   const [mockError,setMockError]=useState('');
   const [flows,setFlows]=useState('{}');
@@ -26,6 +35,16 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   useEffect(() => { onRunning(running || submitting || pickerBusy); }, [running, submitting, pickerBusy, onRunning]);
   const headers = { 'X-TnT-Token': token, 'Content-Type': 'application/json' };
   const api = runnerClient(token);
+  useEffect(()=>{
+    if(!token)return;let stopped=false;
+    const timer=setTimeout(()=>{
+      try {
+        const parsedFlows=JSON.parse(flows);
+        void runnerClient(token)('/api/canvas/references',{yaml,flows:parsedFlows,canvas}).then(value=>{if(!stopped){setCatalog(value.references);setCanvasDiagnostics(value.diagnostics);}}).catch(error=>{if(!stopped){setCatalog([]);setCanvasDiagnostics([{ownerId:'yaml',detail:error.message}]);}});
+      }catch{setCatalog([]);setCanvasDiagnostics([{ownerId:'flows',detail:'Repair the reusable flows JSON.'}]);}
+    },250);
+    return()=>{stopped=true;clearTimeout(timer);};
+  },[yaml,flows,canvas,token]);
   useEffect(() => {
     if (!running || !run) return;
     let stopped = false;
@@ -40,9 +59,19 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     if (screenshot) void inspect(screenshot);
   }, [run?.id, running]);
   useEffect(() => () => { if (artifact?.image) URL.revokeObjectURL(artifact.image); }, [artifact?.image]);
+  async function openWorkspace() {
+    setSubmitting(true);setError('');
+    try {
+      const workspace:Workspace=await api('/api/workspaces/'+openWorkspaceId.trim());
+      setWorkspaceId(workspace.id);setName(workspace.name);setYaml(workspace.yaml);setFlows(JSON.stringify(workspace.flows??{},null,2));
+      setCanvas(workspace.canvas);setPathId('');setLoadedMock(workspace.mock);setMock(workspace.mock);setLoadRevision(value=>value+1);
+      artifactSequence.current++;setRun(undefined);setArtifact(undefined);setInputs('');
+    }catch(error){setError(error instanceof Error?error.message:'Cannot open workspace.');}
+    finally{setSubmitting(false);}
+  }
   async function save() {
     if(mockError) throw new Error(mockError);
-    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml, flows: JSON.parse(flows), mock });
+    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml, flows: JSON.parse(flows), mock, canvas });
     setWorkspaceId(workspace.id);
     return workspace;
   }
@@ -54,7 +83,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       if (execute) {
         const runtimeInputs = inputs.trim() ? JSON.parse(inputs) : undefined;
         setArtifact(undefined);
-        const next = await api('/api/runs', { workspaceId: workspace.id, deviceId, runtimeInputs });
+        const next = await api('/api/runs', { workspaceId: workspace.id, deviceId, runtimeInputs, pathId:canvas?pathId:undefined });
         artifactSequence.current++;
         setArtifact(undefined);
         setRun(next);
@@ -64,7 +93,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     finally { setSubmitting(false); }
   }
   async function savePicked(yaml: string) {
-    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml, flows: JSON.parse(flows), mock });
+    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml, flows: JSON.parse(flows), mock, canvas });
     setWorkspaceId(workspace.id); setYaml(workspace.yaml);
   }
   async function executePicked(flowYaml: string, captureId: string, pickerReviewId: string) {
@@ -107,7 +136,9 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   }
   return <section className="panel scenario-panel" aria-labelledby="scenario-heading">
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Run an authored scenario</h2><p>Saved YAML is the executable authority. Each run gets its own snapshot.</p></div></div>
-    <MockSetup disabled={running||submitting||pickerBusy} onChange={setMockPlan}/>
+    <div className="workspace-open"><label htmlFor="open-workspace">Saved workspace ID</label><input id="open-workspace" value={openWorkspaceId} onChange={event=>setOpenWorkspaceId(event.target.value)} placeholder="Paste the ID shown after saving"/><button className="confirm" disabled={!token||!openWorkspaceId.trim()||running||submitting||pickerBusy||launchBusy} onClick={()=>void openWorkspace()}>Open saved workspace</button></div>
+    <CanvasEditor graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={pathId} onPathChange={setPathId} disabled={running||submitting||pickerBusy||launchBusy}/>
+    <MockSetup key={loadRevision} initialPlan={loadedMock} disabled={running||submitting||pickerBusy} onChange={setMockPlan}/>
     <div className="scenario-grid"><div className="scenario-editor">
       <label htmlFor="expected-page">Expected page text for reusable assertion</label><input id="expected-page" value={expectedPage} onChange={event=>setExpectedPage(event.target.value)} disabled={running||submitting||pickerBusy}/><button className="confirm" disabled={running||submitting||pickerBusy} onClick={addAssertion}>Append reusable assertion</button>
       <label htmlFor="reusable-flows">Reusable YAML flows (JSON filename → YAML)</label><textarea id="reusable-flows" value={flows} onChange={event=>setFlows(event.target.value)} disabled={running||submitting||pickerBusy} spellCheck={false}/>
@@ -127,6 +158,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
         <div className="label-row"><h3>{run.snapshot.name}</h3><span className={'result-tag ' + run.status}>{run.status}</span></div>
         {run.error && <div className="notice error">{run.error}</div>}
         <p>Cleanup ({running ? 'pending' : run.cleanup.verified ? 'verified' : 'failed'}): {run.cleanup.detail}</p>
+        {run.snapshot.canvas&&run.canvas&&<details open><summary>Executed canvas · {run.snapshot.canvas.paths.find(path=>path.id===run.canvas?.pathId)?.name}</summary><p>{run.canvas.note}</p><CanvasBoard graph={run.snapshot.canvas} pathId={run.canvas.pathId} result={run.canvas}/>{run.canvas.tests.map(test=><p key={test.id}>{run.snapshot.canvas?.screens.flatMap(screen=>screen.tests).find(item=>item.id===test.id)?.label}: {test.status} · {test.detail}</p>)}</details>}
         <p className="field-hint">{run.mappingNote}</p>
         <ol className="step-results">{run.steps.map(step => <li key={step.id}><code>{step.command}</code><span>{step.status}</span></li>)}</ol>
         {run.expectedFailure && <details open><summary>Failed expected assertion</summary><pre>{JSON.stringify(run.expectedFailure, null, 2)}</pre></details>}
