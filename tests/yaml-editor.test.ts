@@ -70,3 +70,44 @@ test('appending to an indented command list retains valid YAML and all original 
  assert.equal(readForms(edited).error,undefined);
  assert.equal(readForms(edited).steps.at(-1)?.value,'hello');
 });
+test('deleting middle and tail steps preserves other source and refuses breaking aliases',async()=>{
+ const {deleteForm}=await import('../src/yaml-forms.js');
+ const source='appId: com.example.App\n---\n- launchApp\n# keep\n- tapOn:\n    text: Home\n    optional: true\n- assertVisible: Home # keep too\n';
+ const middle=deleteForm(source,1);
+ assert.equal(middle,'appId: com.example.App\n---\n- launchApp\n# keep\n- assertVisible: Home # keep too\n');
+ assert.equal(deleteForm(middle,1),'appId: com.example.App\n---\n- launchApp\n# keep\n');
+ assert.equal(readForms(deleteForm(deleteForm(middle,1),0)).steps.length,0);
+ assert.throws(()=>deleteForm(mixed,1),/alias|anchor/i);
+});
+test('argument forms edit a selected scalar without rewriting sibling arguments or comments',()=>{
+ const source='appId: com.example.App\n---\n- tapOn:\n    text: Home # keep\n    optional: true\n    index: 0\n';
+ assert.equal(readForms(source).steps[0].fields?.length,3);
+ assert.equal(editForm(source,{source,index:0,field:'text',value:'Coordinator'}),source.replace('Home','"Coordinator"'));
+ assert.equal(editForm(source,{source,index:0,field:'optional',value:'false'}),source.replace('true','false'));
+ assert.throws(()=>editForm(source,{source,index:0,field:'index',value:'no'}),/number/);
+});
+test('deleting a duplicate step explicitly invalidates affected canvas references and an empty list can be rebuilt',async()=>{
+ const {deleteForm,canvasAfterDeletion}=await import('../src/yaml-forms.js');
+ const {referenceCatalog,inspectCanvas}=await import('../server/canvas.js');
+ const source='appId: com.example.App\n---\n- tapOn: Home\n- tapOn: Home\n';
+ const reference=referenceCatalog(source).references[0];
+ const graph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'action',label:'Home',role:'action' as const,reference}]}],edges:[],paths:[]};
+ const changed=canvasAfterDeletion(graph,0);
+ assert.match(inspectCanvas(changed!,deleteForm(source,0)).diagnostics[0].detail,/stale/);
+ assert.equal(inspectCanvas(graph,source).diagnostics.length,0);
+ const empty=deleteForm(deleteForm(source,0),0);
+ assert.equal(readForms(appendForm(empty,'tapOn','Next')).steps[0].value,'Next');
+});
+test('Undo restores invalidated references while preserving later canvas edits and explicit relinking',async()=>{
+ const {canvasAfterDeletion,restoreDeletionReferences}=await import('../src/yaml-forms.js');
+ const {referenceCatalog}=await import('../server/canvas.js');
+ const source='appId: com.example.App\n---\n- tapOn: Home\n';
+ const graph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'action',label:'Home',role:'action' as const,reference:referenceCatalog(source).references[0]}]}],edges:[],paths:[]};
+ const deleted=canvasAfterDeletion(graph,0)!;
+ const moved={...deleted,screens:deleted.screens.map(screen=>({...screen,title:'Renamed',x:120}))};
+ const restored=restoreDeletionReferences(moved,graph,deleted)!;
+ assert.equal(restored.screens[0].x,120);assert.equal(restored.screens[0].title,'Renamed');
+ assert.deepEqual(restored.screens[0].tests[0].reference,graph.screens[0].tests[0].reference);
+ const relinked=structuredClone(moved);relinked.screens[0].tests[0].reference.fingerprint='user-relinked';
+ assert.equal(restoreDeletionReferences(relinked,graph,deleted)!.screens[0].tests[0].reference.fingerprint,'user-relinked');
+});

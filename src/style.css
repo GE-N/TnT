@@ -12,6 +12,25 @@
 
 .workspace-open{padding:18px 24px;display:flex;align-items:center;gap:14px;border-bottom:1px solid #2b382f}.workspace-open label{margin:0;white-space:nowrap}.workspace-open .confirm{white-space:nowrap}.screen-test>span:first-child{min-width:0;overflow-wrap:anywhere}@media(max-width:700px){.workspace-open{flex-wrap:wrap}}
 
-.yaml-step { padding: 16px; margin: 12px 0; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; }
-.yaml-step pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-.yaml-step button { margin: 8px 8px 0 0; }
+/* Compact command rows: only the selected argument editor expands. */
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+.yaml-step { margin:0; border-bottom:1px solid #2b382f; }
+.yaml-step-row { display:flex; align-items:center; gap:8px; min-height:48px; padding:6px 0; }
+.yaml-step-row strong { font-size:12px; width:126px; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.yaml-step-summary { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:#99a99b; }
+.yaml-value { display:flex; align-items:center; gap:8px; flex:1; flex-wrap:wrap; min-width:0; }
+.yaml-value input { flex:1; min-width:70px; width:auto; padding:7px 9px; margin-bottom:0; }
+.yaml-value label { width:90px; margin:0; overflow-wrap:anywhere; }
+.yaml-step button { margin:0; padding:5px; flex-shrink:0; font-size:11px; }
+.yaml-step-details { padding:8px 0 14px 20px; display:grid; gap:8px; }
+.yaml-step-details pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+.yaml-step-details .field-hint { margin:0; }
+.yaml-step-details>button { justify-self:start; }
+.yaml-value .notice { flex-basis:100%; }
+.yaml-add { display:flex; gap:8px; margin:12px 0; border:1px solid #3b4a3e; border-radius:7px; padding:10px; }
+.yaml-add legend { font-size:12px; }
+.yaml-add select { width:130px; padding:7px; }
+.yaml-add input { flex:1; min-width:70px; padding:7px; margin-bottom:0; }
+.yaml-add button { font-size:11px; }
+.yaml-undo { font-size:12px; margin:10px 0; }
+@media(max-width:540px) { .yaml-step-row { flex-wrap:wrap; } .yaml-step-row strong { width:105px; } .yaml-add { flex-wrap:wrap; } }

@@ -19,3 +19,30 @@ Syntax errors and unresolved aliases are explained without replacing the draft. 
 - Saved proof workspace: `b32739f4-55c8-4238-ba72-b08603e86d24`. Local ignored evidence: `.tnt/issue-8-proof.json`, `.tnt/issue-8-forms.png` and corresponding run artifacts.
 
 Final checks: 49 tests passed, type checking, production build and diff checks passed. Existing external-file restrictions and nested/unsupported result-mapping limits are unchanged.
+
+## Compact editor follow-up
+
+Command forms now use compact rows with inline scalar values and one expandable
+argument editor. Supported argument maps expose existing string, number and
+boolean fields; nested values and other complex syntax retain a source preview
+and Edit YAML action. Applying a field preserves sibling drafts and rejects
+stale drafts instead of discarding them.
+
+Every block-list step can be deleted, including middle and final steps. The last
+step leaves an empty YAML list that can be rebuilt with Add command. Deletions
+that would break an alias or produce invalid YAML are rejected. Undo restores
+the exact prior YAML and is disabled after further YAML edits; workspace loading
+resets editing history.
+
+Canvas-linked deletions warn before proceeding. Deleted and shifted references
+are explicitly invalidated, including identical adjacent commands, so a reference
+cannot silently inherit another step. Undo restores unchanged invalidated links
+while preserving later node movement, renaming, removal and explicit relinking.
+
+Browser verification on the existing Hybrid sample confirmed a middle-step
+warning, deletion, stale-reference diagnostics, and Undo returning the step and
+its links. No saved workspace was changed during that check. Automated coverage
+includes middle/tail deletion, alias protection, rebuilding an empty list,
+argument preservation, sibling drafts, warning cancellation/confirmation,
+Undo safeguards, duplicate-step references, and reference restoration after
+canvas edits.

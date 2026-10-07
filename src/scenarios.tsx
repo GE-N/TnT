@@ -1,3 +1,4 @@
+import {canvasAfterDeletion,restoreDeletionReferences} from './yaml-forms.js';
 import {YamlEditor} from './yaml-editor.js';
 import { runnerClient } from './runner-client.js';
 import { useEffect, useState, useRef, useCallback } from 'react';
@@ -145,7 +146,14 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       <label htmlFor="reusable-flows">Reusable YAML flows (JSON filename → YAML)</label><textarea id="reusable-flows" value={flows} onChange={event=>setFlows(event.target.value)} disabled={running||submitting||pickerBusy} spellCheck={false}/>
       <label htmlFor="scenario-name">Scenario name</label><input id="scenario-name" value={name} disabled={pickerBusy} onChange={event => setName(event.target.value)} maxLength={120} />
       <div className="label-row"><span>Executable flow</span><button className="text-button" disabled={!bundleId || pickerBusy} onClick={() => setYaml(`appId: ${bundleId}\n---\n- launchApp\n- assertVisible: Home\n`)}>Use launch app ID</button></div>
-      <YamlEditor yaml={yaml} onChange={setYaml} disabled={pickerBusy}/>
+      <YamlEditor key={loadRevision} yaml={yaml} onChange={setYaml} disabled={pickerBusy}
+        deletionWarnings={index=>canvas?.screens.flatMap(screen=>screen.tests.filter(test=>test.reference.kind==='flow'||(test.reference.file==='flow.yaml'&&(test.reference.index??-1)>=index)).map(test=>screen.title+' · '+test.label))??[]}
+        onDelete={(next,index)=>{
+          const previous=canvas;const changed=canvasAfterDeletion(canvas,index);
+          setYaml(next);setCanvas(changed);
+          return ()=>setCanvas(current=>restoreDeletionReferences(current,previous,changed));
+        }}/>
+
       <p className="field-hint">Reusable files declared above are snapshotted with the scenario; other external files and custom artifact paths are unsupported. Edits during a run apply to the next run.</p>
       <label htmlFor="runtime-inputs">Confidential runtime inputs (optional JSON)</label><input id="runtime-inputs" type="password" value={inputs} onChange={event => setInputs(event.target.value)} autoComplete="off" placeholder={'{"PASSWORD":"value"}'} />
       <p className="field-hint">Use uppercase names and reference them as ${'{NAME}'} in YAML. Values are never saved. Runs with inputs withhold raw logs and images. Keep secrets out of authored YAML.</p>
