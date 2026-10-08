@@ -1,3 +1,5 @@
+import {DefaultActions} from './default-actions.js';
+import type {Automation} from '../server/default-actions.js';
 import {canvasAfterDeletion,restoreDeletionReferences} from './yaml-forms.js';
 import {YamlEditor} from './yaml-editor.js';
 import { runnerClient } from './runner-client.js';
@@ -23,6 +25,9 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   const [mock,setMock]=useState<MockPlan>();
   const [mockError,setMockError]=useState('');
   const [flows,setFlows]=useState('{}');
+  const [automation,setAutomation]=useState<Automation>();
+  const [automationError,setAutomationError]=useState('');
+  const [preview,setPreview]=useState<{source:string;yaml:string}>();
   const [expectedPage,setExpectedPage]=useState('');
   const setMockPlan=useCallback((plan:MockPlan|undefined,error:string)=>{setMock(plan);setMockError(error);},[]);
   const [workspaceId, setWorkspaceId] = useState('');
@@ -66,14 +71,15 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     try {
       const workspace:Workspace=await api('/api/workspaces/'+openWorkspaceId.trim());
       setWorkspaceId(workspace.id);setName(workspace.name);setYaml(workspace.yaml);setFlows(JSON.stringify(workspace.flows??{},null,2));
-      setCanvas(workspace.canvas);setPathId('');setLoadedMock(workspace.mock);setMock(workspace.mock);setLoadRevision(value=>value+1);
+      setAutomation(workspace.automation);setAutomationError('');setPreview(undefined);setCanvas(workspace.canvas);setPathId('');setLoadedMock(workspace.mock);setMock(workspace.mock);setLoadRevision(value=>value+1);
       artifactSequence.current++;setRun(undefined);setArtifact(undefined);setInputs('');
     }catch(error){setError(error instanceof Error?error.message:'Cannot open workspace.');}
     finally{setSubmitting(false);}
   }
   async function save() {
     if(mockError) throw new Error(mockError);
-    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml, flows: JSON.parse(flows), mock, canvas });
+    if(automationError)throw new Error(automationError);
+    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml, flows: JSON.parse(flows), mock, canvas, automation });
     setWorkspaceId(workspace.id);
     return workspace;
   }
@@ -95,7 +101,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     finally { setSubmitting(false); }
   }
   async function savePicked(yaml: string) {
-    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml, flows: JSON.parse(flows), mock, canvas });
+    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml, flows: JSON.parse(flows), mock, canvas, automation });
     setWorkspaceId(workspace.id); setYaml(workspace.yaml);
   }
   async function executePicked(flowYaml: string, captureId: string, pickerReviewId: string) {
@@ -146,12 +152,20 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       <label htmlFor="reusable-flows">Reusable YAML flows (JSON filename → YAML)</label><textarea id="reusable-flows" value={flows} onChange={event=>setFlows(event.target.value)} disabled={running||submitting||pickerBusy} spellCheck={false}/>
       <label htmlFor="scenario-name">Scenario name</label><input id="scenario-name" value={name} disabled={pickerBusy} onChange={event => setName(event.target.value)} maxLength={120} />
       <div className="label-row"><span>Executable flow</span><button className="text-button" disabled={!bundleId || pickerBusy} onClick={() => setYaml(`appId: ${bundleId}\n---\n- launchApp\n- assertVisible: Home\n`)}>Use launch app ID</button></div>
+      <DefaultActions key={'automation-'+loadRevision} value={automation} onChange={setAutomation} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} disabled={pickerBusy} onError={setAutomationError}/>
+      {automation&&<><button type="button" className="confirm" disabled={pickerBusy||submitting||!!automationError} onClick={async()=>{try{const source=JSON.stringify({yaml,flows,automation});const result=await api('/api/automation/preview',{yaml,flows:JSON.parse(flows),automation});setPreview({source,yaml:result.executionYaml});setError('');}catch(error){setError(error instanceof Error?error.message:'Cannot preview execution.');}}}>Preview execution YAML</button>{preview&&<details open><summary>Derived execution preview{preview.source!==JSON.stringify({yaml,flows,automation})?' · outdated, refresh before running':''}</summary><pre className="execution-yaml">{preview.yaml}</pre></details>}</>}
       <YamlEditor key={loadRevision} yaml={yaml} onChange={setYaml} disabled={pickerBusy}
-        deletionWarnings={index=>canvas?.screens.flatMap(screen=>screen.tests.filter(test=>test.reference.kind==='flow'||(test.reference.file==='flow.yaml'&&(test.reference.index??-1)>=index)).map(test=>screen.title+' · '+test.label))??[]}
+        deletionWarnings={index=>[...(canvas?.screens.flatMap(screen=>screen.tests.filter(test=>test.reference.kind==='flow'||(test.reference.file==='flow.yaml'&&(test.reference.index??-1)>=index)).map(test=>screen.title+' · '+test.label))??[]),...(automation?.checkpoints.filter(checkpoint=>checkpoint.beforeStep>=index).map(checkpoint=>'Default-action checkpoint before step '+(checkpoint.beforeStep+1))??[])]}
         onDelete={(next,index)=>{
           const previous=canvas;const changed=canvasAfterDeletion(canvas,index);
-          setYaml(next);setCanvas(changed);
-          return ()=>setCanvas(current=>restoreDeletionReferences(current,previous,changed));
+          const previousAutomation=automation;
+          const changedAutomation=automation?{...automation,checkpoints:automation.checkpoints.map(checkpoint=>checkpoint.beforeStep>=index?{...checkpoint,fingerprint:'deleted:'+checkpoint.fingerprint.slice(-56)}:checkpoint)}:undefined;
+          setYaml(next);setCanvas(changed);setAutomation(changedAutomation);
+          return ()=>{setCanvas(current=>restoreDeletionReferences(current,previous,changed));setAutomation(current=>current&&previousAutomation&&changedAutomation?{...current,checkpoints:current.checkpoints.map(checkpoint=>{
+            const changed=changedAutomation.checkpoints.find(item=>item.beforeStep===checkpoint.beforeStep&&item.fingerprint===checkpoint.fingerprint);
+            const previous=previousAutomation.checkpoints.find(item=>item.beforeStep===checkpoint.beforeStep);
+            return changed&&previous?{...checkpoint,fingerprint:previous.fingerprint}:checkpoint;
+          })}:current);};
         }}/>
 
       <p className="field-hint">Reusable files declared above are snapshotted with the scenario; other external files and custom artifact paths are unsupported. Edits during a run apply to the next run.</p>
@@ -167,6 +181,8 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
         <div className="label-row"><h3>{run.snapshot.name}</h3><span className={'result-tag ' + run.status}>{run.status}</span></div>
         {run.error && <div className="notice error">{run.error}</div>}
         <p>Cleanup ({running ? 'pending' : run.cleanup.verified ? 'verified' : 'failed'}): {run.cleanup.detail}</p>
+        {run.automation&&<details open><summary>Setup and default action outcomes</summary><p>Setup: {run.automation.setup.status}</p>{run.automation.actions.map(action=><p key={action.id+':'+action.beforeStep}>{action.name} · before step {action.beforeStep+1}: {action.status} · {action.detail}</p>)}</details>}
+        {run.snapshot.executionYaml&&<details><summary>Derived execution YAML</summary><pre className="execution-yaml">{run.snapshot.executionYaml}</pre></details>}
         {run.snapshot.canvas&&run.canvas&&<details open><summary>Executed canvas · {run.snapshot.canvas.paths.find(path=>path.id===run.canvas?.pathId)?.name}</summary><p>{run.canvas.note}</p><CanvasBoard graph={run.snapshot.canvas} pathId={run.canvas.pathId} result={run.canvas}/>{run.canvas.tests.map(test=><p key={test.id}>{run.snapshot.canvas?.screens.flatMap(screen=>screen.tests).find(item=>item.id===test.id)?.label}: {test.status} · {test.detail}</p>)}</details>}
         <p className="field-hint">{run.mappingNote}</p>
         <ol className="step-results">{run.steps.map(step => <li key={step.id}><code>{step.command}</code><span>{step.status}</span></li>)}</ol>
