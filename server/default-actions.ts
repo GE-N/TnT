@@ -46,13 +46,13 @@ export function readAutomation(value:unknown,flows:Record<string,string>,yaml:st
  if(header.onFlowStart||header.onFlowComplete)throw new Error('For independent setup, move root flow hooks into declared setup or authored commands.');
  return {setup,actions,checkpoints};
 }
-export function instrument(yaml:string,automation:Automation):{yaml:string;plan:ExecutionItem[]} {
+export function instrument(yaml:string,automation:Automation,resetApp=false):{yaml:string;plan:ExecutionItem[]} {
  const documents=parseAllDocuments(yaml);
  const authored=documents[1].toJS() as unknown[];
  const namespace='output.tnt_'+randomUUID().replaceAll('-','');
  const expression=(script:string)=>'${'+script+'}';
  const invoke=(flow:FlowCall,label:string)=>({runFlow:{file:flow.file,...(Object.keys(flow.parameters).length?{env:{...flow.parameters}}:{}),label}});
- const commands:unknown[]=[{launchApp:{stopApp:true,clearState:false}},invoke(automation.setup,'TnT setup')];
+ const commands:unknown[]=[{launchApp:{stopApp:true,clearState:resetApp}},invoke(automation.setup,'TnT setup')];
  const plan:ExecutionItem[]=[{kind:'reset'},{kind:'setup'}];
  authored.forEach((command,index)=>{
   const checkpoint=automation.checkpoints.find(checkpoint=>checkpoint.beforeStep===index);

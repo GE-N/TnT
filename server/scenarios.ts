@@ -1,3 +1,4 @@
+import {readScenarios,selectScenario,type ScenarioDefinition} from './scenario-definitions.js';
 import {readAutomation,instrument,mapAutomation,metadataStatus,type Automation,type AutomationResult,type ExecutionItem} from './default-actions.js';
 import { mkdir, readFile, writeFile, realpath, readdir, mkdtemp, rm, rename } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
@@ -8,7 +9,7 @@ import {readCanvas,referenceCatalog,inspectCanvas,selectedCanvasPath,mapCanvas,t
 import { createMockSession, validateMock, type MockPlan, type MockResult } from './mockoon.js';
 import type { createRunner } from './runner.js';
 
-export type Workspace = { id: string; name: string; yaml: string; automation?:Automation; flows?: Record<string, string>; mock?: MockPlan; canvas?: CanvasGraph; canvasDiagnostics?: CanvasDiagnostic[] };
+export type Workspace = { scenarios?:ScenarioDefinition[]; id: string; name: string; yaml: string; automation?:Automation; flows?: Record<string, string>; mock?: MockPlan; canvas?: CanvasGraph; canvasDiagnostics?: CanvasDiagnostic[] };
 export type Step = { id: string; command: string; expected?: unknown; assertionStatus?:Step['status']; status: 'unavailable' | 'passed' | 'failed' | 'skipped' };
 export type Cleanup = { verified: boolean; detail: string };
 export type Run = {
@@ -16,7 +17,7 @@ export type Run = {
   status: 'running' | 'passed' | 'path-failed' | 'assertion-failed' | 'tool-error' | 'setup-error' | 'handler-error' | 'cancelled';
   automation?:AutomationResult;
   mock?: MockResult; canvas?: CanvasResult;
-  snapshot: { automation?:Automation; executionYaml?:string; executionPlan?:ExecutionItem[]; canvas?: CanvasGraph; canvasPathId?: string; flows?: Record<string, string>; mock?: MockPlan; expectedPath?: { from: string; to: string }; id: string; workspaceId: string; name: string; yaml: string; steps: Step[]; toolVersions: { maestro: string; node: string; mockoon?: string }; runtimeInputPolicy: string; pickerReference?: { captureId: string; reviewId: string; capturedAt: string } };
+  snapshot: { scenario?:ScenarioDefinition; resetApp?:boolean; authoredYaml?:string; automation?:Automation; executionYaml?:string; executionPlan?:ExecutionItem[]; canvas?: CanvasGraph; canvasPathId?: string; flows?: Record<string, string>; mock?: MockPlan; expectedPath?: { from: string; to: string }; id: string; workspaceId: string; name: string; yaml: string; steps: Step[]; toolVersions: { maestro: string; node: string; mockoon?: string }; runtimeInputPolicy: string; pickerReference?: { captureId: string; reviewId: string; capturedAt: string } };
   steps: Step[]; log: string; error?: string; expectedFailure?: unknown;
   cleanup: Cleanup; artifacts: string[]; mappingNote: string;
 };
@@ -39,12 +40,16 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     return path;
   }
   const service = {
-    async preview(input:{yaml:string;flows?:Record<string,string>;automation?:unknown}) {
+    async preview(input:{yaml:string;flows?:Record<string,string>;automation?:unknown;canvas?:unknown;mock?:unknown;scenarios?:unknown;scenarioId?:string;runtimeInputs?:unknown;resetApp?:boolean}) {
       if(typeof input.yaml!=='string'||Buffer.byteLength(input.yaml)>100_000)throw new Error('Provide YAML up to 100 KB.');
-      const flows=validateFlows(input.flows);const root=validate(input.yaml,flows);
+      const flows=validateFlows(input.flows);
+      if(input.resetApp!==undefined&&typeof input.resetApp!=='boolean')throw new Error('Reset app must be a boolean.');
+      const configured=readAutomation(input.automation,flows??{},input.yaml);
+      const selection=selectScenario({yaml:input.yaml,flows,automation:configured,canvas:readCanvas(input.canvas),mock:validateMock(input.mock),scenarios:readScenarios(input.scenarios)},input.scenarioId,validateInputs(input.runtimeInputs));
+      const yaml=selection?.yaml??input.yaml;const root=validate(yaml,flows);
       for(const flow of Object.values(flows??{}))if(validate(flow,flows).appId!==root.appId)throw new Error('Reusable flows must declare the same appId as the scenario.');
-      const automation=readAutomation(input.automation,flows??{},input.yaml);
-      return {authoredYaml:input.yaml,executionYaml:automation?instrument(input.yaml,automation).yaml:input.yaml};
+      const automation=selection?.automation??configured;
+      return {authoredYaml:yaml,executionYaml:automation?instrument(yaml,automation,input.resetApp??false).yaml:yaml};
     },
     async references(input: {yaml:string;flows?:Record<string,string>;canvas?:unknown;automation?:unknown}) {
       if(typeof input.yaml!=='string'||Buffer.byteLength(input.yaml)>100_000|| (input.flows!==undefined&&(!input.flows||typeof input.flows!=='object'||Array.isArray(input.flows)||Object.values(input.flows).some(value=>typeof value!=='string')))||Buffer.byteLength(JSON.stringify(input.flows??{}))>900_000)throw new Error('Provide bounded YAML and reusable flows.');
@@ -55,32 +60,39 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       if(automationError)catalog.diagnostics.push({ownerId:'automation',detail:automationError});
       return catalog;
     },
-    async save(input: { id?: string; name: string; yaml: string; flows?: Record<string,string>; mock?: unknown; canvas?: unknown; automation?:unknown }): Promise<Workspace> {
+    async save(input: { id?: string; name: string; yaml: string; flows?: Record<string,string>; mock?: unknown; canvas?: unknown; automation?:unknown; scenarios?:unknown }): Promise<Workspace> {
       if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 120 || typeof input.yaml !== 'string' || Buffer.byteLength(input.yaml) > 100_000) throw new Error('Provide a scenario name and YAML up to 100 KB.');
+      const scenarios=readScenarios(input.scenarios);
       const flows = validateFlows(input.flows);
       const mock = validateMock(input.mock);
       const canvas=readCanvas(input.canvas);
 
-      if (Buffer.byteLength(JSON.stringify({flows,mock,canvas,automation:input.automation})) > 900_000) throw new Error('Combined reusable flows and mock environment exceed 900 KB.');
+      if (Buffer.byteLength(JSON.stringify({flows,mock,canvas,automation:input.automation,scenarios})) > 900_000) throw new Error('Combined reusable flows and mock environment exceed 900 KB.');
       const automation=readAutomation(input.automation,flows??{},input.yaml);
       const canvasDiagnostics=canvas?inspectCanvas(canvas,input.yaml,flows,automation).diagnostics:undefined;
-      const workspace = { automation, flows, mock, canvas, canvasDiagnostics, id: input.id ? validId(input.id) : randomUUID(), name: input.name.trim(), yaml: input.yaml };
+      const workspace = { scenarios, automation, flows, mock, canvas, canvasDiagnostics, id: input.id ? validId(input.id) : randomUUID(), name: input.name.trim(), yaml: input.yaml };
       await writeRecord(join(await directory('workspaces', workspace.id), 'workspace.json'), workspace);
       return workspace;
     },
     async workspace(id: string): Promise<Workspace> { return readRecord(await directory('workspaces', id), 'workspace.json'); },
-    async start(input: { workspaceId: string; deviceId: string; runtimeInputs?: unknown; captureId?: string; pickerReviewId?: string; pathId?: string }): Promise<Run> {
+    async start(input: { workspaceId: string; deviceId: string; runtimeInputs?: unknown; captureId?: string; pickerReviewId?: string; pathId?: string; scenarioId?:string; resetApp?:boolean }): Promise<Run> {
       const runtimeInputs = validateInputs(input.runtimeInputs);
       const confidential = Object.keys(runtimeInputs).length > 0;
-      const workspace = await service.workspace(input.workspaceId);
+      const authored = await service.workspace(input.workspaceId);
+      if(input.resetApp!==undefined&&typeof input.resetApp!=='boolean')throw new Error('Reset app must be a boolean.');
+      const selection=selectScenario(authored,input.scenarioId,runtimeInputs);
+      const workspace=selection?{...authored,...selection,name:selection.scenario.name}:authored;
+      const selectedPathId=selection?.scenario.pathId??input.pathId;
+      const resetApp=input.resetApp??false;
+      if(resetApp&&!workspace.automation&&!selection)throw new Error('Reset requires declared independent setup.');
       validateFlows(workspace.flows);
       validateMock(workspace.mock);
       const canvas=readCanvas(workspace.canvas);
 
       const { appId, steps } = validate(workspace.yaml, workspace.flows);
       const automation=readAutomation(workspace.automation,workspace.flows??{},workspace.yaml);
-      const canvasPath=canvas?selectedCanvasPath(canvas,workspace.yaml,workspace.flows??{},input.pathId,automation):undefined;
-      const derived=automation?instrument(workspace.yaml,automation):undefined;
+      const canvasPath=canvas?selectedCanvasPath(canvas,workspace.yaml,workspace.flows??{},selectedPathId,automation):undefined;
+      const derived=automation?instrument(workspace.yaml,automation,resetApp):undefined;
       for (const flow of Object.values(workspace.flows ?? {})) { if (validate(flow, workspace.flows).appId !== appId) throw new Error('Reusable flows must declare the same appId as the scenario.'); }
       if ((input.captureId === undefined) !== (input.pickerReviewId === undefined)) throw new Error('Provide both capture and reviewed step identity.');
       const pickerReference = input.captureId ? options.runner.picker.assertReview(input.captureId, input.pickerReviewId!, workspace.yaml) : undefined;
@@ -92,8 +104,8 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
         const version = await options.maestro.version();
         const id = randomUUID();
         const path = await directory('runs', id);
-        const runtimeInputPolicy = confidential ? 'Confidential runtime inputs supplied: values are omitted; raw logs, evaluated metadata, and images are withheld. Temporary tool artifacts are deleted on cleanup. Historical snapshots cannot replay omitted inputs.' : 'No runtime inputs supplied. Keep secrets out of authored YAML. No inherited application environment is forwarded.';
-        const snapshot = { automation, executionYaml:derived?.yaml, executionPlan:derived?.plan, canvas, canvasPathId: canvasPath?.id, flows: workspace.flows, mock: workspace.mock, expectedPath: workspace.mock ? { from: workspace.mock.fromScreen, to: workspace.mock.toScreen } : undefined, id: createHash('sha256').update(JSON.stringify({ workspace, derived, steps, version, device, pathId:canvasPath?.id, runtimeInputPolicy, pickerReference, node: process.version })).digest('hex'), workspaceId: workspace.id, name: workspace.name, yaml: workspace.yaml, steps, toolVersions: { maestro: version, node: process.version, mockoon: workspace.mock ? '9.9.0' : undefined }, runtimeInputPolicy, pickerReference };
+        const runtimeInputPolicy = confidential ? 'Confidential runtime inputs supplied: values are omitted; raw logs, evaluated metadata, and images are withheld. Temporary tool artifacts are deleted on cleanup. Historical snapshots cannot replay omitted inputs.' : selection?'Saved non-confidential scenario inputs supplied; runtime values are scoped to this run. Keep secrets out of saved inputs/YAML. No inherited application environment is forwarded.':'No runtime inputs supplied. Keep secrets out of authored YAML. No inherited application environment is forwarded.';
+        const snapshot = { scenario:selection?.scenario, resetApp, authoredYaml:selection?authored.yaml:undefined, automation, executionYaml:derived?.yaml, executionPlan:derived?.plan, canvas, canvasPathId: canvasPath?.id, flows: workspace.flows, mock: workspace.mock, expectedPath: workspace.mock ? { from: workspace.mock.fromScreen, to: workspace.mock.toScreen } : undefined, id: createHash('sha256').update(JSON.stringify({ workspace, derived, steps, version, device, scenarioId:selection?.scenario.id,resetApp,pathId:canvasPath?.id, runtimeInputPolicy, pickerReference, node: process.version })).digest('hex'), workspaceId: workspace.id, name: workspace.name, yaml: workspace.yaml, steps, toolVersions: { maestro: version, node: process.version, mockoon: workspace.mock ? '9.9.0' : undefined }, runtimeInputPolicy, pickerReference };
         const run: Run = { id, deviceId: device.id, startedAt: new Date().toISOString(), status: 'running', canvas:canvas&&canvasPath?mapCanvas(canvas,canvasPath.id,workspace.yaml,steps,true,automation?{definition:automation,flows:workspace.flows}:undefined):undefined, snapshot, steps: structuredClone(steps), log: '', cleanup: { verified: false, detail: 'Pending' }, artifacts: [], mappingNote: 'Command outcomes will be mapped after execution; unsupported details remain unavailable.' };
         await writeFile(join(path, 'flow.yaml'), workspace.yaml);
         if(derived)await writeFile(join(path,'.tnt-execution.yaml'),derived.yaml);
@@ -123,7 +135,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
             }
             if (controller.signal.aborted) throw new Error('Run cancelled before execution.');
             phase = 'execution';
-            const execution = await options.maestro.run({ directory: executionDirectory, flow: join(executionDirectory, derived?'.tnt-execution.yaml':'flow.yaml'), deviceId: device.id, signal: controller.signal, runtimeInputs });
+            const execution = await options.maestro.run({ directory: executionDirectory, flow: join(executionDirectory, derived?'.tnt-execution.yaml':'flow.yaml'), deviceId: device.id, signal: controller.signal, runtimeInputs:selection?.inputs??runtimeInputs });
             run.log = confidential ? 'Raw logs withheld because confidential runtime inputs were supplied.' : execution.log;
             run.cleanup = execution.cleanup;
             const files = await listFiles(executionDirectory);
