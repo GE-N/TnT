@@ -137,3 +137,104 @@ test('a reusable-flow association becomes stale when its root invocation paramet
  await assert.rejects(scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'}),/stale/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('a selected route maps its checkpoint handler and setup from the executed snapshot, not another invocation of the same flow',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-canvas-handler-'));
+ try{
+  const source='appId: com.example.HybridApp\n---\n- assertVisible: Details\n';
+  const flows={'setup.yaml':'appId: com.example.HybridApp\n---\n- assertVisible: Home\n','action.yaml':'appId: com.example.HybridApp\n---\n- tapOn: ${TARGET}\n'};
+  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
+   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+   await writeFile(join(directory,'commands.json'),JSON.stringify([
+    {command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:{runFlowCommand:{label:'TnT setup'}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:{runFlowCommand:{label:'TnT checkpoint 1'}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:{runFlowCommand:{label:'TnT handler open checkpoint 1'}},metadata:{depth:2,status:'COMPLETED'}},
+    {command:{runFlowCommand:{label:'TnT handler other checkpoint 1'}},metadata:{depth:2,status:'SKIPPED'}},
+    {command:{runFlowCommand:{label:'TnT step 1',commands:[{assertConditionCommand:{condition:{visible:{textRegex:'Details'}}}}]}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:{assertConditionCommand:{condition:{visible:{textRegex:'Details'}}}},metadata:{depth:1,status:'COMPLETED'}},
+   ]));return{code:0,log:'Fixture',cleanup:{verified:true,detail:'Exited'}};
+  }}});
+  const plain=await scenarios.references({yaml:source,flows});
+  const automation={setup:{file:'setup.yaml',parameters:{}},actions:[{id:'open',name:'Open details',condition:{text:'Home'},file:'action.yaml',parameters:{TARGET:'Coordinator'},enabled:true},{id:'other',name:'Other action',condition:{text:'Home'},file:'action.yaml',parameters:{TARGET:'Wrong'},enabled:true}],checkpoints:[{beforeStep:0,fingerprint:plain.references[0].fingerprint,timeoutMs:0}]};
+  const catalog=await scenarios.references({yaml:source,flows,automation});
+  const handler=catalog.references.find(reference=>reference.kind==='handler'&&reference.actionId==='open');assert.ok(handler);
+  const setup=catalog.references.find(reference=>reference.kind==='setup');assert.ok(setup);
+  const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'setup',label:'Independent setup',role:'setup',reference:setup},{id:'trigger',label:'Open details',role:'handler',reference:handler}]},{id:'details',title:'Details',x:400,y:0,tests:[{id:'assert',label:'Expected Details',role:'assertion',reference:catalog.references[0]}]}],edges:[{id:'edge',from:'home',to:'details',actionTestId:'trigger',assertionTestId:'assert',responseCondition:'Default action opens Details'}],paths:[{id:'path',name:'Details',edgeIds:['edge']}]};
+  const workspace=await scenarios.save({name:'Handler route',yaml:source,flows,automation,canvas});
+  const result=await scenarios.wait((await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'})).id);
+  assert.equal(result.status,'passed');assert.equal(result.canvas?.tests.find(test=>test.id==='setup')?.status,'passed');
+  assert.equal(result.canvas?.tests.find(test=>test.id==='trigger')?.status,'passed');assert.equal(result.canvas?.edges[0].status,'passed');
+  await scenarios.save({...workspace,automation:{...automation,actions:automation.actions.map(action=>({...action,parameters:{TARGET:'Edited after run'}}))}});
+  assert.equal((await scenarios.result(result.id)).canvas?.tests.find(test=>test.id==='trigger')?.status,'passed');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+test('an unrelated authored subflow label cannot make a skipped checkpoint handler pass its selected route',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-canvas-handler-scope-'));
+ try{
+  const source='appId: com.example.HybridApp\n---\n- assertVisible: Details\n';
+  const flows={'setup.yaml':'appId: com.example.HybridApp\n---\n- assertVisible: Home\n','action.yaml':'appId: com.example.HybridApp\n---\n- tapOn: Coordinator\n'};
+  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
+   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+   await writeFile(join(directory,'commands.json'),JSON.stringify([
+    {command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:{runFlowCommand:{label:'TnT setup'}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:{runFlowCommand:{label:'TnT checkpoint 1'}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:{runFlowCommand:{label:'TnT handler open checkpoint 1'}},metadata:{depth:2,status:'SKIPPED'}},
+    {command:{runFlowCommand:{label:'TnT step 1',commands:[{assertConditionCommand:{condition:{visible:{textRegex:'Details'}}}}]}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:{assertConditionCommand:{condition:{visible:{textRegex:'Details'}}}},metadata:{depth:1,status:'COMPLETED'}},
+    {command:{runFlowCommand:{label:'TnT handler open checkpoint 1'}},metadata:{depth:2,status:'COMPLETED'}},
+   ]));return{code:0,log:'Fixture',cleanup:{verified:true,detail:'Exited'}};
+  }}});
+  const plain=await scenarios.references({yaml:source,flows});
+  const automation={setup:{file:'setup.yaml',parameters:{}},actions:[{id:'open',name:'Open',condition:{text:'Absent'},file:'action.yaml',parameters:{},enabled:true}],checkpoints:[{beforeStep:0,fingerprint:plain.references[0].fingerprint,timeoutMs:0}]};
+  const catalog=await scenarios.references({yaml:source,flows,automation});const handler=catalog.references.find(reference=>reference.kind==='handler')!;
+  const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'trigger',label:'Open',role:'handler',reference:handler}]},{id:'details',title:'Details',x:400,y:0,tests:[{id:'assert',label:'Details',role:'assertion',reference:catalog.references[0]}]}],edges:[{id:'edge',from:'home',to:'details',actionTestId:'trigger',assertionTestId:'assert',responseCondition:'Only explicit handler'}],paths:[{id:'path',name:'Details',edgeIds:['edge']}]};
+  const workspace=await scenarios.save({name:'Scoped outcome',yaml:source,flows,automation,canvas});
+  const result=await scenarios.wait((await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'})).id);
+  assert.equal(result.status,'path-failed');assert.equal(result.canvas?.tests.find(test=>test.id==='trigger')?.status,'skipped');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+test('a stale auxiliary handler association stays unavailable even when its newly configured action passes',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-canvas-auxiliary-'));
+ try{
+  const source='appId: com.example.HybridApp\n---\n- tapOn: Coordinator\n- assertVisible: Details\n';
+  const flows={'setup.yaml':'appId: com.example.HybridApp\n---\n- assertVisible: Home\n','action.yaml':'appId: com.example.HybridApp\n---\n- tapOn: ${TARGET}\n'};
+  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
+   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+   const labels=['TnT setup','TnT checkpoint 1','TnT handler optional checkpoint 1','TnT step 1','TnT step 2'];
+   await writeFile(join(directory,'commands.json'),JSON.stringify([{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},...labels.flatMap<unknown>(label=>label==='TnT step 2'?[{command:{runFlowCommand:{label,commands:[{assertConditionCommand:{condition:{visible:{textRegex:'Details'}}}}]}},metadata:{depth:0,status:'COMPLETED'}},{command:{assertConditionCommand:{condition:{visible:{textRegex:'Details'}}}},metadata:{depth:1,status:'COMPLETED'}}]:[{command:{runFlowCommand:{label}},metadata:{depth:label.includes('handler')?2:0,status:'COMPLETED'}}])]));
+   return{code:0,log:'Fixture',cleanup:{verified:true,detail:'Exited'}};
+  }}});
+  const plain=await scenarios.references({yaml:source,flows});
+  const automation={setup:{file:'setup.yaml',parameters:{}},actions:[{id:'optional',name:'Optional',condition:{text:'Home'},file:'action.yaml',parameters:{TARGET:'Old'},enabled:true}],checkpoints:[{beforeStep:0,fingerprint:plain.references[0].fingerprint,timeoutMs:0}]};
+  const catalog=await scenarios.references({yaml:source,flows,automation});
+  const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'trigger',label:'Tap',role:'action',reference:plain.references[0]},{id:'old-handler',label:'Old handler',role:'handler',reference:catalog.references.find(reference=>reference.kind==='handler')!}]},{id:'details',title:'Details',x:400,y:0,tests:[{id:'assert',label:'Details',role:'assertion',reference:plain.references[1]}]}],edges:[{id:'edge',from:'home',to:'details',actionTestId:'trigger',assertionTestId:'assert',responseCondition:'Authored route'}],paths:[{id:'path',name:'Details',edgeIds:['edge']}]};
+  const workspace=await scenarios.save({name:'Stale auxiliary',yaml:source,flows,canvas,automation:{...automation,actions:automation.actions.map(action=>({...action,parameters:{TARGET:'New'}}))}});
+  assert.ok(workspace.canvasDiagnostics?.some(diagnostic=>diagnostic.ownerId==='old-handler'));
+  const result=await scenarios.wait((await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'})).id);
+  assert.equal(result.status,'passed');assert.equal(result.automation?.actions[0].status,'passed');
+  assert.equal(result.canvas?.tests.find(test=>test.id==='old-handler')?.status,'unavailable');
+  assert.match(result.canvas?.tests.find(test=>test.id==='old-handler')?.detail??'',/stale/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+test('a completed reusable-flow wrapper cannot pass a destination whose nested assertion was skipped',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-canvas-nested-skipped-'));
+ try{
+  const source='appId: com.example.HybridApp\n---\n- tapOn: Open\n- runFlow: maintenance.yaml\n';
+  const flows={'maintenance.yaml':'appId: com.example.HybridApp\n---\n- assertVisible:\n    text: Maintenance\n    optional: true\n'};
+  const assertion={assertConditionCommand:{condition:{visible:{textRegex:'Maintenance',optional:true}}}};
+  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
+   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+   await writeFile(join(directory,'commands.json'),JSON.stringify([
+    {command:{tapOnElement:{}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:{runFlowCommand:{commands:[assertion]}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:assertion,metadata:{depth:1,status:'SKIPPED'}},
+   ]));return{code:0,log:'Optional assertion skipped',cleanup:{verified:true,detail:'Exited'}};
+  }}});
+  const catalog=await scenarios.references({yaml:source,flows});
+  const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'trigger',label:'Open',role:'action',reference:catalog.references[0]}]},{id:'maintenance',title:'Maintenance',x:400,y:0,tests:[{id:'assert',label:'Maintenance',role:'assertion',reference:catalog.references[2]}]}],edges:[{id:'edge',from:'home',to:'maintenance',actionTestId:'trigger',assertionTestId:'assert',responseCondition:'Maintenance required'}],paths:[{id:'path',name:'Maintenance',edgeIds:['edge']}]};
+  const workspace=await scenarios.save({name:'Nested assertion skipped',yaml:source,flows,canvas});
+  const result=await scenarios.wait((await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'})).id);
+  assert.equal(result.status,'path-failed');assert.equal(result.canvas?.tests.find(test=>test.id==='assert')?.status,'skipped');
+ }finally{await rm(root,{recursive:true,force:true});}
+});

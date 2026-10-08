@@ -1,16 +1,16 @@
 # Screen canvas — issue #7
 
-Implementation baseline: `956e786d77bf0fa5d0d354a4108f96a65f3eafde`. Verified 2026-10-06 on the prepared iPhone 15 / iOS 17 simulator with `com.example.HybridApp`, Maestro 2.11.0 and Node 24.7.0.
+Initial implementation baseline: `956e786d77bf0fa5d0d354a4108f96a65f3eafde`. Verified 2026-10-06 on the prepared iPhone 15 / iOS 17 simulator with `com.example.HybridApp`, Maestro 2.11.0 and Node 24.7.0.
 
 ## Implemented behavior
 
-The editor provides a scrollable, zoomable screen canvas with draggable and keyboard-movable screen nodes. Each node has a title, optional local PNG/JPEG reference image, and multiple associated YAML commands/subflows. Tests can be labeled as actions, assertions, setup, handlers or general tests. Screens expose their reusable associations in the inspector. Handler roles are explicitly unavailable until #6 provides execution/reporting.
+The editor provides a scrollable, zoomable screen canvas with draggable and keyboard-movable screen nodes. Each node has a title, optional local PNG/JPEG reference image, and multiple associated YAML commands/subflows. Tests can be labeled as actions, assertions, setup, handlers or general tests. Screens expose their reusable associations in the inspector. Independent setup and checkpoint-bound default actions now have executable references and mapped outcomes using #6. A handler reference includes its action ID and checkpoint, not just its flow filename.
 
 Transitions reference an action association on their source screen and an executable assertion association on their expected destination. Their response-condition labels explain intent; they do not configure an API or create commands. Mock selection remains the scenario's #5 configuration. Author an explicitly ordered path; no graph paths are enumerated automatically. Selecting a path highlights its screens/edges and never rewrites YAML. A selected route must follow the command order already authored in the scenario.
 
-References bind a root command position or declared reusable flow to an executable-content fingerprint, including root/reusable-flow header configuration, root invocation parameters and called flow dependencies. Changed/deleted/moved references become visible diagnostics. Multiple matching moved commands are ambiguous. Repair requires explicitly choosing and relinking the intended current reference. References are never silently retargeted. Uncalled or multiply called reusable flows cannot be inferred as route steps: select an explicit root `runFlow` command instead. Unsupported/missing outcomes stay unavailable.
+References bind a root command position or declared reusable flow to an executable-content fingerprint, including root/reusable-flow header configuration, root invocation parameters and called flow dependencies. Setup fingerprints also include reset policy and invocation configuration; handler fingerprints include checkpoint identity and the ordered action definitions. Changed/deleted/moved references become visible diagnostics. Multiple matching moved commands are ambiguous. Repair requires explicitly choosing and relinking the intended current reference. References are never silently retargeted. Uncalled or multiply called reusable flows cannot be inferred as route steps: select an explicit root `runFlow` command instead. Unsupported/missing outcomes stay unavailable.
 
-Each run snapshots the graph, path identity, executable YAML, reusable flows and references. The results canvas renders that executed snapshot independently of current authoring. Selected screen/test/transition outcomes map from verified top-level Maestro command metadata after execution. This is post-run reporting; the UI discloses that live per-step/nested/handler reporting is unavailable. A selected route with a skipped/unavailable required action or assertion cannot pass just because Maestro's overall report passed: it reports `path-failed` without inventing an observed UI assertion result. A failed destination assertion leaves the selected route failed and never follows another branch.
+Each run snapshots the graph, path identity, executable YAML, reusable flows and references. The results canvas renders that executed snapshot independently of current authoring. Selected screen/test/transition outcomes map from scoped Maestro command metadata after execution. A destination requires completed assertion evidence inside the referenced command or reusable flow; a completed wrapper alone is insufficient. Skipped or missing nested assertions remain skipped or unavailable. Setup and handler outcomes use their executed automation snapshot, and handler labels are matched only inside the generated checkpoint subtree. This is post-run reporting; live per-step reporting remains unavailable. A selected route with a skipped/unavailable required action or assertion cannot pass just because Maestro's overall report passed: it reports `path-failed` without inventing an observed UI assertion result. A failed destination assertion leaves the selected route failed and never follows another branch.
 
 ## Evidence
 
@@ -27,11 +27,29 @@ Review fixes: executable header changes now invalidate associations (root, reusa
 
 Final validation: 36 tests passed; type checking, production build and diff checks passed. Official [Maestro runFlow documentation](https://docs.maestro.dev/reference/commands-available/runflow) supports the file/inline reusable-flow interpretation; actual outcome mapping uses the pinned 2.11 metadata proved above.
 
-## Remaining acceptance gates
+## Follow-up verification — 2026-10-08
 
-#6 is still open and no independent setup/screen-triggered default-action implementation exists. The canvas therefore labels handler reporting unavailable and refuses to use handler roles as required route actions/assertions. It does not substitute simulated outcomes or implement #6 inside this ticket.
+Reviewed against `0fde17c` after #6 completed. The follow-up adds setup/handler catalogue entries, binds handler associations to action IDs and checkpoints, and maps actual automation outcomes onto the executed canvas. Stale auxiliary references remain unavailable even when a newly configured action passes. Undo preserves an explicit relink between different handlers that share a file. Destination mapping requires completed nested assertions, preventing a skipped assertion from passing through a completed reusable-flow wrapper.
 
-The actual API-selected maintenance route and existing Mockoon environment still need #5's real-app proof inputs, even though #5 was closed at user request. The negative Settings-versus-Maintenance check proves path failure behavior, not an actual API maintenance transition. #7's demo of the maintenance route with applicable setup and mapped handler execution remains unverified until those dependencies are supplied/implemented. Keep #7 open unless the user explicitly decides otherwise.
+Validation: 66 tests passed, type checking and production build passed, and both Standards and Spec reviews reported no remaining actionable implementation findings. Public scenario regressions cover handler mapping, unrelated labels, stale auxiliary references and skipped nested assertions. A browser authoring regression verifies that selecting a handler keeps its action ID and role.
+
+A separate controlled simulator app, `com.example.TnTCanvasAPIProof`, was compiled from `tests/fixtures/canvas-api-proof.swift`. It makes a real `GET http://localhost:4320/items` request. The Mockoon environment is `tests/fixtures/mockoon.json`, with a dedicated local fallback server on port 4321. The app starts at Home, opens a session notice, and disables Load page until a checkpoint handler dismisses the notice. Setup asserts Home; the authored scenario then loads the page and calls a shared destination assertion. HTTP 500 with JSON code `MAINTENANCE` renders Maintenance; HTTP 200 renders Success.
+
+Verified on the prepared iPhone 15 / iOS 17 simulator with Maestro 2.11.0:
+
+| Proof | Run | Result |
+| --- | --- | --- |
+| Maintenance, HTTP 500 | `888dcf32-6484-4bea-b148-13c37e1c0fdc` | Setup, notice handler, action, destination assertion and selected edge passed; Success remained unavailable. |
+| Success, HTTP 200 | `f8ea23e7-50b5-4d59-959d-2da4b2ea003c` | Selected Success route passed; Maintenance remained unavailable. |
+| Maintenance selected, HTTP 200 returned | `7c427f71-1bc1-4d7a-9025-d0661e8eacc3` | Destination assertion failed; no switch to the Success branch. |
+
+Changing the shared maintenance assertion produced a stale-reference diagnostic and rejected execution before launch; restoring the saved definition repaired it. Native process cleanup and owned Mockoon environment/process cleanup were verified for each run. App data was intentionally not restored.
+
+The browser reopened workspace `f17cfe36-2f26-472d-ac72-183295daa0fc`, explicitly selected Maintenance, and ran it successfully. It displayed a captured mocked `GET /items → 500`, verified cleanup, passed setup/handler outcomes and the executed canvas. Local screenshots: `.tnt/issue-7-completed-canvas.png` (run summary) and `.tnt/issue-7-executed-canvas.png` (mapped graph). The proof script and results are `.tnt/issue-7-completion.ts` and `.tnt/issue-7-completion.json`; raw artifacts remain under `.tnt/runs/<run-id>`. These local artifacts are ignored, while the fixture source is tracked.
+
+## Target-app acceptance gate
+
+The controlled fixture proves the API-selected maintenance transition with setup and mapped handler execution. It does not establish that the existing HybridApp or the user's actual target app uses the intended API environment. That separate real-app proof still requires the target app, configurable endpoint/base URL, existing environment and maintenance-screen condition. Those inputs have not been supplied. Keep that limitation explicit when deciding whether to close #7; do not describe the fixture as actual-target-app validation.
 
 ## Limits
 

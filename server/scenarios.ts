@@ -9,7 +9,7 @@ import { createMockSession, validateMock, type MockPlan, type MockResult } from 
 import type { createRunner } from './runner.js';
 
 export type Workspace = { id: string; name: string; yaml: string; automation?:Automation; flows?: Record<string, string>; mock?: MockPlan; canvas?: CanvasGraph; canvasDiagnostics?: CanvasDiagnostic[] };
-export type Step = { id: string; command: string; expected?: unknown; status: 'unavailable' | 'passed' | 'failed' | 'skipped' };
+export type Step = { id: string; command: string; expected?: unknown; assertionStatus?:Step['status']; status: 'unavailable' | 'passed' | 'failed' | 'skipped' };
 export type Cleanup = { verified: boolean; detail: string };
 export type Run = {
   id: string; deviceId: string; startedAt: string; finishedAt?: string;
@@ -46,19 +46,24 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const automation=readAutomation(input.automation,flows??{},input.yaml);
       return {authoredYaml:input.yaml,executionYaml:automation?instrument(input.yaml,automation).yaml:input.yaml};
     },
-    async references(input: {yaml:string;flows?:Record<string,string>;canvas?:unknown}) {
+    async references(input: {yaml:string;flows?:Record<string,string>;canvas?:unknown;automation?:unknown}) {
       if(typeof input.yaml!=='string'||Buffer.byteLength(input.yaml)>100_000|| (input.flows!==undefined&&(!input.flows||typeof input.flows!=='object'||Array.isArray(input.flows)||Object.values(input.flows).some(value=>typeof value!=='string')))||Buffer.byteLength(JSON.stringify(input.flows??{}))>900_000)throw new Error('Provide bounded YAML and reusable flows.');
       const canvas=readCanvas(input.canvas);
-      return canvas?inspectCanvas(canvas,input.yaml,input.flows):referenceCatalog(input.yaml,input.flows);
+      let automation:Automation|undefined;let automationError:string|undefined;
+      try{automation=readAutomation(input.automation,input.flows??{},input.yaml);}catch(error){automationError=error instanceof Error?error.message:'Repair default-action configuration.';}
+      const catalog=canvas?inspectCanvas(canvas,input.yaml,input.flows,automation):referenceCatalog(input.yaml,input.flows,automation);
+      if(automationError)catalog.diagnostics.push({ownerId:'automation',detail:automationError});
+      return catalog;
     },
     async save(input: { id?: string; name: string; yaml: string; flows?: Record<string,string>; mock?: unknown; canvas?: unknown; automation?:unknown }): Promise<Workspace> {
       if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 120 || typeof input.yaml !== 'string' || Buffer.byteLength(input.yaml) > 100_000) throw new Error('Provide a scenario name and YAML up to 100 KB.');
       const flows = validateFlows(input.flows);
       const mock = validateMock(input.mock);
       const canvas=readCanvas(input.canvas);
-      const canvasDiagnostics=canvas?inspectCanvas(canvas,input.yaml,flows).diagnostics:undefined;
+
       if (Buffer.byteLength(JSON.stringify({flows,mock,canvas,automation:input.automation})) > 900_000) throw new Error('Combined reusable flows and mock environment exceed 900 KB.');
       const automation=readAutomation(input.automation,flows??{},input.yaml);
+      const canvasDiagnostics=canvas?inspectCanvas(canvas,input.yaml,flows,automation).diagnostics:undefined;
       const workspace = { automation, flows, mock, canvas, canvasDiagnostics, id: input.id ? validId(input.id) : randomUUID(), name: input.name.trim(), yaml: input.yaml };
       await writeRecord(join(await directory('workspaces', workspace.id), 'workspace.json'), workspace);
       return workspace;
@@ -71,9 +76,10 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       validateFlows(workspace.flows);
       validateMock(workspace.mock);
       const canvas=readCanvas(workspace.canvas);
-      const canvasPath=canvas?selectedCanvasPath(canvas,workspace.yaml,workspace.flows??{},input.pathId):undefined;
+
       const { appId, steps } = validate(workspace.yaml, workspace.flows);
       const automation=readAutomation(workspace.automation,workspace.flows??{},workspace.yaml);
+      const canvasPath=canvas?selectedCanvasPath(canvas,workspace.yaml,workspace.flows??{},input.pathId,automation):undefined;
       const derived=automation?instrument(workspace.yaml,automation):undefined;
       for (const flow of Object.values(workspace.flows ?? {})) { if (validate(flow, workspace.flows).appId !== appId) throw new Error('Reusable flows must declare the same appId as the scenario.'); }
       if ((input.captureId === undefined) !== (input.pickerReviewId === undefined)) throw new Error('Provide both capture and reviewed step identity.');
@@ -88,7 +94,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
         const path = await directory('runs', id);
         const runtimeInputPolicy = confidential ? 'Confidential runtime inputs supplied: values are omitted; raw logs, evaluated metadata, and images are withheld. Temporary tool artifacts are deleted on cleanup. Historical snapshots cannot replay omitted inputs.' : 'No runtime inputs supplied. Keep secrets out of authored YAML. No inherited application environment is forwarded.';
         const snapshot = { automation, executionYaml:derived?.yaml, executionPlan:derived?.plan, canvas, canvasPathId: canvasPath?.id, flows: workspace.flows, mock: workspace.mock, expectedPath: workspace.mock ? { from: workspace.mock.fromScreen, to: workspace.mock.toScreen } : undefined, id: createHash('sha256').update(JSON.stringify({ workspace, derived, steps, version, device, pathId:canvasPath?.id, runtimeInputPolicy, pickerReference, node: process.version })).digest('hex'), workspaceId: workspace.id, name: workspace.name, yaml: workspace.yaml, steps, toolVersions: { maestro: version, node: process.version, mockoon: workspace.mock ? '9.9.0' : undefined }, runtimeInputPolicy, pickerReference };
-        const run: Run = { id, deviceId: device.id, startedAt: new Date().toISOString(), status: 'running', canvas:canvas&&canvasPath?mapCanvas(canvas,canvasPath.id,workspace.yaml,steps,true):undefined, snapshot, steps: structuredClone(steps), log: '', cleanup: { verified: false, detail: 'Pending' }, artifacts: [], mappingNote: 'Command outcomes will be mapped after execution; unsupported details remain unavailable.' };
+        const run: Run = { id, deviceId: device.id, startedAt: new Date().toISOString(), status: 'running', canvas:canvas&&canvasPath?mapCanvas(canvas,canvasPath.id,workspace.yaml,steps,true,automation?{definition:automation,flows:workspace.flows}:undefined):undefined, snapshot, steps: structuredClone(steps), log: '', cleanup: { verified: false, detail: 'Pending' }, artifacts: [], mappingNote: 'Command outcomes will be mapped after execution; unsupported details remain unavailable.' };
         await writeFile(join(path, 'flow.yaml'), workspace.yaml);
         if(derived)await writeFile(join(path,'.tnt-execution.yaml'),derived.yaml);
         await writeFile(join(path, 'snapshot.json'), JSON.stringify(snapshot, null, 2));
@@ -153,7 +159,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
               catch { run.cleanup = { verified: false, detail: 'Confidential temporary artifact removal could not be verified.' }; }
             }
             if(canvas&&canvasPath){
-              run.canvas=mapCanvas(canvas,canvasPath.id,workspace.yaml,run.steps);
+              run.canvas=mapCanvas(canvas,canvasPath.id,workspace.yaml,run.steps,false,automation?{definition:automation,result:run.automation,flows:workspace.flows}:undefined);
               if(run.status==='passed'&&run.canvas.edges.some(edge=>canvasPath.edgeIds.includes(edge.id)&&edge.status!=='passed')){run.status='path-failed';run.error='The selected scenario path was not verified: a required action or destination assertion did not report passed. No alternate route was followed.';}
             }
             run.finishedAt = new Date().toISOString();
@@ -248,13 +254,37 @@ function mapResults(run: Run, commands: any[]) {
   if(run.snapshot.executionPlan){
     const events=commands.filter(entry=>entry.metadata?.depth===0&&!entry.command?.defineVariablesCommand&&!entry.command?.applyConfigurationCommand);
     if(events.length>run.snapshot.executionPlan.length||events.some((entry,index)=>!entry.command?.[run.snapshot.executionPlan![index].kind==='reset'?'launchAppCommand':'runFlowCommand'])){run.mappingNote='Ambiguous instrumented metadata; step outcomes are unavailable.';return;}
-    run.snapshot.executionPlan.forEach((item,position)=>{if(item.kind==='step'&&item.index!==undefined)run.steps[item.index].status=metadataStatus(events[position]?.metadata?.status);});
+    run.snapshot.executionPlan.forEach((item,position)=>{if(item.kind==='step'&&item.index!==undefined){const step=run.steps[item.index];step.status=metadataStatus(events[position]?.metadata?.status);step.assertionStatus=assertionProof(commands,events[position]);}});
     run.mappingNote='Authored steps mapped through generated top-level wrappers; setup and handler metadata reported separately. No checkpoints run inside reusable flows.';return;
   }
   const events = commands.filter(entry => entry.metadata?.depth === 0 && !entry.command?.defineVariablesCommand && !entry.command?.applyConfigurationCommand);
   if (events.length > run.steps.length || run.steps.some((step, index) => !keys[step.command] || (events[index] && !events[index].command?.[keys[step.command]]))) {
     run.mappingNote = 'Unsupported or ambiguous command mapping. Raw command metadata is available; step outcomes are unavailable.'; return;
   }
-  run.steps.forEach((step, index) => { const status = events[index]?.metadata?.status; step.status = status === 'COMPLETED' ? 'passed' : status === 'FAILED' ? 'failed' : status === 'SKIPPED' ? 'skipped' : 'unavailable'; });
+  run.steps.forEach((step, index) => { const status = events[index]?.metadata?.status; step.status = metadataStatus(status);step.assertionStatus=assertionProof(commands,events[index]); });
   run.mappingNote = 'Top-level commands mapped in execution order using Maestro 2.11 command metadata. Nested/unmapped details remain in raw artifacts.';
+}
+
+// A successful subflow wrapper is execution evidence, not proof that its assertions ran.
+function assertionProof(commands:any[],entry:any):Step['status'] {
+  if(!entry)return 'unavailable';
+  const declared=(command:any):string[]=>{
+    if(command?.assertConditionCommand)return [JSON.stringify(command.assertConditionCommand)];
+    const children=command?.runFlowCommand?.commands??command?.repeatCommand?.commands??[];
+    return children.flatMap((child:any)=>declared(child));
+  };
+  const expected=declared(entry.command);
+  if(!expected.length)return 'unavailable';
+  const start=commands.indexOf(entry);let end=start+1;
+  while(end<commands.length&&commands[end].metadata?.depth>entry.metadata.depth)end++;
+  const subtree=commands.slice(start,end);
+  const assertions=subtree.filter(command=>command.command?.assertConditionCommand);
+  if(assertions.some(command=>command.metadata?.status==='FAILED'))return 'failed';
+  if(subtree.some(command=>command.metadata?.status==='SKIPPED'&&declared(command.command).length))return 'skipped';
+  const expectedCounts=new Map<string,number>();for(const key of expected)expectedCounts.set(key,(expectedCounts.get(key)??0)+1);
+  for(const [key,count] of expectedCounts){
+    const observed=assertions.filter(command=>JSON.stringify(command.command.assertConditionCommand)===key);
+    if(observed.length<count||observed.some(command=>command.metadata?.status!=='COMPLETED'))return 'unavailable';
+  }
+  return 'passed';
 }

@@ -1,8 +1,9 @@
+import type {Automation,AutomationResult} from './default-actions.js';
 import {createHash} from 'node:crypto';
 import {parseAllDocuments, stringify} from 'yaml';
 import type {Step} from './scenarios.js';
 
-export type YAMLReference={kind:'step'|'flow';file:string;index?:number;fingerprint:string};
+export type YAMLReference={kind:'step'|'flow'|'setup'|'handler';file:string;index?:number;actionId?:string;fingerprint:string};
 export type CanvasTest={id:string;label:string;role:'action'|'assertion'|'setup'|'handler'|'test';reference:YAMLReference};
 export type ScreenNode={id:string;title:string;x:number;y:number;referenceScreenshot?:string;tests:CanvasTest[]};
 export type Transition={id:string;from:string;to:string;actionTestId:string;assertionTestId:string;responseCondition:string};
@@ -36,7 +37,7 @@ function executableFingerprint(values:unknown[],flows:Record<string,string>,conf
  }
  return digest({commands:values,configuration,dependencies:[...dependencies.entries()].sort(([a],[b])=>a.localeCompare(b))});
 }
-export function referenceCatalog(yaml:string,flows:Record<string,string>={}){
+export function referenceCatalog(yaml:string,flows:Record<string,string>={},automation?:Automation){
  const references:CatalogEntry[]=[];const diagnostics:CanvasDiagnostic[]=[];
  let root:ReturnType<typeof document>|undefined;
  try{
@@ -45,6 +46,13 @@ export function referenceCatalog(yaml:string,flows:Record<string,string>={}){
  for(const [file,yaml] of Object.entries(flows)){
   try{const source=document(yaml);const values=source.commands;const configuration={file:source.config,root:root?.config,invocations:root?.commands.filter(value=>calledFile(value)===file)};references.push({kind:'flow',file,fingerprint:executableFingerprint(values,flows,configuration),label:file,command:'runFlow',assertion:containsAssertion(values,flows),preview:yaml});}
   catch(error){diagnostics.push({ownerId:file,detail:(error as Error).message});}
+ }
+ if(automation&&root){
+  const setup=automation.setup;
+  references.push({kind:'setup',file:setup.file,fingerprint:executableFingerprint([{runFlow:{file:setup.file,env:setup.parameters}}],flows,{root:root.config,policy:'relaunch-preserve-data'}),label:'Independent setup · '+setup.file,command:'runFlow',assertion:false,preview:stringify(setup)});
+  for(const checkpoint of automation.checkpoints)for(const action of automation.actions){
+   references.push({kind:'handler',file:action.file,index:checkpoint.beforeStep,actionId:action.id,fingerprint:executableFingerprint([{runFlow:{file:action.file,env:action.parameters}}],flows,{root:root.config,checkpoint,actions:automation.actions}),label:`Default action · ${action.name} · before step ${checkpoint.beforeStep+1}`,command:'runFlow',assertion:false,preview:stringify({condition:action.condition,flow:action.file,parameters:action.parameters,enabled:action.enabled,checkpoint})});
+  }
  }
  return {references,diagnostics};
 }
@@ -58,23 +66,27 @@ export function readCanvas(value:unknown):CanvasGraph|undefined{
  for(const screen of graph.screens){
   id(screen.id);if(!text(screen.title)||!Number.isFinite(screen.x)||!Number.isFinite(screen.y)||screen.x<0||screen.y<0||screen.x>2400||screen.y>1400||!Array.isArray(screen.tests)||screen.tests.length>30)throw new Error('Provide titled screens with positions and up to 30 tests each.');
   if(screen.referenceScreenshot!==undefined&&(!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(screen.referenceScreenshot)||screen.referenceScreenshot.length>350_000))throw new Error('Reference screenshots must be PNG/JPEG data up to 250 KB.');
-  for(const test of screen.tests){id(test.id);if(!text(test.label)||!['action','assertion','setup','handler','test'].includes(test.role)||!test.reference||!['step','flow'].includes(test.reference.kind)||!text(test.reference.file,80)||!text(test.reference.fingerprint,64))throw new Error('Provide named tests with explicit YAML references.');
-   const reference=test.reference;test.reference={kind:reference.kind,file:reference.file,index:reference.index,fingerprint:reference.fingerprint};
+  for(const test of screen.tests){id(test.id);if(!text(test.label)||!['action','assertion','setup','handler','test'].includes(test.role)||!test.reference||!['step','flow','setup','handler'].includes(test.reference.kind)||!text(test.reference.file,80)||!text(test.reference.fingerprint,64))throw new Error('Provide named tests with explicit YAML references.');
+   const reference=test.reference;
+   if(['step','handler'].includes(reference.kind)&&(!Number.isInteger(reference.index)||reference.index!<0))throw new Error('Step/handler references require a nonnegative command position.');
+   if(reference.kind==='handler'&&!text(reference.actionId))throw new Error('Handler references require their explicit default-action identity.');
+   test.reference={kind:reference.kind,file:reference.file,index:reference.index,actionId:reference.actionId,fingerprint:reference.fingerprint};
   }
  }
  for(const edge of graph.edges){id(edge.id);if(![edge.from,edge.to,edge.actionTestId,edge.assertionTestId].every(item=>text(item))||!text(edge.responseCondition,300))throw new Error('Transitions require source/destination, action/assertion references and response condition.');}
  for(const path of graph.paths){id(path.id);if(!text(path.name)||!Array.isArray(path.edgeIds)||path.edgeIds.length>80||path.edgeIds.some(item=>!text(item)))throw new Error('Paths need a name and explicitly ordered transition identities.');}
  return graph;
 }
-function sameLocation(a:YAMLReference,b:YAMLReference){return a.kind===b.kind&&a.file===b.file&&a.index===b.index;}
+function sameLocation(a:YAMLReference,b:YAMLReference){return a.kind===b.kind&&a.file===b.file&&a.index===b.index&&a.actionId===b.actionId;}
 function resolveReference(reference:YAMLReference,catalog:CatalogEntry[]){return catalog.find(entry=>sameLocation(entry,reference)&&entry.fingerprint===reference.fingerprint);}
 function executionIndex(reference:YAMLReference,yaml:string){
- if(reference.kind==='step')return reference.index;
+ if(reference.kind==='setup')return -1;
+ if(reference.kind==='handler'||reference.kind==='step')return reference.index;
  const matches=commands(yaml).flatMap((value,index)=>calledFile(value)===reference.file?[index]:[]);
  return matches.length===1?matches[0]:undefined;
 }
-export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,string>={}){
- const catalog=referenceCatalog(yaml,flows);const diagnostics=[...catalog.diagnostics];
+export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,string>={},automation?:Automation){
+ const catalog=referenceCatalog(yaml,flows,automation);const diagnostics=[...catalog.diagnostics];
  const screens=new Map(graph.screens.map(screen=>[screen.id,screen]));
  const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,{test,screen}] as const)));
  for(const {test} of tests.values()){
@@ -95,35 +107,50 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
  }
  return {references:catalog.references,diagnostics};
 }
-export function selectedCanvasPath(graph:CanvasGraph,yaml:string,flows:Record<string,string>,pathId:unknown){
+export function selectedCanvasPath(graph:CanvasGraph,yaml:string,flows:Record<string,string>,pathId:unknown,automation?:Automation){
  if(typeof pathId!=='string')throw new Error('Explicitly select a canvas scenario path before running.');
  const path=graph.paths.find(path=>path.id===pathId);if(!path||!path.edgeIds.length)throw new Error('Select a nonempty explicit scenario path.');
- const inspection=inspectCanvas(graph,yaml,flows);
+ const inspection=inspectCanvas(graph,yaml,flows,automation);
  const edges=path.edgeIds.map(id=>graph.edges.find(edge=>edge.id===id));
  const required=new Set(['yaml',pathId,...path.edgeIds,...edges.flatMap(edge=>edge?[edge.actionTestId,edge.assertionTestId]:[])]);
  const errors=inspection.diagnostics.filter(diagnostic=>required.has(diagnostic.ownerId));
  if(errors.length)throw new Error(errors.map(error=>error.detail).join(' '));
  const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,test] as const)));
- let previous=-1;
+ let previous=-Infinity;
  for(const edge of edges as Transition[]){
   const action=tests.get(edge.actionTestId)!;const assertion=tests.get(edge.assertionTestId)!;
   const actionIndex=executionIndex(action.reference,yaml);const assertionIndex=executionIndex(assertion.reference,yaml);
-  if(action.role==='handler'||assertion.role==='handler')throw new Error('Handler execution requires #6; choose authored action/assertion references.');
+  if(['handler','setup'].includes(assertion.reference.kind))throw new Error('A destination requires an authored assertion, separate from setup/default actions.');
   if(actionIndex===undefined||assertionIndex===undefined)throw new Error('A selected flow is uncalled or called ambiguously. Reference its explicit top-level runFlow step instead.');
-  if(actionIndex<=previous||assertionIndex<=actionIndex)throw new Error('The selected route must follow executable YAML action/assertion order. Repair references or YAML; the canvas cannot rewrite execution.');
-  previous=assertionIndex;
+  const actionPosition=action.reference.kind==='setup'?-1:actionIndex*2+(action.reference.kind==='handler'?0:1);
+  const assertionPosition=assertionIndex*2+1;
+  if(actionPosition<=previous||assertionPosition<=actionPosition)throw new Error('The selected route must follow executable YAML action/assertion order. Repair references or YAML; the canvas cannot rewrite execution.');
+  previous=assertionPosition;
  }
  return path;
 }
-export function mapCanvas(graph:CanvasGraph,pathId:string,yaml:string,steps:Step[],running=false):CanvasResult{
+export function mapCanvas(graph:CanvasGraph,pathId:string,yaml:string,steps:Step[],running=false,execution?:{definition:Automation;result?:AutomationResult;flows?:Record<string,string>}):CanvasResult{
  const path=graph.paths.find(path=>path.id===pathId)!;
  const selectedEdges=graph.edges.filter(edge=>path.edgeIds.includes(edge.id));
+ const selectedScreens=new Set(selectedEdges.flatMap(edge=>[edge.from,edge.to]));
  const selectedTests=new Set(selectedEdges.flatMap(edge=>[edge.actionTestId,edge.assertionTestId]));
+ const destinationTests=new Set(selectedEdges.map(edge=>edge.assertionTestId));
+ const catalog=execution?referenceCatalog(yaml,execution.flows,execution.definition).references:[];
  const tests=graph.screens.flatMap(screen=>screen.tests.map(test=>{
-  const index=executionIndex(test.reference,yaml);const step=index===undefined?undefined:steps[index];
-  const available=!running&&selectedTests.has(test.id)&&test.role!=='handler'&&step;
-  return {id:test.id,status:available?step.status:'unavailable' as Step['status'],stepId:available?step.id:undefined,detail:test.role==='handler'?'Handler execution/reporting requires #6.':!selectedTests.has(test.id)?'Not selected in this route.':running?'Outcomes become available after execution.':index===undefined?'Uncalled or ambiguous reusable flow; no outcome inferred.':'Mapped from top-level YAML command outcome.'};
+  const reference=test.reference;
+  const auxiliary=reference.kind==='setup'||reference.kind==='handler';
+  const included=selectedTests.has(test.id)||(auxiliary&&selectedScreens.has(screen.id));
+  if(running||!included)return {id:test.id,status:'unavailable' as Step['status'],detail:running?'Outcomes become available after execution.':'Not selected in this route.'};
+  if(auxiliary&&!resolveReference(reference,catalog))return {id:test.id,status:'unavailable' as Step['status'],detail:'Broken or stale setup/handler reference in this snapshot; explicitly relink it.'};
+  if(reference.kind==='setup')return {id:test.id,status:execution?.result?.setup.status??'unavailable' as Step['status'],detail:'Mapped from the declared setup invocation in this snapshot.'};
+  if(reference.kind==='handler'){
+   const outcome=execution?.result?.actions.find(action=>action.id===reference.actionId&&action.beforeStep===reference.index);
+   return {id:test.id,status:outcome?.status??'unavailable' as Step['status'],detail:outcome?.detail??'No verified outcome for this action at its explicit checkpoint.'};
+  }
+  const index=executionIndex(reference,yaml);const step=index===undefined?undefined:steps[index];
+  const outcome=destinationTests.has(test.id)?step?.status==='failed'?'failed':step?.assertionStatus??'unavailable':step?.status??'unavailable';
+  return {id:test.id,status:outcome as Step['status'],stepId:step?.id,detail:index===undefined?'Uncalled or ambiguous reusable flow; no outcome inferred.':destinationTests.has(test.id)?'Destination requires completed assertion metadata; a successful flow wrapper alone is insufficient.':'Mapped from top-level authored YAML command outcome.'};
  }));
  const status=(ids:string[]):Step['status']=>{const outcomes=ids.map(id=>tests.find(test=>test.id===id)?.status??'unavailable');return outcomes.includes('failed')?'failed':outcomes.length&&outcomes.every(status=>status==='passed')?'passed':outcomes.length&&outcomes.every(status=>status==='skipped')?'skipped':'unavailable';};
- return {pathId,note:'Post-run top-level command outcomes are the verified reporting baseline. No live per-step or handler outcome is inferred. The graph shows the executed snapshot, not subsequent workspace edits.',tests,screens:graph.screens.map(screen=>({id:screen.id,status:status(screen.tests.filter(test=>selectedTests.has(test.id)).map(test=>test.id))})),edges:graph.edges.map(edge=>({id:edge.id,status:path.edgeIds.includes(edge.id)?status([edge.actionTestId,edge.assertionTestId]):'unavailable'}))};
+ return {pathId,note:'Post-run authored step, declared setup and checkpoint-specific handler outcomes are mapped from the executed snapshot. Live per-step reporting remains unavailable; no alternate route is inferred.',tests,screens:graph.screens.map(screen=>({id:screen.id,status:screen.tests.some(test=>tests.find(outcome=>outcome.id===test.id)?.status==='failed')?'failed':status(screen.tests.filter(test=>selectedTests.has(test.id)).map(test=>test.id))})),edges:graph.edges.map(edge=>({id:edge.id,status:path.edgeIds.includes(edge.id)?status([edge.actionTestId,edge.assertionTestId]):'unavailable'}))};
 }

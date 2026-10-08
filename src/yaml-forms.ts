@@ -101,7 +101,7 @@ export function restoreDeletionReferences(current:CanvasGraph|undefined,previous
   return {...current,screens:current.screens.map(screen=>({...screen,tests:screen.tests.map(test=>{
     const prior=priorTests.get(test.id);const invalidated=deletedTests.get(test.id);
     const reference=test.reference;const expected=invalidated?.reference;
-    const unchanged=expected&&reference.kind===expected.kind&&reference.file===expected.file&&reference.index===expected.index&&reference.fingerprint===expected.fingerprint;
+    const unchanged=expected&&reference.kind===expected.kind&&reference.file===expected.file&&reference.index===expected.index&&reference.actionId===expected.actionId&&reference.fingerprint===expected.fingerprint;
     return prior&&unchanged?{...test,reference:prior.reference}:test;
   })}))};
 }

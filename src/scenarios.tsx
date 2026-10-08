@@ -47,11 +47,11 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     const timer=setTimeout(()=>{
       try {
         const parsedFlows=JSON.parse(flows);
-        void runnerClient(token)('/api/canvas/references',{yaml,flows:parsedFlows,canvas}).then(value=>{if(!stopped){setCatalog(value.references);setCanvasDiagnostics(value.diagnostics);}}).catch(error=>{if(!stopped){setCatalog([]);setCanvasDiagnostics([{ownerId:'yaml',detail:error.message}]);}});
+        void runnerClient(token)('/api/canvas/references',{yaml,flows:parsedFlows,canvas,automation}).then(value=>{if(!stopped){setCatalog(value.references);setCanvasDiagnostics(value.diagnostics);}}).catch(error=>{if(!stopped){setCatalog([]);setCanvasDiagnostics([{ownerId:'yaml',detail:error.message}]);}});
       }catch{setCatalog([]);setCanvasDiagnostics([{ownerId:'flows',detail:'Repair the reusable flows JSON.'}]);}
     },250);
     return()=>{stopped=true;clearTimeout(timer);};
-  },[yaml,flows,canvas,token]);
+  },[yaml,flows,canvas,automation,token]);
   useEffect(() => {
     if (!running || !run) return;
     let stopped = false;

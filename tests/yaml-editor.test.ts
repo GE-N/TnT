@@ -111,3 +111,11 @@ test('Undo restores invalidated references while preserving later canvas edits a
  const relinked=structuredClone(moved);relinked.screens[0].tests[0].reference.fingerprint='user-relinked';
  assert.equal(restoreDeletionReferences(relinked,graph,deleted)!.screens[0].tests[0].reference.fingerprint,'user-relinked');
 });
+test('deletion Undo preserves an explicit relink between handlers sharing a file and fingerprint',async()=>{
+ const {canvasAfterDeletion,restoreDeletionReferences}=await import('../src/yaml-forms.js');
+ const reference={kind:'handler' as const,file:'action.yaml',index:0,actionId:'first',fingerprint:'same'};
+ const graph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'handler',label:'Handler',role:'handler' as const,reference}]}],edges:[],paths:[]};
+ const deleted=canvasAfterDeletion(graph,2)!;
+ const repaired=structuredClone(deleted);repaired.screens[0].tests[0].reference.actionId='second';
+ assert.equal(restoreDeletionReferences(repaired,graph,deleted)!.screens[0].tests[0].reference.actionId,'second');
+});

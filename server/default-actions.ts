@@ -73,7 +73,10 @@ export function mapAutomation(automation:Automation,plan:ExecutionItem[],command
  const setup=metadataStatus(events[1]?.metadata?.status);
  const actions=automation.checkpoints.flatMap(checkpoint=>automation.actions.map(action=>{
   const label=`TnT handler ${action.id} checkpoint ${checkpoint.beforeStep+1}`;
-  const matches=commands.filter(entry=>entry.command?.runFlowCommand?.label===label);
+  const start=commands.findIndex(entry=>entry.metadata?.depth===0&&entry.command?.runFlowCommand?.label===`TnT checkpoint ${checkpoint.beforeStep+1}`);
+  let end=start+1;
+  while(start>=0&&end<commands.length&&commands[end].metadata?.depth!==0)end++;
+  const matches=start<0?[]:commands.slice(start+1,end).filter(entry=>entry.metadata?.depth===2&&entry.command?.runFlowCommand?.label===label);
   const statuses=matches.map(entry=>metadataStatus(entry.metadata?.status));
   const status=!action.enabled?'skipped':statuses.includes('failed')?'failed':statuses.includes('passed')?'passed':statuses.length&&statuses.every(status=>status==='skipped')?'skipped':'unavailable';
   return {id:action.id,name:action.name,beforeStep:checkpoint.beforeStep,status:status as Step['status'],detail:!action.enabled?'Disabled for this scenario.':status==='skipped'?'Condition absent or an earlier action matched.':status==='unavailable'?'No verified handler metadata; no execution inferred.':'Mapped from the conditional handler wrapper.'};
