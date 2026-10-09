@@ -78,6 +78,16 @@ For Home → Coordinator, add an action on Home, target the Coordinator button, 
 
 The **bin icon** is inside each expanded action/check row. Confirm deletion in the reference-warning dialog, or cancel with Escape. Deleting an action removes its connection and route entries; **Undo canvas deletion** restores the authored content and YAML when no later edits would be overwritten.
 
+## Ordered connections and explicit routes (#16)
+
+Use **Add next screen** on a node to create its destination and connection, or drag **Drag to connect** from one node onto another. A new connection extends the selected route only when its source is the current tail. Connections at other points remain outside the route until you choose them explicitly.
+
+In **Connect expected screens**, expand the connection’s compact action rows. Add and edit **Tap**, **Input text**, and **Back**, and use the arrows to reorder them. Tap selectors support manual entry and the existing picker. Input text goes to the focused field; add a Tap first when focus is needed. Checks stay on their screen nodes. The selected route lists the ordered connection actions for review, and **Preview execution YAML** shows the commands that will run.
+
+Ordered connections execute launch/setup, initial checks, each connection’s actions, and its destination checks. Unselected canvas branches are omitted; unassociated YAML commands are retained. Supported YAML edits refresh action forms and order. Results require actual action and assertion evidence. A failure stops normal progression through Maestro’s existing execution semantics. Legacy association-only routes retain their existing YAML-order validation.
+
+Deleting an ordered connection action, a connection, or a referenced node reports the affected routes and leaves missing references visible for repair. Invalid routes cannot run. **Undo canvas deletion** restores graph and YAML together, provided later changes would not be overwritten. Saved workspaces retain action order and routes; select the saved route again after opening. Repeated visits are a separate feature in #17.
+
 ## Screen test canvas (#7)
 
 Choose **Create screen canvas**, add one node per app screen, and associate current YAML commands or declared reusable flows in the screen inspector. Drag headers or use arrow keys to arrange screens; zoom and scroll to inspect the graph. Optional reference screenshots are local annotations up to 250 KB. Reopen saved work using its workspace ID; graph, YAML, reusable flows and mock configuration are restored, while the route must be explicitly selected again.

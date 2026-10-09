@@ -84,3 +84,38 @@ test('Home can choose a destination in Add action and immediately see its connec
   await click('Delete action 1');await click('Delete anyway');assert.equal(saved!.screens[0].tests.length,0);assert.equal(saved!.edges.length,0);assert.equal(saved!.paths[0].edgeIds.length,0);assert.doesNotMatch(authored,/tapOn:/);await click('Undo canvas deletion');assert.match(authored,/tapOn:/);assert.equal(saved!.edges.length,1);assert.deepEqual(saved!.paths[0].edgeIds,[saved!.edges[0].id]);
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
+
+test('Add next screen and dragged connections author ordered edge actions and preserve invalid routes for Undo',async()=>{
+ const dom=new JSDOM('<div id="root"></div>');const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ class ResizeObserver{observe(){}disconnect(){}}
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
+ const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);let authored='';let saved:CanvasGraph|undefined;let chosen='';
+ function Host(){const [graph,setGraph]=useState<CanvasGraph>({screens:[{id:'home',title:'Home',x:0,y:0,tests:[]},{id:'other',title:'Other',x:400,y:400,tests:[]}],edges:[],paths:[{id:'route',name:'Chosen route',screenId:'home',edgeIds:[]}]});const [yaml,setYaml]=useState('appId: com.example.App\n---\n- launchApp\n- evalScript: ${output.keep = true} # untouched\n');const [path,setPath]=useState('route');authored=yaml;saved=graph;chosen=path;return createElement('div',null,createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:path,onPathChange:setPath,disabled:false}),createElement('textarea',{'aria-label':'Executable YAML',value:yaml,onChange:(event:ChangeEvent<HTMLTextAreaElement>)=>setYaml(event.target.value)}));}
+ const document=dom.window.document;
+ const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();});
+ const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?dom.window.HTMLTextAreaElement.prototype:dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
+ const select=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`);assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
+ try{
+  await act(async()=>root.render(createElement(Host)));await fill('New screen title','Done');await click('Add next screen from Home');
+  assert.equal(saved!.screens[2].title,'Done');assert.deepEqual(saved!.paths[0].edgeIds,[saved!.edges[0].id]);assert.equal(chosen,'route');
+  await click('Add check to Home');await fill('Check 1 selector','Home');await click('Add check to Done');
+  const done=document.querySelector('[aria-label="Screen Done"]')!;await act(async()=>{const node=done.querySelector('[aria-label="Check 1 selector"]')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,'Done');node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
+  await click('Add action to connection Home → Done');await fill('Home → Done action 1 selector','Field');
+  await click('Add action to connection Home → Done');await select('Home → Done action 2 type','input');await fill('Home → Done action 2 text','hello');
+  await click('Add action to connection Home → Done');await select('Home → Done action 3 type','back');
+  assert.match(authored,/assertVisible:[\s\S]*tapOn:[\s\S]*inputText: hello[\s\S]*- back[\s\S]*assertVisible:/);
+  await click('Move home → done action 3 up');assert.match(authored,/- back[\s\S]*inputText: hello/);
+  await fill('Executable YAML',authored.replace('inputText: hello','inputText: changed'));assert.equal((document.querySelector('[aria-label="Home → Done action 3 text"]') as HTMLInputElement).value,'changed');
+  const before=structuredClone(saved!);const beforeYaml=authored;
+  await click('Delete home → done action 2');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Chosen route/);await click('Delete anyway');
+  assert.deepEqual(saved!.paths[0].edgeIds,before.paths[0].edgeIds);assert.deepEqual(saved!.edges[0].actionTestIds,before.edges[0].actionTestIds);assert.doesNotMatch(authored,/- back/);
+  await click('Undo canvas deletion');assert.deepEqual(saved!.edges,before.edges);assert.deepEqual(saved!.paths,before.paths);assert.equal(saved!.screens[0].tests.find(test=>test.input!==undefined)!.input,'changed');assert.equal(authored,beforeYaml);
+  await act(async()=>{const transfer={value:'',setData(_type:string,value:string){this.value=value;},getData(){return this.value;}};const start=new dom.window.Event('dragstart',{bubbles:true});Object.defineProperty(start,'dataTransfer',{value:transfer});document.querySelector('[aria-label="Connect from Home"]')!.dispatchEvent(start);const drop=new dom.window.Event('drop',{bubbles:true});Object.defineProperty(drop,'dataTransfer',{value:transfer});document.querySelector('[aria-label="Screen Other"]')!.dispatchEvent(drop);});
+  assert.equal(saved!.edges.length,2);assert.deepEqual(saved!.paths[0].edgeIds,before.paths[0].edgeIds,'Connecting a branch does not extend the active tail');assert.equal(saved!.paths.length,1);
+  await click('Remove transition');await click('Delete anyway');assert.equal(saved!.edges.length,1);assert.deepEqual(saved!.paths[0].edgeIds,before.paths[0].edgeIds);await click('Undo canvas deletion');assert.equal(saved!.edges.length,2);assert.match(authored,/# untouched/);
+  const intact=authored;
+  for(const command of ['inputText: changed','back']){
+   const removed=intact.replace(new RegExp('# tnt-check:[^\\n]+\\n- '+command+'\\n'),'');await fill('Executable YAML',removed);await fill('Check 1 selector','Changed Home');assert.match(document.body.textContent!,/command was removed from YAML/);assert.equal(authored,removed);await fill('Executable YAML',intact);
+  }
+ }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
+});

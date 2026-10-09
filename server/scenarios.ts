@@ -1,3 +1,4 @@
+import {projectCanvasRoute} from './canvas-route.js';
 import {refreshChecks} from '../shared/canvas-authoring.js';
 import {readScenarios,selectScenario,type ScenarioDefinition} from './scenario-definitions.js';
 import {readAutomation,instrument,mapAutomation,metadataStatus,type Automation,type AutomationResult,type ExecutionItem} from './default-actions.js';
@@ -41,15 +42,17 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     return path;
   }
   const service = {
-    async preview(input:{yaml:string;flows?:Record<string,string>;automation?:unknown;canvas?:unknown;mock?:unknown;scenarios?:unknown;scenarioId?:string;runtimeInputs?:unknown;resetApp?:boolean}) {
+    async preview(input:{yaml:string;flows?:Record<string,string>;automation?:unknown;canvas?:unknown;mock?:unknown;scenarios?:unknown;scenarioId?:string;pathId?:string;runtimeInputs?:unknown;resetApp?:boolean}) {
       if(typeof input.yaml!=='string'||Buffer.byteLength(input.yaml)>100_000)throw new Error('Provide YAML up to 100 KB.');
       const flows=validateFlows(input.flows);
       if(input.resetApp!==undefined&&typeof input.resetApp!=='boolean')throw new Error('Reset app must be a boolean.');
       const configured=readAutomation(input.automation,flows??{},input.yaml);
       const selection=selectScenario({yaml:input.yaml,flows,automation:configured,canvas:readCanvas(input.canvas),mock:validateMock(input.mock),scenarios:readScenarios(input.scenarios)},input.scenarioId,validateInputs(input.runtimeInputs));
-      const yaml=selection?.yaml??input.yaml;const root=validate(yaml,flows);
+      let yaml=selection?.yaml??input.yaml;let automation=selection?.automation??configured;
+      const rawCanvas=selection?.canvas??readCanvas(input.canvas);
+      if(rawCanvas){const canvas=refreshChecks(rawCanvas,yaml);const pathId=selection?.scenario.pathId??input.pathId;const projection=projectCanvasRoute(canvas,yaml,flows??{},pathId,automation);yaml=projection.yaml;automation=projection.automation;selectedCanvasPath(projection.canvas,yaml,flows??{},pathId,automation);}
+      const root=validate(yaml,flows);
       for(const flow of Object.values(flows??{}))if(validate(flow,flows).appId!==root.appId)throw new Error('Reusable flows must declare the same appId as the scenario.');
-      const automation=selection?.automation??configured;
       return {authoredYaml:yaml,executionYaml:automation?instrument(yaml,automation,input.resetApp??false).yaml:yaml};
     },
     async references(input: {yaml:string;flows?:Record<string,string>;canvas?:unknown;automation?:unknown}) {
@@ -84,16 +87,17 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const authored = await service.workspace(input.workspaceId);
       if(input.resetApp!==undefined&&typeof input.resetApp!=='boolean')throw new Error('Reset app must be a boolean.');
       const selection=selectScenario(authored,input.scenarioId,runtimeInputs);
-      const workspace=selection?{...authored,...selection,name:selection.scenario.name}:authored;
+      let workspace=selection?{...authored,...selection,name:selection.scenario.name}:authored;
       const selectedPathId=selection?.scenario.pathId??input.pathId;
       const resetApp=input.resetApp??false;
       if(resetApp&&!workspace.automation&&!selection)throw new Error('Reset requires declared independent setup.');
       validateFlows(workspace.flows);
       validateMock(workspace.mock);
       const rawCanvas=readCanvas(workspace.canvas);
-      const canvas=rawCanvas?refreshChecks(rawCanvas,workspace.yaml):undefined;
+      let canvas=rawCanvas?refreshChecks(rawCanvas,workspace.yaml):undefined;
 
-      const automation=readAutomation(workspace.automation,workspace.flows??{},workspace.yaml);
+      let automation=readAutomation(workspace.automation,workspace.flows??{},workspace.yaml);
+      if(canvas){const projection=projectCanvasRoute(canvas,workspace.yaml,workspace.flows??{},selectedPathId,automation);canvas=projection.canvas;workspace={...workspace,yaml:projection.yaml};automation=projection.automation;}
       const canvasPath=canvas?selectedCanvasPath(canvas,workspace.yaml,workspace.flows??{},selectedPathId,automation):undefined;
       const { appId, steps } = validate(workspace.yaml, workspace.flows);
       const derived=automation?instrument(workspace.yaml,automation,resetApp):undefined;
@@ -109,7 +113,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
         const id = randomUUID();
         const path = await directory('runs', id);
         const runtimeInputPolicy = confidential ? 'Confidential runtime inputs supplied: values are omitted; raw logs, evaluated metadata, and images are withheld. Temporary tool artifacts are deleted on cleanup. Historical snapshots cannot replay omitted inputs.' : selection?'Saved non-confidential scenario inputs supplied; runtime values are scoped to this run. Keep secrets out of saved inputs/YAML. No inherited application environment is forwarded.':'No runtime inputs supplied. Keep secrets out of authored YAML. No inherited application environment is forwarded.';
-        const snapshot = { scenario:selection?.scenario, resetApp, authoredYaml:selection?authored.yaml:undefined, automation, executionYaml:derived?.yaml, executionPlan:derived?.plan, canvas, canvasPathId: canvasPath?.id, flows: workspace.flows, mock: workspace.mock, expectedPath: workspace.mock ? { from: workspace.mock.fromScreen, to: workspace.mock.toScreen } : undefined, id: createHash('sha256').update(JSON.stringify({ workspace, derived, steps, version, device, scenarioId:selection?.scenario.id,resetApp,pathId:canvasPath?.id, runtimeInputPolicy, pickerReference, node: process.version })).digest('hex'), workspaceId: workspace.id, name: workspace.name, yaml: workspace.yaml, steps, toolVersions: { maestro: version, node: process.version, mockoon: workspace.mock ? '9.9.0' : undefined }, runtimeInputPolicy, pickerReference };
+        const snapshot = { scenario:selection?.scenario, resetApp, authoredYaml:selection||canvas?authored.yaml:undefined, automation, executionYaml:derived?.yaml, executionPlan:derived?.plan, canvas, canvasPathId: canvasPath?.id, flows: workspace.flows, mock: workspace.mock, expectedPath: workspace.mock ? { from: workspace.mock.fromScreen, to: workspace.mock.toScreen } : undefined, id: createHash('sha256').update(JSON.stringify({ workspace, derived, steps, version, device, scenarioId:selection?.scenario.id,resetApp,pathId:canvasPath?.id, runtimeInputPolicy, pickerReference, node: process.version })).digest('hex'), workspaceId: workspace.id, name: workspace.name, yaml: workspace.yaml, steps, toolVersions: { maestro: version, node: process.version, mockoon: workspace.mock ? '9.9.0' : undefined }, runtimeInputPolicy, pickerReference };
         const run: Run = { id, deviceId: device.id, startedAt: new Date().toISOString(), status: 'running', canvas:canvas&&canvasPath?mapCanvas(canvas,canvasPath.id,workspace.yaml,steps,true,automation?{definition:automation,flows:workspace.flows}:undefined):undefined, snapshot, steps: structuredClone(steps), log: '', cleanup: { verified: false, detail: 'Pending' }, artifacts: [], mappingNote: 'Command outcomes will be mapped after execution; unsupported details remain unavailable.' };
         await writeFile(join(path, 'flow.yaml'), workspace.yaml);
         if(derived)await writeFile(join(path,'.tnt-execution.yaml'),derived.yaml);
@@ -266,7 +270,7 @@ async function listFiles(base: string, prefix = ''): Promise<string[]> {
   return (await Promise.all(entries.map(entry => entry.isDirectory() ? listFiles(base, prefix + entry.name + '/') : entry.isFile() ? [prefix + entry.name] : []))).flat();
 }
 function mapResults(run: Run, commands: any[]) {
-  const keys: Record<string, string> = { launchApp: 'launchAppCommand', assertVisible: 'assertConditionCommand', assertNotVisible: 'assertConditionCommand', tapOn: 'tapOnElement', inputText: 'inputTextCommand', runFlow: 'runFlowCommand' };
+  const keys: Record<string, string> = { launchApp: 'launchAppCommand', assertVisible: 'assertConditionCommand', assertNotVisible: 'assertConditionCommand', tapOn: 'tapOnElement', inputText: 'inputTextCommand', back: 'backPressCommand', evalScript: 'evalScriptCommand', runFlow: 'runFlowCommand' };
   if(run.snapshot.executionPlan){
     const events=commands.filter(entry=>entry.metadata?.depth===0&&!entry.command?.defineVariablesCommand&&!entry.command?.applyConfigurationCommand);
     if(events.length>run.snapshot.executionPlan.length||events.some((entry,index)=>!entry.command?.[run.snapshot.executionPlan![index].kind==='reset'?'launchAppCommand':'runFlowCommand'])){run.mappingNote='Ambiguous instrumented metadata; step outcomes are unavailable.';return;}

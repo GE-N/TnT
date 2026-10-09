@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createRunner} from '../server/runner.js';
 import {createScenarios} from '../server/scenarios.js';
+import type {CanvasGraph,YAMLReference} from '../server/canvas.js';
 const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
 const yaml='appId: com.example.HybridApp\n---\n- launchApp\n- tapOn: Settings\n- assertVisible: Settings\n';
 function device(root:string){return createRunner({artifactDirectory:root,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/installed/app',stderr:''})});}
@@ -321,5 +322,85 @@ test('a node destination requires evidence for every authored check, even when t
   const errorStart=source.indexOf('# tnt-check:error');const late=source.slice(0,errorStart)+'# tnt-check:next\n- tapOn:\n    text: "^Other$"\n# tnt-check:other\n- assertVisible:\n    text: "^Other$"\n'+source.slice(errorStart);
   const lateCanvas={...canvas,screens:[...canvas.screens.map(screen=>screen.id==='coordinator'?{...screen,tests:[...screen.tests,{id:'next',label:'Next',role:'action',reference,tap:{target:'text',match:'exact',value:'Other'}}]}:screen),{id:'other-screen',title:'Other',x:800,y:0,tests:[{id:'other',label:'Other check',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Other'}}]}],edges:[...canvas.edges,{id:'next-edge',from:'coordinator',to:'other-screen',actionTestId:'next',assertionTestId:'other',responseCondition:'Go to Other'}],paths:[{id:'route',name:'Wrong check order',edgeIds:['navigate','next-edge']}]};
   const reordered=await scenarios.save({name:'Late destination check',yaml:late,canvas:lateCanvas});await assert.rejects(async()=>{const unexpected=await scenarios.start({workspaceId:reordered.id,deviceId,pathId:'route'});await scenarios.wait(unexpected.id);},/executable YAML.*order/i);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('a saved multi-action branch executes only its explicit route, retains other commands, and maps each outcome',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-ordered-route-'));
+ const source='appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:home-check\n- assertVisible: Home\n# tnt-check:tap\n- tapOn: Field\n# tnt-check:input\n- inputText: hello\n- evalScript: ${output.keep = true} # keep\n# tnt-check:back\n- back\n# tnt-check:destination\n- assertVisible: Done\n# tnt-check:branch-tap\n- tapOn: Other\n# tnt-check:branch-check\n- assertVisible: Other\n';
+ const reference:YAMLReference={kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'};
+ const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'home-check',label:'Home',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Home'}},{id:'tap',label:'Tap',role:'action',reference,tap:{target:'text',match:'regex',value:'Field'}},{id:'input',label:'Input',role:'action',reference,input:'hello'},{id:'back',label:'Back',role:'action',reference,back:true},{id:'branch-tap',label:'Other',role:'action',reference,tap:{target:'text',match:'regex',value:'Other'}},{id:'unselected-draft',label:'Draft',role:'action',reference,tap:{target:'text',match:'exact',value:''}}]},{id:'done',title:'Done',x:400,y:0,tests:[{id:'destination',label:'Done',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Done'}}]},{id:'other',title:'Other',x:400,y:300,tests:[{id:'branch-check',label:'Other',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Other'}}]}],edges:[{id:'edge',from:'home',to:'done',actionTestId:'tap',actionTestIds:['tap','input','back'],assertionTestId:'destination',responseCondition:'Success'},{id:'branch',from:'home',to:'other',actionTestId:'branch-tap',actionTestIds:['branch-tap'],assertionTestId:'branch-check',responseCondition:'Other'}],paths:[{id:'route',name:'Chosen',screenId:'home',edgeIds:['edge']},{id:'other-route',name:'Other',screenId:'home',edgeIds:['branch']}]};
+ let executed='';
+ try{
+ const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
+  const {readFile}=await import('node:fs/promises');executed=await readFile(flow,'utf8');
+  await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+  const names=['launchAppCommand','assertConditionCommand','tapOnElement','inputTextCommand','evalScriptCommand','backPressCommand','assertConditionCommand'];
+  await writeFile(join(directory,'commands.json'),JSON.stringify(names.map(name=>({command:{[name]:{}},metadata:{depth:0,status:'COMPLETED'}}))));
+  return {code:0,log:'Ordered fixture',cleanup:{verified:true,detail:'Exited'}};
+ }}});
+ const catalog=await scenarios.references({yaml:source});
+ canvas.screens[0].tests.push({id:'launch-setup',label:'Launch setup',role:'setup',reference:{...reference,fingerprint:catalog.references[0].fingerprint}});
+ const saved=await scenarios.save({name:'Explicit branch',yaml:source,canvas});const loaded=await scenarios.workspace(saved.id);
+ assert.deepEqual(loaded.canvas!.edges[0].actionTestIds,['tap','input','back']);
+ const previewInput={...loaded,pathId:'route'};const preview=await scenarios.preview(previewInput);assert.doesNotMatch(preview.executionYaml,/Other/);
+ const result=await scenarios.wait((await scenarios.start({workspaceId:loaded.id,deviceId,pathId:'route'})).id);
+ assert.match(executed,/launchApp[\s\S]*assertVisible: Home[\s\S]*tapOn: Field[\s\S]*inputText: hello[\s\S]*evalScript:[\s\S]*- back[\s\S]*assertVisible: Done/);
+ assert.doesNotMatch(executed,/Other/);assert.match(executed,/# keep/);
+ assert.equal(result.status,'passed');assert.deepEqual(result.canvas!.tests.filter(test=>['home-check','tap','input','back','destination'].includes(test.id)).map(test=>test.status),['passed','passed','passed','passed','passed']);
+ assert.equal(result.canvas!.edges.find(edge=>edge.id==='branch')!.status,'unavailable');assert.equal(result.snapshot.authoredYaml,source);
+ const missing=await scenarios.save({...loaded,canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.filter(test=>test.id!=='input')}))}});
+ await assert.rejects(scenarios.start({workspaceId:missing.id,deviceId,pathId:'route'}),/removed action|ordered actions/i);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+for(const failure of ['initial-skipped','action-failed'] as const)test('multi-action routes do not pass after '+failure,async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-route-stop-'));
+ const source='appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:initial\n- assertVisible: Home\n# tnt-check:tap\n- tapOn: Field\n# tnt-check:input\n- inputText: hello\n# tnt-check:destination\n- assertVisible: Done\n';
+ const reference={kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'};
+ const canvas={screens:[{id:'home',title:'A descriptive label',x:0,y:0,tests:[{id:'initial',label:'Initial',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Home'}},{id:'tap',label:'Tap',role:'action',reference,tap:{target:'text',match:'regex',value:'Field'}},{id:'input',label:'Input',role:'action',reference,input:'hello'}]},{id:'done',title:'Done',x:400,y:0,tests:[{id:'destination',label:'Done',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Done'}}]}],edges:[{id:'edge',from:'home',to:'done',actionTestId:'tap',actionTestIds:['tap','input'],assertionTestId:'destination',responseCondition:'Always successful label'}],paths:[{id:'route',name:'Route',edgeIds:['edge']}]};
+ try{
+ const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
+  await writeFile(join(directory,'report.xml'),`<testsuites><testsuite tests="1" failures="${failure==='action-failed'?1:0}"/></testsuites>`);
+  const names=failure==='action-failed'?['launchAppCommand','assertConditionCommand','tapOnElement','inputTextCommand']:['launchAppCommand','assertConditionCommand','tapOnElement','inputTextCommand','assertConditionCommand'];
+  await writeFile(join(directory,'commands.json'),JSON.stringify(names.map((name,index)=>({command:{[name]:{}},metadata:{depth:0,status:failure==='action-failed'&&index===3?'FAILED':failure==='initial-skipped'&&index===1?'SKIPPED':'COMPLETED'}}))));
+  return {code:failure==='action-failed'?1:0,log:'Stopped fixture',cleanup:{verified:true,detail:'Exited'}};
+ }}});
+ const saved=await scenarios.save({name:'Failure stopping',yaml:source,canvas});const result=await scenarios.wait((await scenarios.start({workspaceId:saved.id,deviceId,pathId:'route'})).id);
+ assert.equal(result.status,failure==='action-failed'?'tool-error':'path-failed');
+ if(failure==='action-failed'){assert.equal(result.canvas!.tests.find(test=>test.id==='input')!.status,'failed');assert.equal(result.canvas!.tests.find(test=>test.id==='destination')!.status,'unavailable');assert.equal(result.canvas!.edges[0].status,'failed');}
+ else assert.equal(result.canvas!.tests.find(test=>test.id==='initial')!.status,'skipped');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('an existing checkpoint handler followed by an ordered edge preserves each destination command',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-mixed-handler-route-'));
+ const source='appId: com.example.HybridApp\n---\n- assertVisible: Middle\n# tnt-check:tap-done\n- tapOn: Done\n# tnt-check:done-check\n- assertVisible: Done\n';
+ const flows={'setup.yaml':'appId: com.example.HybridApp\n---\n- assertVisible: Home\n','open.yaml':'appId: com.example.HybridApp\n---\n- tapOn: Middle\n'};
+ try{
+ const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
+  await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+  await writeFile(join(directory,'commands.json'),JSON.stringify([
+   {command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},
+   {command:{runFlowCommand:{label:'TnT setup'}},metadata:{depth:0,status:'COMPLETED'}},
+   {command:{runFlowCommand:{label:'TnT checkpoint 1'}},metadata:{depth:0,status:'COMPLETED'}},
+   {command:{runFlowCommand:{label:'TnT handler open checkpoint 1'}},metadata:{depth:2,status:'COMPLETED'}},
+   {command:{runFlowCommand:{label:'TnT step 1',commands:[{assertConditionCommand:{condition:{visible:{textRegex:'Middle'}}}}]}},metadata:{depth:0,status:'COMPLETED'}},
+   {command:{assertConditionCommand:{condition:{visible:{textRegex:'Middle'}}}},metadata:{depth:1,status:'COMPLETED'}},
+   {command:{runFlowCommand:{label:'TnT step 2'}},metadata:{depth:0,status:'COMPLETED'}},
+   {command:{tapOnElement:{}},metadata:{depth:1,status:'COMPLETED'}},
+   {command:{runFlowCommand:{label:'TnT step 3',commands:[{assertConditionCommand:{condition:{visible:{textRegex:'Done'}}}}]}},metadata:{depth:0,status:'COMPLETED'}},
+   {command:{assertConditionCommand:{condition:{visible:{textRegex:'Done'}}}},metadata:{depth:1,status:'COMPLETED'}}]));
+  return {code:0,log:'Mixed route fixture',cleanup:{verified:true,detail:'Exited'}};
+ }}});
+ const plain=await scenarios.references({yaml:source,flows});
+ const automation={setup:{file:'setup.yaml',parameters:{}},actions:[{id:'open',name:'Open Middle',condition:{text:'Home'},file:'open.yaml',parameters:{},enabled:true}],checkpoints:[{beforeStep:0,fingerprint:plain.references[0].fingerprint,timeoutMs:0}]};
+ const catalog=await scenarios.references({yaml:source,flows,automation});const handler=catalog.references.find(ref=>ref.kind==='handler')!;
+ const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'handler',label:'Open Middle',role:'handler',reference:handler}]},{id:'middle',title:'Middle',x:400,y:0,tests:[{id:'middle-check',label:'Middle',role:'assertion',reference:plain.references[0]},{id:'tap-done',label:'Done',role:'action',reference:plain.references[1],tap:{target:'text',match:'regex',value:'Done'}}]},{id:'done',title:'Done',x:800,y:0,tests:[{id:'done-check',label:'Done',role:'assertion',reference:plain.references[2],check:{visibility:'visible',target:'text',match:'regex',value:'Done'}}]}],edges:[{id:'handler-edge',from:'home',to:'middle',actionTestId:'handler',assertionTestId:'middle-check',responseCondition:'Handler opens Middle'},{id:'ordered-edge',from:'middle',to:'done',actionTestId:'tap-done',actionTestIds:['tap-done'],assertionTestId:'done-check',responseCondition:'Tap Done'}],paths:[{id:'route',name:'Mixed route',edgeIds:['handler-edge','ordered-edge']}]};
+ const workspace=await scenarios.save({name:'Mixed handler route',yaml:source,flows,automation,canvas});
+ const previewInput={...workspace,pathId:'route'};const preview=await scenarios.preview(previewInput);
+ assert.match(preview.authoredYaml,/assertVisible: Middle[\s\S]*tapOn: Done[\s\S]*assertVisible: Done/);
+ const result=await scenarios.wait((await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'route'})).id);
+ assert.equal(result.status,'passed');assert.deepEqual(result.steps.map(step=>step.command),['assertVisible','tapOn','assertVisible']);assert.equal(result.canvas!.tests.find(test=>test.id==='handler')!.status,'passed');assert.ok(result.canvas!.edges.every(edge=>edge.status==='passed'));
  }finally{await rm(root,{recursive:true,force:true});}
 });
