@@ -32,3 +32,10 @@ Final independent re-review: Standards — 0 remaining findings after sharing ac
 Add next screen now creates one draft destination check, opens its full visible/absent selector form, scrolls the destination into view and focuses the selector. The draft remains saveable and requires a selector before execution. No title is inferred as an assertion. A bin icon in each editable node header uses the existing reference-warning and Undo flow; deleting a referenced screen retains invalid route references for repair. The inspector deletion control shares the same operation.
 
 Extended the canvas GUI regression to verify the immediate condition and focus, direct node deletion, affected-route warnings, preserved route identities and graph/YAML Undo. Browser verification confirmed the same behavior and left an unsaved Home → Next screen example open, with the destination selector ready to fill. Local screenshot: `.scratch/issue-16-screen-conditions-proof.jpg`. Final checks: 85 tests, type checking, production build and whitespace checks passed. Independent Standards and Spec reviews: no actionable findings.
+
+
+## Follow-up: Add next screen authors the navigation action
+
+Add next screen now also creates a linked draft Tap action on the current node. Both the source action and destination check open, with focus on the Tap selector first. New ordered connections show their action forms inside the source node under “Actions to reach …”; the inspector retains legacy association editing and connection deletion. The standalone “Add action with destination” control distinguishes a new destination choice from adding an action to an existing connection. A source check added later inserts before its outgoing actions in YAML.
+
+The existing GUI regression verifies the automatically linked source action, open destination condition, focused action selector, action/check order and deletion/Undo. Browser proof shows both forms together: local `.scratch/issue-16-auto-action-proof.jpg`. Type checking, production build, all 85 tests and independent Standards/Spec reviews pass. The app remains running at port 4322.

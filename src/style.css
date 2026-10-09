@@ -52,3 +52,5 @@
 .canvas-connect-handle{display:block;width:100%;padding:7px 10px;border:0;border-bottom:1px solid #405143;background:#203329;color:#bdd7b3;font-size:10px;text-align:right;cursor:crosshair}.canvas-edge-list .canvas-checks{margin:8px 0}.canvas-edge-list .canvas-checks>button{width:auto}
 
 .screen-node:has(.screen-node-delete) .screen-node-heading{padding-right:48px}.screen-node-delete{position:absolute;right:10px;top:13px;margin:0;padding:5px;z-index:1}.canvas-operation>.field-hint{margin:5px 0}
+
+.canvas-navigation-actions{border:1px solid #405143;border-radius:6px;padding:7px;margin:8px 0}.canvas-navigation-actions legend{font-size:10px;color:#bdd7b3;padding:0 4px}.canvas-navigation-actions>button{width:100%}
