@@ -1,4 +1,4 @@
-import {checkLabel} from '../shared/canvas-authoring.js';
+import {canvasTestLabel} from '../shared/canvas-authoring.js';
 import {ScenarioLibrary} from './scenario-library.js';
 import type {ScenarioDefinition} from '../server/scenario-definitions.js';
 import {DefaultActions} from './default-actions.js';
@@ -198,7 +198,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
         <p>Cleanup ({running ? 'pending' : run.cleanup.verified ? 'verified' : 'failed'}): {run.cleanup.detail}</p>
         {run.automation&&<details open><summary>Setup and default action outcomes</summary><p>Setup: {run.automation.setup.status}</p>{run.automation.actions.map(action=><p key={action.id+':'+action.beforeStep}>{action.name} · before step {action.beforeStep+1}: {action.status} · {action.detail}</p>)}</details>}
         {run.snapshot.executionYaml&&<details><summary>Derived execution YAML</summary><pre className="execution-yaml">{run.snapshot.executionYaml}</pre></details>}
-        {run.snapshot.canvas&&run.canvas&&<details open><summary>Executed canvas · {run.snapshot.canvas.paths.find(path=>path.id===run.canvas?.pathId)?.name}</summary><p>{run.canvas.note}</p><CanvasBoard graph={run.snapshot.canvas} pathId={run.canvas.pathId} result={run.canvas}/>{run.canvas.tests.map(test=><p key={test.id}>{(()=>{const authored=run.snapshot.canvas?.screens.flatMap(screen=>screen.tests).find(item=>item.id===test.id);return authored?.check?checkLabel(authored.check):authored?.label;})()}: {test.status} · {test.detail}</p>)}</details>}
+        {run.snapshot.canvas&&run.canvas&&<details open><summary>Executed canvas · {run.snapshot.canvas.paths.find(path=>path.id===run.canvas?.pathId)?.name}</summary><p>{run.canvas.note}</p><CanvasBoard graph={run.snapshot.canvas} pathId={run.canvas.pathId} result={run.canvas}/>{run.canvas.tests.map(test=><p key={test.id}>{(()=>{const authored=run.snapshot.canvas?.screens.flatMap(screen=>screen.tests).find(item=>item.id===test.id);return authored?canvasTestLabel(authored):undefined;})()}: {test.status} · {test.detail}</p>)}</details>}
         <p className="field-hint">{run.mappingNote}</p>
         <ol className="step-results">{run.steps.map(step => <li key={step.id}><code>{step.command}</code><span>{step.status}</span></li>)}</ol>
         {run.expectedFailure && <details open><summary>Failed expected assertion</summary><pre>{JSON.stringify(run.expectedFailure, null, 2)}</pre></details>}

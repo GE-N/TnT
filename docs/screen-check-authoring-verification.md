@@ -26,3 +26,14 @@ Artifacts are local ignored records under `.tnt/runs/<run-id>`. The browser proo
 Review corrections preserve surviving check positions across intervening YAML actions, refresh GUI row order from YAML, retain invalid YAML drafts, and share leading-comment handling with named-scenario projection.
 
 Final independent reviews against the implementation baseline, including review corrections: Standards — no remaining actionable documented-standard violations or baseline smells. Spec — no remaining actionable findings and no scope creep.
+
+
+## Follow-up: direct taps and reachable deletion — 2026-10-09
+
+The user reported that nodes had no tapOn authoring and that added checks could not be deleted. The GUI regression initially failed with “Add tap to Home” missing and “Delete must be visible without expanding the check.” Nodes now author tap selectors directly, using the same YAML synchronization and draft validation boundary as checks. A tap added on Home after Coordinator's check exists is inserted before that destination's check. Taps appear as triggering actions; both the destination picker and server validation reject using a tap as the destination assertion.
+
+Delete controls now sit outside collapsed details. Their reference warning opens in the viewport, focuses confirmation, supports Escape cancellation, and retains graph/YAML Undo. Shared operation labels keep nodes, connection choices and results consistent.
+
+Browser proof in workspace `04be05a4-840e-448c-ba49-38b4ef359836`: authored Home and Coordinator nodes, deleted a collapsed draft check, confirmed its removal, and restored it with Undo. Authored Coordinator's check before adding Home's tap, then connected and ran the route on the installed HybridApp. Run `df1e188c-fe13-4b41-bb84-989e3b9f8830` passed; tap, destination check and transition reported passed with verified cleanup. The destination used observed text `Navigation pattern for iOS`. An earlier run `fe1428ce-4f5e-4a59-aa72-b9594e42234e` correctly failed an outdated identifier selector copied from the existing sample, while reporting the tap passed.
+
+Final validation: 79 tests passed, type checking and production build passed. Independent Standards and Spec reviews report no remaining actionable findings after extracting shared labels and rejecting destination taps. No debug instrumentation was added.

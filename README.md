@@ -70,6 +70,14 @@ Pick and **Save step** for the trigger, then append a parameterized reusable ass
 
 Declared reusable flows use flat `.yaml` filenames and the same literal app ID. Other external file references remain unsupported. Cancellation stops owned Maestro and Mockoon processes before device release. See [verification and remaining real-app proof inputs](docs/mock-verification.md); #5 is not release-complete without the target API maintenance journey.
 
+## Author taps and checks on canvas nodes
+
+Each node has **Add tap** and **Add check** controls. Expand an added row to enter its text or element identifier; Exact is the default, with explicit Contains and Regex options. These edits synchronize executable YAML.
+
+To navigate Home → Coordinator, add a tap on Home targeting the Coordinator button, and add a visible check on Coordinator targeting content that identifies that page. Under **Connect expected screens**, select Home and its tap as the source, then Coordinator and its check as the destination. Connect them, append the connection to a selected path, and run. Taps are actions; destination choices require assertions.
+
+**Delete** is visible beside a collapsed row. Confirm in the reference warning dialog, or cancel with Escape. **Undo canvas deletion** restores the row and its YAML when no later edits would be overwritten.
+
 ## Screen test canvas (#7)
 
 Choose **Create screen canvas**, add one node per app screen, and associate current YAML commands or declared reusable flows in the screen inspector. Drag headers or use arrow keys to arrange screens; zoom and scroll to inspect the graph. Optional reference screenshots are local annotations up to 250 KB. Reopen saved work using its workspace ID; graph, YAML, reusable flows and mock configuration are restored, while the route must be explicitly selected again.

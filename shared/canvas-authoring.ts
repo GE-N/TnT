@@ -1,11 +1,14 @@
 import {isNode,isSeq,parseAllDocuments,stringify,type YAMLSeq} from 'yaml';
 import type {CanvasGraph,CanvasTest} from '../server/canvas.js';
 
-export type ScreenCheck={visibility:'visible'|'absent';target:'text'|'id';match:'exact'|'contains'|'regex';value:string};
+export type ScreenSelector={target:'text'|'id';match:'exact'|'contains'|'regex';value:string};
+export type ScreenCheck=ScreenSelector & {visibility:'visible'|'absent'};
 const escape=(value:string)=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-export function checkPattern(check:ScreenCheck){return check.match==='regex'?check.value:check.match==='contains'?'.*'+escape(check.value)+'.*':'^'+escape(check.value)+'$';}
+export function checkPattern(check:ScreenSelector){return check.match==='regex'?check.value:check.match==='contains'?'.*'+escape(check.value)+'.*':'^'+escape(check.value)+'$';}
+export function tapLabel(tap:ScreenSelector){return `Tap ${tap.target==='text'?'text':'element'} · ${tap.value||'Draft — selector needed'}`;}
 export function checkLabel(check:ScreenCheck){return `${check.visibility==='visible'?'Visible':'Absent'} ${check.target==='text'?'text':'element'} · ${check.value||'Draft — selector needed'}`;}
-export function checkProblem(check:ScreenCheck){
+export function canvasTestLabel(test:CanvasTest){return test.check?checkLabel(test.check):test.tap?tapLabel(test.tap):test.label;}
+export function checkProblem(check:ScreenSelector){
  if(!check.value.trim())return 'Enter a text or element identifier selector before running.';
  if(check.match==='regex')try{new RegExp(check.value);}catch{return 'Repair the check’s invalid Regex selector before running.';}
 }
@@ -28,27 +31,27 @@ export function authoredChecks(yaml:string){
   const selector=typeof argument==='string'?{text:argument}:argument&&typeof argument==='object'?argument as Record<string,unknown>:undefined;
   const target=selector&&Object.keys(selector).length===1&&['text','id'].includes(Object.keys(selector)[0])?Object.keys(selector)[0] as ScreenCheck['target']:undefined;
   const pattern=target?selector?.[target]:undefined;
-  let check:ScreenCheck|undefined;
-  if(!node?.anchor&&!node?.tag&&['assertVisible','assertNotVisible'].includes(command)&&target&&typeof pattern==='string'){
+  let check:ScreenCheck|undefined;let tap:ScreenSelector|undefined;
+  if(!node?.anchor&&!node?.tag&&['assertVisible','assertNotVisible','tapOn'].includes(command)&&target&&typeof pattern==='string'){
    let match:ScreenCheck['match']='regex';let value=pattern;
    for(const mode of ['exact','contains'] as const){const inner=mode==='exact'&&pattern.startsWith('^')&&pattern.endsWith('$')?pattern.slice(1,-1):mode==='contains'&&pattern.startsWith('.*')&&pattern.endsWith('.*')?pattern.slice(2,-2):undefined;
-    if(inner!==undefined){const literal=inner.replace(/\\([.*+?^${}()|[\]\\])/g,'$1');if(checkPattern({visibility:'visible',target,match:mode,value:literal})===pattern){match=mode;value=literal;break;}}
+    if(inner!==undefined){const literal=inner.replace(/\\([.*+?^${}()|[\]\\])/g,'$1');if(checkPattern({target,match:mode,value:literal})===pattern){match=mode;value=literal;break;}}
    }
    if(/(?:^|\n)\s*tnt-match:regex\s*(?:\n|$)/.test(node?.commentBefore??'')){match='regex';value=pattern;}
-   check={visibility:command==='assertVisible'?'visible':'absent',target,match,value};
+   if(command==='tapOn')tap={target,match,value};else check={visibility:command==='assertVisible'?'visible':'absent',target,match,value};
   }
-  return {id,index,check};
+  return {id,index,check,tap};
  }).filter(item=>item.id);
 }
 export function refreshChecks(graph:CanvasGraph,yaml:string):CanvasGraph{
  let checks:ReturnType<typeof authoredChecks>;try{checks=authoredChecks(yaml);}catch{return graph;}
  return {...graph,screens:graph.screens.map(screen=>{
   const tests=screen.tests.map(test=>{
-   if(!test.check)return test;
+   if(!test.check&&!test.tap)return test;
    const matches=checks.filter(item=>item.id===test.id);const found=matches.length===1?matches[0]:undefined;
-   return found?.check?{...test,check:found.check,reference:{...test.reference,index:found.index}}:test;
+   return found&&(found.check||found.tap)?{...test,check:found.check,tap:found.tap,role:found.tap?'action' as const:'assertion' as const,reference:{...test.reference,index:found.index}}:test;
   });
-  const executable=tests.filter(test=>test.check&&checks.some(item=>item.id===test.id&&item.check)).sort((a,b)=>a.reference.index!-b.reference.index!);
+  const executable=tests.filter(test=>(test.check||test.tap)&&checks.some(item=>item.id===test.id&&(item.check||item.tap))).sort((a,b)=>a.reference.index!-b.reference.index!);
   let cursor=0;return {...screen,tests:tests.map(test=>executable.some(item=>item.id===test.id)?executable[cursor++]:test)};
  })};
 }
@@ -56,34 +59,35 @@ export function refreshChecks(graph:CanvasGraph,yaml:string):CanvasGraph{
 export function writeChecks(yaml:string,previous:CanvasGraph,next:CanvasGraph){
  const {docs,sequence}=source(yaml);
  if(sequence.flow)throw new Error('Convert the command list to block YAML before editing canvas checks.');
- const before=previous.screens.flatMap(screen=>screen.tests).filter(test=>test.check);
- const after=next.screens.flatMap(screen=>screen.tests).filter((test):test is CanvasTest & {check:ScreenCheck}=>!!test.check);
+ const before=previous.screens.flatMap(screen=>screen.tests).filter(test=>test.check||test.tap);
+ const after=next.screens.flatMap(screen=>screen.tests).filter(test=>test.check||test.tap);
  const owned=new Set([...before,...after].map(test=>test.id));
  const parsed=authoredChecks(yaml);
  const originals=new Map(sequence.items.map(node=>[marker(node?.commentBefore),node] as const));
  const replacements=new Map<string,(typeof sequence.items)[number]>();
  for(const test of after){
   const matches=parsed.filter(item=>item.id===test.id);const prior=before.find(item=>item.id===test.id);
-  const unchanged=JSON.stringify(prior?.check)===JSON.stringify(test.check);
+  const selector=test.check??test.tap!;const priorSelector=prior?.check??prior?.tap;const matched=matches[0]?.check??matches[0]?.tap;
+  const unchanged=JSON.stringify({check:prior?.check,tap:prior?.tap})===JSON.stringify({check:test.check,tap:test.tap});
   if(matches.length>1)throw new Error('Ambiguous check YAML. Keep one command identity before editing this check.');
-  if(matches.length&&!matches[0].check){if(unchanged){replacements.set(test.id,originals.get(test.id)!);continue;}throw new Error('This check contains unsupported YAML. Edit its code before changing the canvas form.');}
-  if(!matches.length&&prior?.check&&!checkProblem(prior.check)&&unchanged)throw new Error('A check command was removed from YAML. Restore it or explicitly edit its selector before changing other checks.');
-  if(checkProblem(test.check))continue;
-  if(matches[0]?.check&&JSON.stringify(matches[0].check)===JSON.stringify(test.check)){replacements.set(test.id,originals.get(test.id)!);continue;}
-  const single=source('appId: placeholder\n---\n'+stringify([{[test.check.visibility==='visible'?'assertVisible':'assertNotVisible']:{[test.check.target]:checkPattern(test.check)}}]));
+  if(matches.length&&!matched){if(unchanged){replacements.set(test.id,originals.get(test.id)!);continue;}throw new Error('This check contains unsupported YAML. Edit its code before changing the canvas form.');}
+  if(!matches.length&&priorSelector&&!checkProblem(priorSelector)&&unchanged)throw new Error('A check command was removed from YAML. Restore it or explicitly edit its selector before changing other checks.');
+  if(checkProblem(selector))continue;
+  if(matched&&JSON.stringify({check:matches[0].check,tap:matches[0].tap})===JSON.stringify({check:test.check,tap:test.tap})){replacements.set(test.id,originals.get(test.id)!);continue;}
+  const single=source('appId: placeholder\n---\n'+stringify([{[test.tap?'tapOn':test.check!.visibility==='visible'?'assertVisible':'assertNotVisible']:{[selector.target]:checkPattern(selector)}}]));
   const node=single.sequence.items[0]!;
   const comments=originals.get(test.id)?.commentBefore?.split('\n').filter(line=>!/^\s*tnt-(check|match):/.test(line))??[];
-  node.commentBefore=[...comments,' tnt-check:'+test.id,' tnt-match:'+test.check.match].join('\n');replacements.set(test.id,node);
+  node.commentBefore=[...comments,' tnt-check:'+test.id,' tnt-match:'+selector.match].join('\n');replacements.set(test.id,node);
  }
  const retained=sequence.items.filter(node=>!owned.has(marker(node?.commentBefore)??'')||replacements.has(marker(node?.commentBefore)??''));
- for(const screen of next.screens){
+ for(const [screenIndex,screen] of next.screens.entries()){
   const desired=screen.tests.map(test=>test.id).filter(id=>replacements.has(id));
   const existing=desired.filter(id=>originals.has(id));let cursor=0;
   for(let index=0;index<retained.length;index++)if(existing.includes(marker(retained[index]?.commentBefore)??''))retained[index]=replacements.get(existing[cursor++])!;
   for(let position=0;position<desired.length;position++){
    const id=desired[position];if(originals.has(id))continue;
-   const following=desired.slice(position+1).find(id=>retained.some(node=>marker(node?.commentBefore)===id));
-   const preceding=desired.slice(0,position).findLast(id=>retained.some(node=>marker(node?.commentBefore)===id));
+   const following=desired.slice(position+1).find(id=>retained.some(node=>marker(node?.commentBefore)===id))??next.screens.slice(screenIndex+1).flatMap(screen=>screen.tests).find(test=>retained.some(node=>marker(node?.commentBefore)===test.id))?.id;
+   const preceding=desired.slice(0,position).findLast(id=>retained.some(node=>marker(node?.commentBefore)===id))??next.screens.slice(0,screenIndex).flatMap(screen=>screen.tests).findLast(test=>retained.some(node=>marker(node?.commentBefore)===test.id))?.id;
    const insertion=following?retained.findIndex(node=>marker(node?.commentBefore)===following):preceding?retained.findIndex(node=>marker(node?.commentBefore)===preceding)+1:retained.length;
    retained.splice(insertion,0,replacements.get(id)!);
   }

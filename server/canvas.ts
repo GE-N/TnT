@@ -1,11 +1,11 @@
 import type {Automation,AutomationResult} from './default-actions.js';
 import {createHash} from 'node:crypto';
 import {parseAllDocuments, stringify} from 'yaml';
-import {authoredChecks,checkProblem,type ScreenCheck} from '../shared/canvas-authoring.js';
+import {authoredChecks,checkProblem,type ScreenCheck,type ScreenSelector} from '../shared/canvas-authoring.js';
 import type {Step} from './scenarios.js';
 
 export type YAMLReference={kind:'step'|'flow'|'setup'|'handler';file:string;index?:number;actionId?:string;fingerprint:string};
-export type CanvasTest={check?:ScreenCheck;id:string;label:string;role:'action'|'assertion'|'setup'|'handler'|'test';reference:YAMLReference};
+export type CanvasTest={tap?:ScreenSelector;check?:ScreenCheck;id:string;label:string;role:'action'|'assertion'|'setup'|'handler'|'test';reference:YAMLReference};
 export type ScreenNode={id:string;title:string;x:number;y:number;referenceScreenshot?:string;tests:CanvasTest[]};
 export type Transition={id:string;from:string;to:string;actionTestId:string;assertionTestId:string;responseCondition:string};
 export type CanvasGraph={screens:ScreenNode[];edges:Transition[];paths:{id:string;name:string;edgeIds:string[];screenId?:string}[]};
@@ -69,6 +69,7 @@ export function readCanvas(value:unknown):CanvasGraph|undefined{
   if(screen.referenceScreenshot!==undefined&&(!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(screen.referenceScreenshot)||screen.referenceScreenshot.length>350_000))throw new Error('Reference screenshots must be PNG/JPEG data up to 250 KB.');
   for(const test of screen.tests){id(test.id);if(!text(test.label)||!['action','assertion','setup','handler','test'].includes(test.role)||!test.reference||!['step','flow','setup','handler'].includes(test.reference.kind)||!text(test.reference.file,80)||!text(test.reference.fingerprint,64))throw new Error('Provide named tests with explicit YAML references.');
    if(test.check&&(!['visible','absent'].includes(test.check.visibility)||!['text','id'].includes(test.check.target)||!['exact','contains','regex'].includes(test.check.match)||typeof test.check.value!=='string'||test.check.value.length>4000))throw new Error('Provide a bounded visible/absent check selector.');
+   if(test.tap&&(!['text','id'].includes(test.tap.target)||!['exact','contains','regex'].includes(test.tap.match)||typeof test.tap.value!=='string'||test.tap.value.length>4000||test.check))throw new Error('Provide a bounded tap selector, separate from a check.');
    const reference=test.reference;
    if(['step','handler'].includes(reference.kind)&&(!Number.isInteger(reference.index)||reference.index!<0))throw new Error('Step/handler references require a nonnegative command position.');
    if(reference.kind==='handler'&&!text(reference.actionId))throw new Error('Handler references require their explicit default-action identity.');
@@ -93,7 +94,7 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
  const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,{test,screen}] as const)));
  let authored:ReturnType<typeof authoredChecks>=[];try{authored=authoredChecks(yaml);}catch{ /* YAML catalog reports parse diagnostics. */ }
  for(const {test} of tests.values()){
-  if(test.check){const matches=authored.filter(item=>item.id===test.id);const issue=checkProblem(test.check);if(issue||matches.length!==1||!matches[0].check)diagnostics.push({ownerId:test.id,detail:issue??'Check YAML is missing, unsupported or ambiguous. Repair its command or selector before running.'});continue;}
+  if(test.check||test.tap){const matches=authored.filter(item=>item.id===test.id);const issue=checkProblem(test.check??test.tap!);if(issue||matches.length!==1||!(test.tap?matches[0].tap:matches[0].check))diagnostics.push({ownerId:test.id,detail:issue??'Check YAML is missing, unsupported or ambiguous. Repair its command or selector before running.'});continue;}
   if(!resolveReference(test.reference,catalog.references)){
    const alternatives=catalog.references.filter(entry=>entry.kind===test.reference.kind&&entry.file===test.reference.file&&entry.fingerprint===test.reference.fingerprint);
    diagnostics.push({ownerId:test.id,detail:alternatives.length>1?'Ambiguous moved YAML reference. Explicitly choose its intended command again.':'Broken or stale YAML reference. Explicitly relink to the intended command; references are never retargeted automatically.'});
@@ -103,7 +104,7 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
   const action=tests.get(edge.actionTestId);const assertion=tests.get(edge.assertionTestId);
   if(!screens.has(edge.from)||!screens.has(edge.to)||action?.screen.id!==edge.from||assertion?.screen.id!==edge.to)diagnostics.push({ownerId:edge.id,detail:'Repair transition screen/action/assertion associations.'});
   const target=assertion&&resolveReference(assertion.test.reference,catalog.references);
-  if(target&&!target.assertion)diagnostics.push({ownerId:edge.id,detail:'The destination must reference an executable assertion or assertion flow.'});
+  if(assertion?.test.tap||(target&&!target.assertion))diagnostics.push({ownerId:edge.id,detail:'The destination must reference an executable assertion or assertion flow.'});
  }
  for(const path of graph.paths){
   if(path.screenId&&!screens.has(path.screenId))diagnostics.push({ownerId:path.id,detail:'Restore or select the initial screen for this scenario.'});
@@ -157,7 +158,7 @@ export function mapCanvas(graph:CanvasGraph,pathId:string,yaml:string,steps:Step
    const outcome=execution?.result?.actions.find(action=>action.id===reference.actionId&&action.beforeStep===reference.index);
    return {id:test.id,status:outcome?.status??'unavailable' as Step['status'],detail:outcome?.detail??'No verified outcome for this action at its explicit checkpoint.'};
   }
-  const index=test.check?authored.find(item=>item.id===test.id)?.index:executionIndex(reference,yaml);const step=index===undefined?undefined:steps[index];
+  const index=test.check||test.tap?authored.find(item=>item.id===test.id)?.index:executionIndex(reference,yaml);const step=index===undefined?undefined:steps[index];
   const outcome=destinationTests.has(test.id)?step?.status==='failed'?'failed':step?.assertionStatus??'unavailable':step?.status??'unavailable';
   return {id:test.id,status:outcome as Step['status'],stepId:step?.id,detail:index===undefined?'Uncalled or ambiguous reusable flow; no outcome inferred.':destinationTests.has(test.id)?'Destination requires completed assertion metadata; a successful flow wrapper alone is insufficient.':'Mapped from top-level authored YAML command outcome.'};
  }));

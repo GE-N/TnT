@@ -286,3 +286,20 @@ for(const outcome of ['COMPLETED','FAILED','SKIPPED'] as const)test(`single-scre
   assert.equal(result.status,outcome==='COMPLETED'?'passed':outcome==='FAILED'?'assertion-failed':'path-failed');
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('canvas-authored Home tap and Coordinator check reload and execute their connected route',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-canvas-tap-'));
+ try{
+  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
+   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+   await writeFile(join(directory,'commands.json'),JSON.stringify([{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{tapOnElement:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{assertConditionCommand:{}},metadata:{depth:0,status:'COMPLETED'}}]));return{code:0,log:'Fixture Home → Coordinator',cleanup:{verified:true,detail:'Exited'}};
+  }}});
+  const source='appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:tap\n# tnt-match:exact\n- tapOn:\n    text: "^Coordinator$"\n# tnt-check:destination\n# tnt-match:exact\n- assertVisible:\n    text: "^Coordinator$"\n';
+  const reference={kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'};
+  const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'tap',label:'Tap',role:'action',reference,tap:{target:'text',match:'exact',value:'Coordinator'}}]},{id:'coordinator',title:'Coordinator',x:400,y:0,tests:[{id:'destination',label:'Coordinator',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Coordinator'}}]}],edges:[{id:'navigate',from:'home',to:'coordinator',actionTestId:'tap',assertionTestId:'destination',responseCondition:'Tap Coordinator'}],paths:[{id:'route',name:'Home → Coordinator',edgeIds:['navigate']}]};
+  const saved=await scenarios.save({name:'Canvas navigation',yaml:source,canvas});const loaded=await scenarios.workspace(saved.id);assert.deepEqual(loaded.canvas!.screens[0].tests[0].tap,{target:'text',match:'exact',value:'Coordinator'});assert.equal(loaded.canvasDiagnostics!.length,0);
+  const result=await scenarios.wait((await scenarios.start({workspaceId:loaded.id,deviceId,pathId:'route'})).id);assert.equal(result.status,'passed');assert.equal(result.canvas!.edges[0].status,'passed');assert.deepEqual(result.canvas!.tests.map(test=>test.status),['passed','passed']);
+  const invalidDestination=await scenarios.save({...loaded,yaml:source.replace('- assertVisible:', '- tapOn:'),canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.check?{...test,check:undefined,tap:{target:test.check.target,match:test.check.match,value:test.check.value},role:'action'}:test)}))}});await assert.rejects(async()=>{const unexpected=await scenarios.start({workspaceId:invalidDestination.id,deviceId,pathId:'route'});await scenarios.wait(unexpected.id);},/destination.*assertion/i);
+  const draft=await scenarios.save({...loaded,yaml:source.replace(/# tnt-check:tap\n# tnt-match:exact\n- tapOn:\n    text: "\^Coordinator\$"\n/,''),canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.tap?{...test,tap:{...test.tap,value:''}}:test)}))}});await assert.rejects(scenarios.start({workspaceId:draft.id,deviceId,pathId:'route'}),/selector/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
