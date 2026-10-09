@@ -1,3 +1,4 @@
+import {attachLeadingComments} from '../shared/canvas-authoring.js';
 import {isSeq,parseAllDocuments} from 'yaml';
 import {referenceCatalog,type YAMLReference,type CanvasGraph} from './canvas.js';
 import {readAutomation,instrument,type Automation,type FlowCall} from './default-actions.js';
@@ -43,7 +44,7 @@ export function selectScenario(workspace:{yaml:string;flows?:Record<string,strin
  }
  const docs=parseAllDocuments(workspace.yaml);const sequence=docs[1].contents;
  if(!isSeq(sequence))throw new Error('Repair the authored command list.');
- if(sequence.commentBefore&&sequence.items[0]){sequence.items[0].commentBefore=[sequence.commentBefore,sequence.items[0].commentBefore].filter(Boolean).join('\n');sequence.commentBefore=undefined;}
+ attachLeadingComments(sequence);
  sequence.items=scenario.steps.map(ref=>sequence.items[ref.index!]);
  const yaml=docs[0].toString()+'---\n'+docs[1].toString({directives:false});
  const catalog=referenceCatalog(yaml,flows);

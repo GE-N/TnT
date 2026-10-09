@@ -8,7 +8,7 @@ A single-screen path explicitly selects its initial screen and checks, with no t
 
 ## Automated evidence
 
-The existing workspace/run service seam covers draft save/reload/blocking, supported YAML-to-form synchronization, single-screen checks after declared setup, saved public inputs, reset default No, and passed/failed/skipped assertion outcomes. Browser GUI regressions cover offline authoring, Exact/Contains/Regex choices, check reorder, warning/Undo, unrelated command preservation, and workspace reload without duplicate editors. Existing canvas, named-scenario, picker and default-action regressions remain in place.
+The existing workspace/run service seam covers draft save/reload/blocking, invalid YAML retention, supported YAML-to-form synchronization, single-screen checks after declared setup, saved public inputs, reset default No, and passed/failed/skipped assertion outcomes. Browser GUI regressions cover offline authoring, Exact/Contains/Regex choices, check reorder, warning/Undo, unrelated command preservation across deletion and YAML reordering, and workspace reload without duplicate editors. Existing canvas, named-scenario, picker and default-action regressions remain in place.
 
 Validation on 2026-10-09: 77 tests passed; type checking, production build and diff whitespace checks passed.
 
@@ -22,3 +22,7 @@ In the browser at port 4319, created a screen, authored an Exact visible `Home` 
 - `967b1cde-03d6-4202-8d98-a32b4db16f5b`: changed the absent selector to `Home`; reported `assertion-failed`. The visible check passed, absent check and node failed, and screenshot/hierarchy/log evidence was retained. Process cleanup was verified for both runs.
 
 Artifacts are local ignored records under `.tnt/runs/<run-id>`. The browser proof exposed and fixed a sibling React-key collision during workspace reload; a GUI regression covers it. Declared setup and input behavior are verified by service tests; these browser runs use the existing launch command.
+
+Review corrections preserve surviving check positions across intervening YAML actions, refresh GUI row order from YAML, retain invalid YAML drafts, and share leading-comment handling with named-scenario projection.
+
+Final independent reviews against the implementation baseline, including review corrections: Standards — no remaining actionable documented-standard violations or baseline smells. Spec — no remaining actionable findings and no scope creep.

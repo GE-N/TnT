@@ -1,4 +1,4 @@
-import {isSeq,parseAllDocuments,stringify} from 'yaml';
+import {isNode,isSeq,parseAllDocuments,stringify,type YAMLSeq} from 'yaml';
 import type {CanvasGraph,CanvasTest} from '../server/canvas.js';
 
 export type ScreenCheck={visibility:'visible'|'absent';target:'text'|'id';match:'exact'|'contains'|'regex';value:string};
@@ -13,10 +13,11 @@ function source(yaml:string){
  const docs=parseAllDocuments(yaml);const sequence=docs[1]?.contents;
  if(docs.length!==2||docs.some(doc=>doc.errors.length)||!isSeq(sequence))throw new Error('Repair YAML: use an appId header, --- separator and command list.');
  for(const doc of docs)doc.toJS({maxAliasCount:100});
- // YAML attaches a leading comment to the sequence rather than its first item.
- if(sequence.commentBefore&&sequence.items[0]){sequence.items[0].commentBefore=[sequence.commentBefore,sequence.items[0].commentBefore].filter(Boolean).join('\n');sequence.commentBefore=undefined;}
+ attachLeadingComments(sequence);
  return {docs,sequence};
 }
+// Leading sequence comments belong to the original first command when projecting or editing.
+export function attachLeadingComments(sequence:YAMLSeq){const first=sequence.items[0];if(sequence.commentBefore&&isNode(first)){first.commentBefore=[sequence.commentBefore,first.commentBefore].filter(Boolean).join('\n');sequence.commentBefore=undefined;}}
 const marker=(comment?:string|null)=>comment?.match(/(?:^|\n)\s*tnt-check:([^\s]+)\s*(?:\n|$)/)?.[1];
 export function authoredChecks(yaml:string){
  const {sequence}=source(yaml);
@@ -40,14 +41,18 @@ export function authoredChecks(yaml:string){
  }).filter(item=>item.id);
 }
 export function refreshChecks(graph:CanvasGraph,yaml:string):CanvasGraph{
- const checks=authoredChecks(yaml);
- return {...graph,screens:graph.screens.map(screen=>({...screen,tests:screen.tests.map(test=>{
-  if(!test.check)return test;
-  const matches=checks.filter(item=>item.id===test.id);const found=matches.length===1?matches[0]:undefined;
-  return found?.check?{...test,check:found.check,reference:{...test.reference,index:found.index}}:test;
- })}))};
+ let checks:ReturnType<typeof authoredChecks>;try{checks=authoredChecks(yaml);}catch{return graph;}
+ return {...graph,screens:graph.screens.map(screen=>{
+  const tests=screen.tests.map(test=>{
+   if(!test.check)return test;
+   const matches=checks.filter(item=>item.id===test.id);const found=matches.length===1?matches[0]:undefined;
+   return found?.check?{...test,check:found.check,reference:{...test.reference,index:found.index}}:test;
+  });
+  const executable=tests.filter(test=>test.check&&checks.some(item=>item.id===test.id&&item.check)).sort((a,b)=>a.reference.index!-b.reference.index!);
+  let cursor=0;return {...screen,tests:tests.map(test=>executable.some(item=>item.id===test.id)?executable[cursor++]:test)};
+ })};
 }
-// Mutate only commands carrying stable authoring identities. Other YAML nodes survive intact.
+// Edit identified commands in place. Explicit reorder swaps only surviving check slots.
 export function writeChecks(yaml:string,previous:CanvasGraph,next:CanvasGraph){
  const {docs,sequence}=source(yaml);
  if(sequence.flow)throw new Error('Convert the command list to block YAML before editing canvas checks.');
@@ -55,15 +60,34 @@ export function writeChecks(yaml:string,previous:CanvasGraph,next:CanvasGraph){
  const after=next.screens.flatMap(screen=>screen.tests).filter((test):test is CanvasTest & {check:ScreenCheck}=>!!test.check);
  const owned=new Set([...before,...after].map(test=>test.id));
  const parsed=authoredChecks(yaml);
- for(const test of after){const existing=parsed.filter(item=>item.id===test.id);if(existing.length>1||existing.some(item=>!item.check))throw new Error('This check contains unsupported or ambiguous YAML. Edit its code before changing the canvas form.');}
- for(const test of after){const prior=before.find(item=>item.id===test.id);if(!parsed.some(item=>item.id===test.id)&&prior?.check&&!checkProblem(prior.check)&&JSON.stringify(prior.check)===JSON.stringify(test.check))throw new Error('A check command was removed from YAML. Restore it or explicitly edit its selector before changing other checks.');}
- const nodes=after.filter(test=>!checkProblem(test.check)).map(test=>{const single=source('appId: placeholder\n---\n'+stringify([{[test.check.visibility==='visible'?'assertVisible':'assertNotVisible']:{[test.check.target]:checkPattern(test.check)}}]));const node=single.sequence.items[0]!;node.commentBefore=' tnt-check:'+test.id+'\n tnt-match:'+test.check.match;return node;});
- const retained:typeof sequence.items=[];let cursor=0;let insertion=sequence.items.length;
- for(const node of sequence.items){
-  if(owned.has(marker(node?.commentBefore)??'')){if(nodes[cursor])retained.push(nodes[cursor++]);insertion=retained.length;}
-  else retained.push(node);
+ const originals=new Map(sequence.items.map(node=>[marker(node?.commentBefore),node] as const));
+ const replacements=new Map<string,(typeof sequence.items)[number]>();
+ for(const test of after){
+  const matches=parsed.filter(item=>item.id===test.id);const prior=before.find(item=>item.id===test.id);
+  const unchanged=JSON.stringify(prior?.check)===JSON.stringify(test.check);
+  if(matches.length>1)throw new Error('Ambiguous check YAML. Keep one command identity before editing this check.');
+  if(matches.length&&!matches[0].check){if(unchanged){replacements.set(test.id,originals.get(test.id)!);continue;}throw new Error('This check contains unsupported YAML. Edit its code before changing the canvas form.');}
+  if(!matches.length&&prior?.check&&!checkProblem(prior.check)&&unchanged)throw new Error('A check command was removed from YAML. Restore it or explicitly edit its selector before changing other checks.');
+  if(checkProblem(test.check))continue;
+  if(matches[0]?.check&&JSON.stringify(matches[0].check)===JSON.stringify(test.check)){replacements.set(test.id,originals.get(test.id)!);continue;}
+  const single=source('appId: placeholder\n---\n'+stringify([{[test.check.visibility==='visible'?'assertVisible':'assertNotVisible']:{[test.check.target]:checkPattern(test.check)}}]));
+  const node=single.sequence.items[0]!;
+  const comments=originals.get(test.id)?.commentBefore?.split('\n').filter(line=>!/^\s*tnt-(check|match):/.test(line))??[];
+  node.commentBefore=[...comments,' tnt-check:'+test.id,' tnt-match:'+test.check.match].join('\n');replacements.set(test.id,node);
  }
- retained.splice(insertion,0,...nodes.slice(cursor));sequence.items=retained;
- 
+ const retained=sequence.items.filter(node=>!owned.has(marker(node?.commentBefore)??'')||replacements.has(marker(node?.commentBefore)??''));
+ for(const screen of next.screens){
+  const desired=screen.tests.map(test=>test.id).filter(id=>replacements.has(id));
+  const existing=desired.filter(id=>originals.has(id));let cursor=0;
+  for(let index=0;index<retained.length;index++)if(existing.includes(marker(retained[index]?.commentBefore)??''))retained[index]=replacements.get(existing[cursor++])!;
+  for(let position=0;position<desired.length;position++){
+   const id=desired[position];if(originals.has(id))continue;
+   const following=desired.slice(position+1).find(id=>retained.some(node=>marker(node?.commentBefore)===id));
+   const preceding=desired.slice(0,position).findLast(id=>retained.some(node=>marker(node?.commentBefore)===id));
+   const insertion=following?retained.findIndex(node=>marker(node?.commentBefore)===following):preceding?retained.findIndex(node=>marker(node?.commentBefore)===preceding)+1:retained.length;
+   retained.splice(insertion,0,replacements.get(id)!);
+  }
+ }
+ sequence.items=retained;
  const yamlNext=docs[0].toString()+'---\n'+docs[1].toString({directives:false});source(yamlNext);return yamlNext;
 }
