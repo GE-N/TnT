@@ -1,4 +1,4 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';import {act,createElement,useState,type ChangeEvent} from 'react';import {CanvasEditor} from '../src/canvas.js';import type {CanvasGraph,CatalogEntry} from '../server/canvas.js';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';import {act,createElement,useState,type ChangeEvent} from 'react';import {CanvasEditor} from '../src/canvas.js';import {selectedCanvasPath} from '../server/canvas.js';import type {CanvasGraph,CatalogEntry} from '../server/canvas.js';
 test('authors can associate an explicit checkpoint handler without losing its action identity',async()=>{
  const dom=new JSDOM('<div id="root"></div>');
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
@@ -123,5 +123,33 @@ test('Add next screen and dragged connections author ordered edge actions and pr
   for(const command of ['inputText: changed','back']){
    const removed=intact.replace(new RegExp('# tnt-check:[^\\n]+\\n- '+command+'\\n'),'');await fill('Executable YAML',removed);await fill('Check 1 selector','Changed Home');assert.match(document.body.textContent!,/command was removed from YAML/);assert.equal(authored,removed);await fill('Executable YAML',intact);
   }
+ }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
+});
+
+test('creating screens selects an explicit route and Add next screen recovers an unselected route',async()=>{
+ const dom=new JSDOM('<div id="root"></div>');const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ class ResizeObserver{observe(){}disconnect(){}}
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
+ const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);let authored='';let saved:CanvasGraph|undefined;let chosen='';
+ function Host(){const [graph,setGraph]=useState<CanvasGraph>({screens:[],edges:[],paths:[]});const [yaml,setYaml]=useState('appId: com.example.App\n---\n- launchApp\n- evalScript: ${output.keep = true} # untouched\n');const [path,setPath]=useState('');authored=yaml;saved=graph;chosen=path;return createElement('div',null,createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:path,onPathChange:setPath,disabled:false}),createElement('textarea',{'aria-label':'Executable YAML',value:yaml,onChange:(event:ChangeEvent<HTMLTextAreaElement>)=>setYaml(event.target.value)}));}
+ const document=dom.window.document;
+ const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();});
+ const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?dom.window.HTMLTextAreaElement.prototype:dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
+ const select=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
+ try{
+  await act(async()=>root.render(createElement(Host)));await fill('New screen title','Home');await click('Add screen');
+  const initialSelection=chosen;
+  await select('Scenario path','');await click('Add next screen from Home');
+
+  await fill('Home → Home next action 1 selector','Continue');
+  const check=document.querySelector('[aria-label="Screen Home next"] [aria-label="Check 1 selector"]')!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(check,'Done');check.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
+  assert.doesNotThrow(()=>selectedCanvasPath(saved!,authored,{},chosen),'The authored connection is runnable without manually creating or selecting a path');
+  assert.equal(initialSelection,saved!.paths[0].id,'Creating the initial screen selects its explicit route');
+  assert.deepEqual(saved!.paths.find(path=>path.id===chosen)!.edgeIds,[saved!.edges[0].id]);
+  await select('Scenario path','');await click('Add next screen from Home next');
+  assert.equal(saved!.paths.length,2,'A new explicit route starts at the chosen source instead of inferring an existing route');
+  assert.equal(saved!.paths.find(path=>path.id===chosen)!.screenId,saved!.screens[1].id);
+  assert.deepEqual(saved!.paths.find(path=>path.id===chosen)!.edgeIds,[saved!.edges[1].id]);
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });

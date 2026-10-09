@@ -46,3 +46,12 @@ The existing GUI regression verifies the automatically linked source action, ope
 Editable canvas nodes expose a title field directly in their header. Enter or blur saves a trimmed nonempty draft; Escape cancels and an empty name reverts. The field sits outside the drag/select button so typing and arrow keys do not move the node. Renaming updates the graph through its stable node identity, preserving connections, route references, actions, checks and executable YAML. Historical result boards remain read-only.
 
 The canvas GUI regression covers direct rename, empty-name recovery, Escape cancellation and unchanged YAML/connection identity. Browser proof renamed Home to Sign in with Enter in the header: local `.scratch/issue-16-node-title-proof.jpg`. Type checking, production build, all 85 tests and independent Standards/Spec reviews pass.
+
+
+## Follow-up: Add next screen selects a runnable route
+
+A new GUI regression reproduced the reported `Select a nonempty explicit scenario path.` error by creating a screen, adding the next screen, filling its navigation and destination check, and calling the same selected-path validation used by execution. The first screen created a path without selecting it, and Add next screen only appended to a selected path.
+
+Creating the first screen now selects its initial route. Add next screen with no valid selection reuses an empty source route or creates and selects an explicit route for that connection. Existing selected routes still extend only at their tail; dragging connections does not select branches. The regression covers initial selection, recovery after deselection, successful run validation, and creating a separate route from a later source.
+
+All 86 tests, type checking, production build and independent Standards/Spec reviews pass. A separate browser canvas successfully generated its execution preview after Add next screen; screenshot: `.scratch/issue-16-route-selection-proof.jpg`. The user’s existing draft was preserved, and the app remains running at port 4322.
