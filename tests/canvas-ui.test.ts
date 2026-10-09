@@ -148,3 +148,29 @@ test('creating the first screen selects its explicit route without Add next scre
   assert.doesNotThrow(()=>selectedCanvasPath(saved!,authored,{},chosen));
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
+
+test('visit editors preserve subsets and identities through repeated transitions and deletion Undo',async()=>{
+ const dom=new JSDOM('<div id="root"></div>');const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ class ResizeObserver{observe(){}disconnect(){}}
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
+ const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);
+ const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
+ const check=(id:string,value:string)=>({id,label:value,role:'assertion' as const,reference,check:{visibility:'visible' as const,target:'text' as const,match:'regex' as const,value}});
+ const initial:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[check('initial','Initial'),check('returned','Returned'),{id:'open',label:'Open',role:'action',reference,tap:{target:'text',match:'regex',value:'Coordinator'}}]},{id:'details',title:'Coordinator',x:400,y:0,tests:[check('fixed','Fixed'),{id:'back',label:'Back',role:'action',reference,back:true}]}],edges:[{id:'go',from:'home',to:'details',actionTestId:'open',actionTestIds:['open'],assertionTestId:'fixed',responseCondition:'Go'},{id:'return',from:'details',to:'home',actionTestId:'back',actionTestIds:['back'],assertionTestId:'initial',responseCondition:'Back'}],paths:[{id:'route',name:'Home return',screenId:'home',edgeIds:['go','return']}]};
+ let saved=initial;
+ function Host(){const [graph,setGraph]=useState(initial);const [yaml,setYaml]=useState('appId: com.example.App\n---\n# tnt-check:initial\n- assertVisible: Initial\n# tnt-check:returned\n- assertVisible: Returned\n# tnt-check:open\n- tapOn: Coordinator\n# tnt-check:fixed\n- assertVisible: Fixed\n# tnt-check:back\n- back\n');saved=graph;return createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:'route',onPathChange:()=>{},disabled:false});}
+ const document=dom.window.document;
+ const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll<HTMLElement>('button,input[type=checkbox]')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();});
+ const select=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`) as HTMLSelectElement;assert.ok(node,label);node.value=value;node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
+ try{
+  await act(async()=>root.render(createElement(Host)));
+  await select('Visit 1 checks','subset');await click('Visit 1 check Returned');
+  await select('Visit 3 checks','subset');await click('Visit 3 check Initial');
+  assert.deepEqual(saved.paths[0].visits!.map(visit=>visit.checkIds),[['initial'],undefined,['returned']]);const ids=saved.paths[0].visits!.map(visit=>visit.id);
+  await select('Next transition','go');await click('Append transition to path');assert.deepEqual(saved.paths[0].edgeIds,['go','return','go']);assert.deepEqual(saved.paths[0].visits!.slice(0,3).map(visit=>visit.id),ids);
+  await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].filter(button=>button.textContent==='Remove from path').at(-1)!.click();});assert.ok(document.querySelector('[role=alertdialog]'));await click('Delete anyway');assert.equal(saved.paths[0].visits!.length,3);await click('Undo canvas deletion');assert.equal(saved.paths[0].visits!.length,4);assert.deepEqual(saved.paths[0].visits!.slice(0,3).map(visit=>visit.id),ids);
+  await click('Delete check 2');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Home return/);await click('Delete anyway');
+  assert.match(document.querySelector('[aria-label="Visit 3"]')!.textContent!,/Missing check: returned/);assert.deepEqual(saved.paths[0].visits![2].checkIds,['returned']);
+  await click('Undo canvas deletion');assert.deepEqual(saved.paths[0].visits![2].checkIds,['returned']);assert.doesNotMatch(document.querySelector('[aria-label="Visit 3"]')!.textContent!,/Missing check/);
+ }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
+});

@@ -404,3 +404,56 @@ test('an existing checkpoint handler followed by an ordered edge preserves each 
  assert.equal(result.status,'passed');assert.deepEqual(result.steps.map(step=>step.command),['assertVisible','tapOn','assertVisible']);assert.equal(result.canvas!.tests.find(test=>test.id==='handler')!.status,'passed');assert.ok(result.canvas!.edges.every(edge=>edge.status==='passed'));
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+function repeatedVisitFixture(){
+ const reference:YAMLReference={kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'};
+ const source='appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:home-check\n- assertVisible: Home\n# tnt-check:open\n- tapOn: Coordinator\n# tnt-check:identifier\n- assertVisible:\n    id: "^coordinator.fixed$"\n# tnt-check:back\n- back\n';
+ const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'home-check',label:'Home',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Home'}},{id:'open',label:'Open',role:'action',reference,tap:{target:'text',match:'regex',value:'Coordinator'}}]},{id:'coordinator',title:'Coordinator',x:400,y:0,tests:[{id:'identifier',label:'Fixed identifier',role:'assertion',reference,check:{visibility:'visible',target:'id',match:'regex',value:'^coordinator.fixed$'}},{id:'back',label:'Back',role:'action',reference,back:true}]}],edges:[{id:'go',from:'home',to:'coordinator',actionTestId:'open',actionTestIds:['open'],assertionTestId:'identifier',responseCondition:'Open Coordinator'},{id:'return',from:'coordinator',to:'home',actionTestId:'back',actionTestIds:['back'],assertionTestId:'home-check',responseCondition:'Back Home'}],paths:[{id:'route',name:'Repeated route',screenId:'home',edgeIds:['go','return','go']}]};
+ return {source,canvas};
+}
+
+test('a finite saved route repeats shared screens and edges with distinct execution evidence',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-visits-'));
+ const {source,canvas}=repeatedVisitFixture();
+ try{
+ const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
+  const {readFile}=await import('node:fs/promises');const executed=await readFile(flow,'utf8');
+  assert.equal((executed.match(/tapOn:/g)??[]).length,2);assert.equal((executed.match(/assertVisible: Home/g)??[]).length,2);
+  await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+  await writeFile(join(directory,'commands.json'),JSON.stringify(['launchAppCommand','assertConditionCommand','tapOnElement','assertConditionCommand','backPressCommand','assertConditionCommand','tapOnElement','assertConditionCommand'].map((name,index)=>({command:{[name]:{}},metadata:{depth:0,status:index===7?'FAILED':'COMPLETED'}}))));
+  return {code:0,log:'Occurrence fixture',cleanup:{verified:true,detail:'Exited'}};
+ }}});
+ const saved=await scenarios.save({name:'Repeated route',yaml:source,canvas});const loaded=await scenarios.workspace(saved.id);
+ const result=await scenarios.wait((await scenarios.start({workspaceId:loaded.id,deviceId,pathId:'route'})).id);
+ assert.equal(result.status,'path-failed');assert.equal(result.canvas!.screens.find(screen=>screen.id==='coordinator')!.status,'failed');
+ assert.deepEqual(result.canvas!.visits!.map(visit=>visit.screenId),['home','coordinator','home','coordinator']);
+ assert.deepEqual(result.canvas!.transitions!.map(edge=>edge.status),['passed','passed','failed']);
+ const checks=result.canvas!.occurrences!.filter(item=>item.testId==='identifier');assert.deepEqual(checks.map(check=>check.status),['passed','failed']);assert.notEqual(checks[0].id,checks[1].id);assert.notEqual(checks[0].stepId,checks[1].stepId);
+ assert.deepEqual((await scenarios.workspace(saved.id)).canvas!.paths,loaded.canvas!.paths);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('per-visit check subsets reload, share edits, and reject deleted selections without substitution',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-visit-subsets-'));const {source,canvas}=repeatedVisitFixture();
+ const returned={...canvas.screens[0].tests[0],id:'returned',label:'Returned Home',check:{visibility:'visible' as const,target:'id' as const,match:'regex' as const,value:'home.returned'}};
+ canvas.screens[0].tests.push(returned);
+ canvas.paths[0].edgeIds=['go','return'];canvas.paths[0].visits=[{id:'first',checkIds:['home-check']},{id:'details'},{id:'returned-visit',checkIds:['returned']}];
+ const yaml=source+'# tnt-check:returned\n- assertVisible:\n    id: home.returned\n';
+ try{
+ const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
+  await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+  // Returned Home has no command evidence, despite a successful report.
+  await writeFile(join(directory,'commands.json'),JSON.stringify(['launchAppCommand','assertConditionCommand','tapOnElement','assertConditionCommand','backPressCommand'].map(name=>({command:{[name]:{}},metadata:{depth:0,status:'COMPLETED'}}))));
+  return {code:0,log:'Subset fixture',cleanup:{verified:true,detail:'Exited'}};
+ }}});
+ const saved=await scenarios.save({name:'Home return subsets',yaml,canvas});const loaded=await scenarios.workspace(saved.id);
+ assert.deepEqual(loaded.canvas!.paths[0].visits,canvas.paths[0].visits);
+ const preview=await scenarios.preview({...loaded,pathId:'route'});assert.equal((preview.executionYaml.match(/assertVisible: Home/g)??[]).length,1);assert.equal((preview.executionYaml.match(/home.returned/g)??[]).length,1);
+ const result=await scenarios.wait((await scenarios.start({workspaceId:loaded.id,deviceId,pathId:'route'})).id);
+ assert.equal(result.status,'path-failed');assert.deepEqual(result.canvas!.visits!.map(visit=>visit.status),['passed','passed','unavailable']);assert.equal(result.canvas!.screens.find(screen=>screen.id==='home')!.status,'unavailable');
+ const repaired=await scenarios.save({...loaded,canvas:{...loaded.canvas!,edges:loaded.canvas!.edges.map(edge=>edge.id==='return'?{...edge,assertionTestId:'deleted-original'}:edge)}});assert.match((await scenarios.preview({...repaired,pathId:'route'})).executionYaml,/home.returned/);
+ const edited=await scenarios.save({...loaded,yaml:yaml.replace('home.returned','home.updated')});assert.match((await scenarios.preview({...edited,pathId:'route'})).executionYaml,/home.updated/);assert.deepEqual(edited.canvas!.paths[0].visits,canvas.paths[0].visits);
+ const removed=await scenarios.save({...loaded,canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.filter(test=>test.id!=='returned')}))}});
+ assert.match(removed.canvasDiagnostics!.map(item=>item.detail).join(' '),/deleted or stale check selections/);await assert.rejects(scenarios.start({workspaceId:removed.id,deviceId,pathId:'route'}),/deleted or stale/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});

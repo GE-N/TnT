@@ -105,7 +105,7 @@ export function writeChecks(yaml:string,previous:CanvasGraph,next:CanvasGraph){
 // Choosing a destination owns the connection and extends only the active route's tail.
 export function connectCanvasAction(graph:CanvasGraph,from:string,actionId:string,to:string,pathId:string){
  const previous=graph.edges.find(edge=>edge.from===from&&edgeActions(edge).includes(actionId));
- if(!to){const removed=graph.edges.filter(edge=>edgeActions(edge).includes(actionId)).map(edge=>edge.id);return {graph:{...graph,edges:graph.edges.filter(edge=>!removed.includes(edge.id)),paths:graph.paths.map(path=>({...path,edgeIds:path.edgeIds.filter(id=>!removed.includes(id))}))},pathId};}
+ if(!to){const removed=graph.edges.filter(edge=>edgeActions(edge).includes(actionId)).map(edge=>edge.id);return {graph:{...graph,edges:graph.edges.filter(edge=>!removed.includes(edge.id)),paths:graph.paths.map(path=>({...path,edgeIds:path.edgeIds.filter(id=>!removed.includes(id)),visits:routeVisits(graph,path).filter((_visit,index)=>index===0||!removed.includes(path.edgeIds[index-1]))}))},pathId};}
  const destination=graph.screens.find(screen=>screen.id===to);if(!destination)throw new Error('Choose an existing destination screen.');
  if(!previous&&graph.edges.length>=80)throw new Error('This canvas supports up to 80 connections.');
  const id=previous?.id??'action-link:'+actionId;
@@ -113,7 +113,7 @@ export function connectCanvasAction(graph:CanvasGraph,from:string,actionId:strin
  let paths=graph.paths;let path=paths.find(path=>path.id===pathId)??paths.find(path=>path.edgeIds.includes(id))??paths.find(path=>path.screenId===from&&!path.edgeIds.length);
  if(!path){if(paths.length>=20)throw new Error('Select an existing scenario path; this canvas supports up to 20 paths.');path={id:id+':path',name:(graph.screens.find(screen=>screen.id===from)!.title+' → '+destination.title).slice(0,120),screenId:from,edgeIds:[]};paths=[...paths,path];}
  const tail=path.edgeIds.length?graph.edges.find(edge=>edge.id===path!.edgeIds.at(-1))?.to:path.screenId;
- if(tail===from&&!path.edgeIds.includes(id))paths=paths.map(item=>item.id===path!.id?{...item,edgeIds:[...item.edgeIds,id]}:item);
+ if(tail===from)paths=paths.map(item=>item.id===path!.id?{...item,...appendRouteTransition(graph,item,id)}:item);
  return {graph:{...graph,edges:previous?graph.edges.map(item=>item.id===id?edge:item):[...graph.edges,edge],paths},pathId:path.id};
 }
 
@@ -121,7 +121,7 @@ export function connectCanvasAction(graph:CanvasGraph,from:string,actionId:strin
 export function appendCanvasConnection(graph:CanvasGraph,edge:Transition,pathId:string):CanvasGraph{
  const path=graph.paths.find(item=>item.id===pathId);
  const tail=path?.edgeIds.length?graph.edges.find(item=>item.id===path.edgeIds.at(-1))?.to:path?.screenId;
- return {...graph,edges:[...graph.edges,edge],paths:graph.paths.map(item=>item.id===pathId&&tail===edge.from?{...item,edgeIds:[...item.edgeIds,edge.id]}:item)};
+ return {...graph,edges:[...graph.edges,edge],paths:graph.paths.map(item=>item.id===pathId&&tail===edge.from?{...item,...appendRouteTransition(graph,item,edge.id)}:item)};
 }
 
 export function initialCanvasScreen(graph:CanvasGraph,path:CanvasGraph['paths'][number]){
@@ -131,5 +131,24 @@ export function screenChecks(graph:CanvasGraph,screenId?:string){return graph.sc
 export function edgeChecks(graph:CanvasGraph,edge:Transition){
  const authored=edge.actionTestIds||graph.screens.find(screen=>screen.id===edge.from)?.tests.some(test=>test.id===edge.actionTestId&&test.tap);
  const checks=authored?screenChecks(graph,edge.to).map(test=>test.id):[];
- return checks.includes(edge.assertionTestId)?checks:[edge.assertionTestId,...checks];
+ return checks.length?checks:[edge.assertionTestId];
+}
+
+// Older routes gain deterministic visit identities once saved. Edits retain surviving visits.
+export function routeVisits(graph:CanvasGraph,path:CanvasGraph['paths'][number]){
+ return path.visits??Array.from({length:path.edgeIds.length+1},(_value,index)=>({id:path.id+':visit:'+index,checkIds:undefined as string[]|undefined}));
+}
+export function visitChecks(graph:CanvasGraph,path:CanvasGraph['paths'][number],index:number){
+ const screenId=visitScreenId(graph,path,index);
+ const selected=routeVisits(graph,path)[index]?.checkIds;
+ return selected??(index===0?screenChecks(graph,screenId).map(test=>test.id):graph.edges.find(edge=>edge.id===path.edgeIds[index-1])?edgeChecks(graph,graph.edges.find(edge=>edge.id===path.edgeIds[index-1])!):[]);
+}
+
+export function appendRouteTransition(graph:CanvasGraph,path:CanvasGraph['paths'][number],edgeId:string){
+ if(path.edgeIds.length>=80)throw new Error('A finite route supports up to 80 transitions.');
+ return {...path,edgeIds:[...path.edgeIds,edgeId],visits:[...routeVisits(graph,path),{id:crypto.randomUUID()}]};
+}
+
+export function visitScreenId(graph:CanvasGraph,path:CanvasGraph['paths'][number],index:number){
+ return index===0?(initialCanvasScreen(graph,path)??graph.edges.find(edge=>edge.id===path.edgeIds[0])?.from):graph.edges.find(edge=>edge.id===path.edgeIds[index-1])?.to;
 }
