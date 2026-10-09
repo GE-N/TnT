@@ -1,4 +1,4 @@
-import {parseAllDocuments,stringify} from 'yaml';
+import {isSeq,parseAllDocuments} from 'yaml';
 import {referenceCatalog,type YAMLReference,type CanvasGraph} from './canvas.js';
 import {readAutomation,instrument,type Automation,type FlowCall} from './default-actions.js';
 import {validateMock,type MockPlan} from './mockoon.js';
@@ -41,8 +41,11 @@ export function selectScenario(workspace:{yaml:string;flows?:Record<string,strin
   if(rule.required&&(value===undefined||!value.trim()))throw new Error('Missing required input: '+name);
   if(value!==undefined&&((rule.type==='number'&&(!value.trim()||!Number.isFinite(Number(value))))||(rule.type==='boolean'&&!['true','false'].includes(value))))throw new Error('Invalid '+rule.type+' input: '+name);
  }
- const docs=parseAllDocuments(workspace.yaml);const commands=docs[1].toJS();
- const yaml=docs[0].toString()+'---\n'+stringify(scenario.steps.map(ref=>commands[ref.index!]),{aliasDuplicateObjects:false,lineWidth:0});
+ const docs=parseAllDocuments(workspace.yaml);const sequence=docs[1].contents;
+ if(!isSeq(sequence))throw new Error('Repair the authored command list.');
+ if(sequence.commentBefore&&sequence.items[0]){sequence.items[0].commentBefore=[sequence.commentBefore,sequence.items[0].commentBefore].filter(Boolean).join('\n');sequence.commentBefore=undefined;}
+ sequence.items=scenario.steps.map(ref=>sequence.items[ref.index!]);
+ const yaml=docs[0].toString()+'---\n'+docs[1].toString({directives:false});
  const catalog=referenceCatalog(yaml,flows);
  const positions=new Map(scenario.steps.map((ref,index)=>[ref.index!,index]));
  const base=workspace.automation;

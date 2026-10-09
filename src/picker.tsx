@@ -3,8 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { Capture, Candidate, StepDraft } from '../server/picker.js';
 
 type Preview = { canSave: boolean; matches: Candidate[]; maestroMatches: Candidate[]; stepsYaml: string; note: string };
-export function Picker({ token, deviceId, yaml, disabled, onBusy, onSave, onExecute }: {
-  token: string; deviceId: string; yaml: string; disabled: boolean; onBusy(busy: boolean): void;
+export function Picker({ token, deviceId, yaml, disabled, onBusy, onSave, onExecute, onCheckSelector }: {
+  onCheckSelector?:(selector:string)=>void;token: string; deviceId: string; yaml: string; disabled: boolean; onBusy(busy: boolean): void;
   onSave(yaml: string): Promise<void>; onExecute(flowYaml: string, captureId: string, reviewId: string): Promise<void>;
 }) {
   const [capture, setCapture] = useState<Capture>();
@@ -13,7 +13,7 @@ export function Picker({ token, deviceId, yaml, disabled, onBusy, onSave, onExec
   const [selected, setSelected] = useState<Candidate>();
   const [selector, setSelector] = useState('');
   const [clickPoint, setClickPoint] = useState<[number, number]>();
-  const [command, setCommand] = useState<StepDraft['command']>('tap');
+  const [command, setCommand] = useState<StepDraft['command']>(onCheckSelector?'visible':'tap');
   const [inputText, setInputText] = useState('');
   const [fallback, setFallback] = useState<StepDraft['fallback']>();
   const [preview, setPreview] = useState<Preview>();
@@ -22,6 +22,7 @@ export function Picker({ token, deviceId, yaml, disabled, onBusy, onSave, onExec
   const [notice, setNotice] = useState('');
   const sequence = useRef(0);
   useEffect(() => { onBusy(busy); }, [busy, onBusy]);
+  useEffect(() => () => onBusy(false), [onBusy]);
   useEffect(() => { sequence.current++; setCapture(undefined); setScreen(''); setCandidates([]); setSelected(undefined); setPreview(undefined); }, [deviceId, token]);
   useEffect(() => {
     if (!capture) return;
@@ -89,7 +90,7 @@ export function Picker({ token, deviceId, yaml, disabled, onBusy, onSave, onExec
         <label htmlFor="picked-selector">Selector (literal labels, YAML)</label><textarea id="picked-selector" value={selector} onChange={event => edit(event.target.value)} spellCheck={false} maxLength={4000} />
         <p className="field-hint">Supported: text, id, index (0-based), enabled, childOf, containsChild, above, below, leftOf, rightOf. Labels are literal and escaped in executable YAML. Index follows Maestro screen order (top to bottom, then left to right); use Test selector to verify the real match. Unlabeled controls have no text selector. Coordinates support tap/input only and depend on layout.</p>
         <button className="confirm" onClick={() => void review()}>Preview selector</button>
-        {preview && <><p className="field-hint">{preview.note} Matches: {preview.matches.map(match => match.id).join(', ') || 'none'}<br />Maestro eligible candidates (index order): {preview.maestroMatches.map((match, index) => `${index}: ${match.id}`).join(', ') || 'none'}</p><pre>{preview.stepsYaml}</pre><div className="scenario-actions"><button className="confirm" disabled={!preview.canSave || fallback === 'coordinates'} onClick={() => void finish('test')}>Test selector</button><button className="confirm" disabled={!preview.canSave} onClick={() => void finish('save')}>Save step</button><button className="primary" disabled={!preview.canSave} onClick={() => void finish('run')}>Save &amp; run step</button></div></>}
+        {preview && <><p className="field-hint">{preview.note} Matches: {preview.matches.map(match => match.id).join(', ') || 'none'}<br />Maestro eligible candidates (index order): {preview.maestroMatches.map((match, index) => `${index}: ${match.id}`).join(', ') || 'none'}</p><pre>{preview.stepsYaml}</pre><div className="scenario-actions">{onCheckSelector?<button className="confirm" disabled={!preview.canSave||blocked} onClick={()=>onCheckSelector(selector)}>Use selector for check</button>:<><button className="confirm" disabled={!preview.canSave || fallback === 'coordinates'} onClick={() => void finish('test')}>Test selector</button><button className="confirm" disabled={!preview.canSave} onClick={() => void finish('save')}>Save step</button><button className="primary" disabled={!preview.canSave} onClick={() => void finish('run')}>Save &amp; run step</button></>}</div></>}
       </fieldset>}
     </div></div>
     {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice" role="status">{notice}</div>}

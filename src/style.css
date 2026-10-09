@@ -46,3 +46,4 @@
 .default-action summary { cursor:pointer; font-size:12px; margin-bottom:12px; }
 .checkpoint { padding:12px 0; border-bottom:1px solid #2b382f; font-size:12px; }
 .execution-yaml { white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.6 monospace; }
+.canvas-checks{border:0;padding:0;margin:0;min-width:0}.canvas-check-row{border-bottom:1px solid #3d5341;padding:7px 0;font-size:11px}.canvas-check-row summary{cursor:pointer;overflow-wrap:anywhere;line-height:1.6}.canvas-check-row input,.canvas-check-row select{font-size:11px;padding:6px;margin:4px 0;width:100%;min-width:0}.canvas-check-row button,.canvas-checks>button{font-size:10px;border:1px solid #435744;border-radius:4px;padding:5px 7px;background:#203329;color:#dcebd8;margin:4px 4px 4px 0}.canvas-check-row button:disabled{opacity:.4}.canvas-checks>button{width:100%}

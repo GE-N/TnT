@@ -238,3 +238,50 @@ test('a completed reusable-flow wrapper cannot pass a destination whose nested a
   assert.equal(result.status,'path-failed');assert.equal(result.canvas?.tests.find(test=>test.id==='assert')?.status,'skipped');
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('a single screen reloads YAML edits into checks and blocks incomplete drafts before acquiring a device',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-screen-draft-'));
+ try{
+  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async()=>{throw new Error('Draft must not run');}}});
+  const source='appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:welcome\n- assertNotVisible:\n    text: "^Error$"\n';
+  const canvas={screens:[{id:'home',title:'Descriptive title',x:70,y:90,tests:[{id:'welcome',label:'Welcome',role:'assertion',reference:{kind:'step',file:'flow.yaml',index:1,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:'Old'}},{id:'draft',label:'Draft',role:'assertion',reference:{kind:'step',file:'flow.yaml',index:2,fingerprint:'draft'},check:{visibility:'visible',target:'id',match:'exact',value:''}}]}],edges:[],paths:[{id:'single',name:'Home checks',edgeIds:[],screenId:'home'}]};
+  const saved=await scenarios.save({name:'Screen draft',yaml:source,canvas});
+  const loaded=await scenarios.workspace(saved.id);
+  assert.deepEqual(loaded.canvas!.screens[0].tests[0].check,{visibility:'absent',target:'text',match:'exact',value:'Error'});
+  assert.equal(loaded.yaml,source);assert.equal(loaded.canvas!.screens[0].x,70);
+  assert.match(loaded.canvasDiagnostics!.find(item=>item.ownerId==='draft')!.detail,/selector/i);
+  await assert.rejects(scenarios.start({workspaceId:loaded.id,deviceId,pathId:'single'}),/selector/i);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+for(const outcome of ['COMPLETED','FAILED','SKIPPED'] as const)test(`single-screen checks run after setup with saved inputs and report ${outcome}`,async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-single-screen-'));let execution='';
+ try{
+  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
+   const {readFile}=await import('node:fs/promises');execution=await readFile(join(directory,'.tnt-execution.yaml'),'utf8');
+   const assertion={assertConditionCommand:{condition:{visible:{textRegex:'^Home$'}}}};
+   const absent={assertConditionCommand:{condition:{notVisible:{textRegex:'^Error$'}}}};
+   await writeFile(join(directory,'report.xml'),`<testsuites><testsuite tests="1" failures="${outcome==='FAILED'?1:0}"/></testsuites>`);
+   await writeFile(join(directory,'commands.json'),JSON.stringify([
+    {command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:{runFlowCommand:{label:'TnT setup'}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:{runFlowCommand:{label:'TnT step 1',commands:[assertion]}},metadata:{depth:0,status:'COMPLETED'}},
+    {command:assertion,metadata:{depth:1,status:'COMPLETED'}},
+    {command:{runFlowCommand:{label:'TnT step 2',commands:[absent]}},metadata:{depth:0,status:outcome==='FAILED'?'FAILED':'COMPLETED'}},
+    {command:absent,metadata:{depth:1,status:outcome,error:{message:'Error banner unexpectedly visible'}}},
+   ]));return{code:outcome==='FAILED'?1:0,log:'Fixture screen check evidence',cleanup:{verified:true,detail:'Exited'}};
+  }}});
+  const source='appId: com.example.HybridApp\n---\n# tnt-check:welcome\n- assertVisible:\n    text: "^Home$"\n# tnt-check:no-error\n- assertNotVisible:\n    text: "^Error$"\n';
+  const flows={'setup.yaml':'appId: com.example.HybridApp\n---\n- inputText: ${USER}\n'};
+  const catalog=await scenarios.references({yaml:source,flows});
+  const canvas={screens:[{id:'home',title:'Not an assertion',x:10,y:20,tests:catalog.references.filter(ref=>ref.kind==='step').map((ref,index)=>({id:index===0?'welcome':'no-error',label:index===0?'Welcome':'No error',role:'assertion',reference:ref,check:{visibility:index===0?'visible':'absent',target:'text',match:'exact',value:index===0?'Home':'Error'}}))}],edges:[],paths:[{id:'single',name:'Home',screenId:'home',edgeIds:[]}]};
+  const definitions=[{id:'home-test',name:'Home test',steps:catalog.references.filter(ref=>ref.kind==='step'),pathId:'single',inputs:{USER:'Example'},parameters:{USER:{type:'text',required:true}},setup:{file:'setup.yaml',parameters:{}},enabledHandlerIds:[]}];
+  const saved=await scenarios.save({name:'Home',yaml:source,flows,canvas,scenarios:definitions});
+  const loaded=await scenarios.workspace(saved.id);
+  const result=await scenarios.wait((await scenarios.start({workspaceId:loaded.id,deviceId,scenarioId:'home-test'})).id);
+  assert.equal(result.snapshot.resetApp,false);assert.equal(result.snapshot.scenario!.inputs.USER,'Example');
+  assert.ok(execution.indexOf('TnT setup')<execution.indexOf('assertVisible'));assert.match(execution,/clearState: false/);
+  assert.equal(result.canvas!.tests[0].status,'passed');assert.equal(result.canvas!.tests[1].status,outcome==='COMPLETED'?'passed':outcome==='FAILED'?'failed':'skipped');
+  assert.equal(result.status,outcome==='COMPLETED'?'passed':outcome==='FAILED'?'assertion-failed':'path-failed');
+ }finally{await rm(root,{recursive:true,force:true});}
+});

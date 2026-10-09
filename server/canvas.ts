@@ -1,13 +1,14 @@
 import type {Automation,AutomationResult} from './default-actions.js';
 import {createHash} from 'node:crypto';
 import {parseAllDocuments, stringify} from 'yaml';
+import {authoredChecks,checkProblem,type ScreenCheck} from '../shared/canvas-authoring.js';
 import type {Step} from './scenarios.js';
 
 export type YAMLReference={kind:'step'|'flow'|'setup'|'handler';file:string;index?:number;actionId?:string;fingerprint:string};
-export type CanvasTest={id:string;label:string;role:'action'|'assertion'|'setup'|'handler'|'test';reference:YAMLReference};
+export type CanvasTest={check?:ScreenCheck;id:string;label:string;role:'action'|'assertion'|'setup'|'handler'|'test';reference:YAMLReference};
 export type ScreenNode={id:string;title:string;x:number;y:number;referenceScreenshot?:string;tests:CanvasTest[]};
 export type Transition={id:string;from:string;to:string;actionTestId:string;assertionTestId:string;responseCondition:string};
-export type CanvasGraph={screens:ScreenNode[];edges:Transition[];paths:{id:string;name:string;edgeIds:string[]}[]};
+export type CanvasGraph={screens:ScreenNode[];edges:Transition[];paths:{id:string;name:string;edgeIds:string[];screenId?:string}[]};
 export type CatalogEntry=YAMLReference & {label:string;command:string;assertion:boolean;preview:string};
 export type CanvasDiagnostic={ownerId:string;detail:string};
 export type CanvasResult={pathId:string;note:string;tests:{id:string;status:Step['status'];stepId?:string;detail:string}[];screens:{id:string;status:Step['status']}[];edges:{id:string;status:Step['status']}[]};
@@ -67,6 +68,7 @@ export function readCanvas(value:unknown):CanvasGraph|undefined{
   id(screen.id);if(!text(screen.title)||!Number.isFinite(screen.x)||!Number.isFinite(screen.y)||screen.x<0||screen.y<0||screen.x>2400||screen.y>1400||!Array.isArray(screen.tests)||screen.tests.length>30)throw new Error('Provide titled screens with positions and up to 30 tests each.');
   if(screen.referenceScreenshot!==undefined&&(!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(screen.referenceScreenshot)||screen.referenceScreenshot.length>350_000))throw new Error('Reference screenshots must be PNG/JPEG data up to 250 KB.');
   for(const test of screen.tests){id(test.id);if(!text(test.label)||!['action','assertion','setup','handler','test'].includes(test.role)||!test.reference||!['step','flow','setup','handler'].includes(test.reference.kind)||!text(test.reference.file,80)||!text(test.reference.fingerprint,64))throw new Error('Provide named tests with explicit YAML references.');
+   if(test.check&&(!['visible','absent'].includes(test.check.visibility)||!['text','id'].includes(test.check.target)||!['exact','contains','regex'].includes(test.check.match)||typeof test.check.value!=='string'||test.check.value.length>4000))throw new Error('Provide a bounded visible/absent check selector.');
    const reference=test.reference;
    if(['step','handler'].includes(reference.kind)&&(!Number.isInteger(reference.index)||reference.index!<0))throw new Error('Step/handler references require a nonnegative command position.');
    if(reference.kind==='handler'&&!text(reference.actionId))throw new Error('Handler references require their explicit default-action identity.');
@@ -74,7 +76,7 @@ export function readCanvas(value:unknown):CanvasGraph|undefined{
   }
  }
  for(const edge of graph.edges){id(edge.id);if(![edge.from,edge.to,edge.actionTestId,edge.assertionTestId].every(item=>text(item))||!text(edge.responseCondition,300))throw new Error('Transitions require source/destination, action/assertion references and response condition.');}
- for(const path of graph.paths){id(path.id);if(!text(path.name)||!Array.isArray(path.edgeIds)||path.edgeIds.length>80||path.edgeIds.some(item=>!text(item)))throw new Error('Paths need a name and explicitly ordered transition identities.');}
+ for(const path of graph.paths){id(path.id);if(path.screenId!==undefined&&!text(path.screenId))throw new Error('Choose an initial screen identity.');if(!text(path.name)||!Array.isArray(path.edgeIds)||path.edgeIds.length>80||path.edgeIds.some(item=>!text(item)))throw new Error('Paths need a name and explicitly ordered transition identities.');}
  return graph;
 }
 function sameLocation(a:YAMLReference,b:YAMLReference){return a.kind===b.kind&&a.file===b.file&&a.index===b.index&&a.actionId===b.actionId;}
@@ -89,7 +91,9 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
  const catalog=referenceCatalog(yaml,flows,automation);const diagnostics=[...catalog.diagnostics];
  const screens=new Map(graph.screens.map(screen=>[screen.id,screen]));
  const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,{test,screen}] as const)));
+ let authored:ReturnType<typeof authoredChecks>=[];try{authored=authoredChecks(yaml);}catch{ /* YAML catalog reports parse diagnostics. */ }
  for(const {test} of tests.values()){
+  if(test.check){const matches=authored.filter(item=>item.id===test.id);const issue=checkProblem(test.check);if(issue||matches.length!==1||!matches[0].check)diagnostics.push({ownerId:test.id,detail:issue??'Check YAML is missing, unsupported or ambiguous. Repair its command or selector before running.'});continue;}
   if(!resolveReference(test.reference,catalog.references)){
    const alternatives=catalog.references.filter(entry=>entry.kind===test.reference.kind&&entry.file===test.reference.file&&entry.fingerprint===test.reference.fingerprint);
    diagnostics.push({ownerId:test.id,detail:alternatives.length>1?'Ambiguous moved YAML reference. Explicitly choose its intended command again.':'Broken or stale YAML reference. Explicitly relink to the intended command; references are never retargeted automatically.'});
@@ -102,6 +106,7 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
   if(target&&!target.assertion)diagnostics.push({ownerId:edge.id,detail:'The destination must reference an executable assertion or assertion flow.'});
  }
  for(const path of graph.paths){
+  if(path.screenId&&!screens.has(path.screenId))diagnostics.push({ownerId:path.id,detail:'Restore or select the initial screen for this scenario.'});
   const edges=path.edgeIds.map(id=>graph.edges.find(edge=>edge.id===id));
   if(edges.some(edge=>!edge)||edges.some((edge,index)=>index>0&&edge?.from!==edges[index-1]?.to))diagnostics.push({ownerId:path.id,detail:'Repair the ordered route: every transition must exist and continue from the previous destination.'});
  }
@@ -109,12 +114,14 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
 }
 export function selectedCanvasPath(graph:CanvasGraph,yaml:string,flows:Record<string,string>,pathId:unknown,automation?:Automation){
  if(typeof pathId!=='string')throw new Error('Explicitly select a canvas scenario path before running.');
- const path=graph.paths.find(path=>path.id===pathId);if(!path||!path.edgeIds.length)throw new Error('Select a nonempty explicit scenario path.');
+ const path=graph.paths.find(path=>path.id===pathId);if(!path||(!path.edgeIds.length&&!path.screenId))throw new Error('Select a nonempty explicit scenario path.');
  const inspection=inspectCanvas(graph,yaml,flows,automation);
  const edges=path.edgeIds.map(id=>graph.edges.find(edge=>edge.id===id));
  const required=new Set(['yaml',pathId,...path.edgeIds,...edges.flatMap(edge=>edge?[edge.actionTestId,edge.assertionTestId]:[])]);
+ if(path.screenId){required.add(path.screenId);for(const test of graph.screens.find(screen=>screen.id===path.screenId)?.tests??[])required.add(test.id);}
  const errors=inspection.diagnostics.filter(diagnostic=>required.has(diagnostic.ownerId));
  if(errors.length)throw new Error(errors.map(error=>error.detail).join(' '));
+ if(path.screenId&&!path.edgeIds.length){const screen=graph.screens.find(screen=>screen.id===path.screenId)!;if(!screen.tests.some(test=>test.check))throw new Error('Add at least one screen check before running.');return path;}
  const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,test] as const)));
  let previous=-Infinity;
  for(const edge of edges as Transition[]){
@@ -134,7 +141,10 @@ export function mapCanvas(graph:CanvasGraph,pathId:string,yaml:string,steps:Step
  const selectedEdges=graph.edges.filter(edge=>path.edgeIds.includes(edge.id));
  const selectedScreens=new Set(selectedEdges.flatMap(edge=>[edge.from,edge.to]));
  const selectedTests=new Set(selectedEdges.flatMap(edge=>[edge.actionTestId,edge.assertionTestId]));
+ if(path.screenId){selectedScreens.add(path.screenId);for(const test of graph.screens.find(screen=>screen.id===path.screenId)?.tests??[])selectedTests.add(test.id);}
  const destinationTests=new Set(selectedEdges.map(edge=>edge.assertionTestId));
+ if(path.screenId)for(const test of graph.screens.find(screen=>screen.id===path.screenId)?.tests??[])if(test.check)destinationTests.add(test.id);
+ const authored=authoredChecks(yaml);
  const catalog=execution?referenceCatalog(yaml,execution.flows,execution.definition).references:[];
  const tests=graph.screens.flatMap(screen=>screen.tests.map(test=>{
   const reference=test.reference;
@@ -147,7 +157,7 @@ export function mapCanvas(graph:CanvasGraph,pathId:string,yaml:string,steps:Step
    const outcome=execution?.result?.actions.find(action=>action.id===reference.actionId&&action.beforeStep===reference.index);
    return {id:test.id,status:outcome?.status??'unavailable' as Step['status'],detail:outcome?.detail??'No verified outcome for this action at its explicit checkpoint.'};
   }
-  const index=executionIndex(reference,yaml);const step=index===undefined?undefined:steps[index];
+  const index=test.check?authored.find(item=>item.id===test.id)?.index:executionIndex(reference,yaml);const step=index===undefined?undefined:steps[index];
   const outcome=destinationTests.has(test.id)?step?.status==='failed'?'failed':step?.assertionStatus??'unavailable':step?.status??'unavailable';
   return {id:test.id,status:outcome as Step['status'],stepId:step?.id,detail:index===undefined?'Uncalled or ambiguous reusable flow; no outcome inferred.':destinationTests.has(test.id)?'Destination requires completed assertion metadata; a successful flow wrapper alone is insufficient.':'Mapped from top-level authored YAML command outcome.'};
  }));

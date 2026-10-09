@@ -1,3 +1,4 @@
+import {refreshChecks} from '../shared/canvas-authoring.js';
 import {readScenarios,selectScenario,type ScenarioDefinition} from './scenario-definitions.js';
 import {readAutomation,instrument,mapAutomation,metadataStatus,type Automation,type AutomationResult,type ExecutionItem} from './default-actions.js';
 import { mkdir, readFile, writeFile, realpath, readdir, mkdtemp, rm, rename } from 'node:fs/promises';
@@ -53,7 +54,8 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     },
     async references(input: {yaml:string;flows?:Record<string,string>;canvas?:unknown;automation?:unknown}) {
       if(typeof input.yaml!=='string'||Buffer.byteLength(input.yaml)>100_000|| (input.flows!==undefined&&(!input.flows||typeof input.flows!=='object'||Array.isArray(input.flows)||Object.values(input.flows).some(value=>typeof value!=='string')))||Buffer.byteLength(JSON.stringify(input.flows??{}))>900_000)throw new Error('Provide bounded YAML and reusable flows.');
-      const canvas=readCanvas(input.canvas);
+      const rawCanvas=readCanvas(input.canvas);
+      const canvas=rawCanvas?refreshChecks(rawCanvas,input.yaml):undefined;
       let automation:Automation|undefined;let automationError:string|undefined;
       try{automation=readAutomation(input.automation,input.flows??{},input.yaml);}catch(error){automationError=error instanceof Error?error.message:'Repair default-action configuration.';}
       const catalog=canvas?inspectCanvas(canvas,input.yaml,input.flows,automation):referenceCatalog(input.yaml,input.flows,automation);
@@ -65,7 +67,8 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const scenarios=readScenarios(input.scenarios);
       const flows = validateFlows(input.flows);
       const mock = validateMock(input.mock);
-      const canvas=readCanvas(input.canvas);
+      const rawCanvas=readCanvas(input.canvas);
+      const canvas=rawCanvas?refreshChecks(rawCanvas,input.yaml):undefined;
 
       if (Buffer.byteLength(JSON.stringify({flows,mock,canvas,automation:input.automation,scenarios})) > 900_000) throw new Error('Combined reusable flows and mock environment exceed 900 KB.');
       const automation=readAutomation(input.automation,flows??{},input.yaml);
@@ -87,11 +90,12 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       if(resetApp&&!workspace.automation&&!selection)throw new Error('Reset requires declared independent setup.');
       validateFlows(workspace.flows);
       validateMock(workspace.mock);
-      const canvas=readCanvas(workspace.canvas);
+      const rawCanvas=readCanvas(workspace.canvas);
+      const canvas=rawCanvas?refreshChecks(rawCanvas,workspace.yaml):undefined;
 
-      const { appId, steps } = validate(workspace.yaml, workspace.flows);
       const automation=readAutomation(workspace.automation,workspace.flows??{},workspace.yaml);
       const canvasPath=canvas?selectedCanvasPath(canvas,workspace.yaml,workspace.flows??{},selectedPathId,automation):undefined;
+      const { appId, steps } = validate(workspace.yaml, workspace.flows);
       const derived=automation?instrument(workspace.yaml,automation,resetApp):undefined;
       for (const flow of Object.values(workspace.flows ?? {})) { if (validate(flow, workspace.flows).appId !== appId) throw new Error('Reusable flows must declare the same appId as the scenario.'); }
       if ((input.captureId === undefined) !== (input.pickerReviewId === undefined)) throw new Error('Provide both capture and reviewed step identity.');
@@ -172,7 +176,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
             }
             if(canvas&&canvasPath){
               run.canvas=mapCanvas(canvas,canvasPath.id,workspace.yaml,run.steps,false,automation?{definition:automation,result:run.automation,flows:workspace.flows}:undefined);
-              if(run.status==='passed'&&run.canvas.edges.some(edge=>canvasPath.edgeIds.includes(edge.id)&&edge.status!=='passed')){run.status='path-failed';run.error='The selected scenario path was not verified: a required action or destination assertion did not report passed. No alternate route was followed.';}
+              if(run.status==='passed'&&(run.canvas.edges.some(edge=>canvasPath.edgeIds.includes(edge.id)&&edge.status!=='passed')||!!canvasPath.screenId&&run.canvas.screens.find(screen=>screen.id===canvasPath.screenId)?.status!=='passed')){run.status='path-failed';run.error='The selected scenario path was not verified: a required action or destination assertion did not report passed. No alternate route was followed.';}
             }
             run.finishedAt = new Date().toISOString();
             try { await writeRecord(join(path, 'result.json'), run); }
