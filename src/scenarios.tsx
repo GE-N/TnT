@@ -44,6 +44,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   const [submitting, setSubmitting] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
   const [error, setError] = useState('');
+  const [runError,setRunError]=useState('');
   const [artifact, setArtifact] = useState<{ name: string; text?: string; image?: string }>();
   const artifactSequence = useRef(0);
   const running = run?.status === 'running';
@@ -75,7 +76,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   }, [run?.id, running]);
   useEffect(() => () => { if (artifact?.image) URL.revokeObjectURL(artifact.image); }, [artifact?.image]);
   async function openWorkspace() {
-    setSubmitting(true);setError('');
+    setSubmitting(true);setError('');setRunError('');
     try {
       const workspace:Workspace=await api('/api/workspaces/'+openWorkspaceId.trim());
       setDefinitions(workspace.scenarios??[]);setScenarioId('');setDefinitionError('');setResetApp(false);
@@ -94,7 +95,13 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     return workspace;
   }
   async function submit(execute: boolean) {
-    if (execute) { artifactSequence.current++; setArtifact(undefined); }
+    if(submitting||pickerBusy||(execute&&(running||launchBusy)))return;
+    if (execute) {
+      setRunError('');
+      if(!token){setRunError('Connect to the runner before running a scenario.');return;}
+      if(!deviceId){setRunError('Select a device before running a scenario.');return;}
+      artifactSequence.current++; setArtifact(undefined);
+    }
     setError(''); setSubmitting(true);
     try {
       const workspace = await save();
@@ -107,7 +114,10 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
         setRun(next);
         setInputs('');
       }
-    } catch (error) { setError(error instanceof Error ? error.message : 'Scenario request failed.'); }
+    } catch (error) {
+      const message=error instanceof Error ? error.message : 'Scenario request failed.';
+      if(execute)setRunError(message);else setError(message);
+    }
     finally { setSubmitting(false); }
   }
   async function savePicked(yaml: string) {
@@ -156,7 +166,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Run an authored scenario</h2><p>Saved YAML is the executable authority. Each run gets its own snapshot.</p></div></div>
     <div className="workspace-open"><label htmlFor="open-workspace">Saved workspace ID</label><input id="open-workspace" value={openWorkspaceId} onChange={event=>setOpenWorkspaceId(event.target.value)} placeholder="Paste the ID shown after saving"/><button className="confirm" disabled={!token||!openWorkspaceId.trim()||running||submitting||pickerBusy||launchBusy} onClick={()=>void openWorkspace()}>Open saved workspace</button></div>
     <ScenarioLibrary key={'scenarios-'+loadRevision} items={definitions} onChange={setDefinitions} selected={scenarioId} onSelect={id=>{setScenarioId(id);setPathId(definitions.find(item=>item.id===id)?.pathId??'');setInputs('');}} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} canvas={canvas} automation={automation} mock={mock} disabled={running||submitting||pickerBusy||launchBusy} onError={setDefinitionError}/>
-    <CanvasEditor key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} picker={{token,deviceId,onBusy:setPickerBusy}} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));}} disabled={running||submitting||pickerBusy||launchBusy}/>
+    <CanvasEditor onRun={()=>void submit(true)} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} picker={{token,deviceId,onBusy:setPickerBusy}} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));}} disabled={running||submitting||pickerBusy||launchBusy}/>
     <MockSetup key={loadRevision} initialPlan={loadedMock} disabled={running||submitting||pickerBusy} onChange={setMockPlan}/>
     <div className="scenario-grid"><div className="scenario-editor">
       <label htmlFor="expected-page">Expected page text for reusable assertion</label><input id="expected-page" value={expectedPage} onChange={event=>setExpectedPage(event.target.value)} disabled={running||submitting||pickerBusy}/><button className="confirm" disabled={running||submitting||pickerBusy} onClick={addAssertion}>Append reusable assertion</button>
@@ -209,5 +219,6 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       </>}
     </div></div>
     <Picker token={token} deviceId={deviceId} yaml={yaml} disabled={launchBusy || running || submitting} onBusy={setPickerBusy} onSave={savePicked} onExecute={executePicked} />
+    {runError&&<div className="run-error-toast" role="alert"><button className="text-button" aria-label="Dismiss run error" onClick={()=>setRunError('')}>×</button><strong>Cannot run scenario</strong><p>{runError}</p></div>}
   </section>;
 }

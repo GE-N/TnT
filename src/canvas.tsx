@@ -15,27 +15,27 @@ function NodeTitle({title,onRename,onSelect}:{title:string;onRename:(title:strin
  return <input className="screen-node-title" aria-label={'Screen title for '+title} title="Edit screen title · Enter to save · Escape to cancel" value={draft} maxLength={120} onFocus={onSelect} onChange={event=>setDraft(event.target.value)} onBlur={()=>{const next=draft.trim();if(next&&next!==title)onRename(next);setDraft(next||title);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();event.currentTarget.blur();}if(event.key==='Escape'){event.preventDefault();setDraft(title);}}}/>;
 }
 const referenceLabel=(reference:YAMLReference)=>reference.kind==='setup'?'Setup · '+reference.file:reference.kind==='handler'?`Handler ${reference.actionId} · before step ${(reference.index??0)+1} · ${reference.file}`:reference.kind==='flow'?reference.file:`step ${(reference.index??0)+1}`;
-export function CanvasBoard({graph,pathId,result,onMove,onSelect,selected,renderChecks,onConnect,onDelete,onRename,onAdd}: {graph:CanvasGraph;pathId?:string;result?:CanvasResult;onMove?:(id:string,x:number,y:number)=>void;onSelect?:(id:string)=>void;selected?:string;renderChecks?:(screenId:string)=>ReactNode;onConnect?:(from:string,to:string)=>void;onDelete?:(id:string)=>void;onRename?:(id:string,title:string)=>void;onAdd?:(x:number,y:number)=>void}){
+export function CanvasBoard({graph,pathId,result,onMove,onSelect,selected,renderChecks,onConnect,onDelete,onRename,onAdd,onRun}: {graph:CanvasGraph;pathId?:string;result?:CanvasResult;onMove?:(id:string,x:number,y:number)=>void;onSelect?:(id:string)=>void;selected?:string;renderChecks?:(screenId:string)=>ReactNode;onConnect?:(from:string,to:string)=>void;onDelete?:(id:string)=>void;onRename?:(id:string,title:string)=>void;onAdd?:(x:number,y:number)=>void;onRun?:()=>void}){
  const [zoom,setZoom]=useState(.85);
  const [contextMenu,setContextMenu]=useState<{left:number;top:number;x:number;y:number;screenId?:string}>();
  const menu=useRef<HTMLDivElement>(null);
  const contextTarget=useRef<HTMLElement|null>(null);
  useEffect(()=>{
   if(!contextMenu)return;
-  menu.current?.querySelector('button')?.focus();
+  menu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
   function dismiss(event:Event){if(event.type==='pointerdown'&&menu.current?.contains(event.target as Node))return;setContextMenu(undefined);}
   function escape(event:KeyboardEvent){if(event.key==='Escape'){event.preventDefault();setContextMenu(undefined);contextTarget.current?.focus();}}
   document.addEventListener('pointerdown',dismiss);document.addEventListener('keydown',escape);window.addEventListener('resize',dismiss);window.addEventListener('scroll',dismiss,true);
   return()=>{document.removeEventListener('pointerdown',dismiss);document.removeEventListener('keydown',escape);window.removeEventListener('resize',dismiss);window.removeEventListener('scroll',dismiss,true);};
  },[contextMenu]);
  function openMenu(event:MouseEvent<HTMLElement>,screenId?:string){
-  if(screenId?!onDelete:!onAdd)return;
+  if(screenId?!onDelete:!onAdd&&!onRun)return;
   event.preventDefault();event.stopPropagation();
   const bounds=surface.current!.getBoundingClientRect();
   const target=event.currentTarget.getBoundingClientRect();
   const left=event.clientX||target.left+20;const top=event.clientY||target.top+20;
   contextTarget.current=event.currentTarget;
-  setContextMenu({screenId,left:Math.max(8,Math.min(window.innerWidth-188,left)),top:Math.max(8,Math.min(window.innerHeight-60,top)),x:Math.max(0,Math.min(2400,(left-bounds.left)/zoom)),y:Math.max(0,Math.min(1400,(top-bounds.top)/zoom))});
+  setContextMenu({screenId,left:Math.max(8,Math.min(window.innerWidth-188,left)),top:Math.max(8,Math.min(window.innerHeight-(!screenId&&onAdd&&onRun?100:60),top)),x:Math.max(0,Math.min(2400,(left-bounds.left)/zoom)),y:Math.max(0,Math.min(1400,(top-bounds.top)/zoom))});
  }
 
  const surface=useRef<HTMLDivElement>(null);const [nodeHeights,setNodeHeights]=useState<Record<string,number>>({});
@@ -51,7 +51,7 @@ export function CanvasBoard({graph,pathId,result,onMove,onSelect,selected,render
  if(route?.screenId)selectedScreens.add(route.screenId);
  function color(status?:string){return status==='passed'?'#c7ed88':status==='failed'?'#ef9b88':status==='skipped'?'#d8bc75':'#a7c8ed';}
  return <div className="canvas-board-wrap"><div className="canvas-toolbar"><span>Drag screen headers · scroll to pan{onAdd&&' · Right-click to add or delete nodes'}</span><button onClick={()=>setZoom(value=>Math.max(.4,value-.1))} aria-label="Zoom out">−</button><span>{Math.round(zoom*100)}%</span><button onClick={()=>setZoom(value=>Math.min(1.4,value+.1))} aria-label="Zoom in">+</button><button onClick={()=>setZoom(.85)}>Reset zoom</button></div>
- <div className="canvas-viewport" role="region" aria-label={result?'Executed screen canvas':'Screen test canvas'}><div style={{width:2700*zoom,height:boardHeight*zoom}}><div className="canvas-surface" tabIndex={onAdd?0:undefined} onContextMenu={event=>openMenu(event)} ref={surface} style={{height:boardHeight,transform:`scale(${zoom})`}}>
+ <div className="canvas-viewport" role="region" aria-label={result?'Executed screen canvas':'Screen test canvas'}><div style={{width:2700*zoom,height:boardHeight*zoom}}><div className="canvas-surface" tabIndex={onAdd||onRun?0:undefined} onContextMenu={event=>openMenu(event)} ref={surface} style={{height:boardHeight,transform:`scale(${zoom})`}}>
  <svg className="canvas-lines" width="2700" height={boardHeight} aria-label="Screen transitions"><defs><marker id={marker} viewBox="0 0 8 8" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" refX="7" refY="4" orient="auto"><path d="M1,1 L7,4 L1,7" fill="none" stroke="context-stroke" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/></marker></defs>{graph.edges.map(edge=>{
  const from=graph.screens.find(screen=>screen.id===edge.from);const to=graph.screens.find(screen=>screen.id===edge.to);if(!from||!to)return null;
  const start=[from.x+250,from.y+58];const end=[to.x,to.y+58];const middle=(start[0]+end[0])/2;const status=result?.edges.find(item=>item.id===edge.id)?.status;
@@ -66,14 +66,19 @@ export function CanvasBoard({graph,pathId,result,onMove,onSelect,selected,render
  </article>;})}
  {!graph.screens.length&&<div className="canvas-empty"><h3>Build your screen map</h3><p>Add a screen and describe its checks. Screen titles are descriptive.</p></div>}
  </div></div></div>
- {contextMenu&&(contextMenu.screenId?onDelete:onAdd)&&<div ref={menu} className="canvas-context-menu" role="menu" aria-label={contextMenu.screenId?'Node menu':'Canvas menu'} style={{left:contextMenu.left,top:contextMenu.top}} onContextMenu={event=>event.preventDefault()}>
- <button role="menuitem" disabled={!contextMenu.screenId&&graph.screens.length>=40} onClick={()=>{setContextMenu(undefined);if(contextMenu.screenId)onDelete?.(contextMenu.screenId);else onAdd?.(contextMenu.x,contextMenu.y);}}>{contextMenu.screenId?'Delete node':'Add node'}</button>
+ {contextMenu&&(contextMenu.screenId?onDelete:onAdd||onRun)&&<div ref={menu} className="canvas-context-menu" role="menu" aria-label={contextMenu.screenId?'Node menu':'Canvas menu'} style={{left:contextMenu.left,top:contextMenu.top}} onContextMenu={event=>event.preventDefault()} onKeyDown={event=>{
+  if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
+  event.preventDefault();const items=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const index=items.indexOf(document.activeElement as HTMLButtonElement);
+  const next=event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length;items[next]?.focus();
+ }}>
+ {(contextMenu.screenId?onDelete:onAdd)&&<button role="menuitem" disabled={!contextMenu.screenId&&graph.screens.length>=40} onClick={()=>{setContextMenu(undefined);if(contextMenu.screenId)onDelete?.(contextMenu.screenId);else onAdd?.(contextMenu.x,contextMenu.y);}}>{contextMenu.screenId?'Delete node':'Add node'}</button>}
+ {!contextMenu.screenId&&onRun&&<button role="menuitem" onClick={()=>{setContextMenu(undefined);onRun();}}>Run scenario</button>}
  </div>}
  {result?.visits&&<section aria-label="Visit execution details"><h3>Visit execution details</h3>{result.visits.map((visit,index)=><details key={visit.id} open><summary>Visit {index+1} · {graph.screens.find(screen=>screen.id===visit.screenId)?.title??visit.screenId} · {visit.status}</summary>{result.occurrences?.filter(item=>item.visitId===visit.id).map(item=><p key={item.id}>{graph.screens.flatMap(screen=>screen.tests).find(test=>test.id===item.testId)?.label??item.testId} · {item.status}<small style={{display:'block'}}>{item.detail} {item.stepId}</small></p>)}</details>)}{result.transitions?.map((transition,index)=><p key={transition.id}>Transition {index+1} · {graph.edges.find(edge=>edge.id===transition.edgeId)?.responseCondition??transition.edgeId} · {transition.status}</p>)}</section>}
  </div>;
 }
 
-export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,picker}:{yaml?:string;onYamlChange?:(yaml:string)=>void;picker?:{token:string;deviceId:string;onBusy:(busy:boolean)=>void};graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean}){
+export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,picker,onRun}:{onRun?:()=>void;yaml?:string;onYamlChange?:(yaml:string)=>void;picker?:{token:string;deviceId:string;onBusy:(busy:boolean)=>void};graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean}){
  const [pending,setPending]=useState<{graph:CanvasGraph;source?:string;warnings:string[]}>();
  const [undo,setUndo]=useState<{graph:CanvasGraph;yaml?:string;after:CanvasGraph;afterYaml?:string}>();
  const [expandedRow,setExpandedRow]=useState('');
@@ -149,7 +154,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  return <section className="canvas-editor" aria-labelledby="canvas-heading"><div className="label-row"><div><h2 id="canvas-heading">Screen test canvas</h2><p className="field-hint">One screen per node. YAML owns execution; select a route to review and map its results.</p></div><button className="confirm" disabled={disabled} onClick={()=>{onChange(graph?undefined:emptyCanvas());onPathChange('');}}>{graph?'Disable canvas':'Create screen canvas'}</button></div>
  {graph&&<>
  <div className="canvas-route-bar"><label htmlFor={apiId+'-path'}>Scenario path</label><select id={apiId+'-path'} value={pathId} disabled={disabled} onChange={event=>onPathChange(event.target.value)}><option value="">Explicitly select a route</option>{graph.paths.map(path=><option key={path.id} value={path.id}>{path.name}</option>)}</select><span>{path?.edgeIds.length??0} selected transitions</span></div>
- <CanvasBoard graph={graph} pathId={pathId} selected={selected} onAdd={disabled?undefined:(x,y)=>perform(()=>addScreen('New screen',x,y))} onRename={disabled?undefined:(id,title)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,title}:screen)})} onDelete={disabled?undefined:deleteScreen} onConnect={disabled?undefined:(from,to)=>perform(()=>connectScreens(from,to))} onSelect={id=>{setSelected(id);setRepairTest('');}} renderChecks={yaml!==undefined&&onYamlChange?renderChecks:undefined} onMove={disabled?undefined:(id,x,y)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,x,y}:screen)})}/>
+ <CanvasBoard graph={graph} pathId={pathId} selected={selected} onRun={disabled?undefined:onRun} onAdd={disabled?undefined:(x,y)=>perform(()=>addScreen('New screen',x,y))} onRename={disabled?undefined:(id,title)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,title}:screen)})} onDelete={disabled?undefined:deleteScreen} onConnect={disabled?undefined:(from,to)=>perform(()=>connectScreens(from,to))} onSelect={id=>{setSelected(id);setRepairTest('');}} renderChecks={yaml!==undefined&&onYamlChange?renderChecks:undefined} onMove={disabled?undefined:(id,x,y)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,x,y}:screen)})}/>
  <p className="field-hint">The selected route runs initial checks, ordered connection actions, then destination checks. Other branches are not selected automatically. Unassociated YAML commands remain in execution. Results map after the run; live per-step reporting remains unavailable. Declared setup and checkpoint-specific handler outcomes map after completion.</p>
  <div className="canvas-inspectors"><fieldset disabled={disabled}><legend>Screen inspector</legend><label htmlFor={apiId+'-new-screen'}>New screen title</label><input id={apiId+'-new-screen'} value={screenTitle} onChange={event=>setScreenTitle(event.target.value)} maxLength={120}/><button className="confirm" disabled={graph.screens.length>=40} onClick={()=>perform(()=>addScreen(screenTitle))}>Add screen</button>
  <label htmlFor={apiId+'-screen'}>Selected screen</label><select id={apiId+'-screen'} value={selected} onChange={event=>{setSelected(event.target.value);setRepairTest('');}}><option value="">Choose a screen</option>{graph.screens.map(screen=><option key={screen.id} value={screen.id}>{screen.title}</option>)}</select>

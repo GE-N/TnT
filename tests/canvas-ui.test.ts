@@ -1,4 +1,4 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';import {act,createElement,useState,type ChangeEvent} from 'react';import {CanvasEditor} from '../src/canvas.js';import {selectedCanvasPath} from '../server/canvas.js';import type {CanvasGraph,CatalogEntry} from '../server/canvas.js';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';import {act,createElement,useState,type ChangeEvent} from 'react';import {CanvasEditor,CanvasBoard} from '../src/canvas.js';import {selectedCanvasPath} from '../server/canvas.js';import type {CanvasGraph,CatalogEntry} from '../server/canvas.js';
 test('authors can associate an explicit checkpoint handler without losing its action identity',async()=>{
  const dom=new JSDOM('<div id="root"></div>');
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
@@ -195,5 +195,54 @@ test('canvas context menus add at the clicked position and delete nodes with war
   await act(async()=>document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown',{bubbles:true})));assert.ok(!document.querySelector('[role=menu]'));
   await context(node);await click('Delete node');assert.ok(document.querySelector('[role=alertdialog]'));await click('Delete anyway');assert.equal(saved!.screens.length,0);await click('Undo canvas deletion');assert.deepEqual({x:saved!.screens[0].x,y:saved!.screens[0].y},position);
   await act(async()=>root.render(createElement(Host,{disabled:true})));await context(document.querySelector('.canvas-surface')!);assert.ok(!document.querySelector('[role=menu]'));await context(document.querySelector('[data-screen-id]')!);assert.ok(!document.querySelector('[role=menu]'));
+ }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
+});
+
+test('canvas Run scenario uses the selected path and shows blocked runs in a dismissible toast',async()=>{
+ const dom=new JSDOM('<div id="root"></div>');const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ class ResizeObserver{observe(){}disconnect(){}}
+ const workspace={id:'saved',name:'Home route',yaml:'appId: com.example.App\n---\n- launchApp\n',canvas:{screens:[{id:'home',title:'Home',x:60,y:70,tests:[]}],edges:[],paths:[{id:'route',name:'Home checks',screenId:'home',edgeIds:[]}]}};
+ const requests:Record<string,unknown>[]=[];let rejectRun=true;
+ const fetchMock=async(path:string,options?:RequestInit)=>{
+  if(path==='/api/runs'){
+   requests.push(JSON.parse(String(options?.body)));
+   if(rejectRun)return Response.json({error:'Select a nonempty explicit scenario path.'},{status:400});
+   return Response.json({id:'run',status:'passed',snapshot:{id:'snapshot',name:workspace.name,yaml:workspace.yaml,toolVersions:{maestro:'test',node:'test'}},cleanup:{verified:true,detail:'Done'},steps:[],artifacts:[],log:''});
+  }
+  if(path==='/api/canvas/references')return Response.json({references:[],diagnostics:[]});
+  return Response.json(workspace);
+ };
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetchMock:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
+ const {Scenarios}=await import('../src/scenarios.js');const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);const document=dom.window.document;
+ const render=async(deviceId='device')=>act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'',launchBusy:false,onRunning:()=>{}})));
+ const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();});
+ const context=async()=>act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));
+ const runFromMenu=async()=>{await context();await act(async()=>{const menu=document.querySelector('[role=menu]')!;menu.querySelectorAll<HTMLButtonElement>('button')[1].click();});};
+ try{
+  await render();await act(async()=>{const input=document.getElementById('open-workspace')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,'saved');input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});await click('Open saved workspace');
+  await context();assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(node=>node.textContent),['Add node','Run scenario']);
+  await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'Run scenario');
+  await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'Add node');
+  await runFromMenu();assert.ok(!document.querySelector('[role=menu]'));assert.equal(requests[0].pathId,'');
+  const toast=document.querySelector('.run-error-toast[role=alert]')!;assert.match(toast.textContent!,/Cannot run scenario.*Select a nonempty explicit scenario path/);assert.equal(document.querySelector('.scenario-editor [role=alert]'),null);
+  await click('Dismiss run error');assert.equal(document.querySelector('.run-error-toast'),null);
+  await runFromMenu();assert.ok(document.querySelector('.run-error-toast'));
+  await act(async()=>{const label=[...document.querySelectorAll('label')].find(node=>node.textContent==='Scenario path')!;const select=document.getElementById(label.htmlFor) as HTMLSelectElement;select.value='route';select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
+  rejectRun=false;await runFromMenu();assert.equal(requests.at(-1)!.pathId,'route');assert.equal(requests.at(-1)!.deviceId,'device');assert.equal(document.querySelector('.run-error-toast'),null);assert.match(document.querySelector('.result-tag')!.textContent!,/passed/);
+  await render('');await runFromMenu();assert.match(document.querySelector('.run-error-toast')!.textContent!,/Select a device/);assert.equal(requests.length,3,'Missing device does not submit a run');
+ }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
+});
+
+
+test('Run scenario receives menu focus when the canvas node limit disables Add node',async()=>{
+ const dom=new JSDOM('<div id="root"></div>');const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ class ResizeObserver{observe(){}disconnect(){}}
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
+ const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);
+ const graph:CanvasGraph={screens:Array.from({length:40},(_,index)=>({id:String(index),title:'Screen '+index,x:0,y:0,tests:[]})),edges:[],paths:[]};
+ try{
+  await act(async()=>root.render(createElement(CanvasBoard,{graph,onAdd:()=>{},onRun:()=>{}})));
+  await act(async()=>dom.window.document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));
+  assert.equal(dom.window.document.activeElement?.textContent,'Run scenario');
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });

@@ -61,3 +61,8 @@
 .canvas-context-menu button{display:block;width:100%;border:0;border-radius:4px;background:transparent;color:#e1edda;font:12px system-ui;text-align:left;padding:10px 12px;cursor:pointer}
 .canvas-context-menu button:hover,.canvas-context-menu button:focus-visible{background:#2d4230;outline:1px solid #bdd7b3}
 .canvas-context-menu button:disabled{opacity:.5;cursor:default}
+
+.run-error-toast{position:fixed;right:20px;bottom:20px;z-index:1100;width:360px;max-width:calc(100vw - 40px);max-height:40vh;overflow:auto;padding:16px;border:1px solid #ef9b88;border-radius:10px;background:#30241f;color:#ffe1d8;box-shadow:0 8px 28px #0008;overflow-wrap:anywhere}
+.run-error-toast strong{display:block;padding-right:24px}
+.run-error-toast p{margin:8px 0 0;font-size:13px}
+.run-error-toast button{float:right;color:inherit;font-size:20px;line-height:1}
