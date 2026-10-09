@@ -25,3 +25,10 @@ Browser authoring proof on 2026-10-09 used the local workbench at port 4322: cre
 Validation: 85 tests passed with local networking enabled; type checking, production build and whitespace checks passed. The initial sandbox-only full-suite attempt could not bind local HTTP/mock ports; the enabled run passed. Review corrections were covered by focused canvas regressions before final validation.
 
 Final independent re-review: Standards — 0 remaining findings after sharing action creation and route membership helpers. Spec — 0 remaining actionable findings after preserving launch/setup associations, refusing silently restored Input text/Back commands, and keeping checkpoint handlers separate from top-level command occurrences. No scope creep found.
+
+
+## Follow-up: immediate screen conditions and node deletion
+
+Add next screen now creates one draft destination check, opens its full visible/absent selector form, scrolls the destination into view and focuses the selector. The draft remains saveable and requires a selector before execution. No title is inferred as an assertion. A bin icon in each editable node header uses the existing reference-warning and Undo flow; deleting a referenced screen retains invalid route references for repair. The inspector deletion control shares the same operation.
+
+Extended the canvas GUI regression to verify the immediate condition and focus, direct node deletion, affected-route warnings, preserved route identities and graph/YAML Undo. Browser verification confirmed the same behavior and left an unsaved Home → Next screen example open, with the destination selector ready to fill. Local screenshot: `.scratch/issue-16-screen-conditions-proof.jpg`. Final checks: 85 tests, type checking, production build and whitespace checks passed. Independent Standards and Spec reviews: no actionable findings.

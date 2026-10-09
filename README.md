@@ -80,7 +80,7 @@ The **bin icon** is inside each expanded action/check row. Confirm deletion in t
 
 ## Ordered connections and explicit routes (#16)
 
-Use **Add next screen** on a node to create its destination and connection, or drag **Drag to connect** from one node onto another. A new connection extends the selected route only when its source is the current tail. Connections at other points remain outside the route until you choose them explicitly.
+Use **Add next screen** on a node to create its destination and connection. The destination opens with a focused screen condition: enter the text or element ID that must be visible or absent when you reach it. Use the bin in a node header to delete that screen, with affected-route warnings and Undo. You can also drag **Drag to connect** from one node onto another. A new connection extends the selected route only when its source is the current tail. Connections at other points remain outside the route until you choose them explicitly.
 
 In **Connect expected screens**, expand the connection’s compact action rows. Add and edit **Tap**, **Input text**, and **Back**, and use the arrows to reorder them. Tap selectors support manual entry and the existing picker. Input text goes to the focused field; add a Tap first when focus is needed. Checks stay on their screen nodes. The selected route lists the ordered connection actions for review, and **Preview execution YAML** shows the commands that will run.
 
