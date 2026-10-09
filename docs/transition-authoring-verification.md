@@ -39,3 +39,10 @@ Extended the canvas GUI regression to verify the immediate condition and focus, 
 Add next screen now also creates a linked draft Tap action on the current node. Both the source action and destination check open, with focus on the Tap selector first. New ordered connections show their action forms inside the source node under “Actions to reach …”; the inspector retains legacy association editing and connection deletion. The standalone “Add action with destination” control distinguishes a new destination choice from adding an action to an existing connection. A source check added later inserts before its outgoing actions in YAML.
 
 The existing GUI regression verifies the automatically linked source action, open destination condition, focused action selector, action/check order and deletion/Undo. Browser proof shows both forms together: local `.scratch/issue-16-auto-action-proof.jpg`. Type checking, production build, all 85 tests and independent Standards/Spec reviews pass. The app remains running at port 4322.
+
+
+## Follow-up: editable canvas node titles
+
+Editable canvas nodes expose a title field directly in their header. Enter or blur saves a trimmed nonempty draft; Escape cancels and an empty name reverts. The field sits outside the drag/select button so typing and arrow keys do not move the node. Renaming updates the graph through its stable node identity, preserving connections, route references, actions, checks and executable YAML. Historical result boards remain read-only.
+
+The canvas GUI regression covers direct rename, empty-name recovery, Escape cancellation and unchanged YAML/connection identity. Browser proof renamed Home to Sign in with Enter in the header: local `.scratch/issue-16-node-title-proof.jpg`. Type checking, production build, all 85 tests and independent Standards/Spec reviews pass.
