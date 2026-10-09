@@ -51,8 +51,13 @@
 
 .canvas-connect-handle{display:block;width:100%;padding:7px 10px;border:0;border-bottom:1px solid #405143;background:#203329;color:#bdd7b3;font-size:10px;text-align:right;cursor:crosshair}.canvas-edge-list .canvas-checks{margin:8px 0}.canvas-edge-list .canvas-checks>button{width:auto}
 
-.screen-node:has(.screen-node-delete) .screen-node-heading{padding-right:48px}.screen-node-delete{position:absolute;right:10px;top:13px;margin:0;padding:5px;z-index:1}.canvas-operation>.field-hint{margin:5px 0}
+.canvas-operation>.field-hint{margin:5px 0}
 
 .canvas-navigation-actions{border:1px solid #405143;border-radius:6px;padding:7px;margin:8px 0}.canvas-navigation-actions legend{font-size:10px;color:#bdd7b3;padding:0 4px}.canvas-navigation-actions>button{width:100%}
 
 .screen-title-placeholder{visibility:hidden;display:block;white-space:nowrap;overflow:hidden}.screen-node-title{position:absolute;top:12px;left:42px;width:calc(100% - 90px);padding:3px 1px;margin:0;border:0;border-bottom:1px dashed #6d8767;border-radius:0;background:transparent;color:#eff6ed;font-size:12px;font-weight:600;line-height:1.4;box-sizing:border-box}.screen-node-title:focus{background:#101a14;outline:1px solid #bdd7b3}
+
+.canvas-context-menu{position:fixed;z-index:900;width:180px;padding:5px;border:1px solid #51694d;border-radius:8px;background:#17251c;box-shadow:0 8px 28px #0008}
+.canvas-context-menu button{display:block;width:100%;border:0;border-radius:4px;background:transparent;color:#e1edda;font:12px system-ui;text-align:left;padding:10px 12px;cursor:pointer}
+.canvas-context-menu button:hover,.canvas-context-menu button:focus-visible{background:#2d4230;outline:1px solid #bdd7b3}
+.canvas-context-menu button:disabled{opacity:.5;cursor:default}

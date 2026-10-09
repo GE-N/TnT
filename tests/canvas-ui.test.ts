@@ -45,7 +45,7 @@ test('canvas authors create inline checks, reorder, delete with warnings and und
   await click('Undo canvas deletion');assert.equal(saved!.screens[0].tests.length,2);assert.match(authored,/error\\\.banner/);assert.match(authored,/evalScript:.*# untouched/);
   const first=authored.indexOf('# tnt-check:');const between=authored.indexOf('- evalScript: ${output.between');const second=authored.indexOf('# tnt-check:',first+1);await fill('Executable YAML',authored.slice(0,first)+authored.slice(second)+authored.slice(between,second)+authored.slice(first,between));
   assert.equal((document.querySelector('[aria-label="Check 1 selector"]') as HTMLInputElement).value,'Ready');await fill('Check 1 selector','Updated');assert.ok(authored.indexOf('assertVisible')<authored.indexOf('output.between'));assert.ok(authored.indexOf('output.between')<authored.indexOf('assertNotVisible'));
-  await click('Remove screen (references remain visible for repair)');await click('Delete anyway');assert.equal(saved!.screens.length,0);assert.doesNotMatch(authored,/assertVisible|assertNotVisible/);
+  await act(async()=>{document.querySelector('[data-screen-id]')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:100,clientY:100}));});await click('Delete node');await click('Delete anyway');assert.equal(saved!.screens.length,0);assert.doesNotMatch(authored,/assertVisible|assertNotVisible/);
   await click('Undo canvas deletion');assert.equal(saved!.screens[0].title,'Descriptive Home');
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
@@ -122,7 +122,7 @@ test('dragged connections author ordered edge actions and preserve invalid route
   await fill('Screen title for Details','');await act(async()=>title.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));assert.equal(saved!.screens[2].title,'Details');assert.equal(title.value,'Details');
   await fill('Screen title for Details','Cancelled');await act(async()=>title.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(saved!.screens[2].title,'Details');assert.equal(title.value,'Details');
   await fill('Screen title for Details','Done');await act(async()=>title.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));
-  const beforeNode=authored;const references=structuredClone(saved!.paths);await click('Delete screen Done');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Chosen route/);await click('Delete anyway');assert.ok(!saved!.screens.some(screen=>screen.title==='Done'));assert.deepEqual(saved!.paths,references);assert.ok(!document.querySelector('[aria-label="Screen Done"]'));await click('Undo canvas deletion');assert.ok(document.querySelector('[aria-label="Screen Done"]'));assert.equal(authored,beforeNode);
+  const beforeNode=authored;const references=structuredClone(saved!.paths);await act(async()=>{document.querySelector('[aria-label="Screen Done"]')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:100,clientY:100}));});await click('Delete node');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Chosen route/);await click('Delete anyway');assert.ok(!saved!.screens.some(screen=>screen.title==='Done'));assert.deepEqual(saved!.paths,references);assert.ok(!document.querySelector('[aria-label="Screen Done"]'));await click('Undo canvas deletion');assert.ok(document.querySelector('[aria-label="Screen Done"]'));assert.equal(authored,beforeNode);
   const intact=authored;
   for(const command of ['inputText: changed','back']){
    const removed=intact.replace(new RegExp('# tnt-check:[^\\n]+\\n- '+command+'\\n'),'');await fill('Executable YAML',removed);await fill('Check 1 selector','Changed Home');assert.match(document.body.textContent!,/command was removed from YAML/);assert.equal(authored,removed);await fill('Executable YAML',intact);
@@ -172,5 +172,28 @@ test('visit editors preserve subsets and identities through repeated transitions
   await click('Delete check 2');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Home return/);await click('Delete anyway');
   assert.match(document.querySelector('[aria-label="Visit 3"]')!.textContent!,/Missing check: returned/);assert.deepEqual(saved.paths[0].visits![2].checkIds,['returned']);
   await click('Undo canvas deletion');assert.deepEqual(saved.paths[0].visits![2].checkIds,['returned']);assert.doesNotMatch(document.querySelector('[aria-label="Visit 3"]')!.textContent!,/Missing check/);
+ }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
+});
+
+test('canvas context menus add at the clicked position and delete nodes with warnings and Undo',async()=>{
+ const dom=new JSDOM('<div id="root"></div>');const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ class ResizeObserver{observe(){}disconnect(){}}
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
+ const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);let saved:CanvasGraph|undefined;let path='';
+ function Host({disabled=false}:{disabled?:boolean}){const [graph,setGraph]=useState<CanvasGraph>({screens:[],edges:[],paths:[]});const [selected,setSelected]=useState('');saved=graph;path=selected;return createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),catalog:[],diagnostics:[],pathId:selected,onPathChange:setSelected,disabled});}
+ const document=dom.window.document;
+ const context=async(target:Element)=>act(async()=>{target.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:340,clientY:170}));});
+ const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();});
+ try{
+  await act(async()=>root.render(createElement(Host)));
+  await context(document.querySelector('.canvas-surface')!);assert.ok(document.querySelector('[role=menu]'));assert.equal(document.activeElement?.getAttribute('role'),'menuitem');
+  await act(async()=>document.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.ok(!document.querySelector('[role=menu]'));
+  await context(document.querySelector('.canvas-surface')!);await click('Add node');
+  assert.equal(saved!.screens.length,1);assert.equal(saved!.screens[0].x,400);assert.equal(saved!.screens[0].y,200);assert.equal(saved!.paths[0].screenId,saved!.screens[0].id);assert.equal(path,saved!.paths[0].id);assert.ok(!document.querySelector('.screen-node-delete'));
+  const node=document.querySelector('[data-screen-id]')!;const position={x:saved!.screens[0].x,y:saved!.screens[0].y};
+  await context(node);assert.equal(document.querySelectorAll('[role=menuitem]').length,1);assert.equal(document.querySelector('[role=menuitem]')!.textContent,'Delete node');
+  await act(async()=>document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown',{bubbles:true})));assert.ok(!document.querySelector('[role=menu]'));
+  await context(node);await click('Delete node');assert.ok(document.querySelector('[role=alertdialog]'));await click('Delete anyway');assert.equal(saved!.screens.length,0);await click('Undo canvas deletion');assert.deepEqual({x:saved!.screens[0].x,y:saved!.screens[0].y},position);
+  await act(async()=>root.render(createElement(Host,{disabled:true})));await context(document.querySelector('.canvas-surface')!);assert.ok(!document.querySelector('[role=menu]'));await context(document.querySelector('[data-screen-id]')!);assert.ok(!document.querySelector('[role=menu]'));
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
