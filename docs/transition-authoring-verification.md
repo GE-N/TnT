@@ -62,3 +62,8 @@ All 86 tests, type checking, production build and independent Standards/Spec rev
 At the user’s request, the Add next screen control and its dedicated draft-focus and route-creation logic are removed. The earlier sections describe historical implementations superseded by this change. Authors now create nodes with Add screen, add checks, and connect existing nodes with an action destination or drag connection. Existing graph data remains intact.
 
 GUI coverage now authors ordered connections through drag and Add action, retaining checks for ordering, YAML synchronization, title editing, deletion and Undo. The first-screen test retains explicit route selection and asserts the removed control is absent. All 86 tests and the production build pass. Spec review found no issues; the Standards review’s test duplication finding was resolved with a local drag helper, followed by passing canvas tests and type checking.
+
+
+## Follow-up: remove the single-screen scenario node button
+
+Removed Use as single-screen scenario and its handler from canvas nodes at the user’s request. Explicit route controls and first-screen route selection remain available. The existing canvas GUI regression asserts the button is absent. All 86 tests, type checking, production build and independent Standards/Spec reviews pass.

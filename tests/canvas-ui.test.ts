@@ -143,6 +143,7 @@ test('creating the first screen selects its explicit route without Add next scre
   await act(async()=>root.render(createElement(Host)));await fill('New screen title','Home');await click('Add screen');
   assert.equal(chosen,saved!.paths[0].id,'Creating the initial screen selects its explicit route');
   assert.ok(!document.querySelector('[aria-label^="Add next screen"]'));
+  assert.ok(![...document.querySelectorAll('button')].some(button=>button.textContent==='Use as single-screen scenario'));
   await click('Add check to Home');await fill('Check 1 selector','Home');
   assert.doesNotThrow(()=>selectedCanvasPath(saved!,authored,{},chosen));
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
