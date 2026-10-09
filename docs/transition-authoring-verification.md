@@ -55,3 +55,10 @@ A new GUI regression reproduced the reported `Select a nonempty explicit scenari
 Creating the first screen now selects its initial route. Add next screen with no valid selection reuses an empty source route or creates and selects an explicit route for that connection. Existing selected routes still extend only at their tail; dragging connections does not select branches. The regression covers initial selection, recovery after deselection, successful run validation, and creating a separate route from a later source.
 
 All 86 tests, type checking, production build and independent Standards/Spec reviews pass. A separate browser canvas successfully generated its execution preview after Add next screen; screenshot: `.scratch/issue-16-route-selection-proof.jpg`. The user’s existing draft was preserved, and the app remains running at port 4322.
+
+
+## Follow-up: remove Add next screen
+
+At the user’s request, the Add next screen control and its dedicated draft-focus and route-creation logic are removed. The earlier sections describe historical implementations superseded by this change. Authors now create nodes with Add screen, add checks, and connect existing nodes with an action destination or drag connection. Existing graph data remains intact.
+
+GUI coverage now authors ordered connections through drag and Add action, retaining checks for ordering, YAML synchronization, title editing, deletion and Undo. The first-screen test retains explicit route selection and asserts the removed control is absent. All 86 tests and the production build pass. Spec review found no issues; the Standards review’s test duplication finding was resolved with a local drag helper, followed by passing canvas tests and type checking.

@@ -51,9 +51,7 @@ export function CanvasBoard({graph,pathId,result,onMove,onSelect,selected,render
 export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,picker}:{yaml?:string;onYamlChange?:(yaml:string)=>void;picker?:{token:string;deviceId:string;onBusy:(busy:boolean)=>void};graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean}){
  const [pending,setPending]=useState<{graph:CanvasGraph;source?:string;warnings:string[]}>();
  const [undo,setUndo]=useState<{graph:CanvasGraph;yaml?:string;after:CanvasGraph;afterYaml?:string}>();
- const [expandedRow,setExpandedRow]=useState('');const [navigationDraft,setNavigationDraft]=useState('');
- const editor=useRef<HTMLElement>(null);const [focusOperation,setFocusOperation]=useState('');
- useEffect(()=>{if(!focusOperation)return;const row=[...editor.current?.querySelectorAll<HTMLElement>('[data-operation-id]')??[]].find(row=>row.dataset.operationId===focusOperation);row?.closest('article')?.scrollIntoView?.({block:'nearest',inline:'nearest'});row?.querySelector<HTMLInputElement>('input')?.focus({preventScroll:true});},[focusOperation]);
+ const [expandedRow,setExpandedRow]=useState('');
  const [picking,setPicking]=useState<{screenId:string;testId:string}>();
  let displayGraph=graph;try{if(graph&&yaml)displayGraph=refreshChecks(graph,yaml);}catch{ /* Retain graph while invalid YAML is repaired. */ }
  graph=displayGraph;
@@ -79,7 +77,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  {edge&&<legend>Actions to reach {graph!.screens.find(screen=>screen.id===edge.to)?.title??'Missing screen'}</legend>}
  {operations.map((test,index)=>{const selector=test.check??test.tap!;const name=edge?edge.responseCondition+' action '+(index+1):(!test.check?'Action '+(taps.indexOf(test)+1):'Check '+(checks.indexOf(test)+1));return <div key={test.id} className="canvas-operation" data-operation-id={test.id}>
  {test.check&&!selector.value&&<p className="field-hint">Screen condition: choose what must be visible or absent when this screen is reached.</p>}
- <details open={expandedRow===test.id||navigationDraft===test.id?true:undefined} className="canvas-check-row"><summary>{canvasTestLabel(test)}</summary>
+ <details open={expandedRow===test.id?true:undefined} className="canvas-check-row"><summary>{canvasTestLabel(test)}</summary>
  {test.tap&&!edge&&<><p className="field-hint">Tap a button or element, then go to:</p><select aria-label={`${name} destination`} value={graph!.edges.find(edge=>edge.from===screenId&&edge.actionTestId===test.id)?.to??''} onChange={event=>perform(()=>{const connected=connectCanvasAction(graph!,screenId,test.id,event.target.value,pathId);changeChecks(connected.graph);onPathChange(connected.pathId);})}><option value="">Choose destination screen</option>{graph!.screens.filter(screen=>screen.id!==screenId).map(screen=><option key={screen.id} value={screen.id}>{screen.title}</option>)}</select></>}
  {test.check&&<select aria-label={`${name} visibility`} value={test.check.visibility} onChange={event=>updateCheck(screenId,test.id,{visibility:event.target.value as ScreenCheck['visibility']})}><option value="visible">Visible</option><option value="absent">Absent</option></select>}
  {selector&&<><select aria-label={`${name} target`} value={selector.target} onChange={event=>updateCheck(screenId,test.id,{target:event.target.value as ScreenCheck['target']})}><option value="text">Text</option><option value="id">Element identifier</option></select>
@@ -97,7 +95,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  {!edge&&<>{graph!.edges.filter(edge=>edge.from===screenId&&edge.actionTestIds!==undefined).map(edge=><div key={edge.id}>{renderChecks(screenId,edge.id)}</div>)}<button aria-label={'Add action to '+node.title} disabled={node.tests.length>=30} onClick={()=>perform(()=>addAction(screenId))}>Add action with destination</button>
  <button aria-label={'Add check to '+node.title} disabled={node.tests.length>=30} onClick={()=>perform(()=>{const test=draftScreenCheck();changeChecks({...graph!,screens:graph!.screens.map(screen=>screen.id===screenId?{...screen,tests:(()=>{const tests=[...screen.tests];const at=tests.findIndex(test=>graph!.edges.some(edge=>edge.actionTestIds?.includes(test.id)));tests.splice(at<0?tests.length:at,0,test);return tests;})()}:screen)});setExpandedRow(test.id);})}>Add check</button>
  <button onClick={()=>perform(()=>{const existing=graph!.paths.find(path=>path.screenId===screenId&&!path.edgeIds.length);if(existing){onPathChange(existing.id);return;}const id=identity();onChange({...graph!,paths:[...graph!.paths,{id,name:node.title+' checks',screenId,edgeIds:[]}]});onPathChange(id);})}>Use as single-screen scenario</button>
- <button aria-label={'Add next screen from '+node.title} onClick={()=>perform(()=>{if(graph!.screens.length>=40)throw new Error('This canvas supports up to 40 screens.');const id=identity();const title=screenTitle.trim()||node.title+' next';if(node.tests.length>=30)throw new Error('This screen supports up to 30 checks and actions.');const check=draftScreenCheck();const action=draftNavigationAction();const next={...graph!,screens:[...graph!.screens.map(screen=>screen.id===screenId?{...screen,tests:[...screen.tests,action]}:screen),{id,title,x:Math.min(2400,node.x+370),y:node.y,tests:[check]}]};connectScreens(screenId,id,next,action.id);setSelected(screenId);setExpandedRow(check.id);setNavigationDraft(action.id);setFocusOperation(action.id);setScreenTitle('');})}>Add next screen</button></>}
+</>}
  </fieldset>;}
  function deleteScreen(id:string){const node=graph!.screens.find(screen=>screen.id===id)!;warn({...graph!,screens:graph!.screens.filter(screen=>screen.id!==id)},node.tests.map(test=>test.id),id);}
  function addAction(screenId:string,edgeId?:string){
@@ -109,25 +107,15 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   changeChecks({...graph!,screens:graph!.screens.map(screen=>screen.id===screenId?{...screen,tests}:screen),edges:graph!.edges.map(item=>item.id===edgeId?{...item,actionTestId:ids.length?item.actionTestId:test.id,actionTestIds:[...ids,test.id]}:item)});
   setExpandedRow(test.id);
  }
- function connectScreens(from:string,to:string,next=graph!,actionId?:string){
-  if(next.edges.length>=80)throw new Error('This canvas supports up to 80 connections.');
-  const id=identity();const destination=next.screens.find(screen=>screen.id===to)!;
-  const edge={id,from,to,actionTestId:actionId??'pending:'+id,actionTestIds:actionId?[actionId]:[],assertionTestId:destination.tests.find(test=>test.check)?.id??'pending:'+id,responseCondition:next.screens.find(screen=>screen.id===from)!.title+' → '+destination.title};
-  let route=next.paths.find(path=>path.id===pathId);
-  if(actionId&&!route){
-   route=next.paths.find(path=>path.screenId===from&&!path.edgeIds.length);
-   if(!route){
-    if(next.paths.length>=20)throw new Error('Select an existing scenario path; this canvas supports up to 20 paths.');
-    route={id:identity(),name:edge.responseCondition.slice(0,120),screenId:from,edgeIds:[]};
-    next={...next,paths:[...next.paths,route]};
-   }
-  }
-  onChange(appendCanvasConnection(next,edge,route?.id??pathId));
-  if(actionId&&route)onPathChange(route.id);
+ function connectScreens(from:string,to:string){
+  if(graph!.edges.length>=80)throw new Error('This canvas supports up to 80 connections.');
+  const id=identity();const destination=graph!.screens.find(screen=>screen.id===to)!;
+  const edge={id,from,to,actionTestId:'pending:'+id,actionTestIds:[],assertionTestId:destination.tests.find(test=>test.check)?.id??'pending:'+id,responseCondition:graph!.screens.find(screen=>screen.id===from)!.title+' → '+destination.title};
+  onChange(appendCanvasConnection(graph!,edge,pathId));
  }
  function associate(){if(!graph||!screen||referenceIndex===''||!entry)throw new Error('Choose a screen and a current YAML reference.');const test={id:repairTest||identity(),label:testLabel.trim()||entry.label,role,reference:{kind:entry.kind,file:entry.file,index:entry.index,actionId:entry.actionId,fingerprint:entry.fingerprint}};onChange({...graph,screens:graph.screens.map(item=>item.id===screen.id?{...item,tests:repairTest?item.tests.map(existing=>existing.id===repairTest?test:existing):[...item.tests,test]}:item)});setRepairTest('');setTestLabel('');}
  async function image(file?:File){if(!graph||!screen||!file)return;try{if(!['image/png','image/jpeg'].includes(file.type)||file.size>250_000)throw new Error('Use a PNG/JPEG reference up to 250 KB.');const data=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error('Reference image could not be read.'));reader.readAsDataURL(file);});const latest=currentGraph.current;if(!latest||!latest.screens.some(item=>item.id===screen.id))return;onChange({...latest,screens:latest.screens.map(item=>item.id===screen.id?{...item,referenceScreenshot:data}:item)});setError('');}catch(error){setError((error as Error).message);}}
- return <section ref={editor} className="canvas-editor" aria-labelledby="canvas-heading"><div className="label-row"><div><h2 id="canvas-heading">Screen test canvas</h2><p className="field-hint">One screen per node. YAML owns execution; select a route to review and map its results.</p></div><button className="confirm" disabled={disabled} onClick={()=>{onChange(graph?undefined:emptyCanvas());onPathChange('');}}>{graph?'Disable canvas':'Create screen canvas'}</button></div>
+ return <section className="canvas-editor" aria-labelledby="canvas-heading"><div className="label-row"><div><h2 id="canvas-heading">Screen test canvas</h2><p className="field-hint">One screen per node. YAML owns execution; select a route to review and map its results.</p></div><button className="confirm" disabled={disabled} onClick={()=>{onChange(graph?undefined:emptyCanvas());onPathChange('');}}>{graph?'Disable canvas':'Create screen canvas'}</button></div>
  {graph&&<>
  <div className="canvas-route-bar"><label htmlFor={apiId+'-path'}>Scenario path</label><select id={apiId+'-path'} value={pathId} disabled={disabled} onChange={event=>onPathChange(event.target.value)}><option value="">Explicitly select a route</option>{graph.paths.map(path=><option key={path.id} value={path.id}>{path.name}</option>)}</select><span>{path?.edgeIds.length??0} selected transitions</span></div>
  <CanvasBoard graph={graph} pathId={pathId} selected={selected} onRename={disabled?undefined:(id,title)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,title}:screen)})} onDelete={disabled?undefined:deleteScreen} onConnect={disabled?undefined:(from,to)=>perform(()=>connectScreens(from,to))} onSelect={id=>{setSelected(id);setRepairTest('');}} renderChecks={yaml!==undefined&&onYamlChange?renderChecks:undefined} onMove={disabled?undefined:(id,x,y)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,x,y}:screen)})}/>
