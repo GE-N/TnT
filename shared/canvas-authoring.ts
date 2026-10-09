@@ -45,7 +45,7 @@ export function authoredChecks(yaml:string){
 }
 export function refreshChecks(graph:CanvasGraph,yaml:string):CanvasGraph{
  let checks:ReturnType<typeof authoredChecks>;try{checks=authoredChecks(yaml);}catch{return graph;}
- return {...graph,screens:graph.screens.map(screen=>{
+ return {...graph,edges:graph.edges.map(edge=>edge.assertionTestId==='pending:'+edge.id?{...edge,assertionTestId:graph.screens.find(screen=>screen.id===edge.to)?.tests.find(test=>test.check)?.id??edge.assertionTestId}:edge),screens:graph.screens.map(screen=>{
   const tests=screen.tests.map(test=>{
    if(!test.check&&!test.tap)return test;
    const matches=checks.filter(item=>item.id===test.id);const found=matches.length===1?matches[0]:undefined;
@@ -94,4 +94,19 @@ export function writeChecks(yaml:string,previous:CanvasGraph,next:CanvasGraph){
  }
  sequence.items=retained;
  const yamlNext=docs[0].toString()+'---\n'+docs[1].toString({directives:false});source(yamlNext);return yamlNext;
+}
+
+// Choosing a destination owns the connection and extends only the active route's tail.
+export function connectCanvasAction(graph:CanvasGraph,from:string,actionId:string,to:string,pathId:string){
+ const previous=graph.edges.find(edge=>edge.from===from&&edge.actionTestId===actionId);
+ if(!to){const removed=graph.edges.filter(edge=>edge.actionTestId===actionId).map(edge=>edge.id);return {graph:{...graph,edges:graph.edges.filter(edge=>!removed.includes(edge.id)),paths:graph.paths.map(path=>({...path,edgeIds:path.edgeIds.filter(id=>!removed.includes(id))}))},pathId};}
+ const destination=graph.screens.find(screen=>screen.id===to);if(!destination)throw new Error('Choose an existing destination screen.');
+ if(!previous&&graph.edges.length>=80)throw new Error('This canvas supports up to 80 connections.');
+ const id=previous?.id??'action-link:'+actionId;
+ const edge={id,from,to,actionTestId:actionId,assertionTestId:destination.tests.find(test=>test.check)?.id??'pending:'+id,responseCondition:'Tap → '+destination.title};
+ let paths=graph.paths;let path=paths.find(path=>path.id===pathId)??paths.find(path=>path.edgeIds.includes(id))??paths.find(path=>path.screenId===from&&!path.edgeIds.length);
+ if(!path){if(paths.length>=20)throw new Error('Select an existing scenario path; this canvas supports up to 20 paths.');path={id:id+':path',name:(graph.screens.find(screen=>screen.id===from)!.title+' → '+destination.title).slice(0,120),screenId:from,edgeIds:[]};paths=[...paths,path];}
+ const tail=path.edgeIds.length?graph.edges.find(edge=>edge.id===path!.edgeIds.at(-1))?.to:path.screenId;
+ if(tail===from&&!path.edgeIds.includes(id))paths=paths.map(item=>item.id===path!.id?{...item,edgeIds:[...item.edgeIds,id]}:item);
+ return {graph:{...graph,edges:previous?graph.edges.map(item=>item.id===id?edge:item):[...graph.edges,edge],paths},pathId:path.id};
 }

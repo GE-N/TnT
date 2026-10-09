@@ -94,7 +94,7 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
  const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,{test,screen}] as const)));
  let authored:ReturnType<typeof authoredChecks>=[];try{authored=authoredChecks(yaml);}catch{ /* YAML catalog reports parse diagnostics. */ }
  for(const {test} of tests.values()){
-  if(test.check||test.tap){const matches=authored.filter(item=>item.id===test.id);const issue=checkProblem(test.check??test.tap!);if(issue||matches.length!==1||!(test.tap?matches[0].tap:matches[0].check))diagnostics.push({ownerId:test.id,detail:issue??'Check YAML is missing, unsupported or ambiguous. Repair its command or selector before running.'});continue;}
+  if(test.check||test.tap){if(test.tap&&!graph.edges.some(edge=>edge.actionTestId===test.id))diagnostics.push({ownerId:test.id,detail:'Choose a destination screen for this action before running.'});const matches=authored.filter(item=>item.id===test.id);const issue=checkProblem(test.check??test.tap!);if(issue||matches.length!==1||!(test.tap?matches[0].tap:matches[0].check))diagnostics.push({ownerId:test.id,detail:issue??'Check YAML is missing, unsupported or ambiguous. Repair its command or selector before running.'});continue;}
   if(!resolveReference(test.reference,catalog.references)){
    const alternatives=catalog.references.filter(entry=>entry.kind===test.reference.kind&&entry.file===test.reference.file&&entry.fingerprint===test.reference.fingerprint);
    diagnostics.push({ownerId:test.id,detail:alternatives.length>1?'Ambiguous moved YAML reference. Explicitly choose its intended command again.':'Broken or stale YAML reference. Explicitly relink to the intended command; references are never retargeted automatically.'});
@@ -102,7 +102,8 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
  }
  for(const edge of graph.edges){
   const action=tests.get(edge.actionTestId);const assertion=tests.get(edge.assertionTestId);
-  if(!screens.has(edge.from)||!screens.has(edge.to)||action?.screen.id!==edge.from||assertion?.screen.id!==edge.to)diagnostics.push({ownerId:edge.id,detail:'Repair transition screen/action/assertion associations.'});
+  if(edge.assertionTestId==='pending:'+edge.id)diagnostics.push({ownerId:edge.id,detail:'Add a check to destination screen '+(screens.get(edge.to)?.title??edge.to)+' before running this action.'});
+  else if(!screens.has(edge.from)||!screens.has(edge.to)||action?.screen.id!==edge.from||assertion?.screen.id!==edge.to)diagnostics.push({ownerId:edge.id,detail:'Repair transition screen/action/assertion associations.'});
   const target=assertion&&resolveReference(assertion.test.reference,catalog.references);
   if(assertion?.test.tap||(target&&!target.assertion))diagnostics.push({ownerId:edge.id,detail:'The destination must reference an executable assertion or assertion flow.'});
  }
@@ -113,12 +114,13 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
  }
  return {references:catalog.references,diagnostics};
 }
+function destinationChecks(graph:CanvasGraph,edge:Transition){return graph.screens.find(screen=>screen.id===edge.from)?.tests.some(test=>test.id===edge.actionTestId&&test.tap)?graph.screens.find(screen=>screen.id===edge.to)?.tests.filter(test=>test.check).map(test=>test.id)??[]:[];}
 export function selectedCanvasPath(graph:CanvasGraph,yaml:string,flows:Record<string,string>,pathId:unknown,automation?:Automation){
  if(typeof pathId!=='string')throw new Error('Explicitly select a canvas scenario path before running.');
  const path=graph.paths.find(path=>path.id===pathId);if(!path||(!path.edgeIds.length&&!path.screenId))throw new Error('Select a nonempty explicit scenario path.');
  const inspection=inspectCanvas(graph,yaml,flows,automation);
  const edges=path.edgeIds.map(id=>graph.edges.find(edge=>edge.id===id));
- const required=new Set(['yaml',pathId,...path.edgeIds,...edges.flatMap(edge=>edge?[edge.actionTestId,edge.assertionTestId]:[])]);
+ const required=new Set(['yaml',pathId,...path.edgeIds,...edges.flatMap(edge=>edge?[edge.actionTestId,edge.assertionTestId,...destinationChecks(graph,edge)]:[])]);
  if(path.screenId){required.add(path.screenId);for(const test of graph.screens.find(screen=>screen.id===path.screenId)?.tests??[])required.add(test.id);}
  const errors=inspection.diagnostics.filter(diagnostic=>required.has(diagnostic.ownerId));
  if(errors.length)throw new Error(errors.map(error=>error.detail).join(' '));
@@ -133,7 +135,9 @@ export function selectedCanvasPath(graph:CanvasGraph,yaml:string,flows:Record<st
   const actionPosition=action.reference.kind==='setup'?-1:actionIndex*2+(action.reference.kind==='handler'?0:1);
   const assertionPosition=assertionIndex*2+1;
   if(actionPosition<=previous||assertionPosition<=actionPosition)throw new Error('The selected route must follow executable YAML action/assertion order. Repair references or YAML; the canvas cannot rewrite execution.');
-  previous=assertionPosition;
+  let lastCheckPosition=assertionPosition;
+  for(const id of destinationChecks(graph,edge)){const index=executionIndex(tests.get(id)!.reference,yaml);if(index===undefined||index<=actionIndex)throw new Error('Destination screen checks must follow its action in executable YAML. Repair the check order before running.');lastCheckPosition=Math.max(lastCheckPosition,index*2+1);}
+  previous=lastCheckPosition;
  }
  return path;
 }
@@ -143,7 +147,8 @@ export function mapCanvas(graph:CanvasGraph,pathId:string,yaml:string,steps:Step
  const selectedScreens=new Set(selectedEdges.flatMap(edge=>[edge.from,edge.to]));
  const selectedTests=new Set(selectedEdges.flatMap(edge=>[edge.actionTestId,edge.assertionTestId]));
  if(path.screenId){selectedScreens.add(path.screenId);for(const test of graph.screens.find(screen=>screen.id===path.screenId)?.tests??[])selectedTests.add(test.id);}
- const destinationTests=new Set(selectedEdges.map(edge=>edge.assertionTestId));
+ const destinationTests=new Set(selectedEdges.flatMap(edge=>[edge.assertionTestId,...destinationChecks(graph,edge)]));
+ for(const edge of selectedEdges)for(const id of destinationChecks(graph,edge))selectedTests.add(id);
  if(path.screenId)for(const test of graph.screens.find(screen=>screen.id===path.screenId)?.tests??[])if(test.check)destinationTests.add(test.id);
  const authored=authoredChecks(yaml);
  const catalog=execution?referenceCatalog(yaml,execution.flows,execution.definition).references:[];
@@ -163,5 +168,5 @@ export function mapCanvas(graph:CanvasGraph,pathId:string,yaml:string,steps:Step
   return {id:test.id,status:outcome as Step['status'],stepId:step?.id,detail:index===undefined?'Uncalled or ambiguous reusable flow; no outcome inferred.':destinationTests.has(test.id)?'Destination requires completed assertion metadata; a successful flow wrapper alone is insufficient.':'Mapped from top-level authored YAML command outcome.'};
  }));
  const status=(ids:string[]):Step['status']=>{const outcomes=ids.map(id=>tests.find(test=>test.id===id)?.status??'unavailable');return outcomes.includes('failed')?'failed':outcomes.length&&outcomes.every(status=>status==='passed')?'passed':outcomes.length&&outcomes.every(status=>status==='skipped')?'skipped':'unavailable';};
- return {pathId,note:'Post-run authored step, declared setup and checkpoint-specific handler outcomes are mapped from the executed snapshot. Live per-step reporting remains unavailable; no alternate route is inferred.',tests,screens:graph.screens.map(screen=>({id:screen.id,status:screen.tests.some(test=>tests.find(outcome=>outcome.id===test.id)?.status==='failed')?'failed':status(screen.tests.filter(test=>selectedTests.has(test.id)).map(test=>test.id))})),edges:graph.edges.map(edge=>({id:edge.id,status:path.edgeIds.includes(edge.id)?status([edge.actionTestId,edge.assertionTestId]):'unavailable'}))};
+ return {pathId,note:'Post-run authored step, declared setup and checkpoint-specific handler outcomes are mapped from the executed snapshot. Live per-step reporting remains unavailable; no alternate route is inferred.',tests,screens:graph.screens.map(screen=>({id:screen.id,status:screen.tests.some(test=>tests.find(outcome=>outcome.id===test.id)?.status==='failed')?'failed':status(screen.tests.filter(test=>selectedTests.has(test.id)).map(test=>test.id))})),edges:graph.edges.map(edge=>({id:edge.id,status:path.edgeIds.includes(edge.id)?status([edge.actionTestId,edge.assertionTestId,...destinationChecks(graph,edge)]):'unavailable'}))};
 }

@@ -70,13 +70,13 @@ Pick and **Save step** for the trigger, then append a parameterized reusable ass
 
 Declared reusable flows use flat `.yaml` filenames and the same literal app ID. Other external file references remain unsupported. Cancellation stops owned Maestro and Mockoon processes before device release. See [verification and remaining real-app proof inputs](docs/mock-verification.md); #5 is not release-complete without the target API maintenance journey.
 
-## Author taps and checks on canvas nodes
+## Author actions and checks on canvas nodes
 
-Each node has **Add tap** and **Add check** controls. Expand an added row to enter its text or element identifier; Exact is the default, with explicit Contains and Regex options. These edits synchronize executable YAML.
+Each node has **Add action** and **Add check** controls. Add action opens a tap selector and a destination-screen choice. Enter the button's text or identifier and choose the screen it should open: the canvas draws the connection immediately. Extending the selected route's current end appends that connection automatically. Exact matching is the default, with explicit Contains and Regex options.
 
-To navigate Home → Coordinator, add a tap on Home targeting the Coordinator button, and add a visible check on Coordinator targeting content that identifies that page. Under **Connect expected screens**, select Home and its tap as the source, then Coordinator and its check as the destination. Connect them, append the connection to a selected path, and run. Taps are actions; destination choices require assertions.
+For Home → Coordinator, add an action on Home, target the Coordinator button, and choose Coordinator as its destination. Add checks on Coordinator for content identifying that page. YAML stays synchronized; all authored destination checks require execution evidence. Connections to screens without checks can be saved as drafts, but execution waits for a valid destination and checks. Reopened workspaces require selecting the saved route before running.
 
-**Delete** is visible beside a collapsed row. Confirm in the reference warning dialog, or cancel with Escape. **Undo canvas deletion** restores the row and its YAML when no later edits would be overwritten.
+The **bin icon** is inside each expanded action/check row. Confirm deletion in the reference-warning dialog, or cancel with Escape. Deleting an action removes its connection and route entries; **Undo canvas deletion** restores the authored content and YAML when no later edits would be overwritten.
 
 ## Screen test canvas (#7)
 

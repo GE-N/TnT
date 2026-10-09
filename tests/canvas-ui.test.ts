@@ -9,7 +9,7 @@ test('authors can associate an explicit checkpoint handler without losing its ac
  let saved:CanvasGraph|undefined;
  function Host(){const [graph,setGraph]=useState<CanvasGraph>({screens:[{id:'home',title:'Home',x:0,y:0,tests:[]}],edges:[],paths:[]});return createElement(CanvasEditor,{graph,onChange:next=>{saved=next;if(next)setGraph(next);},catalog:[handler],diagnostics:[],pathId:'',onPathChange:()=>{},disabled:false});}
  const document=dom.window.document;
- const select=async(label:string,value:string)=>act(async()=>{const id=[...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor;assert.ok(id);const node=document.getElementById(id)!;Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
+ const select=async(label:string,value:string)=>act(async()=>{const id=[...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor;const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById(id??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  try{
   await act(async()=>root.render(createElement(Host)));
   await select('Selected screen','home');await select('Executable YAML reference','0');
@@ -35,7 +35,7 @@ test('canvas authors create inline checks, reorder, delete with warnings and und
   await act(async()=>root.render(createElement(Host)));
   await act(async()=>{const id=[...document.querySelectorAll('label')].find(node=>node.textContent==='New screen title')!.htmlFor;const input=document.getElementById(id)!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,'Descriptive Home');input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
   await click('Add screen');assert.doesNotMatch(authored,/Descriptive Home/);
-  await click('Add check to Descriptive Home');assert.ok(!document.querySelector('[aria-label="Delete check 1"]')!.closest('details'),'Delete must be visible without expanding the check');await fill('Check 1 selector','Home (ready)');
+  await click('Add check to Descriptive Home');assert.ok(document.querySelector('[aria-label="Delete check 1"]')!.closest('details'),'Bin belongs inside the expanded check');assert.ok(document.querySelector('[aria-label="Delete check 1"] svg'),'Delete is a bin icon');await fill('Check 1 selector','Home (ready)');
   assert.match(authored,/\^Home \\\(ready\\\)\$/);assert.equal(saved!.screens[0].tests[0].check!.match,'exact');
   await select('Check 1 matching','regex');await fill('Check 1 selector','^Home$');assert.equal(saved!.screens[0].tests[0].check!.match,'regex');await select('Check 1 matching','contains');await fill('Check 1 selector','Ready');assert.equal(saved!.screens[0].tests[0].check!.match,'contains');
   await click('Add check to Descriptive Home');await select('Check 2 visibility','absent');await select('Check 2 target','id');await fill('Check 2 selector','error.banner');
@@ -66,21 +66,21 @@ test('opening a saved workspace replaces the canvas editor without duplicating i
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
 
-test('Home can author a tap directly on its node and link it to a Coordinator check',async()=>{
+test('Home can choose a destination in Add action and immediately see its connection',async()=>{
  const dom=new JSDOM('<div id="root"></div>');const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);let authored='';let saved:CanvasGraph|undefined;
- function Host(){const [graph,setGraph]=useState<CanvasGraph>({screens:[{id:'home',title:'Home',x:0,y:0,tests:[]},{id:'coordinator',title:'Coordinator',x:400,y:0,tests:[]}],edges:[],paths:[]});const [yaml,setYaml]=useState('appId: com.example.App\n---\n- launchApp\n');authored=yaml;saved=graph;return createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:'',onPathChange:()=>{},disabled:false});}
+ function Host(){const [graph,setGraph]=useState<CanvasGraph>({screens:[{id:'home',title:'Home',x:0,y:0,tests:[]},{id:'coordinator',title:'Coordinator',x:400,y:0,tests:[]}],edges:[],paths:[]});const [yaml,setYaml]=useState('appId: com.example.App\n---\n- launchApp\n');const [path,setPath]=useState('');authored=yaml;saved=graph;return createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:path,onPathChange:setPath,disabled:false});}
  const document=dom.window.document;
  const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();});
  const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
- const select=async(label:string,value:string)=>act(async()=>{const id=[...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor;assert.ok(id);const node=document.getElementById(id)!;Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
+ const select=async(label:string,value:string)=>act(async()=>{const id=[...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor;const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById(id??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  try{
-  await act(async()=>root.render(createElement(Host)));await click('Add check to Coordinator');await fill('Check 1 selector','Coordinator');await click('Add tap to Home');await fill('Tap 1 selector','Coordinator');
+  await act(async()=>root.render(createElement(Host)));await click('Add check to Coordinator');await fill('Check 1 selector','Coordinator');await click('Add action to Home');await fill('Action 1 selector','Coordinator');
   assert.match(authored,/tapOn:[\s\S]*\^Coordinator\$[\s\S]*assertVisible:/);
-  await select('Source screen','home');await select('Triggering YAML test',saved!.screens[0].tests[0].id);await select('Expected destination','coordinator');await select('Destination assertion / reusable flow',saved!.screens[1].tests[0].id);await fill('Response condition / transition explanation','Tap Coordinator button');await click('Connect screens');
-  assert.equal(saved!.edges.length,1);assert.equal(saved!.edges[0].actionTestId,saved!.screens[0].tests[0].id);
-  await click('Delete tap 1');await click('Delete anyway');assert.equal(saved!.screens[0].tests.length,0);assert.doesNotMatch(authored,/tapOn:/);await click('Undo canvas deletion');assert.match(authored,/tapOn:/);
+  await select('Action 1 destination','coordinator');assert.ok(document.querySelector('[aria-label="Connection Home to Coordinator"]'),'Destination selection immediately draws the line');
+  assert.equal(saved!.edges.length,1);assert.deepEqual(saved!.paths[0].edgeIds,[saved!.edges[0].id]);assert.equal(saved!.edges[0].actionTestId,saved!.screens[0].tests[0].id);
+  await click('Delete action 1');await click('Delete anyway');assert.equal(saved!.screens[0].tests.length,0);assert.equal(saved!.edges.length,0);assert.equal(saved!.paths[0].edgeIds.length,0);assert.doesNotMatch(authored,/tapOn:/);await click('Undo canvas deletion');assert.match(authored,/tapOn:/);assert.equal(saved!.edges.length,1);assert.deepEqual(saved!.paths[0].edgeIds,[saved!.edges[0].id]);
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
