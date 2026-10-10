@@ -86,9 +86,8 @@ test('three finite scenarios reuse four nodes, choose branches explicitly, save/
 
 }));
 
-test('canvas connection drawing supports keyboard selection, parallel choices and contextual ordered actions without route forms',()=>journey(async({document,click,fill,saved})=>{
+test('action destinations support connection reuse and contextual ordered actions without route forms',()=>journey(async({document,click,fill,saved})=>{
  await click('New scenario');await fill('Scenario name','Drawn journey');await click('Use 1 as scenario start');
- await click('Connect from 1');await click('Select screen 4');
  const node=document.querySelector('[aria-label="Screen 1"]')!;
  assert.ok(!node.querySelector('.canvas-navigation-actions'));await click('Add action to 1');
  await fill('Action 1 selector','Focus field');
@@ -97,9 +96,9 @@ test('canvas connection drawing supports keyboard selection, parallel choices an
  await click('Finish sequence');await click('Save workspace');const first=await saved();const firstPath=first.canvas!.paths.at(-1)!;const visitIds=firstPath.visits!.map(visit=>visit.id);
  assert.equal(firstPath.edgeIds.length,1);const edge=first.canvas!.edges.at(-1)!;
  assert.deepEqual(edge.actionTestIds!.map(id=>first.canvas!.screens[0].tests.find(test=>test.id===id)!.input??first.canvas!.screens[0].tests.find(test=>test.id===id)!.back??first.canvas!.screens[0].tests.find(test=>test.id===id)!.tap!.value),['Focus field','hello',true]);
- await click('Connect from 1');await click('Select screen 4');await click('Save workspace');assert.deepEqual((await saved()).canvas!.paths.at(-1)!.visits!.map(visit=>visit.id),visitIds,'Drawing after Finish never extends the sequence');
- await fill('Connection name '+edge.id,'First choice');await click('New scenario');await click('Use 1 as scenario start');await act(async()=>document.querySelector('[aria-label="Screen 4"]')!.dispatchEvent(new document.defaultView!.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));await click('Add 4 to scenario sequence');assert.match(document.querySelector('[role="alert"]')!.textContent!,/Several connections/);
- await click('Append connection First choice');await click('Finish sequence');await click('Save workspace');
+ await select('Action 1 destination','4');await click('Save workspace');assert.deepEqual((await saved()).canvas!.paths.at(-1)!.visits!.map(visit=>visit.id),visitIds,'Choosing a destination after Finish never extends the sequence');
+ await fill('Connection name '+edge.id,'First choice');await click('New scenario');await click('Use 1 as scenario start');await act(async()=>document.querySelector('[aria-label="Screen 4"]')!.dispatchEvent(new document.defaultView!.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));await click('Add 4 to scenario sequence');assert.equal(document.querySelector('[role="alert"]'),null);
+ await click('Finish sequence');await click('Save workspace');
  assert.deepEqual((await saved()).canvas!.paths.at(-1)!.edgeIds,[edge.id]);
  await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
  assert.ok(!document.querySelector('.workspace-canvas select[aria-label="Next transition"]'));
@@ -109,19 +108,20 @@ test('canvas connection drawing supports keyboard selection, parallel choices an
 
 test('a node action keeps its destination picker in the default canvas',()=>journey(async({document,click,fill,saved})=>{
  await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Details');
+ assert.ok(!document.querySelector('[aria-label^="Connect from"]'));assert.ok(!document.body.textContent!.includes('Selector tools'));
  const destination=document.querySelector<HTMLSelectElement>('[aria-label="Action 1 destination"]');assert.ok(destination,'The action must let the author choose its destination');
  await act(async()=>{destination.value='2';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
  await click('Save workspace');const graph=(await saved()).canvas!;assert.equal(graph.edges.length,1);assert.equal(graph.edges[0].to,'2');assert.equal(graph.edges[0].actionTestId,graph.screens[0].tests[0].id);assert.deepEqual(graph.paths[0].edgeIds,[graph.edges[0].id]);
 },true));
 
-test('drawing sets action destinations and an action-only Home Details Back journey runs without mandatory checks',()=>journey(async({document,click,fill,saved})=>{
+test('choosing action destinations creates connections and an action-only Home Details Back journey runs without mandatory checks',()=>journey(async({document,click,fill,saved})=>{
  await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Details');
- await click('Connect from Home');await click('Select screen Details');await click('Save workspace');
- const graph=(await saved()).canvas!;assert.deepEqual(graph.edges[0].actionTestIds,[graph.screens[0].tests[0].id],'Drawing must attach the existing action rather than creating an empty connection');
+ await act(async()=>{const destination=document.querySelector<HTMLSelectElement>('[aria-label="Screen Home"] [aria-label="Action 1 destination"]')!;destination.value='2';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await click('Save workspace');
+ const graph=(await saved()).canvas!;assert.equal(graph.edges[0].actionTestId,graph.screens[0].tests[0].id,'Choosing a destination must attach the existing action rather than creating an empty connection');
  assert.equal(document.querySelector('[aria-label="Screen Details"] .screen-check-guidance')?.textContent,undefined);
  assert.ok(![...document.querySelectorAll('button')].some(button=>button.textContent==='Append visit'),'Redundant append controls are removed');
  await click('Add action to Details');await act(async()=>{const kind=document.querySelector<HTMLSelectElement>('[aria-label="Screen Details"] [aria-label="Action 1 type"]')!;kind.value='back';kind.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
- await click('Connect from Details');await click('Select screen Home');
+ await act(async()=>{const destination=document.querySelector<HTMLSelectElement>('[aria-label="Screen Details"] [aria-label="Action 1 destination"]')!;destination.value='1';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
  assert.equal(document.querySelector<HTMLInputElement>('[aria-label="Screen Details"] [aria-label="Action 1 selector"]')?.value,'Back');
  await click('Save workspace');const backWorkspace=await saved();assert.equal(backWorkspace.canvas!.screens[1].tests[0].back,true);assert.deepEqual(backWorkspace.canvas!.screens[1].tests[0].backSelector,{target:'text',match:'exact',value:'Back'});assert.match(backWorkspace.yaml,/tapOn:[\s\S]*\^Back\$/);
  await act(async()=>{const selector=document.querySelector<HTMLInputElement>('[aria-label="Screen Details"] [aria-label="Action 1 selector"]')!;Object.getOwnPropertyDescriptor(document.defaultView!.HTMLInputElement.prototype,'value')!.set!.call(selector,'Go back');selector.dispatchEvent(new document.defaultView!.Event('input',{bubbles:true}));});await click('Save workspace');const customized=await saved();assert.equal(customized.canvas!.screens[1].tests[0].back,true);assert.equal(customized.canvas!.screens[1].tests[0].backSelector!.value,'Go back');assert.match(customized.yaml,/\^Go back\$/);
@@ -131,9 +131,9 @@ test('drawing sets action destinations and an action-only Home Details Back jour
 },true));
 
 
-test('dragged actions and checks share one reorderable node list and execute in that order',()=>journey(async({document,click,fill,saved})=>{
+test('actions and checks share one reorderable node list and execute in that order',()=>journey(async({document,click,fill,saved})=>{
  await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Focus field');
- await click('Connect from Home');await click('Select screen Details');
+ await act(async()=>{const destination=document.querySelector<HTMLSelectElement>('[aria-label="Screen Home"] [aria-label="Action 1 destination"]')!;destination.value='2';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
  assert.ok(![...document.querySelectorAll('legend')].some(node=>node.textContent?.startsWith('Actions to reach')));
  assert.equal(document.querySelector<HTMLSelectElement>('[aria-label="Action 1 destination"]')!.value,'2');
  await click('Add check to Home');await fill('Check 1 selector','Ready');await click('Move check 1 down');
@@ -145,7 +145,7 @@ test('dragged actions and checks share one reorderable node list and execute in 
 
 test('editing one grouped action destination preserves the other action and its saved sequence',()=>journey(async({document,click,fill,saved})=>{
  const destination=async(value:string)=>act(async()=>{const select=document.querySelector<HTMLSelectElement>('[aria-label="Action 2 destination"]')!;select.value=value;select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
- await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Focus field');await click('Connect from Home');await click('Select screen Details');
+ await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Focus field');await act(async()=>{const destination=document.querySelector<HTMLSelectElement>('[aria-label="Screen Home"] [aria-label="Action 1 destination"]')!;destination.value='2';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
  await click('Add action to Home');await fill('Action 2 selector','Details');await click('Save workspace');const initial=(await saved()).canvas!;const edge=initial.edges[0];
  await destination('1');await click('Save workspace');const changed=(await saved()).canvas!;assert.equal(changed.edges.find(item=>item.id===edge.id)!.to,'2');assert.deepEqual(changed.edges.find(item=>item.id===edge.id)!.actionTestIds,[edge.actionTestIds![0]]);assert.equal(changed.edges.find(item=>item.actionTestId===edge.actionTestIds![1])!.to,'1');assert.deepEqual(changed.paths[0].edgeIds,[changed.edges.find(item=>item.actionTestId===edge.actionTestIds![1])!.id]);
  await destination('2');await destination('');await click('Save workspace');const cleared=(await saved()).canvas!;assert.equal(cleared.edges.length,1);assert.deepEqual(cleared.edges[0].actionTestIds,[edge.actionTestIds![0]]);assert.deepEqual(cleared.paths[0].visits,initial.paths[0].visits);
@@ -160,8 +160,8 @@ test('retargeting the first grouped picker action saves distinct connections and
 },true));
 
 test('node visit sections isolate the return check and follow the selected scenario after save and reopen',()=>journey(async({document,click,fill,saved})=>{
- await click('New scenario');await fill('Scenario name','Return journey');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Details');await click('Connect from Home');await click('Select screen Details');await click('Add action to Details');
- await act(async()=>{const kind=document.querySelector<HTMLSelectElement>('[aria-label="Screen Details"] [aria-label="Action 1 type"]')!;kind.value='back';kind.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await click('Connect from Details');await click('Select screen Home');
+ await click('New scenario');await fill('Scenario name','Return journey');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Details');await act(async()=>{const destination=document.querySelector<HTMLSelectElement>('[aria-label="Screen Home"] [aria-label="Action 1 destination"]')!;destination.value='2';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await click('Add action to Details');
+ await act(async()=>{const kind=document.querySelector<HTMLSelectElement>('[aria-label="Screen Details"] [aria-label="Action 1 type"]')!;kind.value='back';kind.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await act(async()=>{const destination=document.querySelector<HTMLSelectElement>('[aria-label="Screen Details"] [aria-label="Action 1 destination"]')!;destination.value='1';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
  await click('Visit 3 · Home');
  const section=document.querySelector<HTMLElement>('[aria-label="Visit 3 · Home operations"]');assert.ok(section,'Home must expose an independent section for its third visit');
  await act(async()=>{[...section.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Add check')!.click();});

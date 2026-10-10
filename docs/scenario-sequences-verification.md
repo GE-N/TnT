@@ -106,3 +106,11 @@ No remaining actionable findings. Visit sections, independent commands/order, sc
 Review totals: Standards 0; Spec 0.
 
 Final screenshot run `8e414bda-f887-4cb9-a2b3-540e6e82ed69` also passed with launch → opening tap → Back control tap → return assertion. The deletion warning for a visit-owned step names only that scenario and visit.
+
+## Working version 1 UI cleanup
+
+The user accepted `df7d352398eb31ce189eb0cc3235ec007af15b68` as working version 1. This follow-up removes the entire node connection button and its drag/click wiring; authors connect screens using the action Destination selector. Selector tools are removed from action/check rows. Connection endpoints now choose the facing node borders according to horizontal direction and leave an 8 px clearance, so the backward arrowhead remains outside the destination node.
+
+Browser verification reopened the accepted Home → Coordinator → Home workspace and expanded both actions and the return check. No connection buttons or Selector tools were present; both forward and backward arrowheads were visible. Screenshot: ignored `.scratch/issue-22-version-one-polish.png`. Existing public UI/service tests now author via Destination and still exercise save/reopen, Back, visit isolation and command ordering. All 114 tests, type checking, production build and whitespace checks passed.
+
+Standards review: 0 hard violations; 1 optional test-helper duplication suggestion deferred to keep this UI cleanup small. Spec review: 0 actionable findings.

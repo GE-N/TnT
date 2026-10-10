@@ -91,7 +91,7 @@ test('Home can choose a destination in Add action and immediately see its connec
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
 
-test('dragged connections author ordered edge actions and preserve invalid routes for Undo',async()=>{
+test('action destinations author ordered edge actions and preserve invalid routes for Undo',async()=>{
  const dom=new JSDOM('<div id="root"></div>');const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
@@ -101,14 +101,13 @@ test('dragged connections author ordered edge actions and preserve invalid route
  const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();});
  const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?dom.window.HTMLTextAreaElement.prototype:dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const select=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`);assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
- const connect=async(from:string,to:string)=>act(async()=>{const transfer={value:'',setData(_type:string,value:string){this.value=value;},getData(){return this.value;}};const start=new dom.window.Event('dragstart',{bubbles:true});Object.defineProperty(start,'dataTransfer',{value:transfer});document.querySelector(`[aria-label="Connect from ${from}"]`)!.dispatchEvent(start);const drop=new dom.window.Event('drop',{bubbles:true});Object.defineProperty(drop,'dataTransfer',{value:transfer});document.querySelector(`[aria-label="Screen ${to}"]`)!.dispatchEvent(drop);});
+ const connect=async(from:string,to:string)=>{await click('Add action to '+from);await act(async()=>{const destination=document.querySelector<HTMLSelectElement>(`[aria-label="Screen ${from}"] [aria-label$=" destination"]`)!;destination.value=saved!.screens.find(screen=>screen.title===to)!.id;destination.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});};
  try{
   await act(async()=>root.render(createElement(Host)));await addNode(dom,'Done');
   assert.equal(saved!.screens[2].title,'Done');assert.ok(!document.querySelector('[aria-label^="Add next screen"]'),'Nodes expose no Add next screen control');
   await click('Add check to Home');await fill('Check 1 selector','Home');await click('Add check to Done');
   const done=document.querySelector('[aria-label="Screen Done"]')!;await act(async()=>{const node=done.querySelector('[aria-label="Check 1 selector"]')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,'Done');node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
   await connect('Home','Done');
-  await click('Add action to connection Home → Done');
   assert.deepEqual(saved!.paths[0].edgeIds,[saved!.edges[0].id]);assert.equal(chosen,'route');
   await fill('Home → Done action 1 selector','Field');
   await click('Add action to connection Home → Done');await select('Home → Done action 2 type','input');await fill('Home → Done action 2 text','hello');
