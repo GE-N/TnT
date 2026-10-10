@@ -13,13 +13,13 @@ const definition:ScenarioDefinition={id:'home',name:'Home scenario',authoring:'c
 const graph:CanvasGraph={screens:[{id:'home-screen',title:'Descriptive name only',x:80,y:100,tests:[{id:'home-check',label:'Home required',role:'assertion',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:'Home'}}]}],edges:[],paths:[{id:'home-sequence',name:'Home',screenId:'home-screen',edgeIds:[],visits:[{id:'start-visit'}]}]};
 const yaml=writeChecks('appId: com.example.App\n---\n- launchApp\n',{screens:[],edges:[],paths:[]},graph);
 
-test('a single-screen draft with no selected checks cannot reach the simulator',async()=>{
+test('a single-screen scenario can explicitly omit checks and preview ordinary launch',async()=>{
  const root=await mkdtemp(join(tmpdir(),'tnt-draft-'));
  try{
   const service=createScenarios({root,runner:createRunner({artifactDirectory:root,execute:async()=>{assert.fail('Draft must not reach simulator');}}),maestro:{version:async()=>{assert.fail('Draft must not reach Maestro');},run:async()=>{assert.fail('Draft must not execute');}}});
   const canvas=structuredClone(graph);canvas.paths[0].visits![0].checkIds=[];
   const workspace=await service.save({name:'Draft',yaml,canvas,scenarios:[definition]});
-  await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:'home'}),/at least one.*check/i);
+  const preview=await service.preview({...workspace,scenarioId:'home'});assert.match(preview.executionYaml,/- launchApp/);assert.doesNotMatch(preview.executionYaml,/assertVisible/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
@@ -34,7 +34,7 @@ test('empty named drafts and their layout reopen offline and cannot execute',asy
   await assert.rejects(service.start({workspaceId:saved.id,deviceId,scenarioId:'home'}),/nonempty.*path/i);
   const namedOnly=await service.save({...saved,canvas:{...canvas,screens:[{id:'home-screen',title:'Home',x:340,y:230,tests:[]}],paths:[{id:'home-sequence',name:'Home',screenId:'home-screen',edgeIds:[]}]}});
   assert.equal((await service.workspace(saved.id)).canvas?.screens[0].x,340);
-  await assert.rejects(service.start({workspaceId:namedOnly.id,deviceId,scenarioId:'home'}),/at least one.*check/i);
+  assert.match((await service.preview({...namedOnly,scenarioId:'home'})).executionYaml,/launchApp/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
@@ -107,7 +107,7 @@ test('a shared connection executes only actions selected for the running scenari
   assert.equal(result.canvas?.tests.find(test=>test.id==='second-action')?.status,'passed');
   await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:'first'}),/Missing required input: FIRST_INPUT/);
   const excluded=structuredClone(canvas);excluded.screens[1].tests[0].scenarioIds=['first'];await service.save({...workspace,canvas:excluded});
-  await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:'second'}),/at least one screen check.*destination/);
+  const preview=await service.preview({...workspace,canvas:excluded,scenarioId:'second'});assert.match(preview.executionYaml,/Second action/);assert.doesNotMatch(preview.executionYaml,/assertVisible/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 

@@ -19,7 +19,8 @@ export function unconnectedScenarioActions(graph:CanvasGraph,scenarioId:string){
  const connected=new Set(graph.edges.flatMap(edgeActions));
  return graph.screens.flatMap(screen=>screen.tests).filter(test=>isAuthored(test)&&!test.check&&test.scenarioIds?.includes(scenarioId)&&!connected.has(test.id)).map(test=>test.id);
 }
-export function operationProblem(test:CanvasTest){return test.check||test.tap?checkProblem(test.check??test.tap!):test.input!==undefined&&!test.input.trim()?'Enter input text before running.':undefined;}
+export function backControl(test:Pick<CanvasTest,'back'|'backSelector'>):ScreenSelector|undefined{return test.back?(test.backSelector??{target:'text',match:'exact',value:'Back'}):undefined;}
+export function operationProblem(test:CanvasTest){const selector=test.check??test.tap??backControl(test);return selector?checkProblem(selector):test.input!==undefined&&!test.input.trim()?'Enter input text before running.':undefined;}
 export function canvasTestLabel(test:CanvasTest){return test.check?checkLabel(test.check):test.tap?tapLabel(test.tap):test.input!==undefined?'Input text · '+(test.input||'Draft — text needed'):test.back?'Back':test.label;}
 export function checkProblem(check:ScreenSelector){
  if(!check.value.trim())return 'Enter a text or element identifier selector before running.';
@@ -54,8 +55,8 @@ export function authoredChecks(yaml:string){
    if(command==='tapOn')tap={target,match,value};else check={visibility:command==='assertVisible'?'visible':'absent',target,match,value};
   }
   const input=!node?.anchor&&!node?.tag&&command==='inputText'&&typeof argument==='string'?argument:undefined;
-  const back=!node?.anchor&&!node?.tag&&value==='back'?true:undefined;
-  return {id,index,check,tap,input,back};
+  const back=!node?.anchor&&!node?.tag&&(value==='back'||tap&&/(?:^|\n)\s*tnt-back\s*(?:\n|$)/.test(node.commentBefore??''))?true:undefined;
+  return {id,index,check,tap:back?undefined:tap,input,back,backSelector:back?tap:undefined};
  }).filter(item=>item.id);
 }
 export function refreshChecks(graph:CanvasGraph,yaml:string):CanvasGraph{
@@ -64,7 +65,7 @@ export function refreshChecks(graph:CanvasGraph,yaml:string):CanvasGraph{
   const tests=screen.tests.map(test=>{
    if(!isAuthored(test))return test;
    const matches=checks.filter(item=>item.id===test.id);const found=matches.length===1?matches[0]:undefined;
-   return found&&isAuthored(found)?{...test,check:found.check,tap:found.tap,input:found.input,back:found.back,role:!found.check?'action' as const:'assertion' as const,reference:{...test.reference,index:found.index}}:test;
+   return found&&isAuthored(found)?{...test,check:found.check,tap:found.tap,input:found.input,back:found.back,backSelector:found.backSelector,role:!found.check?'action' as const:'assertion' as const,reference:{...test.reference,index:found.index}}:test;
   });
   const executable=tests.filter(test=>isAuthored(test)&&checks.some(item=>item.id===test.id&&isAuthored(item))).sort((a,b)=>a.reference.index!-b.reference.index!);
   let cursor=0;return {...screen,tests:tests.map(test=>executable.some(item=>item.id===test.id)?executable[cursor++]:test)};
@@ -82,18 +83,18 @@ export function writeChecks(yaml:string,previous:CanvasGraph,next:CanvasGraph){
  const replacements=new Map<string,(typeof sequence.items)[number]>();
  for(const test of after){
   const matches=parsed.filter(item=>item.id===test.id);const prior=before.find(item=>item.id===test.id);
-  const selector=test.check??test.tap;const matched=matches[0]&&isAuthored(matches[0]);
-  const shape=(test:{check?:ScreenCheck;tap?:ScreenSelector;input?:string;back?:boolean}|undefined)=>JSON.stringify({check:test?.check,tap:test?.tap,input:test?.input,back:test?.back});
+  const selector=test.check??test.tap??backControl(test);const matched=matches[0]&&isAuthored(matches[0]);
+  const shape=(test:{check?:ScreenCheck;tap?:ScreenSelector;input?:string;back?:boolean;backSelector?:ScreenSelector}|undefined)=>JSON.stringify({check:test?.check,tap:test?.tap,input:test?.input,back:test?.back,backSelector:test?.backSelector});
   const unchanged=shape(prior)===shape(test);
   if(matches.length>1)throw new Error('Ambiguous check YAML. Keep one command identity before editing this check.');
   if(matches.length&&!matched){if(unchanged){replacements.set(test.id,originals.get(test.id)!);continue;}throw new Error('This check contains unsupported YAML. Edit its code before changing the canvas form.');}
   if(!matches.length&&prior&&isAuthored(prior)&&!operationProblem(prior)&&unchanged)throw new Error('A check command was removed from YAML. Restore it or explicitly edit its selector before changing other checks.');
   if(operationProblem(test))continue;
   if(matched&&shape(matches[0])===shape(test)){replacements.set(test.id,originals.get(test.id)!);continue;}
-  const single=source('appId: placeholder\n---\n'+stringify([test.back?'back':test.input!==undefined?{inputText:test.input}:{[test.tap?'tapOn':test.check!.visibility==='visible'?'assertVisible':'assertNotVisible']:{[selector!.target]:checkPattern(selector!)}}]));
+  const single=source('appId: placeholder\n---\n'+stringify([test.input!==undefined?{inputText:test.input}:{[test.tap||test.back?'tapOn':test.check!.visibility==='visible'?'assertVisible':'assertNotVisible']:{[selector!.target]:checkPattern(selector!)}}]));
   const node=single.sequence.items[0]!;
-  const comments=originals.get(test.id)?.commentBefore?.split('\n').filter(line=>!/^\s*tnt-(check|match):/.test(line))??[];
-  node.commentBefore=[...comments,' tnt-check:'+test.id,...(selector?[' tnt-match:'+selector.match]:[])].join('\n');replacements.set(test.id,node);
+  const comments=originals.get(test.id)?.commentBefore?.split('\n').filter(line=>!/^\s*tnt-(check|match):|^\s*tnt-back\s*$/.test(line))??[];
+  node.commentBefore=[...comments,' tnt-check:'+test.id,...(test.back?[' tnt-back']:[]),...(selector?[' tnt-match:'+selector.match]:[])].join('\n');replacements.set(test.id,node);
  }
  const retained=sequence.items.filter(node=>!owned.has(marker(node?.commentBefore)??'')||replacements.has(marker(node?.commentBefore)??''));
  for(const [screenIndex,screen] of next.screens.entries()){
@@ -114,16 +115,25 @@ export function writeChecks(yaml:string,previous:CanvasGraph,next:CanvasGraph){
 
 // Choosing a destination owns the connection and extends only the active route's tail.
 export function connectCanvasAction(graph:CanvasGraph,from:string,actionId:string,to:string,pathId:string){
- const previous=graph.edges.find(edge=>edge.from===from&&edgeActions(edge).includes(actionId));
+ const connected=graph.edges.find(edge=>edge.from===from&&edgeActions(edge).includes(actionId));
+ // Each destination control edits only its own action, preserving its siblings.
+ if(connected&&edgeActions(connected).length>1&&connected.to!==to){
+  const ids=edgeActions(connected).filter(id=>id!==actionId);
+  graph={...graph,edges:graph.edges.map(edge=>edge.id===connected.id?{...edge,actionTestId:ids[0],actionTestIds:ids}:edge)};
+ }
+ const candidates=graph.edges.filter(edge=>edge.from===from&&edge.to===to);
+ const previous=graph.edges.find(edge=>edge.from===from&&edgeActions(edge).includes(actionId))??(candidates.length===1?candidates[0]:candidates.find(edge=>edgeActions(edge).length===0));
  if(!to){const removed=graph.edges.filter(edge=>edgeActions(edge).includes(actionId)).map(edge=>edge.id);return {graph:{...graph,edges:graph.edges.filter(edge=>!removed.includes(edge.id)),paths:graph.paths.map(path=>({...path,edgeIds:path.edgeIds.filter(id=>!removed.includes(id)),visits:routeVisits(graph,path).filter((_visit,index)=>index===0||!removed.includes(path.edgeIds[index-1]))}))},pathId};}
  const destination=graph.screens.find(screen=>screen.id===to);if(!destination)throw new Error('Choose an existing destination screen.');
  if(!previous&&graph.edges.length>=80)throw new Error('This canvas supports up to 80 connections.');
- const id=previous?.id??'action-link:'+actionId;
- const edge={id,from,to,actionTestId:actionId,actionTestIds:previous?.actionTestIds,assertionTestId:destination.tests.find(test=>test.check)?.id??'pending:'+id,responseCondition:'Tap → '+destination.title};
+ const preferred='action-link:'+actionId;
+ const id=previous?.id??(graph.edges.some(edge=>edge.id===preferred)?crypto.randomUUID():preferred);
+ const actions=previous?[...new Set([...edgeActions(previous),actionId])].filter(id=>!id.startsWith('pending:')):[actionId];
+ const edge={id,from,to,actionTestId:actions[0],actionTestIds:previous?.actionTestIds!==undefined||actions.length>1?actions:undefined,assertionTestId:destination.tests.find(test=>test.check)?.id??'pending:'+id,responseCondition:previous?.responseCondition??graph.screens.find(screen=>screen.id===from)!.title+' → '+destination.title};
  let paths=graph.paths;let path=paths.find(path=>path.id===pathId)??paths.find(path=>path.edgeIds.includes(id))??paths.find(path=>path.screenId===from&&!path.edgeIds.length);
  if(!path){if(paths.length>=20)throw new Error('Select an existing scenario path; this canvas supports up to 20 paths.');path={id:id+':path',name:(graph.screens.find(screen=>screen.id===from)!.title+' → '+destination.title).slice(0,120),screenId:from,edgeIds:[]};paths=[...paths,path];}
  const tail=visitScreenId(graph,path,path.edgeIds.length);
- if(tail===from&&!path.finished)paths=paths.map(item=>item.id===path!.id?{...item,...appendRouteTransition(graph,item,id)}:item);
+ if(tail===from&&!path.finished&&!path.edgeIds.includes(id))paths=paths.map(item=>item.id===path!.id?{...item,...appendRouteTransition(graph,item,id)}:item);
  return {graph:{...graph,edges:previous?graph.edges.map(item=>item.id===id?edge:item):[...graph.edges,edge],paths},pathId:path.id};
 }
 
@@ -139,9 +149,9 @@ export function initialCanvasScreen(graph:CanvasGraph,path:CanvasGraph['paths'][
 }
 export function screenChecks(graph:CanvasGraph,screenId?:string){return graph.screens.find(screen=>screen.id===screenId)?.tests.filter(test=>test.check)??[];}
 export function edgeChecks(graph:CanvasGraph,edge:Transition){
- const authored=edge.actionTestIds||graph.screens.find(screen=>screen.id===edge.from)?.tests.some(test=>test.id===edge.actionTestId&&test.tap);
+ const authored=edge.actionTestIds||graph.screens.find(screen=>screen.id===edge.from)?.tests.some(test=>test.id===edge.actionTestId&&isAuthored(test)&&!test.check);
  const checks=authored?screenChecks(graph,edge.to).map(test=>test.id):[];
- return checks.length?checks:[edge.assertionTestId];
+ return authored?checks:[edge.assertionTestId];
 }
 
 // Older routes gain deterministic visit identities once saved. Edits retain surviving visits.

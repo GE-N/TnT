@@ -5,7 +5,7 @@ import {authoredChecks,unconnectedScenarioActions,edgeActions,edgeChecks,initial
 import type {Step} from './scenarios.js';
 
 export type YAMLReference={kind:'step'|'flow'|'setup'|'handler';file:string;index?:number;actionId?:string;fingerprint:string};
-export type CanvasTest={scenarioIds?:string[];input?:string;back?:boolean;tap?:ScreenSelector;check?:ScreenCheck;id:string;label:string;role:'action'|'assertion'|'setup'|'handler'|'test';reference:YAMLReference};
+export type CanvasTest={scenarioIds?:string[];input?:string;back?:boolean;backSelector?:ScreenSelector;tap?:ScreenSelector;check?:ScreenCheck;id:string;label:string;role:'action'|'assertion'|'setup'|'handler'|'test';reference:YAMLReference};
 export type ScreenNode={id:string;title:string;x:number;y:number;referenceScreenshot?:string;tests:CanvasTest[]};
 export type Transition={actionTestIds?:string[];id:string;from:string;to:string;actionTestId:string;assertionTestId:string;responseCondition:string};
 export type CanvasVisit={id:string;checkIds?:string[]};
@@ -78,6 +78,7 @@ export function readCanvas(value:unknown):CanvasGraph|undefined{
    if(test.tap&&(!['text','id'].includes(test.tap.target)||!['exact','contains','regex'].includes(test.tap.match)||typeof test.tap.value!=='string'||test.tap.value.length>4000||test.check))throw new Error('Provide a bounded tap selector, separate from a check.');
    if(test.input!==undefined&&(typeof test.input!=='string'||test.input.length>4000))throw new Error('Provide input text up to 4000 characters.');
    if(test.back!==undefined&&test.back!==true)throw new Error('Back must be true.');
+   if(test.backSelector&&(!test.back||!['text','id'].includes(test.backSelector.target)||!['exact','contains','regex'].includes(test.backSelector.match)||typeof test.backSelector.value!=='string'||test.backSelector.value.length>4000))throw new Error('Provide a bounded Back control selector.');
    if([test.check,test.tap,test.input!==undefined,test.back].filter(Boolean).length>1)throw new Error('Choose one authored command per row.');
    const reference=test.reference;
    if(['step','handler'].includes(reference.kind)&&(!Number.isInteger(reference.index)||reference.index!<0))throw new Error('Step/handler references require a nonnegative command position.');
@@ -118,11 +119,11 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
  for(const edge of graph.edges){
   const action=tests.get(edge.actionTestId);
   if(!edgeActions(edge).length||edgeActions(edge).some(id=>tests.get(id)?.screen.id!==edge.from||tests.get(id)?.test.check))diagnostics.push({ownerId:edge.id,detail:'Repair the ordered actions on this connection; a removed action must be restored or explicitly removed from the route.'});const assertion=tests.get(edge.assertionTestId);
-  const sharedChecks=edge.actionTestIds!==undefined&&screenChecks(graph,edge.to).length>0;
-  if(!sharedChecks&&edge.assertionTestId==='pending:'+edge.id)diagnostics.push({ownerId:edge.id,detail:'Add a check to destination screen '+(screens.get(edge.to)?.title??edge.to)+' before running this action. Use Add check in that node to verify arrival.'});
-  else if(!screens.has(edge.from)||!screens.has(edge.to)||action?.screen.id!==edge.from||!sharedChecks&&assertion?.screen.id!==edge.to)diagnostics.push({ownerId:edge.id,detail:'Repair transition screen/action/assertion associations.'});
+  const authoredConnection=edge.actionTestIds!==undefined||edgeActions(edge).some(id=>{const test=tests.get(id)?.test;return test&&isAuthored(test);});
+  if(!authoredConnection&&edge.assertionTestId==='pending:'+edge.id)diagnostics.push({ownerId:edge.id,detail:'Restore the legacy destination assertion association.'});
+  else if(!screens.has(edge.from)||!screens.has(edge.to)||action?.screen.id!==edge.from||!authoredConnection&&assertion?.screen.id!==edge.to)diagnostics.push({ownerId:edge.id,detail:'Repair transition screen/action/assertion associations.'});
   const target=assertion&&resolveReference(assertion.test.reference,catalog.references);
-  if(!sharedChecks&&((assertion&&isAuthored(assertion.test)&&!assertion.test.check)||(target&&!target.assertion)))diagnostics.push({ownerId:edge.id,detail:'The destination must reference an executable assertion or assertion flow.'});
+  if(!authoredConnection&&((assertion&&isAuthored(assertion.test)&&!assertion.test.check)||(target&&!target.assertion)))diagnostics.push({ownerId:edge.id,detail:'The destination must reference an executable assertion or assertion flow.'});
  }
  for(const path of graph.paths){
   if(path.screenId&&!screens.has(path.screenId))diagnostics.push({ownerId:path.id,detail:'Restore or select the initial screen for this scenario.'});
@@ -147,7 +148,7 @@ export function selectedCanvasPath(graph:CanvasGraph,yaml:string,flows:Record<st
  if(initial){required.add(initial);for(const test of graph.screens.find(screen=>screen.id===initial)?.tests??[])if(visitChecks(graph,path,0).includes(test.id)||!path.scenarioId&&(test.check||!path.edgeIds.length))required.add(test.id);}
  const errors=inspection.diagnostics.filter(diagnostic=>required.has(diagnostic.ownerId));
  if(errors.length)throw new Error(errors.map(error=>error.detail).join(' '));
- if(path.screenId&&!path.edgeIds.length){const screen=graph.screens.find(screen=>screen.id===path.screenId)!;if(!visitChecks(graph,path,0).length||!screen.tests.some(test=>test.check))throw new Error('Select at least one screen check for '+screen.title+' before running, or add its next action to this scenario.');return path;}
+ if(path.screenId&&!path.edgeIds.length)return path;
  const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,test] as const)));
  let previous=-Infinity;
  for(const test of screenChecks(graph,initial)){const index=executionIndex(test.reference,yaml);if(index===undefined)throw new Error('Repair the initial screen checks.');previous=Math.max(previous,index*2+1);}
@@ -215,7 +216,12 @@ function mapCanvasOccurrences(graph:CanvasGraph,steps:Step[],running:boolean,exe
   const status=running?'unavailable':auxiliary?.status??(item.assertion?step?.status==='failed'?'failed':step?.assertionStatus??'unavailable':step?.status??'unavailable');
   return {id:item.id,visitId:item.visitId,testId:item.testId,edgeId:item.edgeId,status,stepId:step?.id,detail:running?'Outcomes become available after execution.':item.assertion?'This visit requires completed assertion evidence.':'Mapped from this execution occurrence.'};
  });
- const visits=plan.visits.map(visit=>({...visit,status:aggregate(occurrences.filter(item=>item.visitId===visit.id).map(item=>item.status))}));
+ const visits=plan.visits.map(visit=>{
+  const own=occurrences.filter(item=>item.visitId===visit.id);
+  const incoming=plan.transitions.find(item=>item.destinationVisitId===visit.id);
+  const navigation=incoming?occurrences.filter(item=>item.visitId===incoming.visitId&&item.edgeId===incoming.edgeId):[];
+  return {...visit,status:aggregate(own.length?own.map(item=>item.status):incoming?navigation.map(item=>item.status):steps.map(step=>step.status))};
+ });
  const transitions=plan.transitions.map(transition=>({id:transition.id,edgeId:transition.edgeId,status:aggregate(occurrences.filter(item=>item.edgeId===transition.edgeId&&item.visitId===transition.visitId||item.visitId===transition.destinationVisitId&&!item.edgeId).map(item=>item.status))}));
  const tests=graph.screens.flatMap(screen=>screen.tests.map(test=>{const outcomes=occurrences.filter(item=>item.testId===test.id);return {id:test.id,status:aggregate(outcomes.map(item=>item.status)),stepId:outcomes.length===1?outcomes[0].stepId:undefined,detail:outcomes.length?'Aggregate of all selected occurrences; inspect visit details.':'Not selected in this route.'};}));
  return {pathId:plan.pathId,note:'Each finite visit and transition maps its own execution evidence. Aggregates preserve failures and unavailable outcomes.',occurrences,visits,transitions,tests,screens:graph.screens.map(screen=>({id:screen.id,status:aggregate(visits.filter(visit=>visit.screenId===screen.id).map(visit=>visit.status))})),edges:graph.edges.map(edge=>({id:edge.id,status:aggregate(transitions.filter(item=>item.edgeId===edge.id).map(item=>item.status))}))};

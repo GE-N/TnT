@@ -113,8 +113,8 @@ test('dragged connections author ordered edge actions and preserve invalid route
   await fill('Home → Done action 1 selector','Field');
   await click('Add action to connection Home → Done');await select('Home → Done action 2 type','input');await fill('Home → Done action 2 text','hello');
   await click('Add action to connection Home → Done');await select('Home → Done action 3 type','back');
-  assert.match(authored,/assertVisible:[\s\S]*tapOn:[\s\S]*inputText: hello[\s\S]*- back[\s\S]*assertVisible:/);
-  await click('Move home → done action 3 up');assert.match(authored,/- back[\s\S]*inputText: hello/);
+  assert.match(authored,/assertVisible:[\s\S]*tapOn:[\s\S]*inputText: hello[\s\S]*\^Back\$[\s\S]*assertVisible:/);
+  await click('Move home → done action 3 up');assert.match(authored,/\^Back\$[\s\S]*inputText: hello/);
   await fill('Executable YAML',authored.replace('inputText: hello','inputText: changed'));assert.equal((document.querySelector('[aria-label="Home → Done action 3 text"]') as HTMLInputElement).value,'changed');
   const before=structuredClone(saved!);const beforeYaml=authored;
   await click('Delete home → done action 2');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Chosen route/);await click('Delete anyway');
@@ -130,8 +130,8 @@ test('dragged connections author ordered edge actions and preserve invalid route
   await fill('Screen title for Details','Done');await act(async()=>title.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));
   const beforeNode=authored;const references=structuredClone(saved!.paths);await act(async()=>{document.querySelector('[aria-label="Screen Done"]')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:100,clientY:100}));});await click('Delete node');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Chosen route/);await click('Delete anyway');assert.ok(!saved!.screens.some(screen=>screen.title==='Done'));assert.deepEqual(saved!.paths,references);assert.ok(!document.querySelector('[aria-label="Screen Done"]'));await click('Undo canvas deletion');assert.ok(document.querySelector('[aria-label="Screen Done"]'));assert.equal(authored,beforeNode);
   const intact=authored;
-  for(const command of ['inputText: changed','back']){
-   const removed=intact.replace(new RegExp('# tnt-check:[^\\n]+\\n- '+command+'\\n'),'');await fill('Executable YAML',removed);await fill('Check 1 selector','Changed Home');assert.match(document.body.textContent!,/command was removed from YAML/);assert.equal(authored,removed);await fill('Executable YAML',intact);
+  for(const command of ['inputText: changed','tapOn:\\n    text: \\^Back\\$']){
+   const removed=intact.replace(new RegExp('# tnt-check:[^\\n]+\\n(?:# tnt-back\\n# tnt-match:exact\\n)?- '+command+'\\n'),'');await fill('Executable YAML',removed);await fill('Check 1 selector','Changed Home');assert.match(document.body.textContent!,/command was removed from YAML/);assert.equal(authored,removed);await fill('Executable YAML',intact);
   }
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });

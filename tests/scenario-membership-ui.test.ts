@@ -8,6 +8,7 @@ import {tmpdir} from 'node:os';
 import {Scenarios} from '../src/scenarios.js';
 import {createScenarios} from '../server/scenarios.js';
 import {createRunner} from '../server/runner.js';
+import {parseAllDocuments} from 'yaml';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import type {CanvasGraph} from '../server/canvas.js';
 
@@ -17,7 +18,7 @@ for(const shareBeforeStart of [false,true])test('a second scenario shares operat
  const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
   executed=await readFile(flow,'utf8');
   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
-  await writeFile(join(directory,'commands.json'),JSON.stringify([{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{tapOnElement:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{assertConditionCommand:{condition:{visible:{textRegex:'^Done$'}}}},metadata:{depth:0,status:'COMPLETED'}}]));
+  await writeFile(join(directory,'commands.json'),JSON.stringify(parseAllDocuments(executed)[1].toJS().map((command:any)=>({command:{[command==='launchApp'||command.launchApp?'launchAppCommand':command.tapOn?'tapOnElement':'assertConditionCommand']:{}},metadata:{depth:0,status:'COMPLETED'}}))));
   return {code:0,log:'Fixture',cleanup:{verified:true,detail:'Fixture exited'}};
  }}});
  const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
@@ -38,7 +39,7 @@ for(const shareBeforeStart of [false,true])test('a second scenario shares operat
   await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));
   await act(async()=>{const input=document.getElementById('open-workspace')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,workspace.id);input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});await click('Open saved workspace');await click('Scenario 2');
   assert.ok(!document.querySelector('[aria-label="Action 1 selector"]'),'Another scenario action is not presented as active');
-  if(!shareBeforeStart){await click('Run scenario');assert.match(document.querySelector('.run-error-toast')!.textContent!,/at least one screen check/);}
+  if(!shareBeforeStart){await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.doesNotMatch(executed,/tapOn|assertVisible/);}
   await click('Use existing actions/checks');await click('Scenarios');
   await click('Use Tap text · Go in Scenario 2');
   await click('Use Visible text · Done in Scenario 2');

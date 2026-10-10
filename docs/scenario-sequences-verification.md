@@ -50,3 +50,30 @@ The always-visible Append visit buttons are removed. Existing connections expose
 A missing screen assertion remains an execution blocker: an action describes the transition, while a check verifies arrival. Nodes without checks explain this beside their authoring controls, and run diagnostics point to Add check in the affected node. The regression recreates Home → Details → Home through existing actions, verifies both missing-check diagnostics, adds checks through the nodes, then executes successfully through the real workspace/run services. A separate regression verifies connecting a node action through its restored destination picker.
 
 Follow-up validation: all 107 tests passed, with type checking, production build and whitespace checks passing. Standards and Spec reviews reported no actionable findings against the user's revised UX requirements. Browser verification selected Details through Home's action destination picker and showed the resulting Home → Details sequence and arrow. The default diagnostic uses the connection's name instead of its internal ID. Screenshot: ignored `.scratch/issue-22-connection-fix.jpg`.
+
+
+## Optional checks and a single operation order — 2026-10-10
+
+The user's follow-up explicitly supersedes the earlier destination-assertion requirement. Canvas scenarios now run with no checks, including a single-screen launch and Home → Details → Home. Included checks still require their actual execution evidence; the runner does not invent assertion evidence for unchecked screens.
+
+The default node editor now has one ordered list of actions and checks. The arrows can move a check before or after a connected action, and route projection follows that displayed order. The separate “Actions to reach …” group is removed from the default editor. Each action exposes its destination. Drawing binds existing unconnected source actions; adding an action to a sole existing connection fills its destination and extends the selected unfinished tail. Editing or clearing one grouped action's destination preserves its siblings and sequence visits. Splitting the first picker-created action allocates a distinct connection identity.
+
+The simulator demonstration found that raw Maestro `back` reports completion on iOS without returning from Coordinator. [Maestro's Back reference](https://docs.maestro.dev/reference/commands-available/back) documents support for Android and Web only. Canvas Back now targets the app's actual Back control: exact text `Back` by default, with editable text/identifier matching and simulator picking. Its YAML is an executable `tapOn` command; the `tnt-back` comment preserves its row type on save/reopen. Old saved canvas Back rows are projected to the same control. Legacy association-only YAML is unchanged.
+
+Controlled no-check proof: workspace `0c9e0f25-e0f9-4f5c-81c2-59a5b1c62116`, run `d4fce4a0-9029-4493-b6b7-4a9ca96a6f2a`, booted iPhone 15, fixture `com.example.TnTRepeatedVisitProof`. Launch, opening Coordinator, and tapping Back passed. The post-run hierarchy contains `home.returned` and does not contain `coordinator.fixed`, confirming actual return to Home. The preceding raw-Back run `da6d9cfa-c4b0-415a-a3eb-b508467c39f3` reported success but stayed on Coordinator and is not counted as navigation proof. Local evidence remains under ignored `.tnt/`.
+
+Public UI regressions cover optional checks, Back type and selector persistence, check/action reordering in both directions and actual execution order, drag destination binding, per-row destination changes/removal, and first-action connection splitting. Existing finite routes, explicit operation memberships, included-check failures and legacy YAML association behavior remain covered.
+
+Browser verification reopened the corrected workspace, added an optional Home check before the navigation action in the same node list, and ran Home → Coordinator → Home successfully (`89f66cc3-e452-4322-a680-afa68356e283`). Command evidence is launch → Home check → open Coordinator → Back control tap → Home check. Screenshot: ignored `.scratch/issue-22-ordered-operations.jpg`.
+
+Final validation: all 110 tests, type checking, production build and whitespace checks passed.
+
+### Standards
+
+No remaining actionable findings. Review verified the distinct-ID correction and Back selector persistence.
+
+### Spec
+
+No remaining actionable findings against the latest user requirements. Optional checks, drag destinations, one reorderable operation list, per-row destination changes and actual iOS Back navigation are covered.
+
+Review totals: Standards 0; Spec 0.
