@@ -9,6 +9,16 @@ export function tapLabel(tap:ScreenSelector){return `Tap ${tap.target==='text'?'
 export function checkLabel(check:ScreenCheck){return `${check.visibility==='visible'?'Visible':'Absent'} ${check.target==='text'?'text':'element'} · ${check.value||'Draft — selector needed'}`;}
 export function isAuthored(test:Pick<CanvasTest,'check'|'tap'|'input'|'back'>){return Boolean(test.check||test.tap||test.input!==undefined||test.back);}
 export function edgeActions(edge:Pick<Transition,'actionTestIds'|'actionTestId'>){return edge.actionTestIds??[edge.actionTestId];}
+export function usedByScenario(test:CanvasTest,scenarioId?:string){return !scenarioId||test.scenarioIds===undefined||test.scenarioIds.includes(scenarioId);}
+function scenarioOperationIds(graph:CanvasGraph,ids:string[],scenarioId?:string){
+ const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,test] as const)));
+ return ids.filter(id=>{const test=tests.get(id);return !test||usedByScenario(test,scenarioId);});
+}
+export function scenarioActions(graph:CanvasGraph,edge:Transition,scenarioId?:string){return scenarioOperationIds(graph,edgeActions(edge),scenarioId);}
+export function unconnectedScenarioActions(graph:CanvasGraph,scenarioId:string){
+ const connected=new Set(graph.edges.flatMap(edgeActions));
+ return graph.screens.flatMap(screen=>screen.tests).filter(test=>isAuthored(test)&&!test.check&&test.scenarioIds?.includes(scenarioId)&&!connected.has(test.id)).map(test=>test.id);
+}
 export function operationProblem(test:CanvasTest){return test.check||test.tap?checkProblem(test.check??test.tap!):test.input!==undefined&&!test.input.trim()?'Enter input text before running.':undefined;}
 export function canvasTestLabel(test:CanvasTest){return test.check?checkLabel(test.check):test.tap?tapLabel(test.tap):test.input!==undefined?'Input text · '+(test.input||'Draft — text needed'):test.back?'Back':test.label;}
 export function checkProblem(check:ScreenSelector){
@@ -141,7 +151,8 @@ export function routeVisits(graph:CanvasGraph,path:CanvasGraph['paths'][number])
 export function visitChecks(graph:CanvasGraph,path:CanvasGraph['paths'][number],index:number){
  const screenId=visitScreenId(graph,path,index);
  const selected=routeVisits(graph,path)[index]?.checkIds;
- return selected??(index===0?screenChecks(graph,screenId).map(test=>test.id):graph.edges.find(edge=>edge.id===path.edgeIds[index-1])?edgeChecks(graph,graph.edges.find(edge=>edge.id===path.edgeIds[index-1])!):[]);
+ const ids=selected??(index===0?screenChecks(graph,screenId).map(test=>test.id):graph.edges.find(edge=>edge.id===path.edgeIds[index-1])?edgeChecks(graph,graph.edges.find(edge=>edge.id===path.edgeIds[index-1])!):[]);
+ return scenarioOperationIds(graph,ids,path.scenarioId);
 }
 
 export function appendRouteTransition(graph:CanvasGraph,path:CanvasGraph['paths'][number],edgeId:string){

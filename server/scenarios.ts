@@ -1,6 +1,6 @@
 import {projectCanvasRoute} from './canvas-route.js';
 import {refreshChecks} from '../shared/canvas-authoring.js';
-import {readScenarios,selectScenario,type ScenarioDefinition} from './scenario-definitions.js';
+import {readScenarios,selectScenario,validateFlowInputs,type ScenarioDefinition} from './scenario-definitions.js';
 import {readAutomation,instrument,mapAutomation,metadataStatus,type Automation,type AutomationResult,type ExecutionItem} from './default-actions.js';
 import { mkdir, readFile, writeFile, realpath, readdir, mkdtemp, rm, rename } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
@@ -53,7 +53,9 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       if(rawCanvas){const canvas=refreshChecks(rawCanvas,yaml);const pathId=selection?.scenario.pathId??input.pathId;const projection=projectCanvasRoute(canvas,yaml,flows??{},pathId,automation);yaml=projection.yaml;automation=projection.automation;selectedCanvasPath(projection.canvas,yaml,flows??{},pathId,automation);}
       const root=validate(yaml,flows);
       for(const flow of Object.values(flows??{}))if(validate(flow,flows).appId!==root.appId)throw new Error('Reusable flows must declare the same appId as the scenario.');
-      return {authoredYaml:yaml,executionYaml:automation?instrument(yaml,automation,input.resetApp??false).yaml:yaml};
+      const executionYaml=automation?instrument(yaml,automation,input.resetApp??false).yaml:yaml;
+      if(selection?.scenario.authoring==='canvas')validateFlowInputs(executionYaml,flows??{},selection.inputs);
+      return {authoredYaml:yaml,executionYaml};
     },
     async references(input: {yaml:string;flows?:Record<string,string>;canvas?:unknown;automation?:unknown}) {
       if(typeof input.yaml!=='string'||Buffer.byteLength(input.yaml)>100_000|| (input.flows!==undefined&&(!input.flows||typeof input.flows!=='object'||Array.isArray(input.flows)||Object.values(input.flows).some(value=>typeof value!=='string')))||Buffer.byteLength(JSON.stringify(input.flows??{}))>900_000)throw new Error('Provide bounded YAML and reusable flows.');
@@ -101,6 +103,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const canvasPath=canvas?selectedCanvasPath(canvas,workspace.yaml,workspace.flows??{},selectedPathId,automation):undefined;
       const { appId, steps } = validate(workspace.yaml, workspace.flows);
       const derived=automation?instrument(workspace.yaml,automation,resetApp):undefined;
+      if(selection?.scenario.authoring==='canvas')validateFlowInputs(derived?.yaml??workspace.yaml,workspace.flows??{},selection.inputs);
       for (const flow of Object.values(workspace.flows ?? {})) { if (validate(flow, workspace.flows).appId !== appId) throw new Error('Reusable flows must declare the same appId as the scenario.'); }
       if ((input.captureId === undefined) !== (input.pickerReviewId === undefined)) throw new Error('Provide both capture and reviewed step identity.');
       const pickerReference = input.captureId ? options.runner.picker.assertReview(input.captureId, input.pickerReviewId!, workspace.yaml) : undefined;

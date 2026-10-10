@@ -1,17 +1,17 @@
 import type {Automation,AutomationResult} from './default-actions.js';
 import {createHash} from 'node:crypto';
 import {parseAllDocuments, stringify} from 'yaml';
-import {authoredChecks,edgeActions,edgeChecks,initialCanvasScreen,screenChecks,routeVisits,visitChecks,visitScreenId,isAuthored,operationProblem,type ScreenCheck,type ScreenSelector} from '../shared/canvas-authoring.js';
+import {authoredChecks,unconnectedScenarioActions,edgeActions,edgeChecks,initialCanvasScreen,screenChecks,routeVisits,visitChecks,visitScreenId,isAuthored,operationProblem,type ScreenCheck,type ScreenSelector} from '../shared/canvas-authoring.js';
 import type {Step} from './scenarios.js';
 
 export type YAMLReference={kind:'step'|'flow'|'setup'|'handler';file:string;index?:number;actionId?:string;fingerprint:string};
-export type CanvasTest={input?:string;back?:boolean;tap?:ScreenSelector;check?:ScreenCheck;id:string;label:string;role:'action'|'assertion'|'setup'|'handler'|'test';reference:YAMLReference};
+export type CanvasTest={scenarioIds?:string[];input?:string;back?:boolean;tap?:ScreenSelector;check?:ScreenCheck;id:string;label:string;role:'action'|'assertion'|'setup'|'handler'|'test';reference:YAMLReference};
 export type ScreenNode={id:string;title:string;x:number;y:number;referenceScreenshot?:string;tests:CanvasTest[]};
 export type Transition={actionTestIds?:string[];id:string;from:string;to:string;actionTestId:string;assertionTestId:string;responseCondition:string};
 export type CanvasVisit={id:string;checkIds?:string[]};
 export type CanvasOccurrence={id:string;visitId:string;testId:string;edgeId?:string;reference:YAMLReference;assertion:boolean};
 export type CanvasExecution={pathId:string;visits:{id:string;screenId:string;checkIds:string[]}[];transitions:{id:string;edgeId:string;visitId:string;destinationVisitId:string}[];occurrences:CanvasOccurrence[]};
-export type CanvasGraph={screens:ScreenNode[];edges:Transition[];paths:{id:string;name:string;edgeIds:string[];screenId?:string;visits?:CanvasVisit[]}[];execution?:CanvasExecution};
+export type CanvasGraph={screens:ScreenNode[];edges:Transition[];paths:{scenarioId?:string;id:string;name:string;edgeIds:string[];screenId?:string;visits?:CanvasVisit[]}[];execution?:CanvasExecution};
 export type CatalogEntry=YAMLReference & {label:string;command:string;assertion:boolean;preview:string};
 export type CanvasDiagnostic={ownerId:string;detail:string};
 export type OccurrenceResult={id:string;visitId:string;testId:string;edgeId?:string;status:Step['status'];stepId?:string;detail:string};
@@ -73,7 +73,7 @@ export function readCanvas(value:unknown):CanvasGraph|undefined{
  for(const screen of graph.screens){
   id(screen.id);if(!text(screen.title)||!Number.isFinite(screen.x)||!Number.isFinite(screen.y)||screen.x<0||screen.y<0||screen.x>2400||screen.y>1400||!Array.isArray(screen.tests)||screen.tests.length>30)throw new Error('Provide titled screens with positions and up to 30 tests each.');
   if(screen.referenceScreenshot!==undefined&&(!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(screen.referenceScreenshot)||screen.referenceScreenshot.length>350_000))throw new Error('Reference screenshots must be PNG/JPEG data up to 250 KB.');
-  for(const test of screen.tests){id(test.id);if(!text(test.label)||!['action','assertion','setup','handler','test'].includes(test.role)||!test.reference||!['step','flow','setup','handler'].includes(test.reference.kind)||!text(test.reference.file,80)||!text(test.reference.fingerprint,64))throw new Error('Provide named tests with explicit YAML references.');
+  for(const test of screen.tests){id(test.id);if(test.scenarioIds!==undefined&&(!Array.isArray(test.scenarioIds)||test.scenarioIds.length>20||test.scenarioIds.some(id=>typeof id!=='string'||! /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(id))||new Set(test.scenarioIds).size!==test.scenarioIds.length))throw new Error('Choose unique scenario identities for this action or check.');if(!text(test.label)||!['action','assertion','setup','handler','test'].includes(test.role)||!test.reference||!['step','flow','setup','handler'].includes(test.reference.kind)||!text(test.reference.file,80)||!text(test.reference.fingerprint,64))throw new Error('Provide named tests with explicit YAML references.');
    if(test.check&&(!['visible','absent'].includes(test.check.visibility)||!['text','id'].includes(test.check.target)||!['exact','contains','regex'].includes(test.check.match)||typeof test.check.value!=='string'||test.check.value.length>4000))throw new Error('Provide a bounded visible/absent check selector.');
    if(test.tap&&(!['text','id'].includes(test.tap.target)||!['exact','contains','regex'].includes(test.tap.match)||typeof test.tap.value!=='string'||test.tap.value.length>4000||test.check))throw new Error('Provide a bounded tap selector, separate from a check.');
    if(test.input!==undefined&&(typeof test.input!=='string'||test.input.length>4000))throw new Error('Provide input text up to 4000 characters.');
@@ -86,7 +86,7 @@ export function readCanvas(value:unknown):CanvasGraph|undefined{
   }
  }
  for(const edge of graph.edges){id(edge.id);if(edge.actionTestIds!==undefined&&(!Array.isArray(edge.actionTestIds)||edge.actionTestIds.length>30||edge.actionTestIds.some(item=>!text(item))||new Set(edge.actionTestIds).size!==edge.actionTestIds.length))throw new Error('Provide up to 30 distinct ordered action identities.');if(![edge.from,edge.to,edge.actionTestId,edge.assertionTestId].every(item=>text(item))||!text(edge.responseCondition,300))throw new Error('Transitions require source/destination, action/assertion references and response condition.');}
- for(const path of graph.paths){id(path.id);if(path.screenId!==undefined&&!text(path.screenId))throw new Error('Choose an initial screen identity.');if(!text(path.name)||!Array.isArray(path.edgeIds)||path.edgeIds.length>80||path.edgeIds.some(item=>!text(item)))throw new Error('Paths need a name and explicitly ordered transition identities.');}
+ for(const path of graph.paths){id(path.id);if(path.scenarioId!==undefined&&(typeof path.scenarioId!=='string'||! /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(path.scenarioId)))throw new Error('Provide a valid scenario identity for the sequence.');if(path.screenId!==undefined&&!text(path.screenId))throw new Error('Choose an initial screen identity.');if(!text(path.name)||!Array.isArray(path.edgeIds)||path.edgeIds.length>80||path.edgeIds.some(item=>!text(item)))throw new Error('Paths need a name and explicitly ordered transition identities.');}
  for(const path of graph.paths){
   if(path.visits!==undefined&&(!Array.isArray(path.visits)||path.visits.some(visit=>!visit||typeof visit!=='object')))throw new Error('Provide an ordered visit list.');
   path.visits=routeVisits(graph,path);
@@ -142,11 +142,12 @@ export function selectedCanvasPath(graph:CanvasGraph,yaml:string,flows:Record<st
  const inspection=inspectCanvas(graph,yaml,flows,automation);
  const edges=path.edgeIds.map(id=>graph.edges.find(edge=>edge.id===id));
  const required=new Set(['yaml',pathId,...path.edgeIds,...edges.flatMap(edge=>edge?[...edgeActions(edge),edge.assertionTestId,...edgeChecks(graph,edge)]:[])]);
+ if(path.scenarioId)for(const id of unconnectedScenarioActions(graph,path.scenarioId))required.add(id);
  const initial=initialCanvasScreen(graph,path);
- if(initial){required.add(initial);for(const test of graph.screens.find(screen=>screen.id===initial)?.tests??[])if(test.check||!path.edgeIds.length)required.add(test.id);}
+ if(initial){required.add(initial);for(const test of graph.screens.find(screen=>screen.id===initial)?.tests??[])if(visitChecks(graph,path,0).includes(test.id)||!path.scenarioId&&(test.check||!path.edgeIds.length))required.add(test.id);}
  const errors=inspection.diagnostics.filter(diagnostic=>required.has(diagnostic.ownerId));
  if(errors.length)throw new Error(errors.map(error=>error.detail).join(' '));
- if(path.screenId&&!path.edgeIds.length){const screen=graph.screens.find(screen=>screen.id===path.screenId)!;if(!visitChecks(graph,path,0).length||!screen.tests.some(test=>test.check))throw new Error('Select at least one screen check before running.');return path;}
+ if(path.screenId&&!path.edgeIds.length){const screen=graph.screens.find(screen=>screen.id===path.screenId)!;if(!visitChecks(graph,path,0).length||!screen.tests.some(test=>test.check))throw new Error('Select at least one screen check for '+screen.title+' before running, or add its next action to this scenario.');return path;}
  const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,test] as const)));
  let previous=-Infinity;
  for(const test of screenChecks(graph,initial)){const index=executionIndex(test.reference,yaml);if(index===undefined)throw new Error('Repair the initial screen checks.');previous=Math.max(previous,index*2+1);}

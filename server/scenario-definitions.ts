@@ -70,6 +70,7 @@ export function selectScenario(workspace:{yaml:string;flows?:Record<string,strin
  })},flows,yaml)!:undefined;
  const target=referenceCatalog(yaml,flows,automation);
  const canvas=workspace.canvas&&structuredClone(workspace.canvas);
+ if(canvas&&canvasAuthored)for(const path of canvas.paths)if(path.id===scenario.pathId)path.scenarioId=scenario.id;
  if(canvas)for(const screen of canvas.screens)for(const test of screen.tests){
   const ref=test.reference;
   const original=source.references.find(entry=>entry.kind===ref.kind&&entry.file===ref.file&&entry.index===ref.index&&entry.actionId===ref.actionId&&entry.fingerprint===ref.fingerprint);
@@ -78,7 +79,7 @@ export function selectScenario(workspace:{yaml:string;flows?:Record<string,strin
   const projected=target.references.find(entry=>entry.kind===ref.kind&&entry.file===ref.file&&entry.index===index&&entry.actionId===ref.actionId);
   test.reference=projected?{kind:projected.kind,file:projected.file,index:projected.index,actionId:projected.actionId,fingerprint:projected.fingerprint}:{...ref,fingerprint:'not-selected'};
  }
- validateFlowInputs(automation?instrument(yaml,automation).yaml:yaml,flows,inputs);
+ if(!canvasAuthored)validateFlowInputs(automation?instrument(yaml,automation).yaml:yaml,flows,inputs);
  if(scenario.mockResponseId&&!workspace.mock)throw new Error('Configure the shared mock environment before choosing a response.');
  let mock=scenario.mockResponseId?validateMock({...workspace.mock,responseId:scenario.mockResponseId}):undefined;
  if(mock&&canvas&&scenario.pathId){const path=canvas.paths.find(path=>path.id===scenario.pathId);const edges=path?.edgeIds.map(id=>canvas.edges.find(edge=>edge.id===id));const first=edges?.[0];const last=edges?.at(-1);if(first&&last)mock={...mock,fromScreen:canvas.screens.find(screen=>screen.id===first.from)!.title,toScreen:canvas.screens.find(screen=>screen.id===last.to)!.title};}
@@ -88,7 +89,7 @@ export function selectScenario(workspace:{yaml:string;flows?:Record<string,strin
 }
 
 // Validate simple Maestro placeholders at invocation scopes. JavaScript expressions stay YAML-owned.
-function validateFlowInputs(yaml:string,flows:Record<string,string>,inputs:Record<string,string>,ancestors:string[]=[]){
+export function validateFlowInputs(yaml:string,flows:Record<string,string>,inputs:Record<string,string>,ancestors:string[]=[]){
  const docs=parseAllDocuments(yaml);
  if(docs.length!==2||docs.some(doc=>doc.errors.length))throw new Error('Repair reusable-flow YAML before running.');
  const config=docs[0].toJS();const values={...inputs,...config?.env};

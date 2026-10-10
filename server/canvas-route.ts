@@ -1,5 +1,5 @@
 import {isSeq,parseAllDocuments} from 'yaml';
-import {attachLeadingComments,authoredChecks,edgeActions,edgeChecks,routeVisits,visitChecks,visitScreenId,isAuthored} from '../shared/canvas-authoring.js';
+import {attachLeadingComments,authoredChecks,unconnectedScenarioActions,scenarioActions,edgeActions,edgeChecks,routeVisits,visitChecks,visitScreenId,isAuthored} from '../shared/canvas-authoring.js';
 import {inspectCanvas,referenceCatalog,selectedCanvasPath,type CanvasGraph,type CanvasExecution} from './canvas.js';
 import type {Automation} from './default-actions.js';
 
@@ -8,12 +8,14 @@ import type {Automation} from './default-actions.js';
 export function projectCanvasRoute(graph:CanvasGraph,yaml:string,flows:Record<string,string>,pathId:unknown,automation?:Automation){
  const path=graph.paths.find(path=>path.id===pathId);
  if(path?.screenId&&!path.edgeIds.length)selectedCanvasPath(graph,yaml,flows,pathId,automation);
- if(!path||(!path.screenId||path.edgeIds.length>0)&&!path.edgeIds.some(id=>graph.edges.find(edge=>edge.id===id)?.actionTestIds)&&new Set(path.edgeIds).size===path.edgeIds.length&&!path.visits?.some(visit=>visit.checkIds!==undefined))return {canvas:graph,yaml,automation};
+ if(!path||!path.scenarioId&&(!path.screenId||path.edgeIds.length>0)&&!path.edgeIds.some(id=>graph.edges.find(edge=>edge.id===id)?.actionTestIds)&&new Set(path.edgeIds).size===path.edgeIds.length&&!path.visits?.some(visit=>visit.checkIds!==undefined))return {canvas:graph,yaml,automation};
  const edges=path.edgeIds.map(id=>graph.edges.find(edge=>edge.id===id));
  const visits=routeVisits(graph,path);
  const tests=graph.screens.flatMap(screen=>screen.tests);
- const ordered=[...visitChecks(graph,path,0).map(testId=>({testId,visitId:visits[0].id,assertion:true,edgeId:undefined as string|undefined})),...edges.flatMap((edge,index)=>edge?[...edgeActions(edge).map(testId=>({testId,visitId:visits[index].id,assertion:false,edgeId:edge.id})),...visitChecks(graph,path,index+1).map(testId=>({testId,visitId:visits[index+1].id,assertion:true,edgeId:undefined}))]:[])];
+ const ordered=[...visitChecks(graph,path,0).map(testId=>({testId,visitId:visits[0].id,assertion:true,edgeId:undefined as string|undefined})),...edges.flatMap((edge,index)=>edge?[...scenarioActions(graph,edge,path.scenarioId).map(testId=>({testId,visitId:visits[index].id,assertion:false,edgeId:edge.id})),...visitChecks(graph,path,index+1).map(testId=>({testId,visitId:visits[index+1].id,assertion:true,edgeId:undefined}))]:[])];
+ for(const [index,edge] of edges.entries()){if(edge&&!scenarioActions(graph,edge,path.scenarioId).length)throw new Error('Select at least one action for this scenario on connection '+edge.responseCondition+'.');if(edge&&!visitChecks(graph,path,index+1).length)throw new Error('Select at least one screen check for this scenario on its destination.');}
  const required=new Set(['yaml',path.id,...path.edgeIds,...ordered.map(item=>item.testId)]);
+ if(path.scenarioId)for(const id of unconnectedScenarioActions(graph,path.scenarioId))required.add(id);
  const diagnostics=inspectCanvas(graph,yaml,flows,automation).diagnostics.filter(item=>required.has(item.ownerId));
  if(diagnostics.length)throw new Error(diagnostics.map(item=>item.detail).join(' '));
  const docs=parseAllDocuments(yaml);const sequence=docs[1]?.contents;

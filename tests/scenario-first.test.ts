@@ -63,3 +63,63 @@ test('canvas scenarios use ordinary launch, isolate shared checks, and require a
   }
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('scenario memberships select shared checks and actions without running another scenario commands',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-scenario-membership-'));
+ try{
+  let executed='';
+  const service=createScenarios({root,runner:createRunner({artifactDirectory:root,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
+   executed=await readFile(flow,'utf8');
+   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+   await writeFile(join(directory,'commands.json'),JSON.stringify([{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{assertConditionCommand:{condition:{visible:{textRegex:'^Shared$'}}}},metadata:{depth:0,status:'COMPLETED'}}]));
+   return {code:0,log:'Fixture',cleanup:{verified:true,detail:'Fixture exited'}};
+  }}});
+  const canvas=structuredClone(graph);
+  Object.assign(canvas.screens[0].tests[0],{scenarioIds:['first'],check:{visibility:'visible',target:'text',match:'exact',value:'First only'}});
+  canvas.screens[0].tests.push({...structuredClone(graph.screens[0].tests[0]),id:'shared',check:{visibility:'visible',target:'text',match:'exact',value:'Shared'},...{scenarioIds:['first','second']}});
+  const authored=writeChecks('appId: com.example.App\n---\n- launchApp\n',{screens:[],edges:[],paths:[]},canvas);
+  canvas.paths=[{id:'first-path',name:'First',screenId:'home-screen',edgeIds:[]},{id:'second-path',name:'Second',screenId:'home-screen',edgeIds:[]}];
+  const definitions=[{...definition,id:'first',pathId:'first-path'},{...definition,id:'second',pathId:'second-path'}];
+  const workspace=await service.save({name:'Shared memberships',yaml:authored,canvas,scenarios:definitions});
+  const result=await service.wait((await service.start({workspaceId:workspace.id,deviceId,scenarioId:'second'})).id);
+  assert.doesNotMatch(executed,/First only/);assert.match(executed,/Shared/);assert.equal(result.status,'passed');
+  assert.equal(result.canvas?.tests.find(test=>test.id==='home-check')?.status,'unavailable');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('a shared connection executes only actions selected for the running scenario',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-action-membership-'));
+ try{
+  let executed='';
+  const service=createScenarios({root,runner:createRunner({artifactDirectory:root,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
+   executed=await readFile(flow,'utf8');await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+   await writeFile(join(directory,'commands.json'),JSON.stringify([{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{tapOnElement:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{assertConditionCommand:{condition:{visible:{textRegex:'^Done$'}}}},metadata:{depth:0,status:'COMPLETED'}}]));
+   return {code:0,log:'Fixture',cleanup:{verified:true,detail:'Fixture exited'}};
+  }}});
+  const ref={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
+  const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'first-action',label:'First',role:'action',reference:ref,scenarioIds:['first'],input:'${FIRST_INPUT}'},{id:'second-action',label:'Second',role:'action',reference:ref,scenarioIds:['second'],tap:{target:'text',match:'exact',value:'Second action'}}]},{id:'done',title:'Done',x:400,y:0,tests:[{id:'done-check',label:'Done',role:'assertion',reference:ref,scenarioIds:['first','second'],check:{visibility:'visible',target:'text',match:'exact',value:'Done'}}]}],edges:[{id:'go',from:'home',to:'done',actionTestId:'first-action',actionTestIds:['first-action','second-action'],assertionTestId:'done-check',responseCondition:'Go'}],paths:['first','second'].map(id=>({id,name:id,screenId:'home',edgeIds:['go']}))};
+  const source=writeChecks('appId: com.example.App\n---\n- launchApp\n',{screens:[],edges:[],paths:[]},canvas);
+  const definitions=['first','second'].map(id=>({...definition,id,pathId:id}));
+  const workspace=await service.save({name:'Shared connection',yaml:source,canvas,scenarios:definitions});
+  const result=await service.wait((await service.start({workspaceId:workspace.id,deviceId,scenarioId:'second'})).id);
+  assert.equal(result.status,'passed');assert.doesNotMatch(executed,/FIRST_INPUT/);assert.match(executed,/Second action/);
+  assert.equal(result.canvas?.tests.find(test=>test.id==='first-action')?.status,'unavailable');
+  assert.equal(result.canvas?.tests.find(test=>test.id==='second-action')?.status,'passed');
+  await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:'first'}),/Missing required input: FIRST_INPUT/);
+  const excluded=structuredClone(canvas);excluded.screens[1].tests[0].scenarioIds=['first'];await service.save({...workspace,canvas:excluded});
+  await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:'second'}),/at least one screen check.*destination/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('a selected scenario cannot silently omit an action with no destination',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-incomplete-membership-'));
+ try{
+  const service=createScenarios({root,runner:createRunner({artifactDirectory:root,execute:async()=>{assert.fail('Incomplete action cannot reach simulator');}}),maestro:{version:async()=>{assert.fail('No version for draft');},run:async()=>{assert.fail('Cannot omit selected action');}}});
+  const canvas=structuredClone(graph);canvas.screens[0].tests.push({id:'pending-action',label:'Go',role:'action',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},scenarioIds:['home'],tap:{target:'text',match:'exact',value:'Go'}});
+  const source=writeChecks(yaml,graph,canvas);const workspace=await service.save({name:'Incomplete action',yaml:source,canvas,scenarios:[definition]});
+  await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:'home'}),/destination screen/);
+  const legacy=structuredClone(canvas);const orphan=legacy.screens[0].tests.pop()!;delete orphan.scenarioIds;legacy.screens.push({id:'unrelated',title:'Unrelated',x:600,y:0,tests:[orphan]});
+  const preview=await service.preview({...workspace,canvas:legacy,scenarioId:'home'});
+  assert.doesNotMatch(preview.executionYaml,/tapOn/,'An unassigned legacy action does not block or execute in another scenario');
+ }finally{await rm(root,{recursive:true,force:true});}
+});

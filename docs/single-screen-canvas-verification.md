@@ -34,3 +34,15 @@ Add action, Add check and the scenario start control now live inside each node. 
 Right-click a node and choose Node info to upload, preview or remove its optional reference screenshot. The popup supports Escape, outside-click dismissal, keyboard focus containment and focus return to its node. Existing PNG/JPEG size restrictions and save/reopen persistence remain in place.
 
 The public UI journey now creates nodes on the canvas, verifies node-local controls, uploads a reference image through Node info, closes the popup with Escape, reopens the saved image and executes the scenario. All 97 tests, type checking, production build and whitespace checks passed. Standards and Spec reviews report no remaining findings. The workbench remains available on port 4324.
+
+## Scenario membership follow-up — 2026-10-10
+
+Nodes now show the actions and checks used by the selected scenario. New operations belong to that scenario; each operation's Scenarios checklist can share it with multiple scenarios. Hidden operations remain available through the node's Use existing actions/checks disclosure. Selector picking remains available under Selector tools.
+
+Existing checks initially remain shared, and existing connected actions infer membership from saved scenario routes. Checking a connected action for another scenario appends its connection when it continues that scenario's current endpoint; ambiguous or disconnected routes are not inferred. Membership changes preserve the shared operation and its YAML identity.
+
+Execution projects both actions and checks through the selected scenario and validates inputs after projection, so an excluded action cannot require another scenario's inputs. Explicitly assigned actions without a connection still block execution, while unassigned legacy orphan actions remain outside the selected scenario. A single-screen draft with no selected checks continues to reject before simulator access, with guidance to add a check or the next action.
+
+The public UI regression recreates a two-scenario workspace where Scenario 2 initially has neither checks nor a next connection. It verifies the rejection, shares the existing action through its checklist, runs Scenario 2 successfully through the real workspace/run services with simulator and Maestro boundaries stubbed, and confirms memberships survive save/reopen. It also verifies a new Scenario 1 check stays hidden in Scenario 2. Service regressions cover shared checks, selected actions, required destination checks, incomplete actions and scenario-specific inputs.
+
+All 101 tests, type checking, production build and whitespace checks passed. Independent Standards and Spec reviews report no remaining findings. This follow-up was verified through the public UI/service seams; the simulator demonstration above applies to the original single-screen implementation.
