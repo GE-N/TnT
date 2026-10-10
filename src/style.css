@@ -77,3 +77,7 @@
 .workspace-device-controls .field-hint { margin:0; }
 .workspace-advanced { margin:24px 0; }
 @media(max-width:760px) { .canvas-workspace { grid-template-columns:1fr; } }
+
+.node-info-backdrop{position:fixed;inset:0;z-index:1000;background:#0009;display:flex;align-items:center;justify-content:center;padding:20px}
+.node-info-popup{width:min(440px,100%);max-height:80vh;overflow:auto;padding:24px;background:#17251c;border:1px solid #51694d;border-radius:12px;box-shadow:0 12px 48px #000b}
+.node-info-popup h3{margin:0;font-size:18px}.node-info-popup input{margin:12px 0}.node-info-reference{display:block;max-width:100%;max-height:280px;margin:16px auto;object-fit:contain}

@@ -1,4 +1,11 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';import {act,createElement,useState,type ChangeEvent} from 'react';import {CanvasEditor,CanvasBoard} from '../src/canvas.js';import {selectedCanvasPath} from '../server/canvas.js';import type {CanvasGraph,CatalogEntry} from '../server/canvas.js';
+async function addNode(dom:JSDOM,title:string){
+ const document=dom.window.document;
+ await act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));
+ await act(async()=>{const add=[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button=>button.textContent==='Add node');assert.ok(add);add.click();});
+ await act(async()=>{const input=document.querySelector('[aria-label="Screen title for New screen"]')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,title);input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
+ await act(async()=>document.querySelector(`[aria-label="Screen title for New screen"]`)!.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));
+}
 test('authors can associate an explicit checkpoint handler without losing its action identity',async()=>{
  const dom=new JSDOM('<div id="root"></div>');
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
@@ -12,7 +19,7 @@ test('authors can associate an explicit checkpoint handler without losing its ac
  const select=async(label:string,value:string)=>act(async()=>{const id=[...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor;const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById(id??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  try{
   await act(async()=>root.render(createElement(Host)));
-  await select('Selected screen','home');await select('Executable YAML reference','0');
+  await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Select screen Home"]')!.click());await select('Executable YAML reference','0');
   await act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>button.textContent==='Associate test');assert.ok(button);button.click();});
   const association=saved!.screens[0].tests[0];assert.equal(association.role,'handler');assert.deepEqual(association.reference,{kind:'handler',file:'dismiss.yaml',index:1,actionId:'notice',fingerprint:'current'});
   assert.match(document.body.textContent!,/Handler notice · before step 2/);assert.doesNotMatch(document.body.textContent!,/#6.*unavailable/);
@@ -33,15 +40,14 @@ test('canvas authors create inline checks, reorder, delete with warnings and und
  const select=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`) as HTMLSelectElement;assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  try{
   await act(async()=>root.render(createElement(Host)));
-  await act(async()=>{const id=[...document.querySelectorAll('label')].find(node=>node.textContent==='New screen title')!.htmlFor;const input=document.getElementById(id)!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,'Descriptive Home');input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
-  await click('Add screen');assert.doesNotMatch(authored,/Descriptive Home/);
+  await addNode(dom,'Descriptive Home');assert.doesNotMatch(authored,/Descriptive Home/);
   await click('Add check to Descriptive Home');assert.ok(document.querySelector('[aria-label="Delete check 1"]')!.closest('details'),'Bin belongs inside the expanded check');assert.ok(document.querySelector('[aria-label="Delete check 1"] svg'),'Delete is a bin icon');await fill('Check 1 selector','Home (ready)');
   assert.match(authored,/\^Home \\\(ready\\\)\$/);assert.equal(saved!.screens[0].tests[0].check!.match,'exact');
   await select('Check 1 matching','regex');await fill('Check 1 selector','^Home$');assert.equal(saved!.screens[0].tests[0].check!.match,'regex');await select('Check 1 matching','contains');await fill('Check 1 selector','Ready');assert.equal(saved!.screens[0].tests[0].check!.match,'contains');
   await click('Add check to Descriptive Home');await select('Check 2 visibility','absent');await select('Check 2 target','id');await fill('Check 2 selector','error.banner');
   await fill('Executable YAML',authored.replace(/(# tnt-check:[^\n]+\n# tnt-match:[^\n]+\n- assertNotVisible)/,'- evalScript: ${output.between = true} # between\n$1'));
   await click('Move check 2 up');assert.match(authored,/assertNotVisible:[\s\S]*assertVisible:/);
-  await click('Delete check 1');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Home checks/);await click('Delete anyway');assert.equal(saved!.screens[0].tests.length,1);assert.ok(authored.indexOf('output.between')<authored.indexOf('assertVisible'));
+  await click('Delete check 1');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/checks/);await click('Delete anyway');assert.equal(saved!.screens[0].tests.length,1);assert.ok(authored.indexOf('output.between')<authored.indexOf('assertVisible'));
   await click('Undo canvas deletion');assert.equal(saved!.screens[0].tests.length,2);assert.match(authored,/error\\\.banner/);assert.match(authored,/evalScript:.*# untouched/);
   const first=authored.indexOf('# tnt-check:');const between=authored.indexOf('- evalScript: ${output.between');const second=authored.indexOf('# tnt-check:',first+1);await fill('Executable YAML',authored.slice(0,first)+authored.slice(second)+authored.slice(between,second)+authored.slice(first,between));
   assert.equal((document.querySelector('[aria-label="Check 1 selector"]') as HTMLInputElement).value,'Ready');await fill('Check 1 selector','Updated');assert.ok(authored.indexOf('assertVisible')<authored.indexOf('output.between'));assert.ok(authored.indexOf('output.between')<authored.indexOf('assertNotVisible'));
@@ -97,7 +103,7 @@ test('dragged connections author ordered edge actions and preserve invalid route
  const select=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`);assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  const connect=async(from:string,to:string)=>act(async()=>{const transfer={value:'',setData(_type:string,value:string){this.value=value;},getData(){return this.value;}};const start=new dom.window.Event('dragstart',{bubbles:true});Object.defineProperty(start,'dataTransfer',{value:transfer});document.querySelector(`[aria-label="Connect from ${from}"]`)!.dispatchEvent(start);const drop=new dom.window.Event('drop',{bubbles:true});Object.defineProperty(drop,'dataTransfer',{value:transfer});document.querySelector(`[aria-label="Screen ${to}"]`)!.dispatchEvent(drop);});
  try{
-  await act(async()=>root.render(createElement(Host)));await fill('New screen title','Done');await click('Add screen');
+  await act(async()=>root.render(createElement(Host)));await addNode(dom,'Done');
   assert.equal(saved!.screens[2].title,'Done');assert.ok(!document.querySelector('[aria-label^="Add next screen"]'),'Nodes expose no Add next screen control');
   await click('Add check to Home');await fill('Check 1 selector','Home');await click('Add check to Done');
   const done=document.querySelector('[aria-label="Screen Done"]')!;await act(async()=>{const node=done.querySelector('[aria-label="Check 1 selector"]')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,'Done');node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
@@ -140,7 +146,7 @@ test('creating the first screen selects its explicit route without Add next scre
  const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();});
  const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?dom.window.HTMLTextAreaElement.prototype:dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  try{
-  await act(async()=>root.render(createElement(Host)));await fill('New screen title','Home');await click('Add screen');
+  await act(async()=>root.render(createElement(Host)));await addNode(dom,'Home');
   assert.equal(chosen,saved!.paths[0].id,'Creating the initial screen selects its explicit route');
   assert.ok(!document.querySelector('[aria-label^="Add next screen"]'));
   assert.ok(![...document.querySelectorAll('button')].some(button=>button.textContent==='Use as single-screen scenario'));
@@ -191,7 +197,7 @@ test('canvas context menus add at the clicked position and delete nodes with war
   await context(document.querySelector('.canvas-surface')!);await click('Add node');
   assert.equal(saved!.screens.length,1);assert.equal(saved!.screens[0].x,400);assert.equal(saved!.screens[0].y,200);assert.equal(saved!.paths[0].screenId,saved!.screens[0].id);assert.equal(path,saved!.paths[0].id);assert.ok(!document.querySelector('.screen-node-delete'));
   const node=document.querySelector('[data-screen-id]')!;const position={x:saved!.screens[0].x,y:saved!.screens[0].y};
-  await context(node);assert.equal(document.querySelectorAll('[role=menuitem]').length,1);assert.equal(document.querySelector('[role=menuitem]')!.textContent,'Delete node');
+  await context(node);assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(item=>item.textContent),['Node info','Delete node']);
   await act(async()=>document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown',{bubbles:true})));assert.ok(!document.querySelector('[role=menu]'));
   await context(node);await click('Delete node');assert.ok(document.querySelector('[role=alertdialog]'));await click('Delete anyway');assert.equal(saved!.screens.length,0);await click('Undo canvas deletion');assert.deepEqual({x:saved!.screens[0].x,y:saved!.screens[0].y},position);
   await act(async()=>root.render(createElement(Host,{disabled:true})));await context(document.querySelector('.canvas-surface')!);assert.ok(!document.querySelector('[role=menu]'));await context(document.querySelector('[data-screen-id]')!);assert.ok(!document.querySelector('[role=menu]'));

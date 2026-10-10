@@ -18,7 +18,7 @@ test('an offline author creates a draft, adds ordered contextual checks, reopens
   return {code:0,log:'External simulator fixture',cleanup:{verified:true,detail:'Fixture process exited'}};
  }}});
  const dom=new JSDOM('<div id="root"></div>');
- const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];
+ const keys=['window','document','HTMLElement','Event','FileReader','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];
  const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  const pendingRequests:Promise<Response>[]=[];
@@ -41,11 +41,26 @@ test('an offline author creates a draft, adds ordered contextual checks, reopens
   await render();await click('New scenario');await fill('Scenario name','Home scenario');await click('Save workspace');
   const workspaceId=document.querySelector('.artifact-id')!.textContent!.replace('Workspace: ','');
   await fill('Saved workspace ID',workspaceId);await click('Open saved workspace');assert.ok([...document.querySelectorAll('button')].some(button=>button.textContent==='Home scenario'));
-  await fill('New screen title','Home');await click('Add screen');await fill('Screen title','Welcome');await click('Use as scenario start');
+  assert.ok(![...document.querySelectorAll('legend')].some(node=>node.textContent==='Screen inspector'));
+  await act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));await click('Add node');
+  await fill('Screen title for New screen','Welcome');await act(async()=>field('Screen title for New screen')!.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));
+  const node=document.querySelector('[aria-label="Screen Welcome"]')!;
+  assert.ok(node.querySelector('[aria-label="Add action to Welcome"]'),'Actions are authored within their node');
+  assert.ok(node.querySelector('[aria-label="Add check to Welcome"]'),'Checks are authored within their node');
+  await click('Use Welcome as scenario start');
   await click('Add check to Welcome');await fill('Check 1 selector','Home');
   await click('Add check to Welcome');await select('Check 2 visibility','absent');await fill('Check 2 selector','Error');
   assert.equal((field('Check 1 matching') as HTMLSelectElement).value,'exact');
+  await act(async()=>node.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:140,clientY:140})));await click('Node info');
+  const popup=document.querySelector('[role="dialog"][aria-label="Node info for Welcome"]')!;assert.ok(popup);
+  const fileInput=popup.querySelector('input[type="file"]')!;
+  const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1cAAAAASUVORK5CYII=';
+  Object.defineProperty(fileInput,'files',{value:[new dom.window.File([Buffer.from(png,'base64')],'reference.png',{type:'image/png'})],configurable:true});
+  await act(async()=>{fileInput.dispatchEvent(new dom.window.Event('change',{bubbles:true}));for(let attempt=0;attempt<50&&!popup.querySelector('img');attempt++)await new Promise(resolve=>setTimeout(resolve,5));});
+  assert.ok(popup.querySelector('img'));
+  await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.ok(!document.querySelector('[role="dialog"]'));assert.equal(document.activeElement?.getAttribute('aria-label'),'Screen Welcome');
   await click('Save workspace');await click('Open saved workspace');await click('Select screen Welcome');
+  assert.equal(document.querySelector<HTMLImageElement>('[aria-label="Screen Welcome"] img')?.getAttribute('src'),'data:image/png;base64,'+png);
   assert.equal((field('Check 1 selector') as HTMLInputElement).value,'Home');assert.equal((field('Check 2 visibility') as HTMLSelectElement).value,'absent');
   assert.equal(document.querySelector('select[aria-label="Scenario path"]')?.closest('details')?.open,false,'The default journey requires no route form');
   assert.equal([...document.querySelectorAll('button')].find(button=>button.textContent==='Run scenario')!.disabled,true,'Execution requires a device while authoring remains available');

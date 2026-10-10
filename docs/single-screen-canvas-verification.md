@@ -26,3 +26,11 @@ On 2026-10-10, the browser at `http://127.0.0.1:4324` created `Home single scree
 ## Validation and review
 
 All 97 tests passed with local networking enabled. Type checking, production build and whitespace checks passed. Independent Standards and Spec reviews report zero remaining findings after correcting empty-check draft execution and remembered-app startup validation, and simplifying the scenario compatibility adapter.
+
+## Node authoring UX follow-up — 2026-10-10
+
+Add action, Add check and the scenario start control now live inside each node. Nodes are created through the canvas context menu and renamed inline in their header. The redundant Screen inspector, Add screen form, Selected screen selector and separate title input are removed. Legacy YAML associations use the node selected on the canvas.
+
+Right-click a node and choose Node info to upload, preview or remove its optional reference screenshot. The popup supports Escape, outside-click dismissal, keyboard focus containment and focus return to its node. Existing PNG/JPEG size restrictions and save/reopen persistence remain in place.
+
+The public UI journey now creates nodes on the canvas, verifies node-local controls, uploads a reference image through Node info, closes the popup with Escape, reopens the saved image and executes the scenario. All 97 tests, type checking, production build and whitespace checks passed. Standards and Spec reviews report no remaining findings. The workbench remains available on port 4324.
