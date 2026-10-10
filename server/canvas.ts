@@ -11,7 +11,7 @@ export type Transition={actionTestIds?:string[];id:string;from:string;to:string;
 export type CanvasVisit={id:string;checkIds?:string[]};
 export type CanvasOccurrence={id:string;visitId:string;testId:string;edgeId?:string;reference:YAMLReference;assertion:boolean};
 export type CanvasExecution={pathId:string;visits:{id:string;screenId:string;checkIds:string[]}[];transitions:{id:string;edgeId:string;visitId:string;destinationVisitId:string}[];occurrences:CanvasOccurrence[]};
-export type CanvasGraph={screens:ScreenNode[];edges:Transition[];paths:{scenarioId?:string;id:string;name:string;edgeIds:string[];screenId?:string;visits?:CanvasVisit[]}[];execution?:CanvasExecution};
+export type CanvasGraph={screens:ScreenNode[];edges:Transition[];paths:{scenarioId?:string;id:string;name:string;edgeIds:string[];screenId?:string;finished?:boolean;visits?:CanvasVisit[]}[];execution?:CanvasExecution};
 export type CatalogEntry=YAMLReference & {label:string;command:string;assertion:boolean;preview:string};
 export type CanvasDiagnostic={ownerId:string;detail:string};
 export type OccurrenceResult={id:string;visitId:string;testId:string;edgeId?:string;status:Step['status'];stepId?:string;detail:string};
@@ -86,7 +86,7 @@ export function readCanvas(value:unknown):CanvasGraph|undefined{
   }
  }
  for(const edge of graph.edges){id(edge.id);if(edge.actionTestIds!==undefined&&(!Array.isArray(edge.actionTestIds)||edge.actionTestIds.length>30||edge.actionTestIds.some(item=>!text(item))||new Set(edge.actionTestIds).size!==edge.actionTestIds.length))throw new Error('Provide up to 30 distinct ordered action identities.');if(![edge.from,edge.to,edge.actionTestId,edge.assertionTestId].every(item=>text(item))||!text(edge.responseCondition,300))throw new Error('Transitions require source/destination, action/assertion references and response condition.');}
- for(const path of graph.paths){id(path.id);if(path.scenarioId!==undefined&&(typeof path.scenarioId!=='string'||! /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(path.scenarioId)))throw new Error('Provide a valid scenario identity for the sequence.');if(path.screenId!==undefined&&!text(path.screenId))throw new Error('Choose an initial screen identity.');if(!text(path.name)||!Array.isArray(path.edgeIds)||path.edgeIds.length>80||path.edgeIds.some(item=>!text(item)))throw new Error('Paths need a name and explicitly ordered transition identities.');}
+ for(const path of graph.paths){id(path.id);if(path.finished!==undefined&&typeof path.finished!=='boolean')throw new Error('Sequence finish must be a boolean.');if(path.scenarioId!==undefined&&(typeof path.scenarioId!=='string'||! /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(path.scenarioId)))throw new Error('Provide a valid scenario identity for the sequence.');if(path.screenId!==undefined&&!text(path.screenId))throw new Error('Choose an initial screen identity.');if(!text(path.name)||!Array.isArray(path.edgeIds)||path.edgeIds.length>80||path.edgeIds.some(item=>!text(item)))throw new Error('Paths need a name and explicitly ordered transition identities.');}
  for(const path of graph.paths){
   if(path.visits!==undefined&&(!Array.isArray(path.visits)||path.visits.some(visit=>!visit||typeof visit!=='object')))throw new Error('Provide an ordered visit list.');
   path.visits=routeVisits(graph,path);

@@ -122,16 +122,16 @@ export function connectCanvasAction(graph:CanvasGraph,from:string,actionId:strin
  const edge={id,from,to,actionTestId:actionId,actionTestIds:previous?.actionTestIds,assertionTestId:destination.tests.find(test=>test.check)?.id??'pending:'+id,responseCondition:'Tap → '+destination.title};
  let paths=graph.paths;let path=paths.find(path=>path.id===pathId)??paths.find(path=>path.edgeIds.includes(id))??paths.find(path=>path.screenId===from&&!path.edgeIds.length);
  if(!path){if(paths.length>=20)throw new Error('Select an existing scenario path; this canvas supports up to 20 paths.');path={id:id+':path',name:(graph.screens.find(screen=>screen.id===from)!.title+' → '+destination.title).slice(0,120),screenId:from,edgeIds:[]};paths=[...paths,path];}
- const tail=path.edgeIds.length?graph.edges.find(edge=>edge.id===path!.edgeIds.at(-1))?.to:path.screenId;
- if(tail===from)paths=paths.map(item=>item.id===path!.id?{...item,...appendRouteTransition(graph,item,id)}:item);
+ const tail=visitScreenId(graph,path,path.edgeIds.length);
+ if(tail===from&&!path.finished)paths=paths.map(item=>item.id===path!.id?{...item,...appendRouteTransition(graph,item,id)}:item);
  return {graph:{...graph,edges:previous?graph.edges.map(item=>item.id===id?edge:item):[...graph.edges,edge],paths},pathId:path.id};
 }
 
 // A new connection extends only the explicitly selected tail; no branch is chosen for the user.
 export function appendCanvasConnection(graph:CanvasGraph,edge:Transition,pathId:string):CanvasGraph{
  const path=graph.paths.find(item=>item.id===pathId);
- const tail=path?.edgeIds.length?graph.edges.find(item=>item.id===path.edgeIds.at(-1))?.to:path?.screenId;
- return {...graph,edges:[...graph.edges,edge],paths:graph.paths.map(item=>item.id===pathId&&tail===edge.from?{...item,...appendRouteTransition(graph,item,edge.id)}:item)};
+ const tail=path?visitScreenId(graph,path,path.edgeIds.length):undefined;
+ return {...graph,edges:[...graph.edges,edge],paths:graph.paths.map(item=>item.id===pathId&&!item.finished&&tail===edge.from?{...item,...appendRouteTransition(graph,item,edge.id)}:item)};
 }
 
 export function initialCanvasScreen(graph:CanvasGraph,path:CanvasGraph['paths'][number]){

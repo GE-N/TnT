@@ -1,4 +1,4 @@
-import {canvasTestLabel} from '../shared/canvas-authoring.js';
+import {canvasTestLabel,routeVisits} from '../shared/canvas-authoring.js';
 import {ScenarioLibrary} from './scenario-library.js';
 import type {ScenarioDefinition} from '../server/scenario-definitions.js';
 import {DefaultActions} from './default-actions.js';
@@ -79,6 +79,22 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   function renameScenario(value:string){
     setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,name:value}:item));
     if(selectedScenario?.authoring==='canvas')setCanvas(current=>current&&({...current,paths:current.paths.map(path=>path.id===selectedScenario.pathId?{...path,name:value}:path)}));
+  }
+  function duplicateScenario(){
+    if(!selectedScenario)return;
+    const id='scenario-'+crypto.randomUUID().slice(0,8);
+    const original=canvas?.paths.find(path=>path.id===selectedScenario.pathId);
+    const pathId=original?'sequence-'+crypto.randomUUID():undefined;
+    const name=(selectedScenario.name+' copy').slice(0,120);
+    setDefinitions(current=>[...current,{...structuredClone(selectedScenario),id,name,pathId}]);
+    setCanvas(current=>current&&({...current,screens:current.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.scenarioIds?.includes(selectedScenario.id)?{...test,scenarioIds:[...test.scenarioIds,id]}:test)})),paths:original?[...current.paths,{...structuredClone(original),id:pathId!,scenarioId:id,name,visits:routeVisits(current,original).map(visit=>({...structuredClone(visit),id:crypto.randomUUID()}))}]:current.paths}));
+    setScenarioId(id);setInputs('');
+  }
+  function deleteScenario(){
+    if(!selectedScenario)return;
+    setDefinitions(current=>current.filter(item=>item.id!==scenarioId));
+    setCanvas(current=>current&&({...current,screens:current.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.scenarioIds?{...test,scenarioIds:test.scenarioIds.filter(id=>id!==scenarioId)}:test)})),paths:current.paths.filter(path=>path.id!==selectedScenario.pathId||definitions.some(item=>item.id!==scenarioId&&item.pathId===path.id))}));
+    setScenarioId(definitions.find(item=>item.id!==scenarioId)?.id??'');setInputs('');
   }
   async function openWorkspace() {
     setSubmitting(true);setError('');setRunError('');
@@ -175,7 +191,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     <div className="canvas-workspace"><aside className="scenario-sidebar" aria-label="Scenarios"><h3>Scenarios</h3>
       {definitions.map(item=><button className={scenarioId===item.id?'primary':'confirm'} key={item.id} aria-pressed={scenarioId===item.id} disabled={running||submitting||pickerBusy} onClick={()=>{setScenarioId(item.id);setInputs('');}}>{item.name}</button>)}
       <button className="confirm" disabled={running||submitting||pickerBusy||definitions.length>=20} onClick={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);}}>New scenario</button>
-      {selectedScenario&&<><label htmlFor="canvas-scenario-name">Scenario name</label><input id="canvas-scenario-name" value={selectedScenario.name} maxLength={120} disabled={running||submitting||pickerBusy} onChange={event=>renameScenario(event.target.value)}/><p className="field-hint">{canvas?.paths.find(path=>path.id===selectedScenario.pathId)?.screenId?'Start saved · add assertions before running':'Draft · choose a screen as the start'}</p></>}
+      {selectedScenario&&<><label htmlFor="canvas-scenario-name">Scenario name</label><input id="canvas-scenario-name" value={selectedScenario.name} maxLength={120} disabled={running||submitting||pickerBusy} onChange={event=>renameScenario(event.target.value)}/><button className="confirm" disabled={running||submitting||pickerBusy||definitions.length>=20||(canvas?.paths.length??0)>=20} onClick={duplicateScenario}>Duplicate scenario</button><button className="confirm" disabled={running||submitting||pickerBusy} onClick={deleteScenario}>Delete scenario</button><p className="field-hint">{canvas?.paths.find(path=>path.id===selectedScenario.pathId)?.screenId?'Start saved · add assertions before running':'Draft · choose a screen as the start'}</p></>}
     </aside><div className="workspace-canvas">
     <CanvasEditor scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={()=>void submit(true)} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} picker={{token,deviceId,onBusy:setPickerBusy}} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));}} disabled={running||submitting||pickerBusy||launchBusy}/>
     </div></div>
