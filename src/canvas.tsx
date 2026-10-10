@@ -145,9 +145,23 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   if(include&&!test.check&&connections.length===1){const edge=connections[0];next={...next,paths:next.paths.map(path=>{const tail=path.edgeIds.length?next.edges.find(edge=>edge.id===path.edgeIds.at(-1))?.to:path.screenId;return path.id===owner?.pathId&&tail===edge.from&&!path.edgeIds.includes(edge.id)?{...path,...appendRouteTransition(next,path,edge.id)}:path;})};}
   onChange(next);if(include&&id===scenarioId)setExpandedRow(test.id);
  }
+ function setScenarioStart(screenId:string){
+  if(!graph||!path||!scenarioId)return;
+  const canvas=graph;
+  let next:CanvasGraph['paths'][number]={...path,screenId,edgeIds:[] as string[],visits:[{id:identity()}]};
+  let tail=screenId;
+  // Follow only an unambiguous continuation made from this scenario's shared actions.
+  while(next.edgeIds.length<80){
+   const connections=graph.edges.filter(edge=>edge.from===tail&&edgeActions(edge).some(id=>canvas.screens.find(screen=>screen.id===tail)?.tests.some(test=>test.id===id&&assignedScenarios(test).includes(scenarioId))));
+   if(connections.length!==1||next.edgeIds.includes(connections[0].id))break;
+   next={...next,...appendRouteTransition(graph,next,connections[0].id)};
+   tail=connections[0].to;
+  }
+  onChange({...graph,paths:graph.paths.map(item=>item.id===pathId?next:item)});
+ }
  function membershipControl(test:CanvasTest){return <details className="operation-scenarios"><summary>Scenarios</summary>{scenarios.map(item=><label className="checkbox-label" key={item.id}><input type="checkbox" aria-label={'Use '+canvasTestLabel(test)+' in '+item.name} checked={assignedScenarios(test).includes(item.id)} onChange={event=>perform(()=>assignOperation(test,item.id,event.target.checked))}/>{item.name}</label>)}</details>;}
  function renderChecks(screenId:string,edgeId?:string){const node=graph!.screens.find(screen=>screen.id===screenId);if(!node)return <p>Restore the missing source screen before editing its actions.</p>;const checks=node.tests.filter(test=>test.check&&visibleOperation(test));const taps=node.tests.filter(test=>isAuthored(test)&&!test.check&&visibleOperation(test));const edge=graph!.edges.find(edge=>edge.id===edgeId);const operations=(edge?edgeActions(edge).flatMap(id=>node.tests.filter(test=>test.id===id)):node.tests.filter(test=>isAuthored(test)&&!graph!.edges.some(edge=>edge.actionTestIds?.includes(test.id)))).filter(visibleOperation);return <fieldset className={edge?'canvas-checks canvas-navigation-actions':'canvas-checks'} disabled={disabled}>
- {scenarioMode&&!edge&&<button aria-label={'Use '+node.title+' as scenario start'} disabled={!path||path.screenId===screenId} onClick={()=>onChange({...graph!,paths:graph!.paths.map(item=>item.id===pathId?{...item,screenId,edgeIds:[],visits:[{id:identity()}]}:item)})}>{path?.screenId===screenId?'Scenario start':'Use as scenario start'}</button>}
+ {scenarioMode&&!edge&&<button aria-label={'Use '+node.title+' as scenario start'} disabled={!path||path.screenId===screenId} onClick={()=>perform(()=>setScenarioStart(screenId))}>{path?.screenId===screenId?'Scenario start':'Use as scenario start'}</button>}
  {edge&&<legend>Actions to reach {graph!.screens.find(screen=>screen.id===edge.to)?.title??'Missing screen'}</legend>}
  {operations.map((test,index)=>{const selector=test.check??test.tap!;const name=edge?edge.responseCondition+' action '+(index+1):(!test.check?'Action '+(taps.indexOf(test)+1):'Check '+(checks.indexOf(test)+1));return <div key={test.id} className="canvas-operation" data-operation-id={test.id}>
  {test.check&&!selector.value&&<p className="field-hint">Screen condition: choose what must be visible or absent when this screen is reached.</p>}

@@ -46,3 +46,9 @@ Execution projects both actions and checks through the selected scenario and val
 The public UI regression recreates a two-scenario workspace where Scenario 2 initially has neither checks nor a next connection. It verifies the rejection, shares the existing action through its checklist, runs Scenario 2 successfully through the real workspace/run services with simulator and Maestro boundaries stubbed, and confirms memberships survive save/reopen. It also verifies a new Scenario 1 check stays hidden in Scenario 2. Service regressions cover shared checks, selected actions, required destination checks, incomplete actions and scenario-specific inputs.
 
 All 101 tests, type checking, production build and whitespace checks passed. Independent Standards and Spec reviews report no remaining findings. This follow-up was verified through the public UI/service seams; the simulator demonstration above applies to the original single-screen implementation.
+
+## Sharing before selecting a start — 2026-10-10
+
+The previous membership regression assumed Scenario 2 already had a start. Sharing an action before choosing the start recorded membership without extending its route; selecting Home afterward reset the route to an empty single-screen path. Execution consequently reported a missing Home check despite the shared action and destination check.
+
+Selecting a scenario start now follows its already assigned actions through unambiguous outgoing connections, creating the route's visit identities through the existing route helper. Traversal stops at branches, a repeated edge or the finite-route limit. The UI regression explicitly shares both the action and destination check and verifies successful execution and save/reopen for both ordering variants. All 102 tests, type checking, production build and whitespace checks passed.
