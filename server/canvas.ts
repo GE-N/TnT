@@ -146,7 +146,7 @@ export function selectedCanvasPath(graph:CanvasGraph,yaml:string,flows:Record<st
  if(initial){required.add(initial);for(const test of graph.screens.find(screen=>screen.id===initial)?.tests??[])if(test.check||!path.edgeIds.length)required.add(test.id);}
  const errors=inspection.diagnostics.filter(diagnostic=>required.has(diagnostic.ownerId));
  if(errors.length)throw new Error(errors.map(error=>error.detail).join(' '));
- if(path.screenId&&!path.edgeIds.length){const screen=graph.screens.find(screen=>screen.id===path.screenId)!;if(!screen.tests.some(test=>test.check))throw new Error('Add at least one screen check before running.');return path;}
+ if(path.screenId&&!path.edgeIds.length){const screen=graph.screens.find(screen=>screen.id===path.screenId)!;if(!visitChecks(graph,path,0).length||!screen.tests.some(test=>test.check))throw new Error('Select at least one screen check before running.');return path;}
  const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,test] as const)));
  let previous=-Infinity;
  for(const test of screenChecks(graph,initial)){const index=executionIndex(test.reference,yaml);if(index===undefined)throw new Error('Repair the initial screen checks.');previous=Math.max(previous,index*2+1);}

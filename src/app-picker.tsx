@@ -4,7 +4,7 @@ import type { InstalledApp } from '../server/runner.js';
 export function AppPicker({ deviceId, token, value, onChange, onReady, disabled }: { deviceId: string; token: string; value: string; onChange: (value: string) => void; onReady: (ready: boolean) => void; disabled: boolean }) {
   const [manual, setManual] = useState(false);
   const [revision, setRevision] = useState(0);
-  const [list, setList] = useState<{ apps: InstalledApp[]; loading: boolean; error: string }>({ apps: [], loading: true, error: '' });
+  const [list, setList] = useState<{ apps: InstalledApp[]; loading: boolean; error: string; deviceId?:string; token?:string }>({ apps: [], loading: true, error: '' });
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
@@ -12,13 +12,14 @@ export function AppPicker({ deviceId, token, value, onChange, onReady, disabled 
     if (!deviceId || !token) { setList({ apps: [], loading: false, error: '' }); return; }
     fetch('/api/devices/' + encodeURIComponent(deviceId) + '/apps', { headers: { 'X-TnT-Token': token }, signal: controller.signal })
       .then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error ?? 'Could not load installed apps. Refresh apps to retry.'); if (data.deviceId !== deviceId || !Array.isArray(data.apps)) throw new Error('The app list does not match this simulator. Refresh apps to retry.'); return data.apps as InstalledApp[]; })
-      .then(apps => { if (active) setList({ apps, loading: false, error: '' }); })
+      .then(apps => { if (active) setList({ apps, loading: false, error: '',deviceId,token }); })
       .catch(error => { if (active) setList({ apps: [], loading: false, error: error instanceof Error ? error.message : 'Could not load installed apps.' }); });
     return () => { active = false; controller.abort(); };
   }, [deviceId, token, revision]);
-  const selected = list.apps.some(app => app.bundleId === value) ? value : '';
+  const revalidated=list.deviceId===deviceId&&list.token===token;
+  const selected = revalidated&&list.apps.some(app => app.bundleId === value) ? value : '';
   useEffect(() => { onReady(manual || (!list.loading && !!selected)); }, [manual, list.loading, selected, onReady]);
-  useEffect(() => { if (!manual && !list.loading && value && !selected) onChange(''); }, [manual, list.loading, value, selected, onChange]);
+  useEffect(() => { if (!manual && revalidated && !list.loading && value && !selected) onChange(''); }, [manual, revalidated, list.loading, value, selected, onChange]);
   return <>
     <div className="label-row"><label htmlFor={manual ? 'bundle' : 'installed-app'}>{manual ? 'App bundle identifier' : 'Installed app'}</label><button type="button" className="text-button" disabled={disabled || !deviceId || !token || list.loading} onClick={() => setRevision(current => current + 1)}>↻ Refresh apps</button></div>
     {manual ? <input id="bundle" value={value} onChange={event => onChange(event.target.value)} placeholder="com.example.App" autoComplete="off" spellCheck={false} disabled={disabled} required maxLength={255} /> : <select id="installed-app" value={selected} required disabled={disabled || list.loading || !deviceId || !list.apps.length} onChange={event => onChange(event.target.value)}>

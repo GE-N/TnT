@@ -7,11 +7,11 @@ type Status = { ready: boolean; devices: Device[]; token: string; tool: string; 
 
 export function App() {
   const [status, setStatus] = useState<Status>();
-  const [deviceId, setDeviceId] = useState('');
-  const [appSelection, setAppSelection] = useState({ deviceId: '', bundleId: '' });
+  const [deviceId, setDeviceId] = useState(()=>{try{return localStorage.getItem('tnt-device')??'';}catch{return '';}});
+  const [appSelection, setAppSelection] = useState(()=>{try{return JSON.parse(localStorage.getItem('tnt-app')??'null')??{deviceId:'',bundleId:''};}catch{return {deviceId:'',bundleId:''};}});
   const bundleId = appSelection.deviceId === deviceId ? appSelection.bundleId : '';
   const setBundleId = useCallback((bundleId: string) => setAppSelection({ deviceId, bundleId }), [deviceId]);
-  useEffect(() => { setAppSelection({ deviceId, bundleId: '' }); }, [deviceId]);
+  useEffect(()=>{try{localStorage.setItem('tnt-device',deviceId);localStorage.setItem('tnt-app',JSON.stringify(appSelection));}catch{}},[deviceId,appSelection]);
   const [pickerReady, setPickerReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [scenarioBusy, setScenarioBusy] = useState(false);
@@ -66,34 +66,14 @@ export function App() {
   return <div className="workbench">
     <header className="topbar"><a className="brand" href="/">tnt<span className="brand-dot">.</span></a><span className="product">MOBILE TEST WORKBENCH</span><span className={'connection ' + (status?.ready ? 'connected' : '')}><i />{status?.ready ? 'Local runner connected' : status ? 'Runner needs attention' : 'Connecting to runner'}</span></header>
     <main>
-      <div className="intro"><div><p className="eyebrow">WORKSPACE / DEVICE LAUNCH</p><h1>Start with your app.</h1><p className="subtitle">Connect a prepared simulator and bring your app into view.</p></div><span className="phase">01 <span>/ Launch</span></span></div>
-      <div className="grid">
-        <section className="panel launch-panel" aria-labelledby="launch-heading">
-          <div className="panel-heading"><span className="section-number">01</span><div><h2 id="launch-heading">Launch configuration</h2><p>Your Mac. Your simulator. Your app.</p></div></div>
-          <form onSubmit={launch}>
-            <div className="label-row"><label htmlFor="device">Ready simulator</label><button className="text-button" type="button" onClick={() => void refresh()} disabled={busy || scenarioBusy}>↻ Refresh</button></div>
-            <select id="device" value={deviceId} onChange={event => setDeviceId(event.target.value)} disabled={busy || scenarioBusy || !status?.devices.length}>
-              {!status?.devices.length && <option value="">No running simulator</option>}
-              {status?.devices.map(device => <option key={device.id} value={device.id}>{device.name} · {device.runtime.replace('com.apple.CoreSimulator.SimRuntime.', '')}</option>)}
-            </select>
-            <p className="field-hint">Open Simulator and install your app before launching.</p>
-            <AppPicker key={deviceId + status?.token} deviceId={deviceId} token={status?.token ?? ''} value={bundleId} onChange={setBundleId} onReady={setPickerReady} disabled={busy || scenarioBusy} />
-            <button className="primary" type="submit" disabled={!ready || !pickerReady || busy || scenarioBusy || !bundleId.trim()}>{busy ? 'Working…' : 'Launch app'}<span aria-hidden="true">↗</span></button>
-          </form>
-          {(error || status?.error) && <div className="notice error" role="alert">{error || status?.error}</div>}
-          {status?.ready && !status.devices.length && <div className="notice">No ready devices found. Open an iOS simulator, then refresh.</div>}
-          <div className="local-note"><span aria-hidden="true">◎</span><div><strong>Runs locally</strong><p>Launches an installed app. Simulator provisioning and app installation stay manual.</p></div></div>
-          <div className="tool-row"><span>LAUNCH TOOL</span><strong>Xcode simctl</strong></div>
-        </section>
-        <section className="panel evidence-panel" aria-labelledby="evidence-heading">
-          <div className="panel-heading"><span className="section-number">02</span><div><h2 id="evidence-heading">Launch evidence</h2><p>Check what actually appeared on the device.</p></div><span className={'result-tag ' + (result?.status ?? '')}>{result?.status === 'confirmed' ? 'Confirmed' : result?.status === 'failed' ? 'Failed' : result ? 'Needs confirmation' : 'Waiting'}</span></div>
-          {!result ? <div className="empty-state"><div className="phone-outline"><span /><div>↗</div><i /></div><h3>{busy ? 'Opening your app…' : 'Your first launch starts here'}</h3><p>{busy ? 'Waiting for the simulator and capturing its screen.' : 'Choose a simulator and an installed app. A captured screen and launch log will appear here.'}</p></div> : <>
-            {result.error && <div className="notice error" role="alert">{result.error}</div>}
-            <div className="evidence-content">{screen && <img className="device-screen" src={screen} alt={'Captured ' + result.deviceName + ' screen after launching ' + result.bundleId} />}<div className="launch-details"><p className="eyebrow">{result.deviceName}</p><h3>{result.bundleId}</h3><p>{result.status === 'confirmed' ? 'You confirmed the app is visible in the captured screen.' : result.status === 'failed' ? 'The launch did not complete. Review the log and correct the configuration.' : 'The launch command completed. Verify the app is foregrounded in the captured screen before confirming.'}</p>{result.status === 'awaiting-confirmation' && <button className="confirm" type="button" onClick={() => void confirm()} disabled={busy || !screen}>I can see the app</button>}<p className="timestamp">{new Date(result.startedAt).toLocaleString()}</p><details><summary>Launch log</summary><pre>{result.log || 'No command output.'}</pre><p className="artifact-id">Launch ID: {result.id}</p></details></div></div>
-          </>}
-        </section>
+      <div className="workspace-device-controls">
+        <label htmlFor="device">Simulator</label><select id="device" value={deviceId} disabled={busy||scenarioBusy} onChange={event=>setDeviceId(event.target.value)}><option value="">Design offline</option>{status?.devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select>
+        <button className="text-button" disabled={busy||scenarioBusy} onClick={()=>void refresh()}>Refresh devices</button>
+        <AppPicker key={deviceId+status?.token} deviceId={deviceId} token={status?.token??''} value={bundleId} onChange={setBundleId} onReady={setPickerReady} disabled={busy||scenarioBusy}/>
       </div>
-      <Scenarios token={status?.token ?? ''} deviceId={deviceId} bundleId={bundleId} launchBusy={busy} onRunning={setScenarioBusy} />
+      {(error||status?.error)&&<div className="notice error" role="alert">{error||status?.error}</div>}
+      <Scenarios token={status?.token??''} deviceId={deviceId} bundleId={bundleId} launchBusy={busy} onRunning={setScenarioBusy}/>
+      <details><summary>Advanced launch tools</summary><form onSubmit={launch}><button className="confirm" disabled={!ready||!pickerReady||busy||scenarioBusy}>Launch app</button></form>{result&&<><p>{result.bundleId} · {result.status}</p>{screen&&<img className="device-screen" src={screen} alt="Captured launch screen"/>}{result.status==='awaiting-confirmation'&&<button onClick={()=>void confirm()} disabled={busy||!screen}>I can see the app</button>}<pre>{result.log}</pre></>}</details>
       <footer><span>iOS first · Local execution</span><span>Pick reviewed steps from the simulator · Isolated mock scenarios and reusable assertions.</span></footer>
     </main>
   </div>;

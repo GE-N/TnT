@@ -3,6 +3,7 @@ import type {ScenarioDefinition} from '../server/scenario-definitions.js';
 import type {CatalogEntry,CanvasGraph} from '../server/canvas.js';
 import type {Automation} from '../server/default-actions.js';
 import type {MockPlan} from '../server/mockoon.js';
+const emptyInputs:Record<string,string>={};
 type Props={items:ScenarioDefinition[];onChange:(items:ScenarioDefinition[])=>void;selected:string;onSelect:(id:string)=>void;catalog:CatalogEntry[];files:string[];canvas?:CanvasGraph;automation?:Automation;mock?:MockPlan;disabled:boolean;onError:(error:string)=>void};
 function JsonField({id,label,value,onApply,onError}:{id:string;label:string;value:unknown;onApply:(value:any)=>void;onError:(error:string)=>void}){
  const [draft,setDraft]=useState(JSON.stringify(value,null,2));const [error,setError]=useState('');
@@ -30,8 +31,8 @@ export function ScenarioLibrary({items,onChange,selected,onSelect,catalog,files,
     {current.steps.filter(step=>!steps.some(ref=>ref.index===step.index)).map(step=><p role="alert" key={step.index}>Missing selected step {step.index!+1}. Remove or repair this selection.</p>)}
     <button type="button" className="confirm" onClick={()=>update({steps:steps.filter(ref=>current.steps.some(step=>step.index===ref.index)).map(({kind,file,index,fingerprint})=>({kind,file,index,fingerprint}))})}>Relink selected steps</button>
    </details>
-   <label>Scenario setup flow<select aria-label="Scenario setup flow" value={current.setup.file} onChange={event=>update({setup:{...current.setup,file:event.target.value}})}>{files.map(file=><option key={file}>{file}</option>)}</select></label>
-   <JsonField id="scenario-setup-inputs" label="Setup parameters" value={current.setup.parameters} onApply={parameters=>update({setup:{...current.setup,parameters}})} onError={message=>fieldError('setup',message)}/>
+   <label>Scenario setup flow<select aria-label="Scenario setup flow" value={current.setup?.file??''} onChange={event=>update({setup:{parameters:current.setup?.parameters??emptyInputs,file:event.target.value}})}>{files.map(file=><option key={file}>{file}</option>)}</select></label>
+   <JsonField id="scenario-setup-inputs" label="Setup parameters" value={current.setup?.parameters??emptyInputs} onApply={parameters=>update({setup:current.setup?{...current.setup,parameters}:undefined})} onError={message=>fieldError('setup',message)}/>
    <JsonField id="scenario-public-inputs" label="Scenario inputs" value={current.inputs} onApply={inputs=>update({inputs})} onError={message=>fieldError('inputs',message)}/>
    <p className="field-hint">Saved test data only. Reference inputs as {'${NAME}'} in reusable YAML. Supply secrets using confidential runtime inputs below.</p>
    <details><summary>Input requirements</summary><JsonField id="scenario-input-rules" label="Input requirements" value={current.parameters} onApply={parameters=>update({parameters})} onError={message=>fieldError('requirements',message)}/><p className="field-hint">Example: {'{"EXPECTED_PAGE":{"type":"text","required":true}}'}. Types: text, number, boolean.</p></details>

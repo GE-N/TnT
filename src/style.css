@@ -66,3 +66,14 @@
 .run-error-toast strong{display:block;padding-right:24px}
 .run-error-toast p{margin:8px 0 0;font-size:13px}
 .run-error-toast button{float:right;color:inherit;font-size:20px;line-height:1}
+
+.canvas-workspace { display:grid; grid-template-columns:220px minmax(0,1fr); gap:20px; }
+.scenario-sidebar { display:flex; flex-direction:column; align-items:stretch; gap:12px; padding:16px; background:#17211c; border-radius:12px; }
+.workspace-canvas { min-width:0; }
+.workspace-canvas .canvas-viewport { height:540px; }
+.workspace-canvas .canvas-inspectors { grid-template-columns:1fr; }
+.workspace-device-controls { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-bottom:20px; }
+.workspace-device-controls select { width:auto; max-width:320px; }
+.workspace-device-controls .field-hint { margin:0; }
+.workspace-advanced { margin:24px 0; }
+@media(max-width:760px) { .canvas-workspace { grid-template-columns:1fr; } }

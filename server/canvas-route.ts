@@ -1,13 +1,14 @@
 import {isSeq,parseAllDocuments} from 'yaml';
 import {attachLeadingComments,authoredChecks,edgeActions,edgeChecks,routeVisits,visitChecks,visitScreenId,isAuthored} from '../shared/canvas-authoring.js';
-import {inspectCanvas,referenceCatalog,type CanvasGraph,type CanvasExecution} from './canvas.js';
+import {inspectCanvas,referenceCatalog,selectedCanvasPath,type CanvasGraph,type CanvasExecution} from './canvas.js';
 import type {Automation} from './default-actions.js';
 
 // Expand a finite route into distinct command occurrences, preserving unassociated YAML.
 // Legacy association-only canvases retain their authored YAML order.
 export function projectCanvasRoute(graph:CanvasGraph,yaml:string,flows:Record<string,string>,pathId:unknown,automation?:Automation){
  const path=graph.paths.find(path=>path.id===pathId);
- if(!path||!path.edgeIds.some(id=>graph.edges.find(edge=>edge.id===id)?.actionTestIds)&&new Set(path.edgeIds).size===path.edgeIds.length&&!path.visits?.some(visit=>visit.checkIds!==undefined))return {canvas:graph,yaml,automation};
+ if(path?.screenId&&!path.edgeIds.length)selectedCanvasPath(graph,yaml,flows,pathId,automation);
+ if(!path||(!path.screenId||path.edgeIds.length>0)&&!path.edgeIds.some(id=>graph.edges.find(edge=>edge.id===id)?.actionTestIds)&&new Set(path.edgeIds).size===path.edgeIds.length&&!path.visits?.some(visit=>visit.checkIds!==undefined))return {canvas:graph,yaml,automation};
  const edges=path.edgeIds.map(id=>graph.edges.find(edge=>edge.id===id));
  const visits=routeVisits(graph,path);
  const tests=graph.screens.flatMap(screen=>screen.tests);

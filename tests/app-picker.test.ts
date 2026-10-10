@@ -10,12 +10,13 @@ const second = 'F5C92F6E-40DC-493C-93B4-469E67193736';
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
 const app = (bundleId: string, name: string, type = 'user') => ({ bundleId, name, type });
 function deferred() { let resolve!: (value: Response) => void; const promise = new Promise<Response>(done => { resolve = done; }); return { promise, resolve }; }
-async function ui(fetcher: typeof fetch) {
+async function ui(fetcher: typeof fetch, remembered?:{deviceId:string;bundleId:string}) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/' });
-  const restore = ['window','document','HTMLElement','Event','MouseEvent','IS_REACT_ACT_ENVIRONMENT','fetch'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
-  for (const key of ['window','document','HTMLElement','Event','MouseEvent']) Object.defineProperty(globalThis, key, { value: Reflect.get(dom.window,key), configurable: true });
+  const restore = ['window','document','HTMLElement','Event','MouseEvent','localStorage','IS_REACT_ACT_ENVIRONMENT','fetch'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+  for (const key of ['window','document','HTMLElement','Event','MouseEvent','localStorage']) Object.defineProperty(globalThis, key, { value: Reflect.get(dom.window,key), configurable: true });
   Object.defineProperty(globalThis,'IS_REACT_ACT_ENVIRONMENT',{ value:true, configurable:true });
   Object.defineProperty(globalThis,'fetch',{ value:fetcher, configurable:true });
+  if(remembered){dom.window.localStorage.setItem('tnt-device',remembered.deviceId);dom.window.localStorage.setItem('tnt-app',JSON.stringify(remembered));}
   const root = createRoot(dom.window.document.getElementById('root')!);
   await act(async () => { root.render(createElement(App)); });
   const document = dom.window.document;
@@ -101,4 +102,25 @@ test('launch waits for a refreshed picker selection to be validated while manual
     await view.select('installed-app','com.example.App');
     assert.equal(view.button('Launch app').disabled,false);
   } finally { await view.close(); }
+});
+
+
+test('a remembered app survives cold startup and becomes runnable only after inventory revalidation',async()=>{
+ const connection=deferred();const inventory=deferred();
+ const remembered={deviceId:second,bundleId:'com.example.App'};
+ const view=await ui(async url=>{
+  if(url==='/api/status')return connection.promise;
+  if(String(url).endsWith('/apps'))return inventory.promise;
+  return response({references:[],diagnostics:[]});
+ },remembered);
+ try{
+  assert.equal(JSON.parse(localStorage.getItem('tnt-app')!).bundleId,'com.example.App');
+  assert.equal(view.button('Launch app').disabled,true);
+  await act(async()=>connection.resolve(status()));
+  assert.equal((view.document.getElementById('device') as HTMLSelectElement).value,second);
+  assert.equal(view.button('Launch app').disabled,true);
+  await act(async()=>inventory.resolve(response({deviceId:second,apps:[app('com.example.App','Remembered app')]})));
+  assert.equal((view.document.getElementById('installed-app') as HTMLSelectElement).value,'com.example.App');
+  assert.equal(view.button('Launch app').disabled,false);
+ }finally{await view.close();}
 });
