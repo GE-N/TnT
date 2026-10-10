@@ -38,3 +38,15 @@ The browser at `http://127.0.0.1:4324` opened a controlled shared-node fixture, 
 ## Validation and review
 
 All 105 tests passed, including existing scenario membership and legacy canvas regressions. Type checking, production build and whitespace checks passed. Independent Standards and Spec reviews found no remaining actionable findings after sharing the visit-screen lookup, introducing an explicit connection-start callback, and clearing selection on scenario switches.
+
+## Connection UX correction — 2026-10-10
+
+The first implementation hid the node action's destination picker and created empty connections when the author dragged after adding an action. That made an existing Home action impossible to connect through its own editor and left the drawn arrow detached from that action.
+
+Node actions now retain their contextual destination picker, including Input and Back actions. Drawing from a node binds its unconnected actions used by the selected scenario in their authored order. Already connected actions remain on their own connections, so a new parallel connection can still be authored independently.
+
+The always-visible Append visit buttons are removed. Existing connections expose Continue only at the current unfinished sequence endpoint. The node menu retains Add to sequence for explicit node appends and disconnected/parallel diagnostics.
+
+A missing screen assertion remains an execution blocker: an action describes the transition, while a check verifies arrival. Nodes without checks explain this beside their authoring controls, and run diagnostics point to Add check in the affected node. The regression recreates Home → Details → Home through existing actions, verifies both missing-check diagnostics, adds checks through the nodes, then executes successfully through the real workspace/run services. A separate regression verifies connecting a node action through its restored destination picker.
+
+Follow-up validation: all 107 tests passed, with type checking, production build and whitespace checks passing. Standards and Spec reviews reported no actionable findings against the user's revised UX requirements. Browser verification selected Details through Home's action destination picker and showed the resulting Home → Details sequence and arrow. The default diagnostic uses the connection's name instead of its internal ID. Screenshot: ignored `.scratch/issue-22-connection-fix.jpg`.

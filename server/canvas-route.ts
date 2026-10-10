@@ -13,7 +13,7 @@ export function projectCanvasRoute(graph:CanvasGraph,yaml:string,flows:Record<st
  const visits=routeVisits(graph,path);
  const tests=graph.screens.flatMap(screen=>screen.tests);
  const ordered=[...visitChecks(graph,path,0).map(testId=>({testId,visitId:visits[0].id,assertion:true,edgeId:undefined as string|undefined})),...edges.flatMap((edge,index)=>edge?[...scenarioActions(graph,edge,path.scenarioId).map(testId=>({testId,visitId:visits[index].id,assertion:false,edgeId:edge.id})),...visitChecks(graph,path,index+1).map(testId=>({testId,visitId:visits[index+1].id,assertion:true,edgeId:undefined}))]:[])];
- for(const [index,edge] of edges.entries()){if(edge&&!scenarioActions(graph,edge,path.scenarioId).length)throw new Error('Select at least one action for this scenario on connection '+edge.responseCondition+'.');if(edge&&!visitChecks(graph,path,index+1).length)throw new Error('Select at least one screen check for this scenario on its destination.');}
+ for(const [index,edge] of edges.entries()){if(edge&&!scenarioActions(graph,edge,path.scenarioId).length)throw new Error('Select at least one action for this scenario on connection '+edge.responseCondition+'.');if(edge&&!visitChecks(graph,path,index+1).length)throw new Error('Select at least one screen check for this scenario on destination '+graph.screens.find(screen=>screen.id===edge.to)?.title+'. Use Add check in that node to verify arrival before running.');}
  const required=new Set(['yaml',path.id,...path.edgeIds,...ordered.map(item=>item.testId)]);
  if(path.scenarioId)for(const id of unconnectedScenarioActions(graph,path.scenarioId))required.add(id);
  const diagnostics=inspectCanvas(graph,yaml,flows,automation).diagnostics.filter(item=>required.has(item.ownerId));

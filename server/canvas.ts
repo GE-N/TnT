@@ -119,7 +119,7 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
   const action=tests.get(edge.actionTestId);
   if(!edgeActions(edge).length||edgeActions(edge).some(id=>tests.get(id)?.screen.id!==edge.from||tests.get(id)?.test.check))diagnostics.push({ownerId:edge.id,detail:'Repair the ordered actions on this connection; a removed action must be restored or explicitly removed from the route.'});const assertion=tests.get(edge.assertionTestId);
   const sharedChecks=edge.actionTestIds!==undefined&&screenChecks(graph,edge.to).length>0;
-  if(!sharedChecks&&edge.assertionTestId==='pending:'+edge.id)diagnostics.push({ownerId:edge.id,detail:'Add a check to destination screen '+(screens.get(edge.to)?.title??edge.to)+' before running this action.'});
+  if(!sharedChecks&&edge.assertionTestId==='pending:'+edge.id)diagnostics.push({ownerId:edge.id,detail:'Add a check to destination screen '+(screens.get(edge.to)?.title??edge.to)+' before running this action. Use Add check in that node to verify arrival.'});
   else if(!screens.has(edge.from)||!screens.has(edge.to)||action?.screen.id!==edge.from||!sharedChecks&&assertion?.screen.id!==edge.to)diagnostics.push({ownerId:edge.id,detail:'Repair transition screen/action/assertion associations.'});
   const target=assertion&&resolveReference(assertion.test.reference,catalog.references);
   if(!sharedChecks&&((assertion&&isAuthored(assertion.test)&&!assertion.test.check)||(target&&!target.assertion)))diagnostics.push({ownerId:edge.id,detail:'The destination must reference an executable assertion or assertion flow.'});

@@ -12,7 +12,7 @@ import {createRunner} from '../server/runner.js';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import type {CanvasGraph} from '../server/canvas.js';
 
-async function journey(work:(ui:{document:Document;click:(label:string)=>Promise<void>;fill:(label:string,value:string)=>Promise<void>;saved:()=>Promise<Awaited<ReturnType<ReturnType<typeof createScenarios>['workspace']>>>;failNext:()=>void})=>Promise<void>){
+async function journey(work:(ui:{document:Document;click:(label:string)=>Promise<void>;fill:(label:string,value:string)=>Promise<void>;saved:()=>Promise<Awaited<ReturnType<ReturnType<typeof createScenarios>['workspace']>>>;failNext:()=>void})=>Promise<void>,draft=false){
  const directory=await mkdtemp(join(tmpdir(),'tnt-sequences-ui-'));const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
  let fail=false;
  const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
@@ -26,6 +26,7 @@ async function journey(work:(ui:{document:Document;click:(label:string)=>Promise
  const canvas:CanvasGraph={screens:['1','2','3','4'].map((id,index)=>({id,title:id,x:400*index,y:0,tests:[{id:'check'+id,label:id,role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Screen '+id}}]})),edges:[],paths:[]};
  const edges=[['1','2'],['2','3'],['3','2'],['2','1'],['3','4']];
  for(const [from,to] of edges){const id=from+to;canvas.screens.find(screen=>screen.id===from)!.tests.push({id:'go'+id,label:'Go '+to,role:'action',reference,tap:{target:'text',match:'exact',value:'Go '+to}});canvas.edges.push({id,from,to,actionTestId:'go'+id,actionTestIds:['go'+id],assertionTestId:'check'+to,responseCondition:from+' → '+to});}
+ if(draft){canvas.screens=canvas.screens.slice(0,2).map((screen,index)=>({...screen,title:index?'Details':'Home',tests:[]}));canvas.edges=[];}
  const workspace=await service.save({name:'Four shared nodes',yaml:writeChecks('appId: com.example.App\n---\n- launchApp\n',{screens:[],edges:[],paths:[]},canvas),canvas,scenarios:[]});
  const dom=new JSDOM('<div id="root"></div>');const document=dom.window.document;
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
@@ -55,7 +56,7 @@ test('three finite scenarios reuse four nodes, choose branches explicitly, save/
  for(const [index,route] of routes.entries()){
   await click('New scenario');await fill('Scenario name','Journey '+(index+1));await click('Use 1 as scenario start');
   assert.equal(document.querySelector('[aria-label="Scenario sequence"]')!.textContent,'1 · 1');
-  await click('Append visit to 4');assert.match(document.querySelector('[role="alert"]')!.textContent!,/No connection.*1.*4/);
+  await act(async()=>document.querySelector('[aria-label="Screen 4"]')!.dispatchEvent(new document.defaultView!.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));await click('Add 4 to scenario sequence');assert.match(document.querySelector('[role="alert"]')!.textContent!,/No connection.*1.*4/);
   for(let position=1;position<route.length;position++)await click('Append connection '+route[position-1]+' → '+route[position]);
   await click('Finish sequence');await click('Save workspace');
   const snapshot=await saved();const path=snapshot.canvas!.paths.find(path=>path.id===snapshot.scenarios![index].pathId)!;
@@ -93,10 +94,31 @@ test('canvas connection drawing supports keyboard selection, parallel choices an
  assert.equal(firstPath.edgeIds.length,1);const edge=first.canvas!.edges.at(-1)!;
  assert.deepEqual(edge.actionTestIds!.map(id=>first.canvas!.screens[0].tests.find(test=>test.id===id)!.input??first.canvas!.screens[0].tests.find(test=>test.id===id)!.back??first.canvas!.screens[0].tests.find(test=>test.id===id)!.tap!.value),['Focus field','hello',true]);
  await click('Connect from 1');await click('Select screen 4');await click('Save workspace');assert.deepEqual((await saved()).canvas!.paths.at(-1)!.visits!.map(visit=>visit.id),visitIds,'Drawing after Finish never extends the sequence');
- await click('New scenario');await click('Use 1 as scenario start');await click('Append visit to 4');assert.match(document.querySelector('[role="alert"]')!.textContent!,/Several connections/);
+ await click('New scenario');await click('Use 1 as scenario start');await act(async()=>document.querySelector('[aria-label="Screen 4"]')!.dispatchEvent(new document.defaultView!.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));await click('Add 4 to scenario sequence');assert.match(document.querySelector('[role="alert"]')!.textContent!,/Several connections/);
  await fill('Connection name '+edge.id,'First choice');await click('Append connection First choice');await click('Finish sequence');await click('Save workspace');
  assert.deepEqual((await saved()).canvas!.paths.at(-1)!.edgeIds,[edge.id]);
  await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
  assert.ok(!document.querySelector('.workspace-canvas select[aria-label="Next transition"]'));
- assert.ok(!document.querySelector('.workspace-canvas select[aria-label="Action 1 destination"]'));
+ assert.ok(!document.querySelector('.workspace-canvas select[aria-label="Source screen"]'));
 }));
+
+
+test('a node action keeps its destination picker in the default canvas',()=>journey(async({document,click,fill,saved})=>{
+ await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Details');
+ const destination=document.querySelector<HTMLSelectElement>('[aria-label="Action 1 destination"]');assert.ok(destination,'The action must let the author choose its destination');
+ await act(async()=>{destination.value='2';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
+ await click('Save workspace');const graph=(await saved()).canvas!;assert.equal(graph.edges.length,1);assert.equal(graph.edges[0].to,'2');assert.equal(graph.edges[0].actionTestId,graph.screens[0].tests[0].id);assert.deepEqual(graph.paths[0].edgeIds,[graph.edges[0].id]);
+},true));
+
+test('drawing after authoring an action connects that action and explains missing screen checks at their nodes',()=>journey(async({document,click,fill,saved})=>{
+ await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Details');
+ await click('Connect from Home');await click('Select screen Details');await click('Save workspace');
+ const graph=(await saved()).canvas!;assert.deepEqual(graph.edges[0].actionTestIds,[graph.screens[0].tests[0].id],'Drawing must attach the existing action rather than creating an empty connection');
+ assert.match(document.querySelector('[aria-label="Screen Details"]')!.textContent!,/Add a check.*verify.*Details/);
+ assert.ok(![...document.querySelectorAll('button')].some(button=>button.textContent==='Append visit'),'Redundant append controls are removed');
+ await click('Add action to Details');await act(async()=>{const kind=document.querySelector<HTMLSelectElement>('[aria-label="Action 1 type"]')!;kind.value='back';kind.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
+ await click('Connect from Details');await click('Select screen Home');
+ await click('Run scenario');assert.match(document.querySelector('.run-error-toast')!.textContent!,/Details.*Add check/);assert.match(document.querySelector('.run-error-toast')!.textContent!,/Home/);
+ await click('Add check to Details');await fill('Check 1 selector','Details');await click('Add check to Home');await fill('Check 1 selector','Home');
+ await click('Run scenario');assert.equal(document.querySelector('.run-error-toast'),null);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+},true));
