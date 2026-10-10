@@ -1,5 +1,5 @@
 import {isNode,isSeq,parseAllDocuments,stringify,type YAMLSeq} from 'yaml';
-import type {CanvasGraph,CanvasTest,Transition} from '../server/canvas.js';
+import type {CanvasGraph,CanvasTest,CanvasVisit,Transition} from '../server/canvas.js';
 
 export type ScreenSelector={target:'text'|'id';match:'exact'|'contains'|'regex';value:string};
 export type ScreenCheck=ScreenSelector & {visibility:'visible'|'absent'};
@@ -155,11 +155,13 @@ export function edgeChecks(graph:CanvasGraph,edge:Transition){
 }
 
 // Older routes gain deterministic visit identities once saved. Edits retain surviving visits.
-export function routeVisits(graph:CanvasGraph,path:CanvasGraph['paths'][number]){
+export function routeVisits(graph:CanvasGraph,path:CanvasGraph['paths'][number]):CanvasVisit[]{
  return path.visits??Array.from({length:path.edgeIds.length+1},(_value,index)=>({id:path.id+':visit:'+index,checkIds:undefined as string[]|undefined}));
 }
 export function visitChecks(graph:CanvasGraph,path:CanvasGraph['paths'][number],index:number){
  const screenId=visitScreenId(graph,path,index);
+ const operations=routeVisits(graph,path)[index]?.operationIds;
+ if(operations!==undefined)return operations.filter(id=>graph.screens.find(screen=>screen.id===screenId)?.tests.some(test=>test.id===id&&test.check));
  const selected=routeVisits(graph,path)[index]?.checkIds;
  const ids=selected??(index===0?screenChecks(graph,screenId).map(test=>test.id):graph.edges.find(edge=>edge.id===path.edgeIds[index-1])?edgeChecks(graph,graph.edges.find(edge=>edge.id===path.edgeIds[index-1])!):[]);
  return scenarioOperationIds(graph,ids,path.scenarioId);
@@ -167,9 +169,67 @@ export function visitChecks(graph:CanvasGraph,path:CanvasGraph['paths'][number],
 
 export function appendRouteTransition(graph:CanvasGraph,path:CanvasGraph['paths'][number],edgeId:string){
  if(path.edgeIds.length>=80)throw new Error('A finite route supports up to 80 transitions.');
- return {...path,edgeIds:[...path.edgeIds,edgeId],visits:[...routeVisits(graph,path),{id:crypto.randomUUID()}]};
+ return {...path,edgeIds:[...path.edgeIds,edgeId],visits:[...routeVisits(graph,path),{id:crypto.randomUUID(),...(routeVisits(graph,path).some(visit=>visit.operationIds!==undefined)?{operationIds:[]}: {})}]};
 }
 
 export function visitScreenId(graph:CanvasGraph,path:CanvasGraph['paths'][number],index:number){
  return index===0?(initialCanvasScreen(graph,path)??graph.edges.find(edge=>edge.id===path.edgeIds[0])?.from):graph.edges.find(edge=>edge.id===path.edgeIds[index-1])?.to;
+}
+
+// Explicit lists own the execution order of an individual visit. Older workspaces
+// derive their original selection until an edit freezes it into visit lists.
+export function visitOperations(graph:CanvasGraph,path:CanvasGraph['paths'][number],index:number):string[]{
+ const visit=routeVisits(graph,path)[index];
+ if(visit?.operationIds!==undefined)return visit.operationIds;
+ const screenId=visitScreenId(graph,path,index);const screen=graph.screens.find(screen=>screen.id===screenId);
+ const edge=graph.edges.find(edge=>edge.id===path.edgeIds[index]);
+ const ids=new Set([...visitChecks(graph,path,index),...(edge?scenarioActions(graph,edge,path.scenarioId):[])]);
+ if(path.scenarioId&&!routeVisits(graph,path).slice(0,index).some((_visit,i)=>visitScreenId(graph,path,i)===screenId)){
+  for(const id of unconnectedScenarioActions(graph,path.scenarioId))if(screen?.tests.some(test=>test.id===id))ids.add(id);
+ }
+ return screen?.tests.filter(test=>ids.has(test.id)).map(test=>test.id)??[];
+}
+export function freezeVisitOperations(graph:CanvasGraph):CanvasGraph{
+ return {...graph,paths:graph.paths.map(path=>path.scenarioId&&initialCanvasScreen(graph,path)?{...path,visits:routeVisits(graph,path).map((visit,index)=>({...visit,operationIds:visitOperations(graph,path,index)}))}:path)};
+}
+export function updateVisitOperations(graph:CanvasGraph,pathId:string,visitId:string,operationIds:string[]):CanvasGraph{
+ if(operationIds.length>30)throw new Error('A visit supports up to 30 actions and checks.');
+ return {...graph,paths:graph.paths.map(path=>path.id===pathId?{...path,visits:routeVisits(graph,path).map(visit=>visit.id===visitId?{...visit,operationIds,checkIds:undefined}:visit)}:path)};
+}
+// Copy on edit also isolates imported shared operations and duplicated scenarios.
+export function privateVisitOperation(graph:CanvasGraph,pathId:string,visitId:string,testId:string){
+ graph=freezeVisitOperations(graph);
+ const path=graph.paths.find(path=>path.id===pathId)!;const index=routeVisits(graph,path).findIndex(visit=>visit.id===visitId);
+ if(index<0||!visitOperations(graph,path,index).includes(testId))throw new Error('Select the visit that owns this operation.');
+ const shared=graph.paths.some(item=>routeVisits(graph,item).some((visit,i)=>(item.id!==pathId||visit.id!==visitId)&&visitOperations(graph,item,i).includes(testId)));
+ if(!shared)return {graph,testId};
+ const id=crypto.randomUUID();const screenId=visitScreenId(graph,path,index)!;const test=graph.screens.find(screen=>screen.id===screenId)!.tests.find(test=>test.id===testId)!;
+ const edgeId=path.edgeIds[index];
+ graph={...graph,screens:graph.screens.map(screen=>screen.id===screenId?{...screen,tests:[...screen.tests,{...structuredClone(test),id,scenarioIds:path.scenarioId?[path.scenarioId]:undefined}]}:screen),edges:graph.edges.map(edge=>edge.id===edgeId&&!test.check?{...edge,actionTestIds:[...edgeActions(edge),id]}:edge)};
+ return {graph:updateVisitOperations(graph,pathId,visitId,visitOperations(graph,path,index).map(item=>item===testId?id:item)),testId:id};
+}
+
+export function connectionVisitActions(graph:CanvasGraph,path:CanvasGraph['paths'][number],edge:Transition){
+ // Prefer this scenario's own earlier occurrence, never the pooled edge union.
+ for(const item of [path,...graph.paths.filter(item=>item.id!==path.id)]){
+  const index=item.edgeIds.indexOf(edge.id);
+  if(index>=0){const actions=visitOperations(graph,item,index).filter(id=>edgeActions(edge).includes(id));if(actions.length)return actions;}
+ }
+ return scenarioActions(graph,edge,path.scenarioId);
+}
+export function connectVisitAction(graph:CanvasGraph,pathId:string,visitId:string,actionId:string,to:string){
+ const path=graph.paths.find(item=>item.id===pathId)!;const index=routeVisits(graph,path).findIndex(visit=>visit.id===visitId);const from=visitScreenId(graph,path,index)!;
+ const previous=graph.edges.find(edge=>edge.from===from&&edgeActions(edge).includes(actionId));
+ let next:CanvasGraph;
+ if(to)next=connectCanvasAction(graph,from,actionId,to,pathId).graph;
+ else next={...graph,edges:graph.edges.map(edge=>edge.id===previous?.id?{...edge,actionTestIds:edgeActions(edge).filter(id=>id!==actionId),actionTestId:edgeActions(edge).find(id=>id!==actionId)??'pending:'+edge.id}:edge)};
+ const current=next.paths.find(item=>item.id===pathId)!;
+ const ids=visitOperations(next,current,index).filter(id=>id!==actionId);
+ const edge=to?next.edges.find(edge=>edge.from===from&&edgeActions(edge).includes(actionId)):next.edges.find(edge=>edge.from===from&&edgeActions(edge).some(id=>ids.includes(id)));
+ if(edge){
+  if(current.edgeIds[index])next={...next,paths:next.paths.map(item=>item.id===pathId?{...item,edgeIds:item.edgeIds.map((id,i)=>i===index?edge.id:id)}:item)};
+  else if(!current.finished&&current.edgeIds.length===index)next={...next,paths:next.paths.map(item=>item.id===pathId?appendRouteTransition(next,item,edge.id):item)};
+ }
+ if(!to&&previous&&!edgeActions(next.edges.find(edge=>edge.id===previous.id)!).length&&!next.paths.some(item=>item.edgeIds.includes(previous.id)))next={...next,edges:next.edges.filter(edge=>edge.id!==previous.id)};
+ return next;
 }

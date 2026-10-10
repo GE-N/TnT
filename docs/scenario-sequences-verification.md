@@ -77,3 +77,32 @@ No remaining actionable findings. Review verified the distinct-ID correction and
 No remaining actionable findings against the latest user requirements. Optional checks, drag destinations, one reorderable operation list, per-row destination changes and actual iOS Back navigation are covered.
 
 Review totals: Standards 0; Spec 0.
+
+
+## Independent visit sections — 2026-10-10
+
+The accepted follow-up changes ownership from a node/scenario operation list to an ordered list for each individual visit. Every visit appears as a section inside its shared node, labelled with its sequence number, screen and scenario. Only the selected scenario's sections appear: a return journey shows Home visits 1 and 3; a Home-only scenario shows Home visit 1 and no Detail visit. The sequence strip selects the corresponding section.
+
+`CanvasVisit.operationIds` is the explicit execution order. Old workspaces derive their prior selections until an edit freezes them. New checks/actions belong to the section where they are added. Imported shared steps and duplicated scenarios copy commands on edit so selector/type changes cannot affect other visits. Reordering changes only the visit list; deletion detaches only that visit's selection and keeps steps still used elsewhere. **Copy existing steps** creates independent commands. New destination visits start with an empty list.
+
+Reusing a connection selects the current scenario's earlier occurrence as the action template; it does not import the union of commands stored on that shared edge. Changing a visit action's destination updates that visit's route while preserving other paths. Steps associated with the previous destination remain available for explicit removal/repair, instead of being silently reassigned. Each visit supports 30 operations; the bounded shared node/connection pools support 600 stored commands so independent visits are not accidentally limited to 30 combined steps. Existing YAML and combined workspace size limits still apply.
+
+Public UI/service regressions reproduce the exact Home → Detail → Home workflow, add a return-only check in Visit 3, save/reopen and verify launch → opening tap → Back control tap → assertion. They verify scenario-dependent section counts, independent selectors/order/deletion in duplicates and repeated visits, reusing the original connection after a duplicate edit without leaking its commands, saving more than 30 total steps across two visits, and explicit repair after retargeting a copied visit. Legacy association-only route and membership compatibility tests remain covered.
+
+Controlled browser/simulator verification used workspace `2380b65c-fe1c-499a-a65f-c0aa9f560d1b` on the installed `com.example.TnTRepeatedVisitProof` fixture. The browser selected Visit 3 · Home, added exact text `Returned Home` in that section, finished, saved, reopened and ran the journey. Run `cb2c80c9-5d63-4f99-a638-407030a066a9` passed with verified cleanup: Visit 1 contains only the opening tap (step 2), Visit 2 contains Back (step 3), and Visit 3 contains the return assertion (step 4). This text exists only after returning, so successful execution proves the check did not run on the initial Home visit. The earlier development-runner-interrupted attempt `5c4d43a5-0ae0-4c32-b0db-e608bbd2918c` is retained but is not passing evidence; its raw report failed to find Back. Its exited runner's ownership lock was preserved with that run after confirming no owned Maestro process remained.
+
+Switching to Home only showed exactly Home Visit 1, zero Home Visit 3 sections, and zero Coordinator visit sections. Switching back restored both Home sections and the return-only check. Local screenshots: ignored `.scratch/issue-22-one-visit.jpg` and `.scratch/issue-22-independent-visits.jpg`. Executed node labels now show the mapped execution step instead of the command's original YAML index. The legacy subset editor directs visit-owned lists to the contextual node editor so it cannot apply ignored selection changes.
+
+Final validation: all 114 tests, type checking, production build and whitespace checks passed.
+
+### Standards
+
+No remaining actionable findings after aligning pooled limits, scoping destination edits and correcting execution step labels.
+
+### Spec
+
+No remaining actionable findings. Visit sections, independent commands/order, scenario-dependent visibility, return-only checks and connection reuse isolation match the clarified requirements.
+
+Review totals: Standards 0; Spec 0.
+
+Final screenshot run `8e414bda-f887-4cb9-a2b3-540e6e82ed69` also passed with launch → opening tap → Back control tap → return assertion. The deletion warning for a visit-owned step names only that scenario and visit.

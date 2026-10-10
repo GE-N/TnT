@@ -40,10 +40,8 @@ for(const shareBeforeStart of [false,true])test('a second scenario shares operat
   await act(async()=>{const input=document.getElementById('open-workspace')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,workspace.id);input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});await click('Open saved workspace');await click('Scenario 2');
   assert.ok(!document.querySelector('[aria-label="Action 1 selector"]'),'Another scenario action is not presented as active');
   if(!shareBeforeStart){await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.doesNotMatch(executed,/tapOn|assertVisible/);}
-  await click('Use existing actions/checks');await click('Scenarios');
-  await click('Use Tap text · Go in Scenario 2');
-  await click('Use Visible text · Done in Scenario 2');
-  if(shareBeforeStart)await click('Use Home as scenario start');
+  if(shareBeforeStart){await click('Use existing actions/checks');await click('Scenarios');await click('Use Tap text · Go in Scenario 2');await click('Use Visible text · Done in Scenario 2');await click('Use Home as scenario start');}
+  else{await click('Copy existing steps');await click('Copy Tap text · Go to Visit 1');await click('Copy Visible text · Done to Visit 2');}
   assert.equal(document.querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go');
   await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.match(executed,/tapOn/);assert.match(executed,/\^Done\$/);
   await click('Save workspace');await click('Open saved workspace');await click('Scenario 2');assert.equal(document.querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go');

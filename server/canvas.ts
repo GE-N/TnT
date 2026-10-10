@@ -8,7 +8,7 @@ export type YAMLReference={kind:'step'|'flow'|'setup'|'handler';file:string;inde
 export type CanvasTest={scenarioIds?:string[];input?:string;back?:boolean;backSelector?:ScreenSelector;tap?:ScreenSelector;check?:ScreenCheck;id:string;label:string;role:'action'|'assertion'|'setup'|'handler'|'test';reference:YAMLReference};
 export type ScreenNode={id:string;title:string;x:number;y:number;referenceScreenshot?:string;tests:CanvasTest[]};
 export type Transition={actionTestIds?:string[];id:string;from:string;to:string;actionTestId:string;assertionTestId:string;responseCondition:string};
-export type CanvasVisit={id:string;checkIds?:string[]};
+export type CanvasVisit={id:string;operationIds?:string[];checkIds?:string[]};
 export type CanvasOccurrence={id:string;visitId:string;testId:string;edgeId?:string;reference:YAMLReference;assertion:boolean};
 export type CanvasExecution={pathId:string;visits:{id:string;screenId:string;checkIds:string[]}[];transitions:{id:string;edgeId:string;visitId:string;destinationVisitId:string}[];occurrences:CanvasOccurrence[]};
 export type CanvasGraph={screens:ScreenNode[];edges:Transition[];paths:{scenarioId?:string;id:string;name:string;edgeIds:string[];screenId?:string;finished?:boolean;visits?:CanvasVisit[]}[];execution?:CanvasExecution};
@@ -71,7 +71,7 @@ export function readCanvas(value:unknown):CanvasGraph|undefined{
  const text=(value:unknown,max=120)=>typeof value==='string'&&value.length>0&&value.length<=max;
  const ids=new Set<string>();const id=(value:unknown,max=120)=>{if(!text(value,max)||ids.has(value as string))throw new Error('Canvas identities must be unique, nonempty strings.');ids.add(value as string);};
  for(const screen of graph.screens){
-  id(screen.id);if(!text(screen.title)||!Number.isFinite(screen.x)||!Number.isFinite(screen.y)||screen.x<0||screen.y<0||screen.x>2400||screen.y>1400||!Array.isArray(screen.tests)||screen.tests.length>30)throw new Error('Provide titled screens with positions and up to 30 tests each.');
+  id(screen.id);if(!text(screen.title)||!Number.isFinite(screen.x)||!Number.isFinite(screen.y)||screen.x<0||screen.y<0||screen.x>2400||screen.y>1400||!Array.isArray(screen.tests)||screen.tests.length>600)throw new Error('Provide titled screens with positions and up to 600 stored steps each.');
   if(screen.referenceScreenshot!==undefined&&(!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(screen.referenceScreenshot)||screen.referenceScreenshot.length>350_000))throw new Error('Reference screenshots must be PNG/JPEG data up to 250 KB.');
   for(const test of screen.tests){id(test.id);if(test.scenarioIds!==undefined&&(!Array.isArray(test.scenarioIds)||test.scenarioIds.length>20||test.scenarioIds.some(id=>typeof id!=='string'||! /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(id))||new Set(test.scenarioIds).size!==test.scenarioIds.length))throw new Error('Choose unique scenario identities for this action or check.');if(!text(test.label)||!['action','assertion','setup','handler','test'].includes(test.role)||!test.reference||!['step','flow','setup','handler'].includes(test.reference.kind)||!text(test.reference.file,80)||!text(test.reference.fingerprint,64))throw new Error('Provide named tests with explicit YAML references.');
    if(test.check&&(!['visible','absent'].includes(test.check.visibility)||!['text','id'].includes(test.check.target)||!['exact','contains','regex'].includes(test.check.match)||typeof test.check.value!=='string'||test.check.value.length>4000))throw new Error('Provide a bounded visible/absent check selector.');
@@ -86,13 +86,13 @@ export function readCanvas(value:unknown):CanvasGraph|undefined{
    test.reference={kind:reference.kind,file:reference.file,index:reference.index,actionId:reference.actionId,fingerprint:reference.fingerprint};
   }
  }
- for(const edge of graph.edges){id(edge.id);if(edge.actionTestIds!==undefined&&(!Array.isArray(edge.actionTestIds)||edge.actionTestIds.length>30||edge.actionTestIds.some(item=>!text(item))||new Set(edge.actionTestIds).size!==edge.actionTestIds.length))throw new Error('Provide up to 30 distinct ordered action identities.');if(![edge.from,edge.to,edge.actionTestId,edge.assertionTestId].every(item=>text(item))||!text(edge.responseCondition,300))throw new Error('Transitions require source/destination, action/assertion references and response condition.');}
+ for(const edge of graph.edges){id(edge.id);if(edge.actionTestIds!==undefined&&(!Array.isArray(edge.actionTestIds)||edge.actionTestIds.length>600||edge.actionTestIds.some(item=>!text(item))||new Set(edge.actionTestIds).size!==edge.actionTestIds.length))throw new Error('Provide up to 600 distinct stored action identities.');if(![edge.from,edge.to,edge.actionTestId,edge.assertionTestId].every(item=>text(item))||!text(edge.responseCondition,300))throw new Error('Transitions require source/destination, action/assertion references and response condition.');}
  for(const path of graph.paths){id(path.id);if(path.finished!==undefined&&typeof path.finished!=='boolean')throw new Error('Sequence finish must be a boolean.');if(path.scenarioId!==undefined&&(typeof path.scenarioId!=='string'||! /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(path.scenarioId)))throw new Error('Provide a valid scenario identity for the sequence.');if(path.screenId!==undefined&&!text(path.screenId))throw new Error('Choose an initial screen identity.');if(!text(path.name)||!Array.isArray(path.edgeIds)||path.edgeIds.length>80||path.edgeIds.some(item=>!text(item)))throw new Error('Paths need a name and explicitly ordered transition identities.');}
  for(const path of graph.paths){
   if(path.visits!==undefined&&(!Array.isArray(path.visits)||path.visits.some(visit=>!visit||typeof visit!=='object')))throw new Error('Provide an ordered visit list.');
   path.visits=routeVisits(graph,path);
   if(path.visits.length!==path.edgeIds.length+1)throw new Error('Provide one visit for the initial screen and each ordered destination.');
-  for(const visit of path.visits){id(visit.id,256);if(visit.checkIds!==undefined&&(!Array.isArray(visit.checkIds)||visit.checkIds.length>30||visit.checkIds.some(item=>!text(item))||new Set(visit.checkIds).size!==visit.checkIds.length))throw new Error('Provide up to 30 distinct check identities per visit.');}
+  for(const visit of path.visits){id(visit.id,256);if(visit.operationIds!==undefined&&(!Array.isArray(visit.operationIds)||visit.operationIds.length>30||visit.operationIds.some(item=>!text(item))||new Set(visit.operationIds).size!==visit.operationIds.length))throw new Error('Provide up to 30 distinct operation identities per visit.');if(visit.checkIds!==undefined&&(!Array.isArray(visit.checkIds)||visit.checkIds.length>30||visit.checkIds.some(item=>!text(item))||new Set(visit.checkIds).size!==visit.checkIds.length))throw new Error('Provide up to 30 distinct check identities per visit.');}
  }
  return graph;
 }
@@ -129,7 +129,10 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
   if(path.screenId&&!screens.has(path.screenId))diagnostics.push({ownerId:path.id,detail:'Restore or select the initial screen for this scenario.'});
   for(const [index,visit] of routeVisits(graph,path).entries()){
    const screenId=visitScreenId(graph,path,index);
-   if(visit.checkIds?.some(id=>!screenChecks(graph,screenId).some(check=>check.id===id)))diagnostics.push({ownerId:path.id,detail:'Visit '+visit.id+' contains deleted or stale check selections. Restore them or explicitly select checks; no replacement is inferred.'});
+   if(visit.operationIds?.some(id=>!graph.screens.find(screen=>screen.id===screenId)?.tests.some(test=>test.id===id&&isAuthored(test))))diagnostics.push({ownerId:path.id,detail:'Visit '+(index+1)+' contains missing actions or checks. Restore them or remove them from this visit.'});
+   const outgoing=graph.edges.find(edge=>edge.id===path.edgeIds[index]);const actionIds=outgoing?edgeActions(outgoing):[];
+   if(visit.operationIds?.some(id=>{const test=tests.get(id)?.test;return test&&!test.check&&!actionIds.includes(id);}))diagnostics.push({ownerId:path.id,detail:'Choose a destination for each action in Visit '+(index+1)+' that continues its sequence.'});
+   if(visit.operationIds===undefined&&visit.checkIds?.some(id=>!screenChecks(graph,screenId).some(check=>check.id===id)))diagnostics.push({ownerId:path.id,detail:'Visit '+visit.id+' contains deleted or stale check selections. Restore them or explicitly select checks; no replacement is inferred.'});
   }
   const edges=path.edgeIds.map(id=>graph.edges.find(edge=>edge.id===id));
   if(edges.some(edge=>!edge)||edges.some((edge,index)=>index===0&&path.screenId&&edge?.from!==path.screenId||index>0&&edge?.from!==edges[index-1]?.to))diagnostics.push({ownerId:path.id,detail:'Repair the ordered route: every transition must exist and continue from the previous destination.'});
