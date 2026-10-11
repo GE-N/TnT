@@ -91,7 +91,7 @@ test('Home can choose a destination in Add action and immediately see its connec
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
 
-test('action destinations author ordered edge actions and preserve invalid routes for Undo',async()=>{
+test('action destinations clean deleted references and Undo restores the original route',async()=>{
  const dom=new JSDOM('<div id="root"></div>');const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
@@ -117,17 +117,17 @@ test('action destinations author ordered edge actions and preserve invalid route
   await fill('Executable YAML',authored.replace('inputText: hello','inputText: changed'));assert.equal((document.querySelector('[aria-label="Home → Done action 3 text"]') as HTMLInputElement).value,'changed');
   const before=structuredClone(saved!);const beforeYaml=authored;
   await click('Delete home → done action 2');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Chosen route/);await click('Delete anyway');
-  assert.deepEqual(saved!.paths[0].edgeIds,before.paths[0].edgeIds);assert.deepEqual(saved!.edges[0].actionTestIds,before.edges[0].actionTestIds);assert.doesNotMatch(authored,/- back/);
+  assert.deepEqual(saved!.paths[0].edgeIds,before.paths[0].edgeIds);assert.deepEqual(saved!.edges[0].actionTestIds,before.edges[0].actionTestIds!.filter(id=>id!==before.screens[0].tests.find(test=>test.back)!.id));assert.doesNotMatch(authored,/- back/);
   await click('Undo canvas deletion');assert.deepEqual(saved!.edges,before.edges);assert.deepEqual(saved!.paths,before.paths);assert.equal(saved!.screens[0].tests.find(test=>test.input!==undefined)!.input,'changed');assert.equal(authored,beforeYaml);
   await connect('Home','Other');
   assert.equal(saved!.edges.length,2);assert.deepEqual(saved!.paths[0].edgeIds,before.paths[0].edgeIds,'Connecting a branch does not extend the active tail');assert.equal(saved!.paths.length,1);
-  await click('Remove transition');await click('Delete anyway');assert.equal(saved!.edges.length,1);assert.deepEqual(saved!.paths[0].edgeIds,before.paths[0].edgeIds);await click('Undo canvas deletion');assert.equal(saved!.edges.length,2);assert.match(authored,/# untouched/);
+  await click('Remove transition');await click('Delete anyway');assert.equal(saved!.edges.length,1);assert.deepEqual(saved!.paths[0].edgeIds,[]);await click('Undo canvas deletion');assert.equal(saved!.edges.length,2);assert.match(authored,/# untouched/);
   const beforeRename=authored;const title=document.querySelector('[aria-label="Screen title for Done"]') as HTMLInputElement;assert.ok(title,'Title is editable on the canvas node');assert.ok(title.closest('[data-screen-id]'));
   await fill('Screen title for Done','Details');await act(async()=>title.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));assert.equal(saved!.screens[2].title,'Details');assert.equal(authored,beforeRename);assert.ok(document.querySelector('[aria-label="Connection Home to Details"]'));
   await fill('Screen title for Details','');await act(async()=>title.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));assert.equal(saved!.screens[2].title,'Details');assert.equal(title.value,'Details');
   await fill('Screen title for Details','Cancelled');await act(async()=>title.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(saved!.screens[2].title,'Details');assert.equal(title.value,'Details');
   await fill('Screen title for Details','Done');await act(async()=>title.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));
-  const beforeNode=authored;const references=structuredClone(saved!.paths);await act(async()=>{document.querySelector('[aria-label="Screen Done"]')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:100,clientY:100}));});await click('Delete node');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Chosen route/);await click('Delete anyway');assert.ok(!saved!.screens.some(screen=>screen.title==='Done'));assert.deepEqual(saved!.paths,references);assert.ok(!document.querySelector('[aria-label="Screen Done"]'));await click('Undo canvas deletion');assert.ok(document.querySelector('[aria-label="Screen Done"]'));assert.equal(authored,beforeNode);
+  const beforeNode=authored;const references=structuredClone(saved!.paths);await act(async()=>{document.querySelector('[aria-label="Screen Done"]')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:100,clientY:100}));});await click('Delete node');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Chosen route/);await click('Delete anyway');assert.ok(!saved!.screens.some(screen=>screen.title==='Done'));assert.deepEqual(saved!.paths[0].edgeIds,[]);assert.equal(saved!.paths[0].visits!.length,1);assert.ok(!document.querySelector('[aria-label="Screen Done"]'));await click('Undo canvas deletion');assert.ok(document.querySelector('[aria-label="Screen Done"]'));assert.equal(authored,beforeNode);
   const intact=authored;
   for(const command of ['inputText: changed','tapOn:\\n    text: \\^Back\\$']){
    const removed=intact.replace(new RegExp('# tnt-check:[^\\n]+\\n(?:# tnt-back\\n# tnt-match:exact\\n)?- '+command+'\\n'),'');await fill('Executable YAML',removed);await fill('Check 1 selector','Changed Home');assert.match(document.body.textContent!,/command was removed from YAML/);assert.equal(authored,removed);await fill('Executable YAML',intact);
@@ -175,7 +175,7 @@ test('visit editors preserve subsets and identities through repeated transitions
   await select('Next transition','go');await click('Append transition to path');assert.deepEqual(saved.paths[0].edgeIds,['go','return','go']);assert.deepEqual(saved.paths[0].visits!.slice(0,3).map(visit=>visit.id),ids);
   await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].filter(button=>button.textContent==='Remove from path').at(-1)!.click();});assert.ok(document.querySelector('[role=alertdialog]'));await click('Delete anyway');assert.equal(saved.paths[0].visits!.length,3);await click('Undo canvas deletion');assert.equal(saved.paths[0].visits!.length,4);assert.deepEqual(saved.paths[0].visits!.slice(0,3).map(visit=>visit.id),ids);
   await click('Delete check 2');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Home return/);await click('Delete anyway');
-  assert.match(document.querySelector('[aria-label="Visit 3"]')!.textContent!,/Missing check: returned/);assert.deepEqual(saved.paths[0].visits![2].checkIds,['returned']);
+  assert.doesNotMatch(document.querySelector('[aria-label="Visit 3"]')!.textContent!,/Missing check/);assert.deepEqual(saved.paths[0].visits![2].checkIds,[]);
   await click('Undo canvas deletion');assert.deepEqual(saved.paths[0].visits![2].checkIds,['returned']);assert.doesNotMatch(document.querySelector('[aria-label="Visit 3"]')!.textContent!,/Missing check/);
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });

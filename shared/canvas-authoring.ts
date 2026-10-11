@@ -233,3 +233,63 @@ export function connectVisitAction(graph:CanvasGraph,pathId:string,visitId:strin
  if(!to&&previous&&!edgeActions(next.edges.find(edge=>edge.id===previous.id)!).length&&!next.paths.some(item=>item.edgeIds.includes(previous.id)))next={...next,edges:next.edges.filter(edge=>edge.id!==previous.id)};
  return next;
 }
+
+export type CanvasDeletion={kind:'operation';id:string;pathId?:string;visitId?:string;clearDestination?:boolean}|{kind:'connection';id:string;pathId?:string;visitId?:string}|{kind:'screen';id:string};
+// Plan deletion without mutating the workspace: the UI commits this graph only
+// after confirmation. A broken continuation removes the entire dependent suffix.
+export function planCanvasDeletion(original:CanvasGraph,deletion:CanvasDeletion):{graph:CanvasGraph;warnings:string[]}{
+ const graph={...original,paths:original.paths.map(path=>({...path,visits:routeVisits(original,path).map((visit,index)=>({...visit,operationIds:visitOperations(original,path,index)}))}))};
+ const candidates=new Set<string>();const affectedScenarios=new Set<string>();const warnings:string[]=[];
+ const removedScreen=deletion.kind==='screen'?deletion.id:undefined;
+ const removedEdges=new Set(graph.edges.filter(edge=>deletion.kind==='connection'?edge.id===deletion.id:removedScreen&&(edge.from===removedScreen||edge.to===removedScreen)).map(edge=>edge.id));
+ const paths=graph.paths.map(path=>{
+  if(deletion.kind!=='screen'&&deletion.pathId&&path.id!==deletion.pathId)return path;
+  let cut=path.edgeIds.length;let changed=false;
+  const visits=routeVisits(graph,path).map((visit,index)=>{
+   let ids=visit.operationIds!;
+   if(deletion.kind==='operation'&&(!deletion.visitId||visit.id===deletion.visitId)&&ids.includes(deletion.id)){
+    if(!deletion.clearDestination){ids=ids.filter(id=>id!==deletion.id);candidates.add(deletion.id);changed=true;}
+    const edge=graph.edges.find(edge=>edge.id===path.edgeIds[index]);
+    if(edge&&edgeActions(edge).includes(deletion.id)&&!ids.some(id=>id!==deletion.id&&edgeActions(edge).includes(id))){cut=Math.min(cut,index);changed=true;}
+   }
+   if(removedEdges.has(path.edgeIds[index])&&(deletion.kind!=='connection'||!deletion.visitId||visit.id===deletion.visitId)){
+    cut=Math.min(cut,index);changed=true;
+    const actions=edgeActions(graph.edges.find(edge=>edge.id===path.edgeIds[index])!);
+    ids=ids.filter(id=>{if(actions.includes(id)){candidates.add(id);return false;}return true;});
+   }
+   return {...visit,operationIds:ids,checkIds:undefined};
+  });
+  const reset=removedScreen!==undefined&&removedScreen===visitScreenId(graph,path,0);
+  if(reset){cut=0;changed=true;}
+  if(!changed)return path;
+  if(path.scenarioId)affectedScenarios.add(path.scenarioId);
+  const firstRemoved=reset?0:cut+1;
+  for(const visit of visits.slice(firstRemoved))for(const id of visit.operationIds!)candidates.add(id);
+  const count=visits.length-firstRemoved;
+  warnings.push(path.name+(count?' · remove Visit '+(firstRemoved+1)+(count>1?' through '+visits.length:'')+' and their actions/checks':' · update actions/checks'));
+  return {...path,screenId:reset?undefined:path.screenId,finished:reset||cut<path.edgeIds.length?false:path.finished,edgeIds:path.edgeIds.slice(0,cut),visits:reset?[{id:visits[0].id,operationIds:[]}]:visits.slice(0,cut+1)};
+ });
+ if(deletion.kind==='operation'&&!deletion.pathId&&!deletion.clearDestination)candidates.add(deletion.id);
+ if(deletion.kind==='connection')for(const id of graph.edges.find(edge=>edge.id===deletion.id)?edgeActions(graph.edges.find(edge=>edge.id===deletion.id)!):[])candidates.add(id);
+ if(removedScreen)for(const test of graph.screens.find(screen=>screen.id===removedScreen)?.tests??[])candidates.add(test.id);
+ const retained=new Set(paths.flatMap(path=>routeVisits(graph,path).flatMap(visit=>visit.operationIds??[])));
+ const screens=graph.screens.filter(screen=>screen.id!==removedScreen).map(screen=>({...screen,tests:screen.tests.flatMap(test=>{
+  if(!candidates.has(test.id))return [test];
+  const scenarioIds=test.scenarioIds?.filter(id=>!affectedScenarios.has(id)||paths.some(path=>path.scenarioId===id&&path.visits?.some(visit=>visit.operationIds?.includes(test.id))));
+  return retained.has(test.id)||scenarioIds?.length?[scenarioIds===undefined?test:{...test,scenarioIds}]:[];
+ })}));
+ const tests=new Set(screens.flatMap(screen=>screen.tests.map(test=>test.id)));
+ const deletedTests=new Set(graph.screens.flatMap(screen=>screen.tests.map(test=>test.id)).filter(id=>!tests.has(id)));
+ const usedEdges=new Set(paths.flatMap(path=>path.edgeIds));
+ const edges=graph.edges.flatMap(edge=>{
+  if(removedScreen&&(edge.from===removedScreen||edge.to===removedScreen))return [];
+  if(removedEdges.has(edge.id)&&!usedEdges.has(edge.id))return [];
+  let ids=edgeActions(edge).filter(id=>!deletedTests.has(id));
+  if(deletion.kind==='operation'&&deletion.clearDestination&&ids.includes(deletion.id)&&!paths.some(path=>path.edgeIds.some((id,index)=>id===edge.id&&path.visits?.[index].operationIds?.includes(deletion.id))))ids=ids.filter(id=>id!==deletion.id);
+  if(!ids.length&&!usedEdges.has(edge.id))return [];
+  if(ids.length===edgeActions(edge).length&&!deletedTests.has(edge.assertionTestId))return [edge];
+  return [{...edge,actionTestId:ids[0]??edge.actionTestId,actionTestIds:ids,assertionTestId:tests.has(edge.assertionTestId)?edge.assertionTestId:screens.find(screen=>screen.id===edge.to)?.tests.find(test=>test.check)?.id??'pending:'+edge.id}];
+ });
+ const finalPaths=paths.map(path=>{const previous=original.paths.find(item=>item.id===path.id)!;if(previous.scenarioId||previous.visits?.some(visit=>visit.operationIds!==undefined))return path;return {...path,visits:path.visits?.map(visit=>{const prior=routeVisits(original,previous).find(item=>item.id===visit.id);const {operationIds,...legacy}=visit;return {...legacy,checkIds:prior?.checkIds?.filter(id=>operationIds?.includes(id)&&tests.has(id))};})};});
+ return {graph:{...graph,screens,edges,paths:finalPaths,execution:undefined},warnings:warnings.length?warnings:['Remove this content and its related actions/checks.']};
+}
