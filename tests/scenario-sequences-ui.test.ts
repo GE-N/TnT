@@ -12,7 +12,7 @@ import {createRunner} from '../server/runner.js';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import type {CanvasGraph} from '../server/canvas.js';
 
-async function journey(work:(ui:{document:Document;click:(label:string)=>Promise<void>;fill:(label:string,value:string)=>Promise<void>;saved:()=>Promise<Awaited<ReturnType<ReturnType<typeof createScenarios>['workspace']>>>;service:ReturnType<typeof createScenarios>;failNext:(index?:number)=>void;holdNext:()=>void;calls:()=>number})=>Promise<void>,draft=false){
+async function journey(work:(ui:{document:Document;selectedCommand:(label:string)=>Promise<void>;click:(label:string)=>Promise<void>;fill:(label:string,value:string)=>Promise<void>;saved:()=>Promise<Awaited<ReturnType<ReturnType<typeof createScenarios>['workspace']>>>;service:ReturnType<typeof createScenarios>;failNext:(index?:number)=>void;holdNext:()=>void;calls:()=>number})=>Promise<void>,draft=false){
  const directory=await mkdtemp(join(tmpdir(),'tnt-sequences-ui-'));const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
  let fail=false;let failIndex=3;let hold=false;let liveBatch=false;let runCalls=0;
  const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=> '2.11.0',run:async({directory,flow,signal})=>{
@@ -37,22 +37,23 @@ async function journey(work:(ui:{document:Document;click:(label:string)=>Promise
  const fetch=(path:string,options?:{body?:string})=>{const result=request(path,options);pending.push(result);return result;};
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetch:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root')!);
- const click=async(label:string)=>act(async()=>{const node=[...document.querySelectorAll<HTMLElement>('button,summary')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(node,label);assert.ok(!(node as HTMLButtonElement).disabled,label+' is enabled');node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});
- const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector('[aria-label="'+label+'"]')??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
- try{await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));await fill('Saved workspace ID',workspace.id);await click('Open saved workspace');await work({document,click,fill,saved:()=>service.workspace(workspace.id),service,failNext:(index=3)=>{fail=true;failIndex=index;},holdNext:()=>{hold=true;liveBatch=true;},calls:()=>runCalls});}
+ const click=async(label:string)=>act(async()=>{const node=[...document.querySelectorAll<HTMLElement>('[role="menu"] button'),...document.querySelectorAll<HTMLElement>('button,summary')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(node,label);assert.ok(!(node as HTMLButtonElement).disabled,label+' is enabled');node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});
+ const selectedCommand=async(label:string)=>{await click('Actions for '+document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent);await click(label);};
+ const fill=async(label:string,value:string)=>{if(label==='Scenario name'){const selected=document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!;await click('Actions for '+selected.textContent);await click('Rename');await fill('Rename scenario',value);await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));return;}return act(async()=>{const node=document.querySelector('[aria-label="'+label+'"]')??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});};
+ try{await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));await fill('Saved workspace ID',workspace.id);await click('Open saved workspace');await work({document,selectedCommand,click,fill,saved:()=>service.workspace(workspace.id),service,failNext:(index=3)=>{fail=true;failIndex=index;},holdNext:()=>{hold=true;liveBatch=true;},calls:()=>runCalls});}
  finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
 }
 
-test('sidebar duplication creates fresh scenario and visit identities while sharing canvas nodes and connections',()=>journey(async({click,fill,saved})=>{
+test('sidebar duplication creates fresh scenario and visit identities while sharing canvas nodes and connections',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
  await click('New scenario');await fill('Scenario name','Original');await click('Use 1 as scenario start');await click('Save workspace');const before=await saved();
- await click('Duplicate scenario');await fill('Scenario name','Copy');await click('Save workspace');const after=await saved();
+ await selectedCommand('Duplicate');await fill('Scenario name','Copy');await click('Save workspace');const after=await saved();
  assert.equal(after.scenarios!.length,2);assert.equal(after.canvas!.screens.length,4);assert.deepEqual(after.canvas!.edges,before.canvas!.edges);
  assert.notEqual(after.scenarios![0].id,after.scenarios![1].id);assert.notEqual(after.scenarios![0].pathId,after.scenarios![1].pathId);
  assert.notEqual(after.canvas!.paths[0].visits![0].id,after.canvas!.paths[1].visits![0].id);
- await click('Delete scenario');await click('Save workspace');assert.equal((await saved()).scenarios!.length,1);assert.equal((await saved()).canvas!.paths.length,1);await click('Original');
+ await selectedCommand('Delete');await click('Save workspace');assert.equal((await saved()).scenarios!.length,1);assert.equal((await saved()).canvas!.paths.length,1);await click('Original');
 }));
 
-test('three finite scenarios reuse four nodes, choose branches explicitly, save/reopen and run only their numbered visits',()=>journey(async({document,click,fill,saved,failNext})=>{
+test('three finite scenarios reuse four nodes, choose branches explicitly, save/reopen and run only their numbered visits',()=>journey(async({document,selectedCommand,click,fill,saved,failNext})=>{
  const routes=[['1','2','3','2','1'],['1','2','3','4'],['1','2','1']];
  for(const [index,route] of routes.entries()){
   await click('New scenario');await fill('Scenario name','Journey '+(index+1));await click('Use 1 as scenario start');
@@ -95,13 +96,13 @@ test('three finite scenarios reuse four nodes, choose branches explicitly, save/
  const evidence=document.querySelector('[aria-label="Execution evidence"]');assert.ok(evidence,'Selecting a visit opens its evidence inspector');
  assert.match(evidence.textContent!,/Expected/);assert.match(evidence.textContent!,/Screen 2/);assert.match(evidence.textContent!,/FAILED/);assert.match(evidence.textContent!,/Screenshot evidence unavailable/);assert.match(evidence.textContent!,/Simulator boundary fixture/);
  await click('Inspect transition 4');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/skipped/);
- await click('Duplicate scenario');await fill('Scenario name','Return copy');await click('Save workspace');const duplicated=await saved();
+ await selectedCommand('Duplicate');await fill('Scenario name','Return copy');await click('Save workspace');const duplicated=await saved();
  const original=workspace.canvas!.paths[0];const copy=duplicated.canvas!.paths.at(-1)!;assert.deepEqual(copy.edgeIds,original.edgeIds);assert.ok(copy.visits!.every(visit=>!original.visits!.some(item=>item.id===visit.id)));assert.equal(Reflect.get(copy,'finished'),true);
  await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
 
 }));
 
-test('action destinations support connection reuse and contextual ordered actions without route forms',()=>journey(async({document,click,fill,saved})=>{
+test('action destinations support connection reuse and contextual ordered actions without route forms',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
  await click('New scenario');await fill('Scenario name','Drawn journey');await click('Use 1 as scenario start');
  const node=document.querySelector('[aria-label="Screen 1"]')!;
  assert.ok(!node.querySelector('.canvas-navigation-actions'));await click('Add action to 1');
@@ -121,7 +122,7 @@ test('action destinations support connection reuse and contextual ordered action
 }));
 
 
-test('a node action keeps its destination picker in the default canvas',()=>journey(async({document,click,fill,saved})=>{
+test('a node action keeps its destination picker in the default canvas',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
  await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Details');
  assert.ok(!document.querySelector('[aria-label^="Connect from"]'));assert.ok(!document.body.textContent!.includes('Selector tools'));
  const destination=document.querySelector<HTMLSelectElement>('[aria-label="Action 1 destination"]');assert.ok(destination,'The action must let the author choose its destination');
@@ -137,7 +138,7 @@ test('blocking authoring diagnostics name the scenario and focus the affected ch
  await fill('Check 1 selector','Home');await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
 },true));
 
-test('choosing action destinations creates connections and an action-only Home Details Back journey runs without mandatory checks',()=>journey(async({document,click,fill,saved})=>{
+test('choosing action destinations creates connections and an action-only Home Details Back journey runs without mandatory checks',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
  await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Details');
  await act(async()=>{const destination=document.querySelector<HTMLSelectElement>('[aria-label="Screen Home"] [aria-label="Action 1 destination"]')!;destination.value='2';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await click('Save workspace');
  const graph=(await saved()).canvas!;assert.equal(graph.edges[0].actionTestId,graph.screens[0].tests[0].id,'Choosing a destination must attach the existing action rather than creating an empty connection');
@@ -154,7 +155,7 @@ test('choosing action destinations creates connections and an action-only Home D
 },true));
 
 
-test('actions and checks share one reorderable node list and execute in that order',()=>journey(async({document,click,fill,saved})=>{
+test('actions and checks share one reorderable node list and execute in that order',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
  await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Focus field');
  await act(async()=>{const destination=document.querySelector<HTMLSelectElement>('[aria-label="Screen Home"] [aria-label="Action 1 destination"]')!;destination.value='2';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
  assert.ok(![...document.querySelectorAll('legend')].some(node=>node.textContent?.startsWith('Actions to reach')));
@@ -166,7 +167,7 @@ test('actions and checks share one reorderable node list and execute in that ord
 },true));
 
 
-test('editing one grouped action destination preserves the other action and its saved sequence',()=>journey(async({document,click,fill,saved})=>{
+test('editing one grouped action destination preserves the other action and its saved sequence',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
  const destination=async(value:string)=>act(async()=>{const select=document.querySelector<HTMLSelectElement>('[aria-label="Action 2 destination"]')!;select.value=value;select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
  await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Focus field');await act(async()=>{const destination=document.querySelector<HTMLSelectElement>('[aria-label="Screen Home"] [aria-label="Action 1 destination"]')!;destination.value='2';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
  await click('Add action to Home');await fill('Action 2 selector','Details');await click('Save workspace');const initial=(await saved()).canvas!;const edge=initial.edges[0];
@@ -176,13 +177,13 @@ test('editing one grouped action destination preserves the other action and its 
 },true));
 
 
-test('retargeting the first grouped picker action saves distinct connections and preserves its sibling',()=>journey(async({document,click,fill,saved})=>{
+test('retargeting the first grouped picker action saves distinct connections and preserves its sibling',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
  const destination=async(value:string)=>act(async()=>{const select=document.querySelector<HTMLSelectElement>('[aria-label="Action 1 destination"]')!;select.value=value;select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
  await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Focus');await destination('2');await click('Add action to Home');await fill('Action 2 selector','Details');await click('Save workspace');const initial=(await saved()).canvas!;
  await destination('1');await click('Save workspace');const changed=(await saved()).canvas!;assert.equal(changed.edges.length,2);assert.equal(new Set(changed.edges.map(edge=>edge.id)).size,2);const original=changed.edges.find(edge=>edge.id===initial.edges[0].id)!;assert.equal(original.to,'2');assert.deepEqual(original.actionTestIds,[initial.screens[0].tests[1].id]);assert.deepEqual(changed.paths[0].visits,initial.paths[0].visits);
 },true));
 
-test('node visit sections isolate the return check and follow the selected scenario after save and reopen',()=>journey(async({document,click,fill,saved})=>{
+test('node visit sections isolate the return check and follow the selected scenario after save and reopen',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
  await click('New scenario');await fill('Scenario name','Return journey');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Details');await act(async()=>{const destination=document.querySelector<HTMLSelectElement>('[aria-label="Screen Home"] [aria-label="Action 1 destination"]')!;destination.value='2';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await click('Add action to Details');
  await act(async()=>{const kind=document.querySelector<HTMLSelectElement>('[aria-label="Screen Details"] [aria-label="Action 1 type"]')!;kind.value='back';kind.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await act(async()=>{const destination=document.querySelector<HTMLSelectElement>('[aria-label="Screen Details"] [aria-label="Action 1 destination"]')!;destination.value='1';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
  await click('Visit 3 · Home');
@@ -196,20 +197,20 @@ test('node visit sections isolate the return check and follow the selected scena
  await click('Return journey');assert.equal(document.querySelectorAll('[aria-label="Screen Home"] .canvas-visit-section').length,2);assert.equal(document.querySelector<HTMLInputElement>('[aria-label="Visit 3 · Home operations"] [aria-label="Check 1 selector"]')!.value,'Returned Home');await click('Run scenario');assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','tapOn','tapOn','assertVisible']);
 },true));
 
-test('editing, ordering and deleting visit steps keeps another visit and a duplicated scenario independent',()=>journey(async({document,click,fill,saved})=>{
+test('editing, ordering and deleting visit steps keeps another visit and a duplicated scenario independent',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
  const section=(number:number)=>document.querySelector<HTMLElement>('[aria-label="Visit '+number+' · 1 operations"]')!;
  const scopedClick=async(number:number,label:string)=>act(async()=>{const button=[...section(number).querySelectorAll<HTMLButtonElement>('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();});
  const scopedFill=async(number:number,label:string,value:string)=>act(async()=>{const input=section(number).querySelector<HTMLInputElement>('[aria-label="'+label+'"]')!;assert.ok(input,label);Object.getOwnPropertyDescriptor(document.defaultView!.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new document.defaultView!.Event('input',{bubbles:true}));});
  await click('New scenario');await fill('Scenario name','Original visits');await click('Use 1 as scenario start');await click('Append connection 1 → 2');await click('Append connection 2 → 1');await click('Copy Visible text · Screen 1 to Visit 3');await scopedFill(3,'Check 1 selector','Returned original');assert.equal(section(1).querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!.value,'Screen 1');
  await click('Save workspace');const original=(await saved()).canvas!.paths[0];
- await click('Duplicate scenario');await fill('Scenario name','Independent copy');await scopedFill(1,'Check 1 selector','Copy initial');await scopedFill(1,'Action 1 selector','Copy details');await scopedFill(3,'Check 1 selector','Copy returned');await scopedClick(1,'Move check 1 down');await scopedClick(3,'Delete check 1');await click('Delete anyway');
+ await selectedCommand('Duplicate');await fill('Scenario name','Independent copy');await scopedFill(1,'Check 1 selector','Copy initial');await scopedFill(1,'Action 1 selector','Copy details');await scopedFill(3,'Check 1 selector','Copy returned');await scopedClick(1,'Move check 1 down');await scopedClick(3,'Delete check 1');await click('Delete anyway');
  await click('Save workspace');await click('Open saved workspace');await click('Independent copy');await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','tapOn','assertVisible','tapOn']);assert.equal(section(3).querySelector('[aria-label="Check 1 selector"]'),null);
  await click('Original visits');assert.equal(section(1).querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!.value,'Screen 1');assert.equal(section(1).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go 2');assert.equal(section(3).querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!.value,'Returned original');await click('Run scenario');assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','assertVisible','tapOn','tapOn','assertVisible']);assert.deepEqual((await saved()).canvas!.paths[0],original);
  await click('Append connection 1 → 2');await click('Save workspace');const extended=await saved();const end=extended.canvas!.paths[0].visits!.at(-2)!;const operations=end.operationIds!.flatMap(id=>extended.canvas!.screens[0].tests.filter(test=>test.id===id));assert.deepEqual(operations.filter(test=>test.tap).map(test=>test.tap!.value),['Go 2']);await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
  await click('New scenario');await fill('Scenario name','Fresh journey');await click('Use 1 as scenario start');await click('Append connection 1 → 2');await click('Save workspace');const fresh=await saved();const start=fresh.canvas!.paths.at(-1)!.visits![0];assert.deepEqual(start.operationIds!.flatMap(id=>fresh.canvas!.screens[0].tests.filter(test=>test.id===id&&test.tap).map(test=>test.tap!.value)),['Go 2']);
 }));
 
-test('two visits can save more than thirty total node steps while keeping their own bounded lists',()=>journey(async({document,click,fill,saved})=>{
+test('two visits can save more than thirty total node steps while keeping their own bounded lists',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
  await click('New scenario');await click('Use 1 as scenario start');await click('Append connection 1 → 2');await click('Append connection 2 → 1');
  for(const number of [1,3])for(let index=0;index<16;index++){
   await act(async()=>{const section=document.querySelector('[aria-label="Visit '+number+' · 1 operations"]')!;[...section.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Add check')!.click();});
@@ -218,15 +219,15 @@ test('two visits can save more than thirty total node steps while keeping their 
  await click('Save workspace');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.ok((await saved()).canvas!.screens[0].tests.length>30);await click('Open saved workspace');assert.equal(document.querySelectorAll('[aria-label="Visit 1 · 1 operations"] input[aria-label^="Check "][aria-label$=" selector"]').length,17);assert.equal(document.querySelectorAll('[aria-label="Visit 3 · 1 operations"] input[aria-label^="Check "][aria-label$=" selector"]').length,16);await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
 }));
 
-test('changing a copied visit destination updates its route and keeps displaced checks available for explicit repair',()=>journey(async({document,click,fill,saved})=>{
+test('changing a copied visit destination updates its route and keeps displaced checks available for explicit repair',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
  await click('New scenario');await fill('Scenario name','Original destination');await click('Use 1 as scenario start');await click('Append connection 1 → 2');await click('Add check to 2');await act(async()=>{const input=document.querySelector<HTMLInputElement>('[aria-label="Visit 2 · 2 operations"] [aria-label="Check 1 selector"]')!;Object.getOwnPropertyDescriptor(document.defaultView!.HTMLInputElement.prototype,'value')!.set!.call(input,'Screen 2');input.dispatchEvent(new document.defaultView!.Event('input',{bubbles:true}));});await click('Save workspace');const original=(await saved()).canvas!.paths[0];
- await click('Duplicate scenario');await fill('Scenario name','Changed destination');await act(async()=>{const select=document.querySelector<HTMLSelectElement>('[aria-label="Visit 1 · 1 operations"] [aria-label="Action 1 destination"]')!;select.value='4';select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await fill('Action 1 selector','Go 4');
+ await selectedCommand('Duplicate');await fill('Scenario name','Changed destination');await act(async()=>{const select=document.querySelector<HTMLSelectElement>('[aria-label="Visit 1 · 1 operations"] [aria-label="Action 1 destination"]')!;select.value='4';select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await fill('Action 1 selector','Go 4');
  assert.equal(document.querySelectorAll('[aria-label="Screen 4"] .canvas-visit-section').length,1);assert.match(document.querySelector('[aria-label="Visit 2 · 4 operations"]')!.textContent!,/previous destination/);await click('Run scenario');assert.match(document.querySelector('.run-error-toast')!.textContent!,/missing actions or checks/);await click('Remove from this visit');await click('Save workspace');await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.deepEqual((await saved()).canvas!.paths[0],original);
  await click('Original destination');assert.equal(document.querySelector<HTMLInputElement>('[aria-label="Visit 2 · 2 operations"] [aria-label="Check 1 selector"]')!.value,'Screen 2');await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
 }));
 
 
-test('repair follows a diagnostic visit identity even when the message contains a visit ID',()=>journey(async({document,click,fill,saved,service})=>{
+test('repair follows a diagnostic visit identity even when the message contains a visit ID',()=>journey(async({document,selectedCommand,click,fill,saved,service})=>{
  await click('New scenario');await fill('Scenario name','Broken return check');await click('Use 1 as scenario start');await click('Append connection 1 → 2');await click('Append connection 2 → 1');await click('Save workspace');
  const workspace=await saved();const path=workspace.canvas!.paths[0];const last=path.visits!.at(-1)!;last.id='return-visit-uuid';delete last.operationIds;last.checkIds=['deleted-check'];await service.save(workspace);await click('Open saved workspace');
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
@@ -245,7 +246,7 @@ test('linked actions and reusable checks expose their executed YAML expectations
 }));
 
 
-test('Run all shows independent batch outcomes and opens reports without changing authoring selection',()=>journey(async({document,click,fill,failNext})=>{
+test('Run all shows independent batch outcomes and opens reports without changing authoring selection',()=>journey(async({document,selectedCommand,click,fill,failNext})=>{
  for(let index=1;index<=3;index++){
   await click('New scenario');await fill('Scenario name','Batch journey '+index);await click('Use 1 as scenario start');await click('Save workspace');
  }
@@ -254,7 +255,7 @@ test('Run all shows independent batch outcomes and opens reports without changin
  assert.match(batch.textContent!,/completed/);assert.match(batch.textContent!,/Batch journey 1 · passed/);assert.match(batch.textContent!,/Batch journey 2 · passed/);assert.match(batch.textContent!,/Batch journey 3 · passed/);
  assert.equal(document.querySelectorAll('[aria-label="Scenario reports"] button').length,3);
  await click('Open report for Batch journey 1');assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Batch journey 1');
- assert.equal(document.querySelector<HTMLInputElement>('#canvas-scenario-name')!.value,'Batch journey 3');
+ assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Batch journey 3');
  await fill('Scenario name','Later edit');await click('Save workspace');
  assert.match(batch.textContent!,/Batch journey 3/);assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Batch journey 1');
 }));
@@ -268,7 +269,7 @@ test('batch sidebar labels invalid drafts and still executes valid scenarios',()
  assert.equal(document.querySelectorAll('[aria-label="Scenario reports"] button').length,1);
 }));
 
-test('batch sidebar shows running and queued states and cancels the remaining queue',()=>journey(async({document,click,fill,holdNext,calls})=>{
+test('batch sidebar shows running and queued states and cancels the remaining queue',()=>journey(async({document,selectedCommand,click,fill,holdNext,calls})=>{
  for(let index=1;index<=2;index++){await click('New scenario');await fill('Scenario name','Queued '+index);await click('Use 1 as scenario start');await click('Save workspace');}
  holdNext();await click('Run all');
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,1100));});
@@ -276,4 +277,80 @@ test('batch sidebar shows running and queued states and cancels the remaining qu
  assert.match(report.textContent!,/Queued 1 · running/);assert.match(report.textContent!,/Queued 2 · queued/);
  await click('Cancel batch');assert.match(report.textContent!,/Batch · cancelled/);assert.match(report.textContent!,/Queued 1 · cancelled/);assert.match(report.textContent!,/Queued 2 · not-run/);assert.equal(calls(),1);
  await click('Open report for Queued 1');assert.equal(document.querySelector('.result-tag')!.textContent,'cancelled');
+}));
+
+
+test('row run targets an unselected scenario and search leaves saved order and batch scope intact',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
+ for(let index=1;index<=12;index++){await click('New scenario');await fill('Scenario name','Case '+index);await click('Use 1 as scenario start');}
+ await click('Save workspace');const before=await saved();
+ await fill('Search scenarios','Case 1');
+ assert.equal(document.querySelectorAll('[aria-label="Scenario list"] [aria-pressed]').length,4);
+ await click('Run Case 1');assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Case 1');
+ await click('Clear search');await click('Actions for Case 2');await click('Run scenario');assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Case 2');
+ assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Case 12');
+ await fill('Search scenarios','Case 1');await click('Run all');
+ assert.deepEqual([...document.querySelectorAll('[aria-label="Batch report"] button')].map(button=>button.textContent),before.scenarios!.map(item=>'Open report for '+item.name));
+ assert.deepEqual((await saved()).scenarios,before.scenarios);
+ await fill('Search scenarios','missing');assert.match(document.querySelector('[aria-label="Scenario list"]')!.textContent!,/No scenarios match/);
+}));
+
+
+test('row rename commits or cancels without changing identity, sequence or historical evidence',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
+ await click('New scenario');await fill('Scenario name','Original name');await click('Use 1 as scenario start');await click('Run scenario');const before=await saved();
+ await click('Actions for Original name');await click('Rename');await fill('Rename scenario','Cancelled');await click('Save workspace');assert.ok(document.querySelector('[aria-label="Rename scenario"]'),'Blur leaves the draft open');assert.equal((await saved()).scenarios![0].name,'Original name');
+ await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+ assert.ok([...document.querySelectorAll('button')].some(button=>button.textContent==='Original name'));
+ await click('Actions for Original name');await click('Rename');await fill('Rename scenario','   ');
+ await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
+ assert.match(document.querySelector('[role="alert"]')!.textContent!,/nonempty/);
+ await fill('Rename scenario','  Updated name  ');await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
+ await click('Save workspace');const after=await saved();
+ assert.deepEqual(after.scenarios,[{...before.scenarios![0],name:'Updated name'}]);
+ assert.deepEqual(after.canvas!.paths,[{...before.canvas!.paths[0],name:'Updated name'}]);
+ assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Original name');
+ await click('Open saved workspace');assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Updated name');
+}));
+
+
+test('deleting an unselected row and undo restores saved references without overwriting later edits',()=>journey(async({document,selectedCommand,click,fill,saved,service})=>{
+ await click('New scenario');await fill('Scenario name','Original');await click('Use 1 as scenario start');await click('Run scenario');
+ await click('Actions for Original');await click('Duplicate');await fill('Scenario name','Other');await click('Save workspace');const initial=await saved();initial.canvas!.screens[0].tests[0].scenarioIds=initial.scenarios!.map(item=>item.id);await service.save(initial);await click('Open saved workspace');await click('Other');await click('Run Original');const before=await saved();
+ await click('Actions for Original');await click('Delete');
+ assert.match(document.querySelector('[role="status"]')!.textContent!,/Deleted Original/);
+ assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Other');
+ await fill('Scenario name','Later edit');await click('Save workspace');assert.equal((await saved()).scenarios!.length,1);
+ assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Original');
+ await click('Undo');await click('Save workspace');const restored=await saved();
+ assert.deepEqual(restored.scenarios,[before.scenarios![0],{...before.scenarios![1],name:'Later edit'}]);
+ assert.deepEqual(restored.canvas!.paths,[before.canvas!.paths[0],{...before.canvas!.paths[1],name:'Later edit'}]);
+ assert.deepEqual(restored.canvas!.screens,before.canvas!.screens);
+ await click('Open saved workspace');await click('Original');await click('Actions for Original');await click('Delete');await click('Actions for Later edit');await click('Delete');
+ assert.match(document.querySelector('[aria-label="Scenario list"]')!.textContent!,/No scenarios yet/);await click('Save workspace');assert.equal((await saved()).scenarios!.length,0);
+ await click('Undo');assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Later edit');await click('Save workspace');await click('Open saved workspace');assert.equal((await saved()).scenarios![0].name,'Later edit');
+}));
+
+
+test('right click and keyboard menus expose identical row commands without selecting their target',()=>journey(async({document,click,fill})=>{
+ await click('New scenario');await fill('Scenario name','First');await click('Use 1 as scenario start');await click('New scenario');await fill('Scenario name','Second');
+ const first=[...document.querySelectorAll<HTMLButtonElement>('[aria-label="Scenario list"] button')].find(button=>button.textContent==='First')!;
+ await act(async()=>first.dispatchEvent(new document.defaultView!.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:150,clientY:150})));
+ const commands=[...document.querySelectorAll('[role="menuitem"]')].map(node=>node.textContent);assert.deepEqual(commands,['Run scenario','Rename','Duplicate','Delete']);
+ await act(async()=>document.activeElement!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(document.activeElement,first);
+ await click('Actions for First');assert.deepEqual([...document.querySelectorAll('[role="menuitem"]')].map(node=>node.textContent),commands);
+ await act(async()=>document.activeElement!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement!.textContent,'Rename');
+ await act(async()=>document.activeElement!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+ await act(async()=>first.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true})));
+ assert.deepEqual([...document.querySelectorAll('[role="menuitem"]')].map(node=>node.textContent),commands);
+ assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Second');
+ await click('Rename');await fill('Rename scenario','Discard this');await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(document.activeElement!.textContent,'First');
+}));
+
+
+test('an unselected row can duplicate its definition and dismissal clears the latest deletion notification',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
+ await click('New scenario');await fill('Scenario name','Target');await click('Use 1 as scenario start');await click('Save workspace');const before=await saved();
+ await click('New scenario');await fill('Scenario name','Selected');await click('Actions for Target');await click('Duplicate');await click('Save workspace');const after=await saved();
+ assert.deepEqual(after.scenarios![2],{...before.scenarios![0],id:after.scenarios![2].id,pathId:after.scenarios![2].pathId,name:'Target copy'});
+ assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Target copy');
+ await click('Actions for Target');await click('Delete');await click('Dismiss');assert.equal(document.querySelector('[role="status"]'),null);
+ await click('Save workspace');await click('Open saved workspace');assert.deepEqual((await saved()).scenarios!.map(item=>item.name),['Selected','Target copy']);
 }));

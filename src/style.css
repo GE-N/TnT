@@ -89,3 +89,32 @@
 .canvas-visit-section{border:1px solid #405744;border-radius:7px;margin:8px 0;padding:8px;background:#122018}.canvas-visit-section.selected-visit{border-color:#c7ed88;background:#1c2b1b}.visit-section-heading{display:block;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid #405744;color:#d7edc5;padding:3px 0 8px;margin-bottom:8px;font-size:12px;font-weight:600}.visit-section-heading small{display:block;margin-top:3px;color:#91a68b;font-weight:400;font-size:10px}.visit-start-button,.unused-operations>button{background:#203329;color:#dcebd8;border:1px solid #435744;border-radius:5px;padding:6px 9px;text-align:left;font-size:10px}.unused-operations>button{display:block;width:100%;margin:6px 0}
 
 [aria-label="Scenario reports"]{display:flex;flex-wrap:wrap;gap:8px;padding:16px 24px;border-top:1px solid #334337}[aria-label="Scenario reports"] p{width:100%;font-size:12px;color:#9fb09f}[aria-label="Scenario reports"] [aria-pressed="true"]{border-color:#c7ed88}.execution-evidence{padding:18px;border:1px solid #496049;border-radius:8px;margin-top:18px}.execution-evidence article{padding:12px 0;border-bottom:1px solid #334337}.execution-evidence pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto}.execution-evidence button{display:block;text-align:left;overflow-wrap:anywhere}.execution-evidence h4{margin:8px 0}
+
+.canvas-workspace { grid-template-columns:280px minmax(0,1fr); align-items:start; }
+.scenario-sidebar { gap:10px; padding:12px; min-width:0; position:sticky; top:12px; max-height:calc(100vh - 24px); }
+.sidebar-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.sidebar-heading h3 { font-size:14px; margin:0; }
+.sidebar-heading h3 span { font-size:11px; font-weight:normal; }
+.scenario-sidebar .confirm { margin:0; padding:7px 8px; }
+.sidebar-search input { padding:9px; }
+.sidebar-search .text-button { margin:6px 0 0; }
+.scenario-list { min-height:0; max-height:clamp(120px,calc(100dvh - 520px),360px); overflow-y:auto; scrollbar-gutter:stable; padding-right:18px; overscroll-behavior:contain; }
+.scenario-list p { font-size:12px; line-height:1.6; }
+.scenario-row { display:flex; align-items:center; gap:4px; min-height:38px; border-radius:6px; }
+.scenario-select { flex:1; min-width:0; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border:1px solid transparent; background:transparent; color:inherit; padding:9px 6px; font-size:12px; border-radius:6px; }
+.scenario-select[aria-pressed="true"] { background:#c7ed8818; border-color:#c7ed88; }
+.scenario-row-actions { display:flex; gap:3px; }
+.scenario-row-actions button { opacity:0; }
+.scenario-row:hover .scenario-row-actions button,.scenario-row:focus-within .scenario-row-actions button { opacity:1; }
+.scenario-row input { min-width:0; padding:8px; }
+.sidebar-run { flex-shrink:0; border-top:1px solid #3b4a3e; padding-top:10px; }
+.scenario-context-menu { position:fixed; z-index:50; width:210px; padding:6px; border:1px solid #829588; border-radius:8px; background:#17211c; box-shadow:0 8px 28px #0008; }
+.scenario-context-menu button { display:block; width:100%; text-align:left; padding:10px; border:0; border-radius:4px; background:transparent; color:inherit; font-size:13px; }
+.scenario-context-menu button:hover:not(:disabled),.scenario-context-menu button:focus-visible { background:#c7ed8820; }
+.scenario-sidebar button:focus-visible { outline:2px solid #c7ed88; outline-offset:-2px; }
+@media (hover:none) { .scenario-row-actions { visibility:visible; } .scenario-row-actions button { opacity:1; } }
+@media(max-width:760px) { .canvas-workspace { grid-template-columns:1fr; } .scenario-sidebar { position:static; max-height:420px; } .scenario-list { max-height:240px; } }
+
+.scenario-delete-notice { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:60; display:flex; align-items:center; gap:12px; max-width:calc(100vw - 24px); padding:10px 16px; background:#17211c; border:1px solid #829588; border-radius:8px; box-shadow:0 8px 28px #0008; font-size:13px; }
+.scenario-delete-notice span { overflow-wrap:anywhere; min-width:0; }
+.scenario-delete-notice button { margin:0; }
