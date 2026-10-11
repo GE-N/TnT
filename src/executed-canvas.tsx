@@ -1,4 +1,5 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
+import {parseAllDocuments} from 'yaml';
 import {canvasTestLabel} from '../shared/canvas-authoring.js';
 import type {Run} from '../server/scenarios.js';
 import {CanvasBoard,type CanvasInspection} from './canvas.js';
@@ -7,6 +8,7 @@ export function ExecutedCanvas({run,onArtifact}:{run:Run;onArtifact:(name:string
  const [selection,setSelection]=useState<CanvasInspection>();
  const evidence=useRef<HTMLElement>(null);
  useEffect(()=>{if(selection){evidence.current?.focus();evidence.current?.scrollIntoView?.({block:'nearest'});}},[selection]);
+ const commands=useMemo(()=>{try{const docs=parseAllDocuments(run.snapshot.yaml);return docs.some(doc=>doc.errors.length)?[]:docs[1]?.toJS()??[];}catch{return [];}},[run.snapshot.yaml]);
  const graph=run.snapshot.canvas;const result=run.canvas;
  if(!graph||!result)return null;
  const transition=selection?.kind==='transition'?graph.execution?.transitions.find(item=>item.id===selection.id):undefined;
@@ -23,10 +25,17 @@ export function ExecutedCanvas({run,onArtifact}:{run:Run;onArtifact:(name:string
    {occurrences.map(item=>{
     const test=graph.screens.flatMap(screen=>screen.tests).find(test=>test.id===item.testId);
     const step=run.steps.find(step=>step.id===item.stepId);
+    const command=step?commands[run.steps.findIndex(candidate=>candidate.id===step.id)]:undefined;
+    const handler=test?.reference.kind==='handler'?run.snapshot.automation?.actions.find(action=>action.id===test.reference.actionId):undefined;
+    const setup=test?.reference.kind==='setup'?run.snapshot.automation?.setup:undefined;
+    const invocation=command?.runFlow??handler??setup;const file=typeof invocation==='string'?invocation:invocation?.file;
+    const flow=file?run.snapshot.flows?.[file]:undefined;
+    const expected=command??handler??setup??test?.check??test?.tap??test?.backSelector??test?.input;
     const screenshots=step?.artifacts?.filter(name=>name.endsWith('.png'))??[];
     return <article key={item.id}>
      <h4>{test?canvasTestLabel(test):item.testId} · {item.status}</h4><p>Occurrence: {item.id} · {item.stepId??'No mapped command'}</p>
-     <strong>Expected</strong><pre>{JSON.stringify(step?.expected??test?.check??test?.tap??test?.backSelector??test?.input??test?.reference??'Expected conditions unavailable',null,2)}</pre>
+     <strong>Expected</strong><pre>{JSON.stringify(expected??'Expected conditions unavailable',null,2)}</pre>
+     {flow&&<><strong>Referenced authored flow · {file}</strong><pre>{flow}</pre></>}
      <strong>Actual result</strong><p>{item.detail}</p><pre>{step?.actual?JSON.stringify(step.actual,null,2):'Evaluated command evidence unavailable or withheld.'}</pre>
      {screenshots.length?screenshots.map(name=><button className="text-button" key={name} onClick={()=>onArtifact(name)}>Inspect screenshot · {name}</button>):<p>Screenshot evidence unavailable or withheld for this occurrence.</p>}
      {step?.artifacts?.filter(name=>!name.endsWith('.png')).map(name=><button className="text-button" key={name} onClick={()=>onArtifact(name)}>Inspect evidence · {name}</button>)}

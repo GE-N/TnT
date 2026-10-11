@@ -128,12 +128,12 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   target?.scrollIntoView?.({block:'nearest'});
   (target?.querySelector<HTMLElement>('input[aria-label$=" selector"]')??target?.querySelector<HTMLElement>('.visit-step-repair button,button[aria-label$=" as scenario start"]')??target?.querySelector<HTMLElement>('button,select'))?.focus();
  },[repairTarget,selected]);
- function repairDiagnostic(ownerId:string,detail:string){
+ function repairDiagnostic({ownerId,visitId}:CanvasDiagnostic){
   const edge=graph?.edges.find(edge=>edge.id===ownerId);
   const node=graph?.screens.find(screen=>screen.id===ownerId||screen.tests.some(test=>test.id===ownerId||edge&&edgeActions(edge).includes(test.id)));
   const test=node?.tests.find(test=>test.id===ownerId)??node?.tests.find(test=>edge&&edgeActions(edge).includes(test.id));
   if(!node&&!graph?.paths.some(path=>path.id===ownerId)){onRepairSource?.(ownerId);return;}
-  const visitNumber=detail.match(/Visit (\d+)/)?.[1];const index=visitNumber?Number(visitNumber)-1:undefined;const visit=path&&index!==undefined?routeVisits(graph!,path)[index]:undefined;
+  const index=path&&visitId?routeVisits(graph!,path).findIndex(visit=>visit.id===visitId):undefined;const visit=path&&index!==undefined&&index>=0?routeVisits(graph!,path)[index]:undefined;
   setSelectedVisit(visit?.id??'');setSelected(node?.id??(path&&index!==undefined?visitScreenId(graph!,path,index):undefined)??'');setExpandedRow(test?.id??'');setRepairTest(test&&!isAuthored(test)?test.id:'');setRepairTarget({ownerId:test?.id??ownerId,visitId:visit?.id});
  }
  const currentGraph=useRef(graph);currentGraph.current=graph;
@@ -328,7 +328,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  </fieldset>;
  })}</div>}
  </fieldset></>}</div>}
- {visibleDiagnostics.length>0&&<div className="notice error" role="alert"><strong>{scenarioMode?'Before running':'References need review'}</strong>{visibleDiagnostics.map((diagnostic,index)=>{const label=graph.screens.flatMap(screen=>screen.tests).find(test=>test.id===diagnostic.ownerId)?.label??graph.screens.find(screen=>screen.id===diagnostic.ownerId)?.title??graph.edges.find(edge=>edge.id===diagnostic.ownerId)?.responseCondition??graph.paths.find(path=>path.id===diagnostic.ownerId)?.name??diagnostic.ownerId;return <p key={index}>{scenarioMode&&(scenarios.find(item=>item.id===scenarioId)?.name??'Selected scenario')+' · '}{label}: {diagnostic.detail} <button className="text-button" disabled={disabled} aria-label={'Repair '+label} onClick={()=>repairDiagnostic(diagnostic.ownerId,diagnostic.detail)}>Repair</button></p>;})}</div>}
+ {visibleDiagnostics.length>0&&<div className="notice error" role="alert"><strong>{scenarioMode?'Before running':'References need review'}</strong>{visibleDiagnostics.map((diagnostic,index)=>{const label=graph.screens.flatMap(screen=>screen.tests).find(test=>test.id===diagnostic.ownerId)?.label??graph.screens.find(screen=>screen.id===diagnostic.ownerId)?.title??graph.edges.find(edge=>edge.id===diagnostic.ownerId)?.responseCondition??graph.paths.find(path=>path.id===diagnostic.ownerId)?.name??diagnostic.ownerId;return <p key={index}>{scenarioMode&&(scenarios.find(item=>item.id===scenarioId)?.name??'Selected scenario')+' · '}{label}: {diagnostic.detail} <button className="text-button" disabled={disabled} aria-label={'Repair '+label} onClick={()=>repairDiagnostic(diagnostic)}>Repair</button></p>;})}</div>}
  {pending&&<div role="alertdialog" aria-label="Canvas reference warning" aria-modal="true" className="notice canvas-delete-dialog" onKeyDown={event=>{if(event.key==='Escape')setPending(undefined);}}><p>Deleting this content affects references: {pending.warnings.join(', ')}. Affected references require repair before running.</p><button autoFocus disabled={disabled||pending.source!==yaml} onClick={()=>perform(()=>{if(yaml!==undefined&&onYamlChange)changeChecks(pending.graph,true);else{setUndo({graph:graph!,after:pending.graph});onChange(pending.graph);}setPending(undefined);})}>Delete anyway</button><button onClick={()=>setPending(undefined)}>Cancel deletion</button></div>}
  {undo&&<button disabled={disabled||yaml!==undo.afterYaml||JSON.stringify(graph)!==JSON.stringify(undo.after)} onClick={()=>{if(undo.yaml!==undefined)onYamlChange?.(undo.yaml);onChange(undo.graph);setUndo(undefined);}}>Undo canvas deletion</button>}
  {infoScreen&&<NodeInfo screen={infoScreen} disabled={disabled} error={error} onImage={file=>void image(infoScreen.id,file)} onRemove={()=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===infoScreen.id?{...screen,referenceScreenshot:undefined}:screen)})} onClose={()=>{setNodeInfoId('');setError('');}}/>}

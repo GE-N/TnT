@@ -12,7 +12,7 @@ import {createRunner} from '../server/runner.js';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import type {CanvasGraph} from '../server/canvas.js';
 
-async function journey(work:(ui:{document:Document;click:(label:string)=>Promise<void>;fill:(label:string,value:string)=>Promise<void>;saved:()=>Promise<Awaited<ReturnType<ReturnType<typeof createScenarios>['workspace']>>>;failNext:(index?:number)=>void})=>Promise<void>,draft=false){
+async function journey(work:(ui:{document:Document;click:(label:string)=>Promise<void>;fill:(label:string,value:string)=>Promise<void>;saved:()=>Promise<Awaited<ReturnType<ReturnType<typeof createScenarios>['workspace']>>>;service:ReturnType<typeof createScenarios>;failNext:(index?:number)=>void})=>Promise<void>,draft=false){
  const directory=await mkdtemp(join(tmpdir(),'tnt-sequences-ui-'));const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
  let fail=false;let failIndex=3;
  const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
@@ -38,7 +38,7 @@ async function journey(work:(ui:{document:Document;click:(label:string)=>Promise
  const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root')!);
  const click=async(label:string)=>act(async()=>{const node=[...document.querySelectorAll<HTMLElement>('button,summary')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(node,label);assert.ok(!(node as HTMLButtonElement).disabled,label+' is enabled');node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});
  const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector('[aria-label="'+label+'"]')??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
- try{await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));await fill('Saved workspace ID',workspace.id);await click('Open saved workspace');await work({document,click,fill,saved:()=>service.workspace(workspace.id),failNext:(index=3)=>{fail=true;failIndex=index;}});}
+ try{await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));await fill('Saved workspace ID',workspace.id);await click('Open saved workspace');await work({document,click,fill,saved:()=>service.workspace(workspace.id),service,failNext:(index=3)=>{fail=true;failIndex=index;}});}
  finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
 }
 
@@ -222,4 +222,23 @@ test('changing a copied visit destination updates its route and keeps displaced 
  await click('Duplicate scenario');await fill('Scenario name','Changed destination');await act(async()=>{const select=document.querySelector<HTMLSelectElement>('[aria-label="Visit 1 · 1 operations"] [aria-label="Action 1 destination"]')!;select.value='4';select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await fill('Action 1 selector','Go 4');
  assert.equal(document.querySelectorAll('[aria-label="Screen 4"] .canvas-visit-section').length,1);assert.match(document.querySelector('[aria-label="Visit 2 · 4 operations"]')!.textContent!,/previous destination/);await click('Run scenario');assert.match(document.querySelector('.run-error-toast')!.textContent!,/missing actions or checks/);await click('Remove from this visit');await click('Save workspace');await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.deepEqual((await saved()).canvas!.paths[0],original);
  await click('Original destination');assert.equal(document.querySelector<HTMLInputElement>('[aria-label="Visit 2 · 2 operations"] [aria-label="Check 1 selector"]')!.value,'Screen 2');await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+}));
+
+
+test('repair follows a diagnostic visit identity even when the message contains a visit ID',()=>journey(async({document,click,fill,saved,service})=>{
+ await click('New scenario');await fill('Scenario name','Broken return check');await click('Use 1 as scenario start');await click('Append connection 1 → 2');await click('Append connection 2 → 1');await click('Save workspace');
+ const workspace=await saved();const path=workspace.canvas!.paths[0];const last=path.visits!.at(-1)!;last.id='return-visit-uuid';delete last.operationIds;last.checkIds=['deleted-check'];await service.save(workspace);await click('Open saved workspace');
+ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
+ await click('Repair Broken return check');assert.equal(document.activeElement?.closest('[data-visit-id]')?.getAttribute('data-visit-id'),'return-visit-uuid');
+}));
+
+test('linked actions and reusable checks expose their executed YAML expectations',()=>journey(async({document,click,saved,service})=>{
+ const workspace=await saved();const yaml='appId: com.example.App\n---\n- launchApp\n- tapOn: Linked Settings\n- runFlow: settings.yaml\n';const flows={'settings.yaml':'appId: com.example.App\n---\n- assertVisible: Settings content\n'};
+ const catalog=await service.references({yaml,flows});
+ const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'linked-action',label:'Linked Settings',role:'action',reference:catalog.references[1]}]},{id:'settings',title:'Settings',x:400,y:0,tests:[{id:'linked-check',label:'Reusable Settings',role:'assertion',reference:catalog.references[2]}]}],edges:[{id:'settings-edge',from:'home',to:'settings',actionTestId:'linked-action',assertionTestId:'linked-check',responseCondition:'Open Settings'}],paths:[{id:'linked-route',scenarioId:'linked-scenario',name:'Linked route',screenId:'home',edgeIds:['settings-edge']}]};
+ await service.save({...workspace,yaml,flows,canvas,scenarios:[{id:'linked-scenario',name:'Linked scenario',steps:catalog.references.filter(ref=>ref.kind==='step').map(ref=>({kind:'step' as const,file:'flow.yaml',index:ref.index,fingerprint:ref.fingerprint})),pathId:'linked-route',inputs:{},parameters:{},enabledHandlerIds:[]}]});await click('Open saved workspace');
+ await act(async()=>{const label=[...document.querySelectorAll<HTMLLabelElement>('label')].find(node=>node.textContent==='Scenario path')!;const select=document.getElementById(label.htmlFor) as HTMLSelectElement;select.value='linked-route';select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
+ await click('Run scenario');await click('Inspect visit 1');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/Linked Settings/);
+ const expected=document.querySelector('[aria-label="Execution evidence"] pre')!.textContent!;assert.match(expected,/tapOn/);assert.match(expected,/Linked Settings/);
+ await click('Inspect visit 2');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/Settings content/);
 }));

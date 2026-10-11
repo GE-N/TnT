@@ -13,7 +13,7 @@ export type CanvasOccurrence={id:string;visitId:string;testId:string;edgeId?:str
 export type CanvasExecution={pathId:string;visits:{id:string;screenId:string;checkIds:string[]}[];transitions:{id:string;edgeId:string;visitId:string;destinationVisitId:string}[];occurrences:CanvasOccurrence[]};
 export type CanvasGraph={screens:ScreenNode[];edges:Transition[];paths:{scenarioId?:string;id:string;name:string;edgeIds:string[];screenId?:string;finished?:boolean;visits?:CanvasVisit[]}[];execution?:CanvasExecution};
 export type CatalogEntry=YAMLReference & {label:string;command:string;assertion:boolean;preview:string};
-export type CanvasDiagnostic={ownerId:string;detail:string};
+export type CanvasDiagnostic={ownerId:string;visitId?:string;detail:string};
 export type OccurrenceResult={id:string;visitId:string;testId:string;edgeId?:string;status:Step['status'];stepId?:string;detail:string};
 export type CanvasResult={occurrences?:OccurrenceResult[];visits?:{id:string;screenId:string;status:Step['status'];checkIds:string[]}[];transitions?:{id:string;edgeId:string;status:Step['status']}[];pathId:string;note:string;tests:{id:string;status:Step['status'];stepId?:string;detail:string}[];screens:{id:string;status:Step['status']}[];edges:{id:string;status:Step['status']}[]};
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -129,10 +129,10 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
   if(path.screenId&&!screens.has(path.screenId))diagnostics.push({ownerId:path.id,detail:'Restore or select the initial screen for this scenario.'});
   for(const [index,visit] of routeVisits(graph,path).entries()){
    const screenId=visitScreenId(graph,path,index);
-   if(visit.operationIds?.some(id=>!graph.screens.find(screen=>screen.id===screenId)?.tests.some(test=>test.id===id&&isAuthored(test))))diagnostics.push({ownerId:path.id,detail:'Visit '+(index+1)+' contains missing actions or checks. Restore them or remove them from this visit.'});
+   if(visit.operationIds?.some(id=>!graph.screens.find(screen=>screen.id===screenId)?.tests.some(test=>test.id===id&&isAuthored(test))))diagnostics.push({ownerId:path.id,visitId:visit.id,detail:'Visit '+(index+1)+' contains missing actions or checks. Restore them or remove them from this visit.'});
    const outgoing=graph.edges.find(edge=>edge.id===path.edgeIds[index]);const actionIds=outgoing?edgeActions(outgoing):[];
-   if(visit.operationIds?.some(id=>{const test=tests.get(id)?.test;return test&&!test.check&&!actionIds.includes(id);}))diagnostics.push({ownerId:path.id,detail:'Choose a destination for each action in Visit '+(index+1)+' that continues its sequence.'});
-   if(visit.operationIds===undefined&&visit.checkIds?.some(id=>!screenChecks(graph,screenId).some(check=>check.id===id)))diagnostics.push({ownerId:path.id,detail:'Visit '+visit.id+' contains deleted or stale check selections. Restore them or explicitly select checks; no replacement is inferred.'});
+   if(visit.operationIds?.some(id=>{const test=tests.get(id)?.test;return test&&!test.check&&!actionIds.includes(id);}))diagnostics.push({ownerId:path.id,visitId:visit.id,detail:'Choose a destination for each action in Visit '+(index+1)+' that continues its sequence.'});
+   if(visit.operationIds===undefined&&visit.checkIds?.some(id=>!screenChecks(graph,screenId).some(check=>check.id===id)))diagnostics.push({ownerId:path.id,visitId:visit.id,detail:'Visit '+visit.id+' contains deleted or stale check selections. Restore them or explicitly select checks; no replacement is inferred.'});
   }
   const edges=path.edgeIds.map(id=>graph.edges.find(edge=>edge.id===id));
   if(edges.some(edge=>!edge)||edges.some((edge,index)=>index===0&&path.screenId&&edge?.from!==path.screenId||index>0&&edge?.from!==edges[index-1]?.to))diagnostics.push({ownerId:path.id,detail:'Repair the ordered route: every transition must exist and continue from the previous destination.'});

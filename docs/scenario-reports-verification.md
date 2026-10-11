@@ -8,7 +8,7 @@ After a structured failure, later authored commands are skipped even if contradi
 
 ## Automated verification
 
-All 116 tests passed, including the public workspace UI journey for the three acceptance sequences, reopening independent reports, preserving names after later edits, a second visit failure, expected/actual/log inspection, missing screenshots, and focusing a blocking check for repair. Public scenario-service tests cover distinct failure screenshots/details, immutable results after edits, contradictory later completion metadata, nested assertion evidence, tool errors, cancellation and confidential inputs. Existing setup/handler expectations now classify dependent commands as skipped after a failure. Typechecking, production build and whitespace checks passed. The full suite required sandbox escape for local HTTP test servers.
+All 118 tests passed, including the public workspace UI journey for the three acceptance sequences, reopening independent reports, preserving names after later edits, a second visit failure, expected/actual/log inspection, missing screenshots, and focusing a blocking check for repair. Review regressions additionally cover visit-ID diagnostics and linked-action/reusable-flow expectations resolved from the executed YAML snapshot. Public scenario-service tests cover distinct failure screenshots/details, immutable results after edits, contradictory later completion metadata, nested assertion evidence, tool errors, cancellation and confidential inputs. Existing setup/handler expectations now classify dependent commands as skipped after a failure. Typechecking, production build and whitespace checks passed. The full suite required sandbox escape for local HTTP test servers.
 
 ## Controlled simulator evidence
 
