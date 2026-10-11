@@ -12,12 +12,16 @@ TDD used the existing public workspace/batch service and UI save/reopen seams, a
 
 The public UI journey creates twelve cases, marks two through right-click/overflow, saves/reopens, renames and deletes/Undoes a skipped definition, and executes the ten included cases in saved order while a restrictive search is active. It individually runs a skipped row and checks the ordinary passed report, clears the preference, duplicates a skipped definition, skips every remaining case, and verifies zero included, disabled dispatch, persistence, and continued individual execution. Service tests cover legacy omission, boolean validation, exact ordered filtering, included draft validation, all-skipped rejection, independent reports, and retained explicit subset behavior. Existing regression journeys cover frozen scope and safety behaviors.
 
-## Browser review limitation
+## Browser visual review
 
-Browser review was attempted against the local development workbench using both `127.0.0.1:4317` and `localhost:4317`. Chrome's browser tool blocked both addresses (`ERR_BLOCKED_BY_CLIENT`), so live visual verification of gray titles, contrast and menu placement could not be completed. DOM tests do not prove those visual properties. No simulator execution is claimed; tests stub only the external simulator/Maestro boundaries.
+Completed in live Chrome on 2026-10-11 after the user granted permission to retry. Direct browser-tab access still returned `ERR_BLOCKED_BY_CLIENT`; the existing workbench tab was successfully refreshed and reviewed using the supported native Chrome UI controls.
+
+Created twelve draft scenarios and marked Scenario 3 through overflow and Scenario 2 through right-click. Both skipped titles appeared readable gray without strikethrough, distinguishable from ordinary titles. Selecting Scenario 2 retained the selection highlight and enabled individual Run control. Shift+F10 opened the shared menu with a visible check beside the exact `Skip in Run All` label; the menu rendered above the canvas with visible keyboard focus. The sidebar showed ten included and two skipped. Scrolling the scenario list revealed rows 7–12 while its header, search, inclusion counts and Run all stayed in place. No visual defect was found; no code change was needed.
+
+Local proof images: `.scratch/issue-29/skip-visual-review.png` (checked keyboard menu) and `.scratch/issue-29/skip-sidebar-review.png` (gray titles, selected skipped row, individual controls and counts). This review exercised visual/authoring controls on draft scenarios; it does not claim real simulator execution. Automated service/UI journeys already verify save/reopen and execution behavior.
 
 ## Final checks and reviews
 
 All 139 tests passed. The first sandboxed full-suite attempt could not bind sockets required by existing HTTP/Mockoon tests; the complete suite then passed with local socket access. Type checking, production build and whitespace checks passed.
 
-Independent Standards and Spec reviewers examined the implementation against starting commit `d1a7b2b0853839253b4e00eeb236b7bd2a149d41` before commit. Standards: zero findings. Spec: zero code findings, with the browser-review limitation above explicitly retained.
+Independent Standards and Spec reviewers examined the implementation against starting commit `d1a7b2b0853839253b4e00eeb236b7bd2a149d41` before commit. Standards: zero findings. Spec: zero code findings, with the initially blocked browser review subsequently completed as recorded above.
