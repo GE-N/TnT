@@ -368,7 +368,7 @@ test('authors can create, duplicate, restore and run more than twenty scenarios 
  const batch=document.querySelector('[aria-label="Batch report"]')!;assert.match(batch.textContent!,/Later draft · not-run/);
  assert.deepEqual([...batch.querySelectorAll('button')].map(button=>button.textContent),restored.scenarios!.slice(0,-1).map(item=>'Open report for '+item.name));
  const create=document.querySelector('[aria-label="Scenarios"] button[aria-label="New scenario"]')!;assert.equal(create.textContent,'+');
- assert.ok(document.querySelector('[aria-label="Scenarios"] button[aria-label^="Actions for "]'));
+ assert.equal(document.querySelector('[aria-label="Scenarios"] button[aria-label^="Actions for "]'),null);
 }));
 
 
@@ -388,11 +388,11 @@ test('authors persist two skips, run ten searched cases in saved order, and rest
  await click('Save workspace');await click('Open saved workspace');
  const counts=()=>document.querySelector('[aria-label="Run All inclusion"]')!.textContent;
  assert.equal(counts(),'12 included · 0 skipped');
- // Right click and overflow share the same checkable command and target an unselected row.
+ // Right click exposes the checkable command for an unselected row.
  await click('Actions for Skip case 3');
  assert.equal(document.querySelector('[role="menuitemcheckbox"]')!.getAttribute('aria-checked'),'false');
  await click('Skip in Run All');
- await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Actions for Skip case 10"]')!.click());
+ await click('Actions for Skip case 10');
  await click('Skip in Run All');assert.equal(counts(),'10 included · 2 skipped');
  await click('Save workspace');const before=await saved();await click('Open saved workspace');
  await click('Actions for Skip case 3');assert.equal(document.querySelector('[role="menuitemcheckbox"]')!.getAttribute('aria-checked'),'true');
