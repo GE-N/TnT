@@ -369,7 +369,7 @@ for(const failure of ['initial-skipped','action-failed'] as const)test('multi-ac
  }}});
  const saved=await scenarios.save({name:'Failure stopping',yaml:source,canvas});const result=await scenarios.wait((await scenarios.start({workspaceId:saved.id,deviceId,pathId:'route'})).id);
  assert.equal(result.status,failure==='action-failed'?'tool-error':'path-failed');
- if(failure==='action-failed'){assert.equal(result.canvas!.tests.find(test=>test.id==='input')!.status,'failed');assert.equal(result.canvas!.tests.find(test=>test.id==='destination')!.status,'unavailable');assert.equal(result.canvas!.edges[0].status,'failed');}
+ if(failure==='action-failed'){assert.equal(result.canvas!.tests.find(test=>test.id==='input')!.status,'failed');assert.equal(result.canvas!.tests.find(test=>test.id==='destination')!.status,'skipped');assert.equal(result.canvas!.edges[0].status,'failed');}
  else assert.equal(result.canvas!.tests.find(test=>test.id==='initial')!.status,'skipped');
  }finally{await rm(root,{recursive:true,force:true});}
 });
@@ -412,6 +412,25 @@ function repeatedVisitFixture(){
  const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'home-check',label:'Home',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Home'}},{id:'open',label:'Open',role:'action',reference,tap:{target:'text',match:'regex',value:'Coordinator'}}]},{id:'coordinator',title:'Coordinator',x:400,y:0,tests:[{id:'identifier',label:'Fixed identifier',role:'assertion',reference,check:{visibility:'visible',target:'id',match:'regex',value:'^coordinator.fixed$'}},{id:'back',label:'Back',role:'action',reference,back:true}]}],edges:[{id:'go',from:'home',to:'coordinator',actionTestId:'open',actionTestIds:['open'],assertionTestId:'identifier',responseCondition:'Open Coordinator'},{id:'return',from:'coordinator',to:'home',actionTestId:'back',actionTestIds:['back'],assertionTestId:'home-check',responseCondition:'Back Home'}],paths:[{id:'route',name:'Repeated route',screenId:'home',edgeIds:['go','return','go']}]};
  return {source,canvas};
 }
+
+test('a failed return visit retains its own detail and screenshot and later occurrences cannot pass',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-return-evidence-'));const {source,canvas}=repeatedVisitFixture();
+ try{
+ const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
+  await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="1"/></testsuites>');
+  await writeFile(join(directory,'step-008-assertCondition.png'),'controlled screenshot fixture');
+  await writeFile(join(directory,'commands.json'),JSON.stringify(['launchAppCommand','assertConditionCommand','tapOnElement','assertConditionCommand','tapOnElement','assertConditionCommand','tapOnElement','assertConditionCommand'].map((name,index)=>({command:{[name]:{}},metadata:{depth:0,sequenceNumber:index+2,status:index===5?'FAILED':'COMPLETED',error:index===5?{message:'Home return check failed'}:undefined,evaluatedCommand:index===5?{assertConditionCommand:{condition:{visible:{textRegex:'Home'}}}}:undefined}}))));
+  return {code:1,log:'Controlled failure log',cleanup:{verified:true,detail:'Exited'}};
+ }}});
+ const saved=await scenarios.save({name:'Return failure',yaml:source,canvas});const result=await scenarios.wait((await scenarios.start({workspaceId:saved.id,deviceId,pathId:'route'})).id);
+ const home=result.canvas!.occurrences!.filter(item=>item.testId==='home-check');assert.deepEqual(home.map(item=>item.status),['passed','failed']);
+ const failed=result.steps.find(step=>step.id===home[1].stepId)!;
+ assert.equal(failed.detail,'Home return check failed');assert.deepEqual(failed.artifacts,['step-008-assertCondition.png']);assert.deepEqual(failed.actual,{assertConditionCommand:{condition:{visible:{textRegex:'Home'}}}});
+ assert.deepEqual(result.canvas!.occurrences!.slice(-2).map(item=>item.status),['skipped','skipped']);
+ await scenarios.save({...saved,canvas:{...canvas,screens:canvas.screens.map(screen=>({...screen,title:'Later edit'}))}});
+ assert.equal((await scenarios.result(result.id)).snapshot.canvas!.screens[0].title,'Home');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
 
 test('a finite saved route repeats shared screens and edges with distinct execution evidence',async()=>{
  const root=await mkdtemp(join(tmpdir(),'tnt-visits-'));

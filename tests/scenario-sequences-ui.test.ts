@@ -12,14 +12,14 @@ import {createRunner} from '../server/runner.js';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import type {CanvasGraph} from '../server/canvas.js';
 
-async function journey(work:(ui:{document:Document;click:(label:string)=>Promise<void>;fill:(label:string,value:string)=>Promise<void>;saved:()=>Promise<Awaited<ReturnType<ReturnType<typeof createScenarios>['workspace']>>>;failNext:()=>void})=>Promise<void>,draft=false){
+async function journey(work:(ui:{document:Document;click:(label:string)=>Promise<void>;fill:(label:string,value:string)=>Promise<void>;saved:()=>Promise<Awaited<ReturnType<ReturnType<typeof createScenarios>['workspace']>>>;failNext:(index?:number)=>void})=>Promise<void>,draft=false){
  const directory=await mkdtemp(join(tmpdir(),'tnt-sequences-ui-'));const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
- let fail=false;
+ let fail=false;let failIndex=3;
  const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
   const commands=parseAllDocuments(await readFile(flow,'utf8'))[1].toJS();
   const failing=fail;fail=false;
   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="'+(failing?1:0)+'"/></testsuites>');
-  await writeFile(join(directory,'commands.json'),JSON.stringify(commands.map((command:any,index:number)=>({command:{[command==='back'?'backPressCommand':command==='launchApp'||command.launchApp?'launchAppCommand':command.tapOn?'tapOnElement':command.inputText?'inputTextCommand':'assertConditionCommand']:{}},metadata:{depth:0,status:failing&&index===3?'FAILED':failing&&index>3?'SKIPPED':'COMPLETED'}}))));
+  await writeFile(join(directory,'commands.json'),JSON.stringify(commands.map((command:any,index:number)=>({command:{[command==='back'?'backPressCommand':command==='launchApp'||command.launchApp?'launchAppCommand':command.tapOn?'tapOnElement':command.inputText?'inputTextCommand':'assertConditionCommand']:{}},metadata:{depth:0,status:failing&&index===failIndex?'FAILED':failing&&index>failIndex?'SKIPPED':'COMPLETED'}}))));
   return {code:failing?1:0,log:'Simulator boundary fixture',cleanup:{verified:true,detail:'Fixture exited'}};
  }}});
  const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
@@ -38,7 +38,7 @@ async function journey(work:(ui:{document:Document;click:(label:string)=>Promise
  const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root')!);
  const click=async(label:string)=>act(async()=>{const node=[...document.querySelectorAll<HTMLElement>('button,summary')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(node,label);assert.ok(!(node as HTMLButtonElement).disabled,label+' is enabled');node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});
  const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector('[aria-label="'+label+'"]')??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
- try{await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));await fill('Saved workspace ID',workspace.id);await click('Open saved workspace');await work({document,click,fill,saved:()=>service.workspace(workspace.id),failNext:()=>{fail=true;}});}
+ try{await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));await fill('Saved workspace ID',workspace.id);await click('Open saved workspace');await work({document,click,fill,saved:()=>service.workspace(workspace.id),failNext:(index=3)=>{fail=true;failIndex=index;}});}
  finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
 }
 
@@ -77,9 +77,23 @@ test('three finite scenarios reuse four nodes, choose branches explicitly, save/
   const results=[...document.querySelectorAll('[aria-label="Visit execution details"] summary')].map(node=>node.textContent);assert.deepEqual(results,route.map((id,i)=>'Visit '+(i+1)+' · '+id+' · passed'));
  }
  assert.deepEqual((await saved()).canvas!.paths,workspace.canvas!.paths,'Selecting/running never changes a scenario sequence');
- await click('Journey 1');failNext();await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'assertion-failed');
+ const reportButtons=[...document.querySelectorAll<HTMLButtonElement>('[aria-label="Scenario reports"] button')];
+ assert.equal(reportButtons.length,3,'All three independent reports remain inspectable');
+ await click('Journey 1');
+ assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Journey 3','Sidebar selection preserves the inspected report');
+ await act(async()=>reportButtons[0].click());
+ assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Journey 1');
+ assert.equal(document.querySelectorAll('[aria-label="Visit execution details"] summary').length,5);
+ await fill('Scenario name','Renamed Journey');await click('Save workspace');
+ assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Journey 1','Authoring edits cannot rename historical evidence');
+ await fill('Scenario name','Journey 1');
+ await click('Journey 1');failNext(7);await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'assertion-failed');
  const failedVisits=[...document.querySelectorAll('[aria-label="Visit execution details"] summary')].map(node=>node.textContent);
- assert.equal(failedVisits.length,5);assert.match(failedVisits[1]!,/failed/);assert.ok(!failedVisits.at(-1)!.endsWith('passed'),'A check failure stops the finite route');
+ assert.equal(failedVisits.length,5);assert.match(failedVisits[1]!,/passed/);assert.match(failedVisits[3]!,/failed/);assert.ok(!failedVisits.at(-1)!.endsWith('passed'),'A check failure stops the finite route');
+ await click('Inspect visit 4');
+ const evidence=document.querySelector('[aria-label="Execution evidence"]');assert.ok(evidence,'Selecting a visit opens its evidence inspector');
+ assert.match(evidence.textContent!,/Expected/);assert.match(evidence.textContent!,/Screen 2/);assert.match(evidence.textContent!,/FAILED/);assert.match(evidence.textContent!,/Screenshot evidence unavailable/);assert.match(evidence.textContent!,/Simulator boundary fixture/);
+ await click('Inspect transition 4');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/skipped/);
  await click('Duplicate scenario');await fill('Scenario name','Return copy');await click('Save workspace');const duplicated=await saved();
  const original=workspace.canvas!.paths[0];const copy=duplicated.canvas!.paths.at(-1)!;assert.deepEqual(copy.edgeIds,original.edgeIds);assert.ok(copy.visits!.every(visit=>!original.visits!.some(item=>item.id===visit.id)));assert.equal(Reflect.get(copy,'finished'),true);
  await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
@@ -112,6 +126,14 @@ test('a node action keeps its destination picker in the default canvas',()=>jour
  const destination=document.querySelector<HTMLSelectElement>('[aria-label="Action 1 destination"]');assert.ok(destination,'The action must let the author choose its destination');
  await act(async()=>{destination.value='2';destination.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});
  await click('Save workspace');const graph=(await saved()).canvas!;assert.equal(graph.edges.length,1);assert.equal(graph.edges[0].to,'2');assert.equal(graph.edges[0].actionTestId,graph.screens[0].tests[0].id);assert.deepEqual(graph.paths[0].edgeIds,[graph.edges[0].id]);
+},true));
+
+test('blocking authoring diagnostics name the scenario and focus the affected check for repair',()=>journey(async({document,click,fill})=>{
+ await click('New scenario');await fill('Scenario name','Repair journey');await click('Use Home as scenario start');await click('Add check to Home');
+ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
+ const notice=[...document.querySelectorAll('[role="alert"]')].find(node=>node.textContent?.includes('Before running'));assert.ok(notice);assert.match(notice.textContent!,/Repair journey/);
+ await click('Repair Screen check');assert.equal(document.activeElement?.getAttribute('aria-label'),'Check 1 selector');
+ await fill('Check 1 selector','Home');await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
 },true));
 
 test('choosing action destinations creates connections and an action-only Home Details Back journey runs without mandatory checks',()=>journey(async({document,click,fill,saved})=>{

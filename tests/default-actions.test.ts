@@ -69,7 +69,7 @@ test('an action failure stops the dependent authored step and is reported as han
   const workspace=await service.save({name:'Handler failure',yaml,flows,automation:{setup:{file:'setup.yaml',parameters:{}},actions:[{id:'back',name:'Back',condition:{text:'Details'},file:'back.yaml',parameters:{BACK:'Missing'},enabled:true}],checkpoints:[{beforeStep:1,fingerprint:reference.fingerprint,timeoutMs:1000}]}});
   const result=await service.wait((await service.start({workspaceId:workspace.id,deviceId})).id);
   assert.equal(result.status,'handler-error');assert.equal(result.automation?.actions[0].status,'failed');
-  assert.equal(result.steps[1].status,'unavailable');assert.equal(result.cleanup.verified,true);
+  assert.equal(result.steps[1].status,'skipped');assert.equal(result.cleanup.verified,true);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 test('a declared execution.yaml cannot replace instrumentation in normal or confidential runs',async()=>{
@@ -105,6 +105,6 @@ test('a failed declared setup is distinct from a scenario assertion failure and 
   const workspace=await service.save({name:'Setup failure',yaml,flows,automation:{setup:{file:'setup.yaml',parameters:{}},actions:[],checkpoints:[]}});
   const result=await service.wait((await service.start({workspaceId:workspace.id,deviceId})).id);
   assert.equal(result.status,'setup-error');assert.equal(result.automation?.setup.status,'failed');
-  assert.deepEqual(result.steps.map(step=>step.status),['unavailable','unavailable']);
+  assert.deepEqual(result.steps.map(step=>step.status),['skipped','skipped']);
  }finally{await rm(root,{recursive:true,force:true});}
 });

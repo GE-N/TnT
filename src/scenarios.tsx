@@ -1,4 +1,5 @@
 import {canvasTestLabel,routeVisits} from '../shared/canvas-authoring.js';
+import {ExecutedCanvas} from './executed-canvas.js';
 import {ScenarioLibrary} from './scenario-library.js';
 import type {ScenarioDefinition} from '../server/scenario-definitions.js';
 import {DefaultActions} from './default-actions.js';
@@ -8,7 +9,7 @@ import {YamlEditor} from './yaml-editor.js';
 import { runnerClient } from './runner-client.js';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import type { Run, Workspace } from '../server/scenarios.js';
-import {CanvasEditor,CanvasBoard,emptyCanvas} from './canvas.js';
+import {CanvasEditor,emptyCanvas} from './canvas.js';
 import type {CanvasGraph,CanvasDiagnostic,CatalogEntry} from '../server/canvas.js';
 import { MockSetup } from './mock-setup.js';
 import type { MockPlan } from '../server/mockoon.js';
@@ -41,7 +42,10 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   const setMockPlan=useCallback((plan:MockPlan|undefined,error:string)=>{setMock(plan);setMockError(error);},[]);
   const [workspaceId, setWorkspaceId] = useState('');
   const [inputs, setInputs] = useState('');
+  const [sourceRepair,setSourceRepair]=useState<{ownerId:string}>();
+  const advanced=useRef<HTMLDetailsElement>(null);
   const [run, setRun] = useState<Run>();
+  const [reports,setReports]=useState<Run[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
   const [error, setError] = useState('');
@@ -52,6 +56,16 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   useEffect(() => { onRunning(running || submitting || pickerBusy); }, [running, submitting, pickerBusy, onRunning]);
   const headers = { 'X-TnT-Token': token, 'Content-Type': 'application/json' };
   const api = runnerClient(token);
+  useEffect(()=>{
+    if(!sourceRepair)return;
+    if(advanced.current)advanced.current.open=true;
+    const target=sourceRepair.ownerId==='flows'||sourceRepair.ownerId.endsWith('.yaml')?document.getElementById('reusable-flows'):sourceRepair.ownerId==='automation'?advanced.current?.querySelector<HTMLElement>('.default-actions input,.default-actions select'):advanced.current?.querySelector<HTMLElement>('[aria-label="YAML form and code editor"] button');
+    target?.scrollIntoView?.({block:'nearest'});target?.focus();
+  },[sourceRepair]);
+  useEffect(()=>{
+    if(run)setReports(current=>current.some(item=>item.id===run.id)?current.map(item=>item.id===run.id?run:item):[...current,run]);
+  },[run]);
+  useEffect(()=>{artifactSequence.current++;setArtifact(undefined);},[run?.id]);
   useEffect(()=>{
     if(!token)return;let stopped=false;
     const timer=setTimeout(()=>{
@@ -70,11 +84,6 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     }, 1000);
     return () => { stopped = true; clearInterval(timer); };
   }, [run?.id, running, token]);
-  useEffect(() => {
-    if (!run || running) return;
-    const screenshot = run.artifacts.find(name => name.endsWith('.png') && name.includes('screenshots/'));
-    if (screenshot) void inspect(screenshot);
-  }, [run?.id, running]);
   useEffect(() => () => { if (artifact?.image) URL.revokeObjectURL(artifact.image); }, [artifact?.image]);
   function renameScenario(value:string){
     setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,name:value}:item));
@@ -193,9 +202,9 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       <button className="confirm" disabled={running||submitting||pickerBusy||definitions.length>=20} onClick={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);}}>New scenario</button>
       {selectedScenario&&<><label htmlFor="canvas-scenario-name">Scenario name</label><input id="canvas-scenario-name" value={selectedScenario.name} maxLength={120} disabled={running||submitting||pickerBusy} onChange={event=>renameScenario(event.target.value)}/><button className="confirm" disabled={running||submitting||pickerBusy||definitions.length>=20||(canvas?.paths.length??0)>=20} onClick={duplicateScenario}>Duplicate scenario</button><button className="confirm" disabled={running||submitting||pickerBusy} onClick={deleteScenario}>Delete scenario</button><p className="field-hint">{canvas?.paths.find(path=>path.id===selectedScenario.pathId)?.screenId?'Start saved':'Draft · choose a screen as the start'}</p></>}
     </aside><div className="workspace-canvas">
-    <CanvasEditor scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={()=>void submit(true)} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));}} disabled={running||submitting||pickerBusy||launchBusy}/>
+    <CanvasEditor onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={()=>void submit(true)} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));}} disabled={running||submitting||pickerBusy||launchBusy}/>
     </div></div>
-    <details className="workspace-advanced"><summary>Advanced mode · legacy authoring and settings</summary><button className="confirm" onClick={()=>setLegacyCanvas(value=>!value)}>{legacyCanvas?'Return to contextual canvas':'Show legacy canvas controls'}</button>
+    <details ref={advanced} className="workspace-advanced"><summary>Advanced mode · legacy authoring and settings</summary><button className="confirm" onClick={()=>setLegacyCanvas(value=>!value)}>{legacyCanvas?'Return to contextual canvas':'Show legacy canvas controls'}</button>
     <ScenarioLibrary key={'scenarios-'+loadRevision} items={definitions} onChange={setDefinitions} selected={scenarioId} onSelect={id=>{setScenarioId(id);setPathId(definitions.find(item=>item.id===id)?.pathId??'');setInputs('');}} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} canvas={canvas} automation={automation} mock={mock} disabled={running||submitting||pickerBusy||launchBusy} onError={setDefinitionError}/>
     <MockSetup key={loadRevision} initialPlan={loadedMock} disabled={running||submitting||pickerBusy} onChange={setMockPlan}/>
     <div className="scenario-editor">
@@ -230,6 +239,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       <div className="scenario-actions"><button className="confirm" onClick={() => void submit(false)} disabled={submitting || pickerBusy}>Save workspace</button><button className="primary" onClick={() => void submit(true)} disabled={!deviceId || !token || submitting || running || launchBusy || pickerBusy}>{submitting ? 'Preparing…' : 'Run scenario'}</button>{running && <button className="confirm" onClick={() => void cancel()}>Cancel run</button>}</div>
       {workspaceId && <p className="artifact-id">Workspace: {workspaceId}</p>}
       {error && <div role="alert" className="notice error">{error}</div>}
+    {reports.some(item=>item.snapshot.workspaceId===workspaceId)&&<nav aria-label="Scenario reports"><p>Reports from this workspace session · selecting a scenario leaves the inspected report open.</p>{reports.filter(item=>item.snapshot.workspaceId===workspaceId).map((item,index)=><button className="confirm" key={item.id} disabled={running||submitting} aria-pressed={run?.id===item.id} onClick={()=>setRun(item)}>{item.snapshot.scenario?.name??item.snapshot.name} · {item.status} · Run {index+1}</button>)}</nav>}
     <div className="scenario-result" aria-live="polite">
       {!run ? <div className="empty-state"><h3>Your scenario result</h3><p>Run a saved flow on the selected simulator to see its real outcome and artifacts.</p></div> : <>
         {run.snapshot.expectedPath && <div className="expected-path"><span>{run.snapshot.expectedPath.from}</span><span>→</span><span>Expected: {run.snapshot.expectedPath.to} · {run.status}</span></div>}
@@ -239,7 +249,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
         <p>Cleanup ({running ? 'pending' : run.cleanup.verified ? 'verified' : 'failed'}): {run.cleanup.detail}</p>
         {run.automation&&<details open><summary>Setup and default action outcomes</summary><p>Setup: {run.automation.setup.status}</p>{run.automation.actions.map(action=><p key={action.id+':'+action.beforeStep}>{action.name} · before step {action.beforeStep+1}: {action.status} · {action.detail}</p>)}</details>}
         {run.snapshot.executionYaml&&<details><summary>Derived execution YAML</summary><pre className="execution-yaml">{run.snapshot.executionYaml}</pre></details>}
-        {run.snapshot.canvas&&run.canvas&&<details open><summary>Executed canvas · {run.snapshot.canvas.paths.find(path=>path.id===run.canvas?.pathId)?.name}</summary><p>{run.canvas.note}</p><CanvasBoard graph={run.snapshot.canvas} pathId={run.canvas.pathId} result={run.canvas}/>{run.canvas.tests.map(test=><p key={test.id}>{(()=>{const authored=run.snapshot.canvas?.screens.flatMap(screen=>screen.tests).find(item=>item.id===test.id);return authored?canvasTestLabel(authored):undefined;})()}: {test.status} · {test.detail}</p>)}</details>}
+        <ExecutedCanvas key={run.id} run={run} onArtifact={name=>void inspect(name)}/>
         <p className="field-hint">{run.mappingNote}</p>
         <ol className="step-results">{run.steps.map(step => <li key={step.id}><code>{step.command}</code><span>{step.status}</span></li>)}</ol>
         {run.expectedFailure && <details open><summary>Failed expected assertion</summary><pre>{JSON.stringify(run.expectedFailure, null, 2)}</pre></details>}

@@ -216,8 +216,8 @@ function mapCanvasOccurrences(graph:CanvasGraph,steps:Step[],running:boolean,exe
  const occurrences:OccurrenceResult[]=plan.occurrences.map(item=>{
   const ref=item.reference;const step=ref.kind==='step'?steps[ref.index!]:undefined;
   const auxiliary=ref.kind==='setup'?execution?.result?.setup:ref.kind==='handler'?execution?.result?.actions.find(action=>action.id===ref.actionId&&action.beforeStep===ref.index):undefined;
-  const status=running?'unavailable':auxiliary?.status??(item.assertion?step?.status==='failed'?'failed':step?.assertionStatus??'unavailable':step?.status??'unavailable');
-  return {id:item.id,visitId:item.visitId,testId:item.testId,edgeId:item.edgeId,status,stepId:step?.id,detail:running?'Outcomes become available after execution.':item.assertion?'This visit requires completed assertion evidence.':'Mapped from this execution occurrence.'};
+  const status=running?'unavailable':auxiliary?.status??(item.assertion?step?.status==='failed'||step?.status==='skipped'?step.status:step?.assertionStatus??'unavailable':step?.status??'unavailable');
+  return {id:item.id,visitId:item.visitId,testId:item.testId,edgeId:item.edgeId,status,stepId:step?.id,detail:running?'Outcomes become available after execution.':(auxiliary&&'detail' in auxiliary?String(auxiliary.detail):undefined)??step?.detail??(item.assertion?'This visit requires completed assertion evidence.':'Execution evidence unavailable.')};
  });
  const visits=plan.visits.map(visit=>{
   const own=occurrences.filter(item=>item.visitId===visit.id);

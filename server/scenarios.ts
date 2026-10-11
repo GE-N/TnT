@@ -12,7 +12,7 @@ import { createMockSession, validateMock, type MockPlan, type MockResult } from 
 import type { createRunner } from './runner.js';
 
 export type Workspace = { scenarios?:ScenarioDefinition[]; id: string; name: string; yaml: string; automation?:Automation; flows?: Record<string, string>; mock?: MockPlan; canvas?: CanvasGraph; canvasDiagnostics?: CanvasDiagnostic[] };
-export type Step = { id: string; command: string; expected?: unknown; assertionStatus?:Step['status']; status: 'unavailable' | 'passed' | 'failed' | 'skipped' };
+export type Step = { id: string; command: string; expected?: unknown; actual?:unknown; detail?:string; artifacts?:string[]; assertionStatus?:Step['status']; status: 'unavailable' | 'passed' | 'failed' | 'skipped' };
 export type Cleanup = { verified: boolean; detail: string };
 export type Run = {
   id: string; deviceId: string; startedAt: string; finishedAt?: string;
@@ -153,7 +153,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
             run.artifacts = confidential ? ['flow.yaml', 'snapshot.json'] : files.filter(file => file !== 'result.json');
             const commandFile = files.find(file => file.endsWith('commands.json'));
             const commands = commandFile ? JSON.parse(await readFile(join(executionDirectory, commandFile), 'utf8')) : [];
-            mapResults(run, commands);
+            mapResults(run, commands,confidential);
             const automationMapping=automation&&derived?mapAutomation(automation,derived.plan,commands):undefined;
             run.automation=automationMapping?.result;
             let report: any;
@@ -272,20 +272,38 @@ async function listFiles(base: string, prefix = ''): Promise<string[]> {
   const entries = await readdir(join(base, prefix), { withFileTypes: true });
   return (await Promise.all(entries.map(entry => entry.isDirectory() ? listFiles(base, prefix + entry.name + '/') : entry.isFile() ? [prefix + entry.name] : []))).flat();
 }
-function mapResults(run: Run, commands: any[]) {
+function mapResults(run: Run, commands: any[],confidential:boolean) {
   const keys: Record<string, string> = { launchApp: 'launchAppCommand', assertVisible: 'assertConditionCommand', assertNotVisible: 'assertConditionCommand', tapOn: 'tapOnElement', inputText: 'inputTextCommand', back: 'backPressCommand', evalScript: 'evalScriptCommand', runFlow: 'runFlowCommand' };
   if(run.snapshot.executionPlan){
     const events=commands.filter(entry=>entry.metadata?.depth===0&&!entry.command?.defineVariablesCommand&&!entry.command?.applyConfigurationCommand);
     if(events.length>run.snapshot.executionPlan.length||events.some((entry,index)=>!entry.command?.[run.snapshot.executionPlan![index].kind==='reset'?'launchAppCommand':'runFlowCommand'])){run.mappingNote='Ambiguous instrumented metadata; step outcomes are unavailable.';return;}
-    run.snapshot.executionPlan.forEach((item,position)=>{if(item.kind==='step'&&item.index!==undefined){const step=run.steps[item.index];step.status=metadataStatus(events[position]?.metadata?.status);step.assertionStatus=assertionProof(commands,events[position]);}});
+    let stopped=false;
+    run.snapshot.executionPlan.forEach((item,position)=>{
+      const entry=events[position];
+      if(item.kind==='step'&&item.index!==undefined){const step=run.steps[item.index];mapStepEvidence(run,step,commands,entry,stopped,confidential);if(step.status==='failed'||step.assertionStatus==='failed')stopped=true;}
+      if(entry?.metadata?.status==='FAILED')stopped=true;
+    });
     run.mappingNote='Authored steps mapped through generated top-level wrappers; setup and handler metadata reported separately. No checkpoints run inside reusable flows.';return;
   }
   const events = commands.filter(entry => entry.metadata?.depth === 0 && !entry.command?.defineVariablesCommand && !entry.command?.applyConfigurationCommand);
   if (events.length > run.steps.length || run.steps.some((step, index) => !keys[step.command] || (events[index] && !events[index].command?.[keys[step.command]]))) {
     run.mappingNote = 'Unsupported or ambiguous command mapping. Raw command metadata is available; step outcomes are unavailable.'; return;
   }
-  run.steps.forEach((step, index) => { const status = events[index]?.metadata?.status; step.status = metadataStatus(status);step.assertionStatus=assertionProof(commands,events[index]); });
+  let stopped=false;
+  run.steps.forEach((step, index) => {mapStepEvidence(run,step,commands,events[index],stopped,confidential);if(step.status==='failed'||step.assertionStatus==='failed')stopped=true;});
   run.mappingNote = 'Top-level commands mapped in execution order using Maestro 2.11 command metadata. Nested/unmapped details remain in raw artifacts.';
+}
+
+function mapStepEvidence(run:Run,step:Step,commands:any[],entry:any,stopped:boolean,confidential:boolean){
+  step.status=stopped?'skipped':metadataStatus(entry?.metadata?.status);
+  step.assertionStatus=stopped?'skipped':assertionProof(commands,entry);
+  const start=commands.indexOf(entry);let end=start+1;
+  while(start>=0&&end<commands.length&&commands[end].metadata?.depth>entry.metadata.depth)end++;
+  const subtree=stopped||start<0?[]:commands.slice(start,end);
+  const failed=subtree.find(item=>item.metadata?.status==='FAILED');
+  step.detail=stopped?'Not executed after an earlier failure.':confidential?'Evaluated detail withheld for confidential inputs.':failed?.metadata?.error?.message??(entry?'Runner command reported '+String(entry.metadata?.status??'no status')+'.':'Command evidence unavailable.');
+  if(!confidential&&!stopped)step.actual=failed?.metadata?.evaluatedCommand??entry?.metadata?.evaluatedCommand;
+  step.artifacts=confidential?[]:run.artifacts.filter(name=>subtree.some(item=>Number.isInteger(item.metadata?.sequenceNumber)&&name.split('/').at(-1)?.startsWith('step-'+String(item.metadata.sequenceNumber+1).padStart(3,'0')+'-')));
 }
 
 // A successful subflow wrapper is execution evidence, not proof that its assertions ran.
