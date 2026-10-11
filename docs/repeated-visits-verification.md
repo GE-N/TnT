@@ -21,3 +21,7 @@ Review corrections: transition removal now warns about its destination visit/che
 Validation: all 89 tests passed with local networking enabled; type checking, production build and whitespace checks passed. The final canvas-focused run passed all 31 tests after the small result-layout and bounded-identity adjustments.
 
 Final independent review: Standards — 0 remaining actionable findings; Spec — 0 remaining actionable findings. Browser proof screenshot: ignored `.scratch/issue-17-visits-proof.jpg`.
+
+Return-visit correction on 2026-10-11: reproduced Home → Details → Home through the public scenario editor using a Tap action and a Back action. The regression failed twice because Visit 3 offered the already-traversed Home → Details connection despite having no local action. Continue suggestions now exclude connections already used in the selected sequence. Authors can deliberately repeat a transition by adding an action to the return visit and choosing its destination; the existing independence/execution journey exercises this flow. Save/reopen coverage confirms the empty return visit retains Add action and Add check without creating Visit 4.
+
+Return-visit validation: all 136 tests, type checking, production build and whitespace checks passed. Independent Standards and Spec reviews each reported zero findings.
