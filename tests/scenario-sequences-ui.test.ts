@@ -12,10 +12,11 @@ import {createRunner} from '../server/runner.js';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import type {CanvasGraph} from '../server/canvas.js';
 
-async function journey(work:(ui:{document:Document;click:(label:string)=>Promise<void>;fill:(label:string,value:string)=>Promise<void>;saved:()=>Promise<Awaited<ReturnType<ReturnType<typeof createScenarios>['workspace']>>>;service:ReturnType<typeof createScenarios>;failNext:(index?:number)=>void})=>Promise<void>,draft=false){
+async function journey(work:(ui:{document:Document;click:(label:string)=>Promise<void>;fill:(label:string,value:string)=>Promise<void>;saved:()=>Promise<Awaited<ReturnType<ReturnType<typeof createScenarios>['workspace']>>>;service:ReturnType<typeof createScenarios>;failNext:(index?:number)=>void;holdNext:()=>void;calls:()=>number})=>Promise<void>,draft=false){
  const directory=await mkdtemp(join(tmpdir(),'tnt-sequences-ui-'));const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
- let fail=false;let failIndex=3;
- const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
+ let fail=false;let failIndex=3;let hold=false;let liveBatch=false;let runCalls=0;
+ const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=> '2.11.0',run:async({directory,flow,signal})=>{
+  runCalls++;if(hold){hold=false;await new Promise<void>(resolve=>{if(signal.aborted)resolve();else signal.addEventListener('abort',()=>resolve(),{once:true});});}
   const commands=parseAllDocuments(await readFile(flow,'utf8'))[1].toJS();
   const failing=fail;fail=false;
   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="'+(failing?1:0)+'"/></testsuites>');
@@ -32,13 +33,13 @@ async function journey(work:(ui:{document:Document;click:(label:string)=>Promise
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  const pending:Promise<Response>[]=[];
- const request=async(path:string,options?:{body?:string})=>{try{const body=options?.body?JSON.parse(options.body):undefined;return Response.json(path==='/api/workspaces'?await service.save(body):path==='/api/canvas/references'?await service.references(body):path==='/api/runs'?await service.wait((await service.start(body)).id):await service.workspace(path.slice('/api/workspaces/'.length)));}catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}};
+ const request=async(path:string,options?:{body?:string})=>{try{const body=options?.body?JSON.parse(options.body):undefined;return Response.json(path==='/api/workspaces'?await service.save(body):path==='/api/canvas/references'?await service.references(body):path==='/api/batches'?(liveBatch?await service.startBatch(body):await service.waitBatch((await service.startBatch(body)).id)):path.startsWith('/api/batches/')?(path.endsWith('/cancel')?await service.cancelBatch(path.split('/')[3]):await service.batch(path.split('/')[3])):path.startsWith('/api/runs/')?await service.result(path.slice('/api/runs/'.length)):path==='/api/runs'?await service.wait((await service.start(body)).id):await service.workspace(path.slice('/api/workspaces/'.length)));}catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}};
  const fetch=(path:string,options?:{body?:string})=>{const result=request(path,options);pending.push(result);return result;};
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetch:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root')!);
  const click=async(label:string)=>act(async()=>{const node=[...document.querySelectorAll<HTMLElement>('button,summary')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(node,label);assert.ok(!(node as HTMLButtonElement).disabled,label+' is enabled');node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});
  const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector('[aria-label="'+label+'"]')??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
- try{await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));await fill('Saved workspace ID',workspace.id);await click('Open saved workspace');await work({document,click,fill,saved:()=>service.workspace(workspace.id),service,failNext:(index=3)=>{fail=true;failIndex=index;}});}
+ try{await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));await fill('Saved workspace ID',workspace.id);await click('Open saved workspace');await work({document,click,fill,saved:()=>service.workspace(workspace.id),service,failNext:(index=3)=>{fail=true;failIndex=index;},holdNext:()=>{hold=true;liveBatch=true;},calls:()=>runCalls});}
  finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
 }
 
@@ -241,4 +242,38 @@ test('linked actions and reusable checks expose their executed YAML expectations
  await click('Run scenario');await click('Inspect visit 1');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/Linked Settings/);
  const expected=document.querySelector('[aria-label="Execution evidence"] pre')!.textContent!;assert.match(expected,/tapOn/);assert.match(expected,/Linked Settings/);
  await click('Inspect visit 2');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/Settings content/);
+}));
+
+
+test('Run all shows independent batch outcomes and opens reports without changing authoring selection',()=>journey(async({document,click,fill,failNext})=>{
+ for(let index=1;index<=3;index++){
+  await click('New scenario');await fill('Scenario name','Batch journey '+index);await click('Use 1 as scenario start');await click('Save workspace');
+ }
+ await click('Run all');
+ const batch=document.querySelector('[aria-label="Batch report"]')!;
+ assert.match(batch.textContent!,/completed/);assert.match(batch.textContent!,/Batch journey 1 · passed/);assert.match(batch.textContent!,/Batch journey 2 · passed/);assert.match(batch.textContent!,/Batch journey 3 · passed/);
+ assert.equal(document.querySelectorAll('[aria-label="Scenario reports"] button').length,3);
+ await click('Open report for Batch journey 1');assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Batch journey 1');
+ assert.equal(document.querySelector<HTMLInputElement>('#canvas-scenario-name')!.value,'Batch journey 3');
+ await fill('Scenario name','Later edit');await click('Save workspace');
+ assert.match(batch.textContent!,/Batch journey 3/);assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Batch journey 1');
+}));
+
+
+test('batch sidebar labels invalid drafts and still executes valid scenarios',()=>journey(async({document,click,fill})=>{
+ await click('New scenario');await fill('Scenario name','Invalid draft');await click('Save workspace');
+ await click('New scenario');await fill('Scenario name','Valid home');await click('Use 1 as scenario start');await click('Run all');
+ const report=document.querySelector('[aria-label="Batch report"]')!;
+ assert.match(report.textContent!,/Invalid draft · not-run/);assert.match(report.textContent!,/nonempty.*path/);assert.match(report.textContent!,/Valid home · passed/);
+ assert.equal(document.querySelectorAll('[aria-label="Scenario reports"] button').length,1);
+}));
+
+test('batch sidebar shows running and queued states and cancels the remaining queue',()=>journey(async({document,click,fill,holdNext,calls})=>{
+ for(let index=1;index<=2;index++){await click('New scenario');await fill('Scenario name','Queued '+index);await click('Use 1 as scenario start');await click('Save workspace');}
+ holdNext();await click('Run all');
+ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,1100));});
+ const report=document.querySelector('[aria-label="Batch report"]')!;
+ assert.match(report.textContent!,/Queued 1 · running/);assert.match(report.textContent!,/Queued 2 · queued/);
+ await click('Cancel batch');assert.match(report.textContent!,/Batch · cancelled/);assert.match(report.textContent!,/Queued 1 · cancelled/);assert.match(report.textContent!,/Queued 2 · not-run/);assert.equal(calls(),1);
+ await click('Open report for Queued 1');assert.equal(document.querySelector('.result-tag')!.textContent,'cancelled');
 }));

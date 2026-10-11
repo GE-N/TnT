@@ -58,6 +58,12 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         if (request.method === 'POST' && url.pathname === '/api/workspaces') return json(200, await scenarios.save(await readJson(request)));
         const workspace = /^\/api\/workspaces\/([0-9a-f-]{36})$/.exec(url.pathname);
         if (request.method === 'GET' && workspace) return json(200, await scenarios.workspace(workspace[1]));
+        if (request.method === 'POST' && url.pathname === '/api/batches') return json(202, await scenarios.startBatch(await readJson(request)));
+        const batch = /^\/api\/batches\/([0-9a-f-]{36})(?:\/(cancel))?$/.exec(url.pathname);
+        if (batch) {
+          if (request.method === 'GET' && !batch[2]) return json(200, await scenarios.batch(batch[1]));
+          if (request.method === 'POST' && batch[2] === 'cancel') return json(200, await scenarios.cancelBatch(batch[1]));
+        }
         if (request.method === 'POST' && url.pathname === '/api/runs') return json(202, await scenarios.start(await readJson(request)));
         const run = /^\/api\/runs\/([0-9a-f-]{36})(?:\/(cancel|artifact))?$/.exec(url.pathname);
         if (run) {

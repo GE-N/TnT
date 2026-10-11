@@ -1,3 +1,4 @@
+import {createBatches} from './batches.js';
 import {projectCanvasRoute} from './canvas-route.js';
 import {refreshChecks} from '../shared/canvas-authoring.js';
 import {readScenarios,selectScenario,validateFlowInputs,type ScenarioDefinition} from './scenario-definitions.js';
@@ -23,6 +24,7 @@ export type Run = {
   steps: Step[]; log: string; error?: string; expectedFailure?: unknown;
   cleanup: Cleanup; artifacts: string[]; mappingNote: string;
 };
+export type RunInput = { workspaceId: string; deviceId: string; runtimeInputs?: unknown; captureId?: string; pickerReviewId?: string; pathId?: string; scenarioId?:string; resetApp?:boolean };
 export type Maestro = {
   version(): Promise<string>;
   run(input: { directory: string; flow: string; deviceId: string; signal: AbortSignal; runtimeInputs?: Record<string, string> }): Promise<{ code: number | null; log: string; cleanup: Cleanup }>;
@@ -83,10 +85,27 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       return workspace;
     },
     async workspace(id: string): Promise<Workspace> { return readRecord(await directory('workspaces', id), 'workspace.json'); },
-    async start(input: { workspaceId: string; deviceId: string; runtimeInputs?: unknown; captureId?: string; pickerReviewId?: string; pathId?: string; scenarioId?:string; resetApp?:boolean }): Promise<Run> {
+    async start(input: RunInput): Promise<Run> {
+      if (batches.busy) throw new Error('A scenario batch is in progress. Wait for cleanup.');
+      const workspace = await service.workspace(input.workspaceId);
+      if (batches.busy) throw new Error('A scenario batch is in progress. Wait for cleanup.');
+      return startWorkspace(input, workspace);
+    },
+    async result(id: string): Promise<Run> { return readRecord(await directory('runs', id), 'result.json'); },
+    async wait(id: string): Promise<Run> { return pending.get(id) ?? service.result(id); },
+    async cancel(id: string) { const controller = controllers.get(validId(id)); if (!controller) throw new Error('Run is no longer active.'); controller.abort(); return service.wait(id); },
+    async artifact(id: string, name: string) {
+      const run = await service.result(id);
+      if (!run.artifacts.includes(name)) throw new Error('Unknown run artifact.');
+      const base = await directory('runs', id);
+      const path = await realpath(resolve(base, name));
+      if (!path.startsWith((await realpath(base)) + sep)) throw new Error('Artifact path escapes its run.');
+      return readFile(path);
+    },
+  };
+  async function startWorkspace(input: RunInput, authored: Workspace, signal?: AbortSignal): Promise<Run> {
       const runtimeInputs = validateInputs(input.runtimeInputs);
       const confidential = Object.keys(runtimeInputs).length > 0;
-      const authored = await service.workspace(input.workspaceId);
       if(input.resetApp!==undefined&&typeof input.resetApp!=='boolean')throw new Error('Reset app must be a boolean.');
       const selection=selectScenario(authored,input.scenarioId,runtimeInputs);
       let workspace=selection?{...authored,...selection,name:selection.scenario.name}:authored;
@@ -113,6 +132,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
         if (!device) throw new Error('Select an available, already-running simulator and refresh.');
         await options.runner.checkApp(device.id, appId);
         const version = await options.maestro.version();
+        if (signal?.aborted) throw new Error('Batch cancelled before execution.');
         const id = randomUUID();
         const path = await directory('runs', id);
         const runtimeInputPolicy = confidential ? 'Confidential runtime inputs supplied: values are omitted; raw logs, evaluated metadata, and images are withheld. Temporary tool artifacts are deleted on cleanup. Historical snapshots cannot replay omitted inputs.' : selection?'Saved non-confidential scenario inputs supplied; runtime values are scoped to this run. Keep secrets out of saved inputs/YAML. No inherited application environment is forwarded.':'No runtime inputs supplied. Keep secrets out of authored YAML. No inherited application environment is forwarded.';
@@ -123,6 +143,9 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
         await writeFile(join(path, 'snapshot.json'), JSON.stringify(snapshot, null, 2));
         await writeRecord(join(path, 'result.json'), run);
         const controller = new AbortController();
+        const abort = () => controller.abort();
+        signal?.addEventListener('abort', abort, {once:true});
+        if (signal?.aborted) controller.abort();
         controllers.set(id, controller);
         const done = (async () => {
           let privateDirectory: string | undefined;
@@ -187,7 +210,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
             }
             run.finishedAt = new Date().toISOString();
             try { await writeRecord(join(path, 'result.json'), run); }
-            finally { controllers.delete(id); if (run.cleanup.verified) await release(); }
+            finally { signal?.removeEventListener('abort', abort); controllers.delete(id); if (run.cleanup.verified) await release(); }
           }
           return run;
         })();
@@ -195,20 +218,14 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
         void done.finally(() => pending.delete(id)).catch(() => {});
         return structuredClone(run);
       } catch (error) { await release(); throw error; }
-    },
-    async result(id: string): Promise<Run> { return readRecord(await directory('runs', id), 'result.json'); },
-    async wait(id: string): Promise<Run> { return pending.get(id) ?? service.result(id); },
-    async cancel(id: string) { const controller = controllers.get(validId(id)); if (!controller) throw new Error('Run is no longer active.'); controller.abort(); return service.wait(id); },
-    async artifact(id: string, name: string) {
-      const run = await service.result(id);
-      if (!run.artifacts.includes(name)) throw new Error('Unknown run artifact.');
-      const base = await directory('runs', id);
-      const path = await realpath(resolve(base, name));
-      if (!path.startsWith((await realpath(base)) + sep)) throw new Error('Artifact path escapes its run.');
-      return readFile(path);
-    },
-  };
-  return service;
+  }
+  const batches = createBatches({
+    workspace: service.workspace, preview: service.preview,
+    start: startWorkspace, wait: service.wait, cancel: service.cancel,
+    persist: async batch => writeRecord(join(await directory('batches', batch.id), 'result.json'), batch),
+    read: async id => readRecord(await directory('batches', id), 'result.json'),
+  });
+  return {...service, startBatch: batches.start, batch: batches.result, waitBatch: batches.wait, cancelBatch: batches.cancel};
 }
 async function readRecord(base: string, name: string) {
   const file = await realpath(join(base, name));

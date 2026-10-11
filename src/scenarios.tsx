@@ -1,3 +1,4 @@
+import type {Batch} from '../server/batches.js';
 import {canvasTestLabel,routeVisits} from '../shared/canvas-authoring.js';
 import {ExecutedCanvas} from './executed-canvas.js';
 import {ScenarioLibrary} from './scenario-library.js';
@@ -45,6 +46,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   const [sourceRepair,setSourceRepair]=useState<{ownerId:string}>();
   const advanced=useRef<HTMLDetailsElement>(null);
   const [run, setRun] = useState<Run>();
+  const [batch,setBatch]=useState<Batch>();
   const [reports,setReports]=useState<Run[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
@@ -52,7 +54,8 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   const [runError,setRunError]=useState('');
   const [artifact, setArtifact] = useState<{ name: string; text?: string; image?: string }>();
   const artifactSequence = useRef(0);
-  const running = run?.status === 'running';
+  const batchRunning=batch?.status==='running'||batch?.status==='cancelling';
+  const running = run?.status === 'running'||batchRunning;
   useEffect(() => { onRunning(running || submitting || pickerBusy); }, [running, submitting, pickerBusy, onRunning]);
   const headers = { 'X-TnT-Token': token, 'Content-Type': 'application/json' };
   const api = runnerClient(token);
@@ -77,7 +80,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     return()=>{stopped=true;clearTimeout(timer);};
   },[yaml,flows,canvas,automation,token]);
   useEffect(() => {
-    if (!running || !run) return;
+    if (run?.status !== 'running') return;
     let stopped = false;
     const timer = setInterval(() => {
       void api('/api/runs/' + run.id).then(result => { if (!stopped) setRun(result); }).catch(error => { if (!stopped) setError(String(error.message)); });
@@ -85,6 +88,36 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     return () => { stopped = true; clearInterval(timer); };
   }, [run?.id, running, token]);
   useEffect(() => () => { if (artifact?.image) URL.revokeObjectURL(artifact.image); }, [artifact?.image]);
+  async function receiveBatch(next:Batch){
+    setBatch(next);
+    const records:Run[]=await Promise.all(next.entries.filter(entry=>entry.runId).map(entry=>api('/api/runs/'+entry.runId)));
+    setReports(current=>[...current.filter(item=>!records.some(record=>record.id===item.id)),...records]);
+    setRun(current=>records.find(item=>item.id===current?.id)??current);
+  }
+  useEffect(()=>{
+    if(!batchRunning||!batch)return;
+    let stopped=false;
+    const timer=setInterval(()=>{void api('/api/batches/'+batch.id).then(next=>{if(!stopped)return receiveBatch(next);}).catch(error=>{if(!stopped)setError(error.message);});},1000);
+    return()=>{stopped=true;clearInterval(timer);};
+  },[batch?.id,batchRunning,token]);
+  async function runAll(){
+    if(running||submitting||pickerBusy||launchBusy)return;
+    setSubmitting(true);setRunError('');
+    try{
+      const workspace=await save();
+      await receiveBatch(await api('/api/batches',{workspaceId:workspace.id,deviceId,resetApp,runtimeInputs:inputs.trim()?JSON.parse(inputs):undefined}));
+      setInputs('');
+    }catch(error){setRunError(error instanceof Error?error.message:'Batch request failed.');}
+    finally{setSubmitting(false);}
+  }
+  async function cancelBatch(){
+    try{await receiveBatch(await api('/api/batches/'+batch?.id+'/cancel',{}));}
+    catch(error){setError(error instanceof Error?error.message:'Batch cancellation failed.');}
+  }
+  async function openReport(id:string){
+    try{setRun(await api('/api/runs/'+id));}
+    catch(error){setError(error instanceof Error?error.message:'Report unavailable.');}
+  }
   function renameScenario(value:string){
     setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,name:value}:item));
     if(selectedScenario?.authoring==='canvas')setCanvas(current=>current&&({...current,paths:current.paths.map(path=>path.id===selectedScenario.pathId?{...path,name:value}:path)}));
@@ -110,7 +143,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     try {
       const workspace:Workspace=await api('/api/workspaces/'+openWorkspaceId.trim());
       setLegacyCanvas(!workspace.scenarios?.some(item=>item.authoring==='canvas'));setDefinitions(workspace.scenarios??[]);setScenarioId(workspace.scenarios?.[0]?.id??'');setDefinitionError('');setResetApp(false);
-      setWorkspaceId(workspace.id);setName(workspace.name);setYaml(workspace.yaml);setFlows(JSON.stringify(workspace.flows??{},null,2));
+      setBatch(undefined);setWorkspaceId(workspace.id);setName(workspace.name);setYaml(workspace.yaml);setFlows(JSON.stringify(workspace.flows??{},null,2));
       setAutomation(workspace.automation);setAutomationError('');setPreview(undefined);setCanvas(workspace.canvas);setPathId('');setLoadedMock(workspace.mock);setMock(workspace.mock);setLoadRevision(value=>value+1);
       artifactSequence.current++;setRun(undefined);setArtifact(undefined);setInputs('');
     }catch(error){setError(error instanceof Error?error.message:'Cannot open workspace.');}
@@ -201,6 +234,8 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       {definitions.map(item=><button className={scenarioId===item.id?'primary':'confirm'} key={item.id} aria-pressed={scenarioId===item.id} disabled={running||submitting||pickerBusy} onClick={()=>{setScenarioId(item.id);setInputs('');}}>{item.name}</button>)}
       <button className="confirm" disabled={running||submitting||pickerBusy||definitions.length>=20} onClick={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);}}>New scenario</button>
       {selectedScenario&&<><label htmlFor="canvas-scenario-name">Scenario name</label><input id="canvas-scenario-name" value={selectedScenario.name} maxLength={120} disabled={running||submitting||pickerBusy} onChange={event=>renameScenario(event.target.value)}/><button className="confirm" disabled={running||submitting||pickerBusy||definitions.length>=20||(canvas?.paths.length??0)>=20} onClick={duplicateScenario}>Duplicate scenario</button><button className="confirm" disabled={running||submitting||pickerBusy} onClick={deleteScenario}>Delete scenario</button><p className="field-hint">{canvas?.paths.find(path=>path.id===selectedScenario.pathId)?.screenId?'Start saved':'Draft · choose a screen as the start'}</p></>}
+      <button className="primary" disabled={!deviceId||!token||!definitions.length||running||submitting||launchBusy||pickerBusy} onClick={()=>void runAll()}>Run all</button>
+      {batch&&batch.workspaceId===workspaceId&&<section aria-label="Batch report" aria-live="polite"><h3>Batch · {batch.status}</h3><p>Saved order · separate reports · {batch.snapshot.resetApp?'Declared app reset':'No additional app reset'}</p>{batch.entries.map(entry=><div key={entry.scenarioId}><p>{entry.name} · {entry.status}</p>{entry.reason&&<p>{entry.reason}</p>}{entry.runId&&<button className="confirm" onClick={()=>void openReport(entry.runId!)}>Open report for {entry.name}</button>}</div>)}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</section>}
     </aside><div className="workspace-canvas">
     <CanvasEditor onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={()=>void submit(true)} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));}} disabled={running||submitting||pickerBusy||launchBusy}/>
     </div></div>
@@ -236,17 +271,17 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       <label htmlFor="runtime-inputs">Confidential runtime inputs (optional JSON)</label><input id="runtime-inputs" type="password" value={inputs} onChange={event => setInputs(event.target.value)} autoComplete="off" placeholder={'{"PASSWORD":"value"}'} />
       <p className="field-hint">Use uppercase names and reference them as ${'{NAME}'} in YAML. Values are never saved. Runs with inputs withhold raw logs and images. Keep secrets out of authored YAML.</p>
     </div></details>
-      <div className="scenario-actions"><button className="confirm" onClick={() => void submit(false)} disabled={submitting || pickerBusy}>Save workspace</button><button className="primary" onClick={() => void submit(true)} disabled={!deviceId || !token || submitting || running || launchBusy || pickerBusy}>{submitting ? 'Preparing…' : 'Run scenario'}</button>{running && <button className="confirm" onClick={() => void cancel()}>Cancel run</button>}</div>
+      <div className="scenario-actions"><button className="confirm" onClick={() => void submit(false)} disabled={submitting || pickerBusy}>Save workspace</button><button className="primary" onClick={() => void submit(true)} disabled={!deviceId || !token || submitting || running || launchBusy || pickerBusy}>{submitting ? 'Preparing…' : 'Run scenario'}</button>{run?.status==='running'&&!batchRunning && <button className="confirm" onClick={() => void cancel()}>Cancel run</button>}</div>
       {workspaceId && <p className="artifact-id">Workspace: {workspaceId}</p>}
       {error && <div role="alert" className="notice error">{error}</div>}
-    {reports.some(item=>item.snapshot.workspaceId===workspaceId)&&<nav aria-label="Scenario reports"><p>Reports from this workspace session · selecting a scenario leaves the inspected report open.</p>{reports.filter(item=>item.snapshot.workspaceId===workspaceId).map((item,index)=><button className="confirm" key={item.id} disabled={running||submitting} aria-pressed={run?.id===item.id} onClick={()=>setRun(item)}>{item.snapshot.scenario?.name??item.snapshot.name} · {item.status} · Run {index+1}</button>)}</nav>}
+    {reports.some(item=>item.snapshot.workspaceId===workspaceId)&&<nav aria-label="Scenario reports"><p>Reports from this workspace session · selecting a scenario leaves the inspected report open.</p>{reports.filter(item=>item.snapshot.workspaceId===workspaceId).map((item,index)=><button className="confirm" key={item.id} disabled={submitting} aria-pressed={run?.id===item.id} onClick={()=>setRun(item)}>{item.snapshot.scenario?.name??item.snapshot.name} · {item.status} · Run {index+1}</button>)}</nav>}
     <div className="scenario-result" aria-live="polite">
       {!run ? <div className="empty-state"><h3>Your scenario result</h3><p>Run a saved flow on the selected simulator to see its real outcome and artifacts.</p></div> : <>
         {run.snapshot.expectedPath && <div className="expected-path"><span>{run.snapshot.expectedPath.from}</span><span>→</span><span>Expected: {run.snapshot.expectedPath.to} · {run.status}</span></div>}
         {run.mock && <div className="mock-evidence"><h3>Mock intent: {run.mock.intent.status}</h3><p>{run.mock.intent.method.toUpperCase()} /{run.mock.intent.endpoint} · HTTP {run.mock.intent.httpStatus}</p><p>{run.mock.intent.failureSemantics}</p><h3>Observed requests: {run.mock.evidence.status}</h3><p className="field-hint">{run.mock.evidence.detail}</p>{run.mock.evidence.transactions.map((transaction,index)=><p key={index}>{transaction.method.toUpperCase()} {transaction.path} → {transaction.statusCode} {transaction.proxied?'(forwarded)':'(mocked)'}</p>)}<p>Mock cleanup: {run.mock.cleanup.detail}</p></div>}
         <div className="label-row"><h3>{run.snapshot.name}</h3><span className={'result-tag ' + run.status}>{run.status}</span></div>
         {run.error && <div className="notice error">{run.error}</div>}
-        <p>Cleanup ({running ? 'pending' : run.cleanup.verified ? 'verified' : 'failed'}): {run.cleanup.detail}</p>
+        <p>Cleanup ({run.status==='running' ? 'pending' : run.cleanup.verified ? 'verified' : 'failed'}): {run.cleanup.detail}</p>
         {run.automation&&<details open><summary>Setup and default action outcomes</summary><p>Setup: {run.automation.setup.status}</p>{run.automation.actions.map(action=><p key={action.id+':'+action.beforeStep}>{action.name} · before step {action.beforeStep+1}: {action.status} · {action.detail}</p>)}</details>}
         {run.snapshot.executionYaml&&<details><summary>Derived execution YAML</summary><pre className="execution-yaml">{run.snapshot.executionYaml}</pre></details>}
         <ExecutedCanvas key={run.id} run={run} onArtifact={name=>void inspect(name)}/>
@@ -255,7 +290,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
         {run.expectedFailure && <details open><summary>Failed expected assertion</summary><pre>{JSON.stringify(run.expectedFailure, null, 2)}</pre></details>}
         <details><summary>Executed snapshot &amp; versions</summary><p className="artifact-id">Run: {run.id}<br />Snapshot: {run.snapshot.id}<br />Maestro: {run.snapshot.toolVersions.maestro} · Node: {run.snapshot.toolVersions.node}</p><pre>{run.snapshot.yaml}</pre>{Object.entries(run.snapshot.flows??{}).map(([name,yaml])=><div key={name}><h4>{name}</h4><pre>{yaml}</pre></div>)}<p>{run.snapshot.scenario&&<>Scenario: {run.snapshot.scenario.name} · Reset app: {run.snapshot.resetApp?'Yes':'No'} · Declared setup: {run.snapshot.scenario.setup?.file??'Ordinary app launch'}</>}</p><p>{run.snapshot.runtimeInputPolicy}</p></details>
         <details open={run.status !== 'passed'}><summary>Raw runner log</summary><pre>{run.log || 'Waiting for Maestro to finish…'}</pre></details>
-        <div className="artifact-list">{run.artifacts.map(name => <button className="text-button" key={name} disabled={submitting || running} onClick={() => void inspect(name)}>{name}</button>)}</div>
+        <div className="artifact-list">{run.artifacts.map(name => <button className="text-button" key={name} disabled={submitting || run.status==='running'} onClick={() => void inspect(name)}>{name}</button>)}</div>
         {artifact && <div className="artifact-view"><p className="artifact-id">{artifact.name}</p>{artifact.image ? <img className="device-screen" src={artifact.image} alt="Captured failure screen" /> : <pre>{artifact.text}</pre>}</div>}
       </>}
     </div>
