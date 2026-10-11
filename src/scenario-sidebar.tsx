@@ -19,7 +19,7 @@ export function ScenarioSidebar({children,items,selected,disabled,canRun,onSelec
  function closeMenu(){setMenu(undefined);trigger.current?.focus();}
  function openMenu(id:string,element:HTMLElement,x?:number,y?:number){
   trigger.current=element;const rect=element.getBoundingClientRect();
-  setMenu({id,x:Math.max(8,Math.min(x??rect.left,window.innerWidth-220)),y:Math.max(8,Math.min(y??rect.bottom,window.innerHeight-210))});
+  setMenu({id,x:Math.max(8,Math.min(x??rect.left,window.innerWidth-220)),y:Math.max(8,Math.min(y??rect.bottom,window.innerHeight-240))});
  }
  useEffect(()=>{
   if(!menu)return;
