@@ -334,13 +334,13 @@ test('right click and keyboard menus expose identical row commands without selec
  await click('New scenario');await fill('Scenario name','First');await click('Use 1 as scenario start');await click('New scenario');await fill('Scenario name','Second');
  const first=[...document.querySelectorAll<HTMLButtonElement>('[aria-label="Scenario list"] button')].find(button=>button.textContent==='First')!;
  await act(async()=>first.dispatchEvent(new document.defaultView!.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:150,clientY:150})));
- const commands=[...document.querySelectorAll('[role="menuitem"]')].map(node=>node.textContent);assert.deepEqual(commands,['Run scenario','Rename','Duplicate','Delete']);
+ const commands=[...document.querySelectorAll('[role="menuitem"],[role="menuitemcheckbox"]')].map(node=>node.textContent);assert.deepEqual(commands,['Run scenario','Rename','Duplicate','Skip in Run All','Delete']);
  await act(async()=>document.activeElement!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(document.activeElement,first);
- await act(async()=>first.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'ContextMenu',bubbles:true})));assert.deepEqual([...document.querySelectorAll('[role="menuitem"]')].map(node=>node.textContent),commands);
+ await act(async()=>first.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'ContextMenu',bubbles:true})));assert.deepEqual([...document.querySelectorAll('[role="menuitem"],[role="menuitemcheckbox"]')].map(node=>node.textContent),commands);
  await act(async()=>document.activeElement!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement!.textContent,'Rename');
  await act(async()=>document.activeElement!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
  await act(async()=>first.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true})));
- assert.deepEqual([...document.querySelectorAll('[role="menuitem"]')].map(node=>node.textContent),commands);
+ assert.deepEqual([...document.querySelectorAll('[role="menuitem"],[role="menuitemcheckbox"]')].map(node=>node.textContent),commands);
  assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Second');
  await click('Rename');await fill('Rename scenario','Discard this');await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(document.activeElement!.textContent,'First');
 }));
@@ -368,7 +368,7 @@ test('authors can create, duplicate, restore and run more than twenty scenarios 
  const batch=document.querySelector('[aria-label="Batch report"]')!;assert.match(batch.textContent!,/Later draft · not-run/);
  assert.deepEqual([...batch.querySelectorAll('button')].map(button=>button.textContent),restored.scenarios!.slice(0,-1).map(item=>'Open report for '+item.name));
  const create=document.querySelector('[aria-label="Scenarios"] button[aria-label="New scenario"]')!;assert.equal(create.textContent,'+');
- assert.equal(document.querySelector('[aria-label="Scenarios"] button[aria-label^="Actions for "]'),null);
+ assert.ok(document.querySelector('[aria-label="Scenarios"] button[aria-label^="Actions for "]'));
 }));
 
 
@@ -382,3 +382,37 @@ test('a return to Home offers only visit-local authoring rather than continuing 
  assert.equal([...returned.querySelectorAll('button')].some(button=>button.textContent?.startsWith('Continue →')),false,'Visit 3 has no action leading to another visit');
  await click('Save workspace');await click('Open saved workspace');assert.equal(document.querySelector('[aria-label="Visit 4 · Details operations"]'),null);assert.equal((await saved()).canvas!.paths[0].edgeIds.length,2);
 },true));
+
+test('authors persist two skips, run ten searched cases in saved order, and restore skipped definitions',()=>journey(async({document,click,fill,saved,calls})=>{
+ for(let index=1;index<=12;index++){await click('New scenario');await fill('Scenario name','Skip case '+index);await click('Use 1 as scenario start');}
+ await click('Save workspace');await click('Open saved workspace');
+ const counts=()=>document.querySelector('[aria-label="Run All inclusion"]')!.textContent;
+ assert.equal(counts(),'12 included · 0 skipped');
+ // Right click and overflow share the same checkable command and target an unselected row.
+ await click('Actions for Skip case 3');
+ assert.equal(document.querySelector('[role="menuitemcheckbox"]')!.getAttribute('aria-checked'),'false');
+ await click('Skip in Run All');
+ await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Actions for Skip case 10"]')!.click());
+ await click('Skip in Run All');assert.equal(counts(),'10 included · 2 skipped');
+ await click('Save workspace');const before=await saved();await click('Open saved workspace');
+ await click('Actions for Skip case 3');assert.equal(document.querySelector('[role="menuitemcheckbox"]')!.getAttribute('aria-checked'),'true');
+ await click('Rename');await fill('Rename scenario','Renamed skip');await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
+ await click('Save workspace');assert.equal((await saved()).scenarios![2].skipInRunAll,true);
+ await click('Actions for Renamed skip');await click('Delete');await click('Undo');await click('Save workspace');await click('Open saved workspace');
+ assert.deepEqual((await saved()).scenarios![2],{...before.scenarios![2],name:'Renamed skip'});
+ assert.deepEqual((await saved()).canvas!.screens,before.canvas!.screens);
+ await fill('Search scenarios','Skip case 1');await click('Run all');
+ assert.equal(counts(),'10 included · 2 skipped');
+ assert.deepEqual([...document.querySelectorAll('[aria-label="Batch report"] button')].map(button=>button.textContent),['Skip case 1','Skip case 2','Skip case 4','Skip case 5','Skip case 6','Skip case 7','Skip case 8','Skip case 9','Skip case 11','Skip case 12'].map(name=>'Open report for '+name));
+ assert.equal(calls(),10);
+ await click('Clear search');await click('Run Renamed skip');assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Renamed skip');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.equal(calls(),11);
+ await click('Actions for Renamed skip');await click('Skip in Run All');assert.equal(counts(),'11 included · 1 skipped');
+ await click('Actions for Renamed skip');await click('Skip in Run All');await click('Actions for Renamed skip');await click('Duplicate');await click('Save workspace');
+ assert.equal((await saved()).scenarios!.at(-1)!.skipInRunAll,true);assert.equal(counts(),'10 included · 3 skipped');
+ for(const item of (await saved()).scenarios!.filter(item=>!item.skipInRunAll)){await click('Actions for '+item.name);await click('Skip in Run All');}
+ assert.equal(counts(),'0 included · 13 skipped');
+ const runAll=[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Run all')!;assert.equal(runAll.disabled,true);
+ await act(async()=>runAll.click());assert.equal(calls(),11);
+ await click('Save workspace');await click('Open saved workspace');assert.equal(counts(),'0 included · 13 skipped');
+ await click('Run Renamed skip');assert.equal(calls(),12);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+}));

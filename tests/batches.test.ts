@@ -88,3 +88,33 @@ test('a failed batch summary write cancels the dispatched process and waits for 
   const result=await terminal;assert.equal(result.status,'blocked');assert.equal(result.entries[0].status,'cancelled');assert.equal(result.entries[1].status,'not-run');assert.equal((await service.result(result.entries[0].runId!)).cleanup.verified,true);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('workspace skip preferences survive reopening while legacy scenarios remain included',async()=>fixture(async service=>{
+ const workspace=await saved(service);
+ const updated=await service.save({...workspace,scenarios:workspace.scenarios!.map((item,index)=>({...item,...(index===1?{skipInRunAll:true}:{})}))});
+ const reopened=await service.workspace(updated.id);
+ assert.equal(reopened.scenarios![1].skipInRunAll,true);
+ assert.equal(reopened.scenarios![0].skipInRunAll,undefined);
+ await assert.rejects(service.save({...workspace,scenarios:[{...workspace.scenarios![0],skipInRunAll:'yes'}]}),/skip.*boolean/i);
+},async({directory})=>evidence(directory)));
+
+test('Run All omits intentional skips in saved order, validates included drafts, and allows individual skipped runs',async()=>fixture(async service=>{
+ const workspace=await saved(service);
+ const scenarios=Array.from({length:12},(_,index)=>({...workspace.scenarios![0],id:'case-'+(index+1),name:'Case '+(index+1),skipInRunAll:[2,9].includes(index)}));
+ await service.save({...workspace,scenarios});
+ const batch=await service.waitBatch((await service.startBatch({workspaceId:workspace.id,deviceId})).id);
+ assert.deepEqual(batch.entries.map(entry=>entry.name),['Case 1','Case 2','Case 4','Case 5','Case 6','Case 7','Case 8','Case 9','Case 11','Case 12']);
+ assert.ok(batch.entries.every(entry=>entry.status==='passed'));
+ const individual=await service.wait((await service.start({workspaceId:workspace.id,deviceId,scenarioId:'case-3'})).id);
+ assert.equal(individual.status,'passed');assert.equal(individual.snapshot.scenario?.skipInRunAll,true);
+ await service.save({...workspace,scenarios:scenarios.map((item,index)=>({...item,steps:index===0||index===2?[]:item.steps}))});
+ const drafts=await service.waitBatch((await service.startBatch({workspaceId:workspace.id,deviceId})).id);
+ assert.equal(drafts.entries[0].status,'not-run');assert.match(drafts.entries[0].reason!,/Draft/);
+ assert.equal(drafts.entries.length,10);
+ await service.save({...workspace,scenarios:scenarios.map(item=>({...item,skipInRunAll:true}))});
+ await assert.rejects(service.startBatch({workspaceId:workspace.id,deviceId}),/No scenarios.*included/i);
+ await assert.rejects(service.startBatch({workspaceId:workspace.id,deviceId,scenarioIds:[]}),/distinct scenario IDs/);
+ // An explicit subset is still an intentional request, independent of the Run All preference.
+ const explicit=await service.waitBatch((await service.startBatch({workspaceId:workspace.id,deviceId,scenarioIds:['case-10','case-3']})).id);
+ assert.deepEqual(explicit.entries.map(entry=>entry.scenarioId),['case-10','case-3']);assert.ok(explicit.entries.every(entry=>entry.status==='passed'));
+},async({directory})=>evidence(directory)));

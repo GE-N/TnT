@@ -118,3 +118,7 @@
 .scenario-delete-notice { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:60; display:flex; align-items:center; gap:12px; max-width:calc(100vw - 24px); padding:10px 16px; background:#17211c; border:1px solid #829588; border-radius:8px; box-shadow:0 8px 28px #0008; font-size:13px; }
 .scenario-delete-notice span { overflow-wrap:anywhere; min-width:0; }
 .scenario-delete-notice button { margin:0; }
+
+.scenario-select.scenario-skipped { color:#a8adb0; }
+.sidebar-run p { margin:0 0 8px; font-size:12px; color:#a8adb0; }
+.scenario-context-menu [role="menuitemcheckbox"][aria-checked="true"]::before { content:"✓ "; }

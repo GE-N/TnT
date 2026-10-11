@@ -4,7 +4,7 @@ import {referenceCatalog,type YAMLReference,type CanvasGraph} from './canvas.js'
 import {readAutomation,instrument,type Automation,type FlowCall} from './default-actions.js';
 import {validateMock,type MockPlan} from './mockoon.js';
 export type Parameter={type:'text'|'number'|'boolean';required:boolean};
-export type ScenarioDefinition={id:string;name:string;steps:YAMLReference[];authoring?:'canvas';pathId?:string;inputs:Record<string,string>;parameters:Record<string,Parameter>;setup?:FlowCall;enabledHandlerIds:string[];mockResponseId?:string};
+export type ScenarioDefinition={id:string;name:string;skipInRunAll?:boolean;steps:YAMLReference[];authoring?:'canvas';pathId?:string;inputs:Record<string,string>;parameters:Record<string,Parameter>;setup?:FlowCall;enabledHandlerIds:string[];mockResponseId?:string};
 export function namedInputs(value:unknown):Record<string,string>{
  if(value===undefined)return {};
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length>20||Object.entries(value).some(([key,input])=>! /^[A-Z][A-Z0-9_]{0,63}$/.test(key)||key.startsWith('MAESTRO_')||typeof input!=='string'||input.length>4000||input.includes('\0')))throw new Error('Inputs require at most 20 uppercase names and bounded strings; MAESTRO_ names are reserved.');
@@ -17,6 +17,7 @@ export function readScenarios(value:unknown):ScenarioDefinition[]|undefined{
  return value.map((item:ScenarioDefinition)=>{
   if(!item||typeof item.id!=='string'||! /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(item.id)||ids.has(item.id)||typeof item.name!=='string'||!item.name.trim()||item.name.length>120)throw new Error('Scenarios require unique IDs and nonempty names.');
   ids.add(item.id);
+  if(item.skipInRunAll!==undefined&&typeof item.skipInRunAll!=='boolean')throw new Error('Skip in Run All must be a boolean.');
   if(!Array.isArray(item.steps)||item.steps.length>100||item.steps.some(ref=>!ref||ref.kind!=='step'||ref.file!=='flow.yaml'||!Number.isInteger(ref.index)||ref.index!<0||typeof ref.fingerprint!=='string'||ref.fingerprint.length!==64)||new Set(item.steps.map(ref=>ref.index)).size!==item.steps.length||item.steps.some((ref,index)=>index>0&&ref.index!<=item.steps[index-1].index!))throw new Error('Scenarios require unique explicit authored step references.');
   if(item.pathId!==undefined&&(typeof item.pathId!=='string'||!item.pathId||item.pathId.length>120))throw new Error('Provide an explicit scenario path ID.');
   if(item.authoring!==undefined&&item.authoring!=='canvas')throw new Error('Unknown scenario authoring mode.');
@@ -27,7 +28,7 @@ export function readScenarios(value:unknown):ScenarioDefinition[]|undefined{
   namedInputs(Object.fromEntries(Object.keys(parameters).map(name=>[name,''])));
   for(const rule of Object.values(parameters))if(!rule||!['text','number','boolean'].includes(rule.type)||typeof rule.required!=='boolean')throw new Error('Parameter requirements need text/number/boolean type and required flag.');
   if(item.mockResponseId!==undefined&&(typeof item.mockResponseId!=='string'||!item.mockResponseId||item.mockResponseId.length>120))throw new Error('Choose a mock response identity.');
-  return {id:item.id,name:item.name.trim(),authoring:item.authoring,pathId:item.pathId,steps:item.steps.map(ref=>({kind:'step',file:'flow.yaml',index:ref.index,fingerprint:ref.fingerprint})),setup:item.setup?{file:item.setup.file,parameters:namedInputs(item.setup.parameters)}:undefined,enabledHandlerIds:[...item.enabledHandlerIds],inputs:namedInputs(item.inputs),parameters:structuredClone(parameters),mockResponseId:item.mockResponseId};
+  return {id:item.id,name:item.name.trim(),skipInRunAll:item.skipInRunAll,authoring:item.authoring,pathId:item.pathId,steps:item.steps.map(ref=>({kind:'step',file:'flow.yaml',index:ref.index,fingerprint:ref.fingerprint})),setup:item.setup?{file:item.setup.file,parameters:namedInputs(item.setup.parameters)}:undefined,enabledHandlerIds:[...item.enabledHandlerIds],inputs:namedInputs(item.inputs),parameters:structuredClone(parameters),mockResponseId:item.mockResponseId};
  });
 }
 // Selection references the authored commands; the execution projection never edits them.

@@ -27,7 +27,8 @@ export function createBatches(dependencies:Dependencies){
    active=state;
    try{
     const workspace=structuredClone(await dependencies.workspace(input.workspaceId));
-    const ids=input.scenarioIds??workspace.scenarios?.map(item=>item.id)??[];
+    const ids=input.scenarioIds??workspace.scenarios?.filter(item=>!item.skipInRunAll).map(item=>item.id)??[];
+    if(input.scenarioIds===undefined&&!ids.length)throw new Error('No scenarios are included in Run All.');
     if(!Array.isArray(ids)||!ids.length||ids.some(id=>typeof id!=='string')||new Set(ids).size!==ids.length)throw new Error('Request distinct scenario IDs from the saved workspace.');
     const entries:BatchEntry[]=ids.map(id=>({scenarioId:id,name:workspace.scenarios?.find(item=>item.id===id)?.name??id,status:'queued'}));
     const batch:Batch={id:randomUUID(),workspaceId:workspace.id,deviceId:input.deviceId,startedAt:new Date().toISOString(),status:'running',entries,snapshot:{workspace,resetApp:input.resetApp??false,runtimeInputPolicy:input.runtimeInputs===undefined?'Saved inputs only; no additional reset or server-session guarantee.':'Runtime values omitted; each run applies the confidential runtime-input policy.'}};
