@@ -21,3 +21,11 @@ Reviewed the live development workbench at 1280 × 720 with twelve scenarios. Th
 All 134 tests passed. Type checking, production build and whitespace checks passed. The full suite ran once after behavioral fixes; the build was repeated after the final scrollbar clearance adjustment.
 
 Standards review initially identified lost keyboard focus after rename and a repeated test helper expression; both were corrected and rechecked with zero remaining findings. Spec review identified insufficient filtered-batch coverage; Run all now executes with a restrictive search active and asserts the complete saved order. Spec recheck reports zero remaining findings. Reviews used the staged implementation against starting commit `5209844476681becc5909161be76ff92f0cb782d` before committing.
+
+## Scenario count and controls follow-up
+
+The user superseded the original ticket's 20-scenario restriction and requested `+` for scenario creation and removal of each row's overflow button. There is now no fixed scenario-count cap in creation, duplication, Undo, workspace validation, sequence storage, operation memberships, or batch submission. Other validation, execution and unrelated canvas bounds are unchanged. Both sidebar and advanced-library create buttons display `+` and retain accessible names/tooltips. Row commands remain available by right click, Shift+F10 and the keyboard ContextMenu key; hover/focus still exposes the individual Run button.
+
+The public workspace/run journey creates 21 scenarios, reopens them, duplicates to 22 with 22 shared memberships, deletes and creates another case, then restores to 23 scenarios/sequences. Save/reopen and Run all preserve the complete order; the valid 22 cases produce independent reports and the extra draft retains its ordinary not-run validation. Browser review created 23 rows and verified the `+`, count without a denominator, absence of overflow buttons, scrolling and right-click menu. Follow-up proof: `.scratch/issue-28/sidebar-simplified.png`.
+
+Follow-up validation: all 135 tests passed; type checking, production build and whitespace checks passed. Independent Standards and Spec reviews of the staged follow-up against `71b6ebaa80d4f396134b59a42c517339a13e4bcd` both reported zero findings.

@@ -131,7 +131,7 @@ export function connectCanvasAction(graph:CanvasGraph,from:string,actionId:strin
  const actions=previous?[...new Set([...edgeActions(previous),actionId])].filter(id=>!id.startsWith('pending:')):[actionId];
  const edge={id,from,to,actionTestId:actions[0],actionTestIds:previous?.actionTestIds!==undefined||actions.length>1?actions:undefined,assertionTestId:destination.tests.find(test=>test.check)?.id??'pending:'+id,responseCondition:previous?.responseCondition??graph.screens.find(screen=>screen.id===from)!.title+' → '+destination.title};
  let paths=graph.paths;let path=paths.find(path=>path.id===pathId)??paths.find(path=>path.edgeIds.includes(id))??paths.find(path=>path.screenId===from&&!path.edgeIds.length);
- if(!path){if(paths.length>=20)throw new Error('Select an existing scenario path; this canvas supports up to 20 paths.');path={id:id+':path',name:(graph.screens.find(screen=>screen.id===from)!.title+' → '+destination.title).slice(0,120),screenId:from,edgeIds:[]};paths=[...paths,path];}
+ if(!path){path={id:id+':path',name:(graph.screens.find(screen=>screen.id===from)!.title+' → '+destination.title).slice(0,120),screenId:from,edgeIds:[]};paths=[...paths,path];}
  const tail=visitScreenId(graph,path,path.edgeIds.length);
  if(tail===from&&!path.finished&&!path.edgeIds.includes(id))paths=paths.map(item=>item.id===path!.id?{...item,...appendRouteTransition(graph,item,id)}:item);
  return {graph:{...graph,edges:previous?graph.edges.map(item=>item.id===id?edge:item):[...graph.edges,edge],paths},pathId:path.id};

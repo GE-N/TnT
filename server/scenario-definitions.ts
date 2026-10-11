@@ -12,7 +12,7 @@ export function namedInputs(value:unknown):Record<string,string>{
 }
 export function readScenarios(value:unknown):ScenarioDefinition[]|undefined{
  if(value===undefined)return;
- if(!Array.isArray(value)||value.length>20)throw new Error('Use at most 20 named scenarios.');
+ if(!Array.isArray(value))throw new Error('Provide a list of named scenarios.');
  const ids=new Set<string>();
  return value.map((item:ScenarioDefinition)=>{
   if(!item||typeof item.id!=='string'||! /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(item.id)||ids.has(item.id)||typeof item.name!=='string'||!item.name.trim()||item.name.length>120)throw new Error('Scenarios require unique IDs and nonempty names.');
