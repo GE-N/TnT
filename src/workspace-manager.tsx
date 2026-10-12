@@ -26,7 +26,7 @@ export function WorkspaceManager({token,id,name,status,busy,blocked,dirty,onActi
  const [query,setQuery]=useState('');const [title,setTitle]=useState('');
  const [library,setLibrary]=useState<WorkspaceLibrary>();const [error,setError]=useState('');const [loading,setLoading]=useState(false);
  const [switchFailure,setSwitchFailure]=useState<Action>();const [confirmDiscard,setConfirmDiscard]=useState(false);const [retry,setRetry]=useState(0);
- const trigger=useRef<HTMLButtonElement>(null);const surface=useRef<HTMLDivElement>(null);const switchOpener=useRef<HTMLElement|null>(null);
+ const trigger=useRef<HTMLButtonElement>(null);const surface=useRef<HTMLDivElement>(null);const switchOpener=useRef<HTMLElement|null>(null);const failurePhase=useRef<'closed'|'failure'|'confirm'>('closed');
  const close=()=>{switchOpener.current=null;setPanel(undefined);setSwitchFailure(undefined);setConfirmDiscard(false);setError('');trigger.current?.focus();};
  useEffect(()=>{if(openSignal){setQuery('');setPanel('compact');}},[openSignal]);
  useEffect(()=>{
@@ -37,10 +37,15 @@ export function WorkspaceManager({token,id,name,status,busy,blocked,dirty,onActi
   return()=>{active=false;};
  },[panel,query,token,status,retry]);
  useEffect(()=>{
-  if(!panel)return;
-  if(switchFailure)surface.current?.querySelector<HTMLButtonElement>('.workspace-form-actions button:not(:disabled)')?.focus();
-  else if(switchOpener.current){const opener=switchOpener.current;switchOpener.current=null;const label=(opener.textContent??'').trim();const restored=label?[...surface.current?.querySelectorAll<HTMLButtonElement>('button')??[]].find(button=>button.textContent?.trim()===label):undefined;(restored??(opener.isConnected?opener:undefined)??surface.current?.querySelector<HTMLButtonElement>('.workspace-primary')??trigger.current)?.focus();}
-  else{const input=surface.current?.querySelector<HTMLInputElement>('input');(input??surface.current?.querySelector<HTMLButtonElement>('button'))?.focus();if(panel==='rename'||panel==='new'||panel==='copy')input?.select();}
+  if(!panel){failurePhase.current='closed';return;}
+  if(switchFailure){
+    const actions=surface.current?.querySelector('.workspace-form-actions');
+    const labeled=(label:string)=>[...actions?.querySelectorAll<HTMLButtonElement>('button')??[]].find(button=>button.textContent?.trim()===label);
+    if(confirmDiscard){if(failurePhase.current!=='confirm'){failurePhase.current='confirm';labeled('Cancel')?.focus();}}
+    else if(failurePhase.current==='confirm'){failurePhase.current='failure';labeled('Discard changes and switch')?.focus();}
+    else if(failurePhase.current!=='failure'){failurePhase.current='failure';actions?.querySelector<HTMLButtonElement>('.workspace-primary')?.focus();}
+  }else if(switchOpener.current){failurePhase.current='closed';const opener=switchOpener.current;switchOpener.current=null;const label=(opener.textContent??'').trim();const restored=label?[...surface.current?.querySelectorAll<HTMLButtonElement>('button')??[]].find(button=>button.textContent?.trim()===label):undefined;(restored??(opener.isConnected?opener:undefined)??surface.current?.querySelector<HTMLButtonElement>('.workspace-primary')??trigger.current)?.focus();}
+  else{failurePhase.current='closed';const input=surface.current?.querySelector<HTMLInputElement>('input');(input??surface.current?.querySelector<HTMLButtonElement>('button'))?.focus();if(panel==='rename'||panel==='new'||panel==='copy')input?.select();}
   const measure=()=>surface.current?.style.setProperty('--workspace-space',Math.max(160,window.innerHeight-(trigger.current?.getBoundingClientRect().bottom??0)-16)+'px');measure();window.addEventListener('resize',measure);
 
   function outside(event:PointerEvent){if(!switchFailure&&panel==='compact'&&!surface.current?.contains(event.target as Node)&&!trigger.current?.contains(event.target as Node))close();}
