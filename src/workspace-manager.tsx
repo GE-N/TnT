@@ -21,13 +21,14 @@ function workspaceDate(value:string){
  const date=new Date(value);const today=new Date();const yesterday=new Date(today);yesterday.setDate(today.getDate()-1);
  return date.toDateString()===today.toDateString()?'Today':date.toDateString()===yesterday.toDateString()?'Yesterday':date.toLocaleDateString(undefined,{month:'short',day:'numeric',...(date.getFullYear()!==today.getFullYear()?{year:'numeric' as const}:{})});
 }
-export function WorkspaceManager({token,id,name,status,busy,blocked,dirty,onAction,onSave,recovery}:{token:string;id:string;name:string;status:string;busy:boolean;blocked:boolean;dirty:boolean;onAction:(action:Action,saved?:Workspace)=>Promise<void>;onSave:()=>Promise<Workspace>;recovery:boolean}){
+export function WorkspaceManager({token,id,name,status,busy,blocked,dirty,onAction,onSave,onPrepare,recovery,notice,openSignal}:{token:string;id:string;name:string;status:string;busy:boolean;blocked:boolean;dirty:boolean;onAction:(action:Action,saved?:Workspace,options?:{discard?:boolean})=>Promise<void>;onSave:()=>Promise<Workspace>;onPrepare:(action:Action)=>Promise<Workspace|undefined>;recovery:boolean;notice?:string;openSignal?:number}){
  const [panel,setPanel]=useState<'compact'|'library'|'rename'|'new'|'copy'>();
  const [query,setQuery]=useState('');const [title,setTitle]=useState('');
  const [library,setLibrary]=useState<WorkspaceLibrary>();const [error,setError]=useState('');const [loading,setLoading]=useState(false);
- const [pending,setPending]=useState<Action>();const [retry,setRetry]=useState(0);
+ const [switchFailure,setSwitchFailure]=useState<Action>();const [confirmDiscard,setConfirmDiscard]=useState(false);const [retry,setRetry]=useState(0);
  const trigger=useRef<HTMLButtonElement>(null);const surface=useRef<HTMLDivElement>(null);
- const close=()=>{setPanel(undefined);setPending(undefined);setError('');trigger.current?.focus();};
+ const close=()=>{setPanel(undefined);setSwitchFailure(undefined);setConfirmDiscard(false);setError('');trigger.current?.focus();};
+ useEffect(()=>{if(openSignal){setQuery('');setPanel('compact');}},[openSignal]);
  useEffect(()=>{
   if(panel!=='compact'&&panel!=='library')return;
   let active=true;setLoading(true);setError('');
@@ -40,37 +41,52 @@ export function WorkspaceManager({token,id,name,status,busy,blocked,dirty,onActi
   const input=surface.current?.querySelector<HTMLInputElement>('input');(input??surface.current?.querySelector<HTMLButtonElement>('button'))?.focus();if(panel==='rename'||panel==='new'||panel==='copy')input?.select();
   const measure=()=>surface.current?.style.setProperty('--workspace-space',Math.max(160,window.innerHeight-(trigger.current?.getBoundingClientRect().bottom??0)-16)+'px');measure();window.addEventListener('resize',measure);
 
-  function outside(event:PointerEvent){if(!pending&&panel==='compact'&&!surface.current?.contains(event.target as Node)&&!trigger.current?.contains(event.target as Node))close();}
+  function outside(event:PointerEvent){if(!switchFailure&&panel==='compact'&&!surface.current?.contains(event.target as Node)&&!trigger.current?.contains(event.target as Node))close();}
   document.addEventListener('pointerdown',outside);return()=>{document.removeEventListener('pointerdown',outside);window.removeEventListener('resize',measure);};
- },[panel,pending]);
+ },[panel,switchFailure]);
  async function perform(action:Action,saveFirst=false){
   setError('');
   try{const saved=saveFirst?await onSave():undefined;await onAction(action,saved);close();}catch(error){setError(error instanceof Error?error.message:'Workspace action failed. Current work is retained.');}
  }
- function choose(action:Action){
+ async function choose(action:Action){
   if(blocked){setError('Wait for active execution and cleanup before switching workspaces.');return;}
-  if(dirty&&(action.kind==='new'||action.kind==='open'))setPending(action);else void perform(action,dirty&&action.kind==='copy'&&!recovery);
+  if(action.kind==='rename'){await perform(action);return;}
+  setError('');setConfirmDiscard(false);
+  try{const saved=await onPrepare(action);await onAction(action,saved);close();}
+  catch(error){setSwitchFailure(action);setError(error instanceof Error?error.message:'');}
+ }
+ async function retrySwitch(){
+  if(!switchFailure)return;setError('');
+  try{const saved=await onPrepare(switchFailure);await onAction(switchFailure,saved);close();}
+  catch(error){setError(error instanceof Error?error.message:'');}
+ }
+ async function discardSwitch(){
+  if(!switchFailure)return;setError('');
+  try{await onAction(switchFailure,undefined,{discard:true});close();}
+  catch(error){setError(error instanceof Error?error.message:'Workspace action failed. Current work is retained.');}
  }
  const items=library?.items??[];
  const formPanel=panel==='rename'||panel==='new'||panel==='copy';
- const heading=pending?'Save your changes':panel==='library'?'All workspaces':panel==='rename'?'Rename workspace':panel==='new'?'New workspace':panel==='copy'?'Save a copy':name;
+ const heading=switchFailure?(confirmDiscard?'Discard changes':"Couldn't save"):panel==='library'?'All workspaces':panel==='rename'?'Rename workspace':panel==='new'?'New workspace':panel==='copy'?'Save a copy':name;
+ const statusTone=status.startsWith("Couldn't save")?'danger':status.startsWith('Draft kept')||status.startsWith('This workspace')?'warning':status==='Saved locally'?'success':'muted';
  const startRename=()=>{setTitle(name);setPanel('rename');};
  const startNew=()=>{setTitle('Untitled workspace');setPanel('new');};
  const startCopy=()=>{setTitle((name.slice(0,115)+' copy').slice(0,120));setPanel('copy');};
  return <div className="workspace-manager">
   <button ref={trigger} className="workspace-title" aria-label="Manage workspace" aria-expanded={!!panel} title={name} onClick={()=>{if(panel)close();else{setQuery('');setPanel('compact');}}}>
-   <WorkspaceIcon name="document"/><span className="workspace-identity"><strong>{name}</strong><span role="status">{status}</span></span><WorkspaceIcon name="chevron"/>
+   <WorkspaceIcon name="document"/><span className="workspace-identity"><strong>{name}</strong><span className={'workspace-save-status '+statusTone} role={statusTone==='danger'?'alert':'status'} aria-live={statusTone==='danger'?'assertive':'polite'} aria-label={status} title={status}><span className="workspace-save-icon" aria-hidden="true">{statusTone==='danger'?'!':statusTone==='warning'?'!':statusTone==='success'?'✓':'…'}</span><span className="workspace-save-text">{status}</span></span></span><WorkspaceIcon name="chevron"/>
   </button>
-  {panel&&<><div className={'workspace-management-backdrop '+(panel==='library'||formPanel||pending?'dimmed':'')} onPointerDown={()=>{if(panel==='compact'&&!pending)close();}}/><div ref={surface} role="dialog" aria-modal="true" aria-label={panel==='library'?'All workspaces':'Workspace manager'} className={'workspace-management-surface '+(panel==='library'?'expanded':'compact')} onKeyDown={event=>{
-   if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(pending){setPending(undefined);setError('');}else close();}
+  {panel&&<><div className={'workspace-management-backdrop '+(panel==='library'||formPanel||switchFailure?'dimmed':'')} onPointerDown={()=>{if(panel==='compact'&&!switchFailure)close();}}/><div ref={surface} role="dialog" aria-modal="true" aria-label={panel==='library'?'All workspaces':'Workspace manager'} className={'workspace-management-surface '+(panel==='library'?'expanded':'compact')} onKeyDown={event=>{
+   if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(confirmDiscard){setConfirmDiscard(false);setError('');}else if(switchFailure){setSwitchFailure(undefined);setError('');}else close();}
    if(event.key==='Tab'){const controls=Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled)'));const first=controls[0],last=controls.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}
   }}>
-   <header className="workspace-manager-heading"><div className="workspace-identity"><h3 title={heading}>{heading}</h3>{!formPanel&&!pending&&<small>{panel==='library'?'Saved on this computer':'Current workspace'}</small>}</div>
-    {!formPanel&&!pending&&panel==='compact'&&<button className="workspace-rename" aria-label="Rename workspace" disabled={busy||blocked} onClick={startRename}>Rename</button>}
+   <header className="workspace-manager-heading"><div className="workspace-identity"><h3 title={heading}>{heading}</h3>{!formPanel&&!switchFailure&&<small>{panel==='library'?'Saved on this computer':'Current workspace'}</small>}</div>
+    {!formPanel&&!switchFailure&&panel==='compact'&&<button className="workspace-rename" aria-label="Rename workspace" disabled={busy||blocked} onClick={startRename}>Rename</button>}
     <button className="workspace-close" aria-label="Close workspace manager" onClick={close}><WorkspaceIcon name="close"/></button>
    </header>
    {blocked&&<p className="workspace-feedback" role="status">Active execution: browse available; switching waits for cleanup.</p>}
-   {pending?<><p className="workspace-form-description">Save changes to “{name}” before continuing?</p><div className="workspace-form-actions"><button disabled={busy} onClick={()=>{setPending(undefined);setError('');}}>Cancel</button><button className="workspace-primary" disabled={busy} onClick={()=>void perform(pending,true)}>Save and continue</button></div></>:formPanel?<form onSubmit={event=>{event.preventDefault();const value=title.trim();if(!value||value.length>120){setError('Use a title of 1–120 characters.');return;}choose({kind:panel,name:value});}}>
+   {notice&&!switchFailure&&<p className="workspace-feedback" role="status">{notice}</p>}
+   {switchFailure?<><p className="workspace-form-description">{confirmDiscard?`Discard unsaved changes to “${name}” and switch? This can't be undone.`:"Couldn't save your changes before switching."}</p><div className="workspace-form-actions">{confirmDiscard?<><button className="workspace-danger" disabled={busy} onClick={()=>void discardSwitch()}>Discard</button><button disabled={busy} onClick={()=>setConfirmDiscard(false)}>Cancel</button></>:<><button className="workspace-danger" disabled={busy} onClick={()=>setConfirmDiscard(true)}>Discard changes and switch</button><button disabled={busy} onClick={()=>{setSwitchFailure(undefined);setError('');}}>Cancel</button><button className="workspace-primary" disabled={busy} onClick={()=>void retrySwitch()}>Retry</button></>}</div></>:formPanel?<form onSubmit={event=>{event.preventDefault();const value=title.trim();if(!value||value.length>120){setError('Use a title of 1–120 characters.');return;}void choose({kind:panel,name:value});}}>
     <label htmlFor="workspace-title-input">{panel==='rename'?'Workspace title':panel==='copy'?'Copy title':'New workspace title'}</label><input id="workspace-title-input" value={title} maxLength={120} onChange={event=>setTitle(event.target.value)}/>
     {panel==='copy'&&<p className="workspace-form-description">An independent editable copy. Runtime inputs and previous run results stay with the original session.</p>}
     <div className="workspace-form-actions"><button type="button" disabled={busy} onClick={close}>Cancel</button><button className="workspace-primary" disabled={busy||blocked}>{panel==='rename'?'Done':panel==='copy'?'Create copy':'Create workspace'}</button></div>

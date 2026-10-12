@@ -72,7 +72,7 @@ export function App() {
         <AppPicker key={deviceId+status?.token} deviceId={deviceId} token={status?.token??''} value={bundleId} onChange={setBundleId} onReady={setPickerReady} disabled={busy||scenarioBusy}/>
       </div>
       {(error||status?.error)&&<div className="notice error" role="alert">{error||status?.error}</div>}
-      <Scenarios token={status?.token??''} deviceId={deviceId} bundleId={bundleId} launchBusy={busy} onRunning={setScenarioBusy}/>
+      <Scenarios token={status?.token??''} deviceId={deviceId} bundleId={bundleId} launchBusy={busy} onRunning={setScenarioBusy} recoverSession/>
       <details><summary>Advanced launch tools</summary><form onSubmit={launch}><button className="confirm" disabled={!ready||!pickerReady||busy||scenarioBusy}>Launch app</button></form>{result&&<><p>{result.bundleId} · {result.status}</p>{screen&&<img className="device-screen" src={screen} alt="Captured launch screen"/>}{result.status==='awaiting-confirmation'&&<button onClick={()=>void confirm()} disabled={busy||!screen}>I can see the app</button>}<pre>{result.log}</pre></>}</details>
       <footer><span>iOS first · Local execution</span><span>Pick reviewed steps from the simulator · Isolated mock scenarios and reusable assertions.</span></footer>
     </main>

@@ -1,4 +1,4 @@
-import {createWorkspaceStore,type WorkspaceMetadata} from './workspace-store.js';
+import {createWorkspaceStore,type WorkspaceMetadata,type WorkspaceStoreFaults} from './workspace-store.js';
 import {createBatches} from './batches.js';
 import {projectCanvasRoute} from './canvas-route.js';
 import {refreshChecks,operationProblem} from '../shared/canvas-authoring.js';
@@ -32,7 +32,7 @@ export type Maestro = {
 };
 const validId = (id: string) => { if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new Error('Invalid workspace/run identifier.'); return id; };
 
-export function createScenarios(options: { root: string; runner: ReturnType<typeof createRunner>; maestro: Maestro }) {
+export function createScenarios(options: { root: string; runner: ReturnType<typeof createRunner>; maestro: Maestro; faults?: WorkspaceStoreFaults; now?: () => Date }) {
   const pending = new Map<string, Promise<Run>>();
   const controllers = new Map<string, AbortController>();
   async function directory(kind: string, id: string) {
@@ -58,7 +58,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       return { scenarios, automation, flows, mock, canvas, canvasDiagnostics, id: input.id ? validId(input.id) : '', name: input.name.trim(), yaml: input.yaml };
 
   }
-  const workspaceStore=createWorkspaceStore(options.root,authoredWorkspace);
+  const workspaceStore=createWorkspaceStore(options.root,authoredWorkspace,{faults:options.faults,now:options.now});
   const service = {
     async preview(input:{yaml:string;flows?:Record<string,string>;automation?:unknown;canvas?:unknown;mock?:unknown;scenarios?:unknown;scenarioId?:string;pathId?:string;runtimeInputs?:unknown;resetApp?:boolean}) {
       if(typeof input.yaml!=='string'||Buffer.byteLength(input.yaml)>100_000)throw new Error('Provide YAML up to 100 KB.');
@@ -85,15 +85,29 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       if(automationError)catalog.diagnostics.push({ownerId:'automation',detail:automationError});
       return catalog;
     },
-    async save(input: { expectedRevision?:number; metadata?:WorkspaceMetadata; id?: string; name: string; yaml: string; flows?: Record<string,string>; mock?: unknown; canvas?: unknown; automation?:unknown; scenarios?:unknown }): Promise<Workspace> {
+    async save(input: { clearDraft?:number; expectedRevision?:number; metadata?:WorkspaceMetadata; id?: string; name: string; yaml: string; flows?: Record<string,string>; mock?: unknown; canvas?: unknown; automation?:unknown; scenarios?:unknown }): Promise<Workspace> {
       const revision=input.expectedRevision??input.metadata?.revision??0;
       if(!Number.isSafeInteger(revision)||revision<0)throw new Error('Invalid workspace revision.');
-      return workspaceStore.save(authoredWorkspace(input),revision);
+      if(input.clearDraft!==undefined&&(!Number.isSafeInteger(input.clearDraft)||input.clearDraft<0))throw new Error('Invalid draft revision.');
+      return workspaceStore.save(authoredWorkspace(input),revision,input.clearDraft);
     },
     async workspace(id: string): Promise<Workspace> { return workspaceStore.read(id); },
+    async workspaceDetail(id:string){return workspaceStore.bundle(id);},
     async openWorkspace(id:string){return workspaceStore.open(id);},
     async renameWorkspace(id:string,name:string,expectedRevision=0){if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0)throw new Error('Invalid workspace revision.');return workspaceStore.rename(id,name,expectedRevision);},
     async listWorkspaces(query=''){return workspaceStore.list(query);},
+    async saveDraft(id:string,input:{baseRevision:number;expectedDraftRevision:number;name:string;content:unknown;fields:unknown}){return workspaceStore.saveDraft(id,input);},
+    async createDraftWorkspace(input:{name:string;content:unknown;fields:unknown}){
+      const shell=authoredWorkspace({name:input.name,yaml:'appId: com.example.HybridApp\n---\n- launchApp\n',flows:{},scenarios:[],canvas:{screens:[],edges:[],paths:[]}});
+      return workspaceStore.createWithDraft(shell,input);
+    },
+    async discardDraft(id:string,expectedDraftRevision:number){return workspaceStore.discardDraft(id,expectedDraftRevision);},
+    async saveView(id:string,view:unknown){return workspaceStore.saveView(id,view);},
+    async session(){return workspaceStore.session();},
+    async setSession(id:string|null){return workspaceStore.setSession(id);},
+    async trashWorkspace(id:string){return workspaceStore.trash(id);},
+    async restoreWorkspace(id:string){return workspaceStore.restore(id);},
+    async purgeWorkspace(id:string){return workspaceStore.purge(id);},
     async copyWorkspace(input:Parameters<typeof authoredWorkspace>[0]){
       const content=authoredWorkspace({...input,id:undefined});
       const incomplete=content.canvas?.screens.flatMap(screen=>screen.tests).find(test=>operationProblem(test));if(incomplete)throw new Error('Repair incomplete canvas content before copying. '+operationProblem(incomplete));

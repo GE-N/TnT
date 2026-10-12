@@ -1,6 +1,6 @@
-import {useWorkspaceDraft} from './workspace-drafts.js';
+import {RecoveredFields,useWorkspaceDraft} from './workspace-drafts.js';
 import {planCanvasDeletion,type CanvasDeletion,connectVisitAction,connectionVisitActions,freezeVisitOperations,visitOperations,updateVisitOperations,privateVisitOperation,refreshChecks,writeChecks,backControl,canvasTestLabel,connectCanvasAction,appendCanvasConnection,edgeActions,routeVisits,visitChecks,visitScreenId,screenChecks,appendRouteTransition,isAuthored,type ScreenCheck} from '../shared/canvas-authoring.js';
-import {useEffect,useId,useRef,useState,type ReactNode,type MouseEvent} from 'react';
+import {useContext,useEffect,useId,useRef,useState,type ReactNode,type MouseEvent} from 'react';
 import type {YAMLReference,CanvasGraph,CanvasTest,CanvasDiagnostic,CanvasResult,CatalogEntry,ScreenNode} from '../server/canvas.js';
 
 export const emptyCanvas=():CanvasGraph=>({screens:[],edges:[],paths:[]});
@@ -8,10 +8,13 @@ const identity=()=>crypto.randomUUID();
 function DeleteIcon(){return <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg>;}
 function draftNavigationAction():CanvasTest{return {id:identity(),label:'Tap action',role:'action',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},tap:{target:'text',match:'exact',value:''}};}
 function draftScreenCheck():CanvasTest{return {id:identity(),label:'Screen check',role:'assertion',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:''}};}
-function NodeTitle({title,onRename,onSelect}:{title:string;onRename:(title:string)=>void;onSelect?:()=>void}){
- const [draft,setDraft]=useState(title);
- useWorkspaceDraft(draft!==title);
- useEffect(()=>setDraft(title),[title]);
+function NodeTitle({title,screenId,onRename,onSelect}:{title:string;screenId:string;onRename:(title:string)=>void;onSelect?:()=>void}){
+ const recovered=useContext(RecoveredFields);
+ const fieldKey='screen-title:'+screenId;
+ const recoveredTitle=recovered[fieldKey];
+ const [draft,setDraft]=useState(recoveredTitle??title);
+ useWorkspaceDraft(draft!==title,fieldKey,draft);
+ useEffect(()=>{setDraft(current=>current!==title&&recoveredTitle!==undefined&&current===recoveredTitle?current:title);},[title,recoveredTitle]);
  return <input className="screen-node-title" aria-label={'Screen title for '+title} title="Edit screen title · Enter to save · Escape to cancel" value={draft} maxLength={120} onFocus={onSelect} onChange={event=>setDraft(event.target.value)} onBlur={()=>{const next=draft.trim();if(next&&next!==title)onRename(next);setDraft(next||title);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();event.currentTarget.blur();}if(event.key==='Escape'){event.preventDefault();setDraft(title);}}}/>;
 }
 function NodeInfo({screen,disabled,error,onImage,onRemove,onClose}:{screen:ScreenNode;disabled:boolean;error:string;onImage:(file?:File)=>void;onRemove:()=>void;onClose:()=>void}){
@@ -38,8 +41,8 @@ function NodeInfo({screen,disabled,error,onImage,onRemove,onClose}:{screen:Scree
 }
 const referenceLabel=(reference:YAMLReference)=>reference.kind==='setup'?'Setup · '+reference.file:reference.kind==='handler'?`Handler ${reference.actionId} · before step ${(reference.index??0)+1} · ${reference.file}`:reference.kind==='flow'?reference.file:`step ${(reference.index??0)+1}`;
 export type CanvasInspection={kind:'visit'|'occurrence'|'transition';id:string};
-export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selected,renderChecks,onDelete,onRename,onAdd,onRun,onInfo,onAppend}: {onInspect?:(selection:CanvasInspection)=>void;onAppend?:(id:string)=>void;onInfo?:(id:string)=>void;graph:CanvasGraph;pathId?:string;result?:CanvasResult;onMove?:(id:string,x:number,y:number)=>void;onSelect?:(id:string)=>void;selected?:string;renderChecks?:(screenId:string)=>ReactNode;onDelete?:(id:string)=>void;onRename?:(id:string,title:string)=>void;onAdd?:(x:number,y:number)=>void;onRun?:()=>void}){
- const [zoom,setZoom]=useState(.85);
+export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selected,renderChecks,onDelete,onRename,onAdd,onRun,onInfo,onAppend,initialView,onViewportChange}: {onInspect?:(selection:CanvasInspection)=>void;onAppend?:(id:string)=>void;onInfo?:(id:string)=>void;graph:CanvasGraph;pathId?:string;result?:CanvasResult;onMove?:(id:string,x:number,y:number)=>void;onSelect?:(id:string)=>void;selected?:string;renderChecks?:(screenId:string)=>ReactNode;onDelete?:(id:string)=>void;onRename?:(id:string,title:string)=>void;onAdd?:(x:number,y:number)=>void;onRun?:()=>void;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number};onViewportChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number})=>void}){
+ const [zoom,setZoom]=useState(()=>Math.max(.4,Math.min(1.4,typeof initialView?.zoom==='number'?initialView.zoom:.85)));
  const [contextMenu,setContextMenu]=useState<{left:number;top:number;x:number;y:number;screenId?:string}>();
  const menu=useRef<HTMLDivElement>(null);
  const contextTarget=useRef<HTMLElement|null>(null);
@@ -69,6 +72,22 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   surface.current?.querySelectorAll('[data-screen-id]').forEach(element=>observer.observe(element));
   return()=>observer.disconnect();
  },[graph.screens]);
+ const viewportRef=useRef<HTMLDivElement>(null);
+ const skipViewportReport=useRef(true);
+ useEffect(()=>{
+  const node=viewportRef.current;
+  if(initialView){if(node){node.scrollLeft=initialView.scrollLeft??0;node.scrollTop=initialView.scrollTop??0;}}
+  else if(node&&graph.screens.length&&node.clientWidth>40&&node.clientHeight>40){
+   const maxX=Math.max(...graph.screens.map(screen=>screen.x+280),1);
+   const maxY=Math.max(...graph.screens.map(screen=>screen.y+220),1);
+   setZoom(Math.max(.4,Math.min(1.4,Math.round(Math.min(node.clientWidth/maxX,node.clientHeight/maxY)*100)/100)));
+  }
+ },[]);
+ useEffect(()=>{
+  if(skipViewportReport.current){skipViewportReport.current=false;return;}
+  const node=viewportRef.current;
+  onViewportChange?.({zoom,scrollLeft:node?.scrollLeft??0,scrollTop:node?.scrollTop??0});
+ },[zoom]);
  const boardHeight=Math.max(1650,...graph.screens.map(screen=>screen.y+(nodeHeights[screen.id]??200)+120));const marker=useId().replaceAll(':','');
  const drag=useRef<{id:string;x:number;y:number;clientX:number;clientY:number}|undefined>(undefined);
  const route=graph.paths.find(path=>path.id===pathId);const visits=route?routeVisits(graph,route):[];const selectedEdges=new Set(route?.edgeIds??[]);
@@ -76,7 +95,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  if(route?.screenId)selectedScreens.add(route.screenId);
  function color(status?:string){return status==='passed'?'var(--success)':status==='failed'?'var(--danger)':status==='skipped'?'var(--warning)':'var(--accent)';}
  return <div className="canvas-board-wrap"><div className="canvas-toolbar"><span>Drag screen headers · scroll to pan{onAdd&&' · Right-click for node options'}</span><button onClick={()=>setZoom(value=>Math.max(.4,value-.1))} aria-label="Zoom out">−</button><span>{Math.round(zoom*100)}%</span><button onClick={()=>setZoom(value=>Math.min(1.4,value+.1))} aria-label="Zoom in">+</button><button onClick={()=>setZoom(.85)}>Reset zoom</button></div>
- <div className="canvas-viewport" role="region" aria-label={result?'Executed screen canvas':'Screen test canvas'}><div style={{width:2700*zoom,height:boardHeight*zoom}}><div className="canvas-surface" tabIndex={onAdd||onRun?0:undefined} onContextMenu={event=>openMenu(event)} ref={surface} style={{height:boardHeight,transform:`scale(${zoom})`}}>
+ <div className="canvas-viewport" ref={viewportRef} onScroll={event=>{const node=event.currentTarget;onViewportChange?.({zoom,scrollLeft:node.scrollLeft,scrollTop:node.scrollTop});}} role="region" aria-label={result?'Executed screen canvas':'Screen test canvas'}><div style={{width:2700*zoom,height:boardHeight*zoom}}><div className="canvas-surface" tabIndex={onAdd||onRun?0:undefined} onContextMenu={event=>openMenu(event)} ref={surface} style={{height:boardHeight,transform:`scale(${zoom})`}}>
  <svg className="canvas-lines" width="2700" height={boardHeight} aria-label="Screen transitions"><defs><marker id={marker} viewBox="0 0 8 8" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" refX="7" refY="4" orient="auto"><path d="M1,1 L7,4 L1,7" fill="none" stroke="context-stroke" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/></marker></defs>{graph.edges.map(edge=>{
  const from=graph.screens.find(screen=>screen.id===edge.from);const to=graph.screens.find(screen=>screen.id===edge.to);if(!from||!to)return null;
  const parallel=graph.edges.filter(item=>item.from===edge.from&&item.to===edge.to||item.from===edge.to&&item.to===edge.from);const offset=parallel.indexOf(edge)*64;const forward=to.x>=from.x;const start=[from.x+(forward?258:-8),from.y+58+offset];const end=[to.x+(forward?-8:258),to.y+58+offset];const middle=(start[0]+end[0])/2;const status=result?.edges.find(item=>item.id===edge.id)?.status;
@@ -84,7 +103,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  })}</svg>
  {graph.screens.map(screen=>{const outcome=result?.screens.find(item=>item.id===screen.id)?.status;return <article key={screen.id} data-screen-id={screen.id} className={'screen-node '+(selectedScreens.has(screen.id)?'on-route ':'')+(selected===screen.id?'selected-screen':'')} style={{left:screen.x,top:screen.y,borderColor:selectedScreens.has(screen.id)?color(outcome):undefined}} aria-label={'Screen '+screen.title} tabIndex={onDelete||onInfo?0:undefined} onContextMenu={event=>openMenu(event,screen.id)}>
  <button className="screen-node-heading" aria-label={'Select screen '+screen.title} onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>{if(!onMove||event.button!==0)return;event.currentTarget.setPointerCapture(event.pointerId);drag.current={id:screen.id,x:screen.x,y:screen.y,clientX:event.clientX,clientY:event.clientY};}} onPointerMove={event=>{const current=drag.current;if(!current||current.id!==screen.id)return;onMove?.(screen.id,Math.max(0,Math.min(2400,current.x+(event.clientX-current.clientX)/zoom)),Math.max(0,Math.min(1400,current.y+(event.clientY-current.clientY)/zoom)));}} onPointerUp={()=>{drag.current=undefined;}} onPointerCancel={()=>{drag.current=undefined;}} onKeyDown={event=>{const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const direction=vectors[event.key];if(!direction||!onMove)return;event.preventDefault();const amount=event.shiftKey?40:10;onMove(screen.id,Math.max(0,Math.min(2400,screen.x+direction[0]*amount)),Math.max(0,Math.min(1400,screen.y+direction[1]*amount)));}}><span className="screen-icon">▣</span><span><span className={onRename?'screen-title-placeholder':undefined}>{screen.title}</span><small>{screen.tests.length} {screen.tests.length===1?'step':'steps'}</small></span><span className="node-handle"/></button>
- {onRename&&<NodeTitle title={screen.title} onRename={title=>onRename(screen.id,title)} onSelect={()=>onSelect?.(screen.id)}/>}
+ {onRename&&<NodeTitle screenId={screen.id} title={screen.title} onRename={title=>onRename(screen.id,title)} onSelect={()=>onSelect?.(screen.id)}/>}
  {screen.referenceScreenshot&&<img className="screen-reference" src={screen.referenceScreenshot} alt={'Reference for '+screen.title}/>}
  {result&&!selectedScreens.has(screen.id)&&<p>Outside scenario</p>}<div className="canvas-visit-numbers">{visits.map((visit,index)=>visitScreenId(graph,route!,index)===screen.id?<span key={visit.id}>Visit {index+1}</span>:null)}</div><div className="screen-test-list">{renderChecks?.(screen.id)}{screen.tests.filter(test=>!renderChecks||!isAuthored(test)).map(test=><div key={test.id} className="screen-test"><span>{canvasTestLabel(test)}<small>{test.role} · {result?(result.tests.find(item=>item.id===test.id)?.stepId?.replace(/^step-/, 'step ')??'See visit details'):referenceLabel(test.reference)}</small></span><span className={'outcome '+(result?.tests.find(item=>item.id===test.id)?.status??'unavailable')}>{result?.tests.find(item=>item.id===test.id)?.status??'linked'}</span></div>)}{!screen.tests.length&&!renderChecks&&<p>Add an action or check to this screen.</p>}</div>
  </article>;})}
@@ -104,7 +123,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  </div>;
 }
 
-export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,onRun,onRepairSource,scenarioMode=false,scenarioId,scenarios=[]}:{onRepairSource?:(ownerId:string)=>void;scenarioId?:string;scenarios?:{id:string;name:string;pathId?:string}[];scenarioMode?:boolean;onRun?:()=>void;yaml?:string;onYamlChange?:(yaml:string)=>void;graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean}){
+export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,onRun,onRepairSource,scenarioMode=false,scenarioId,scenarios=[],initialView,onViewChange}:{onRepairSource?:(ownerId:string)=>void;scenarioId?:string;scenarios?:{id:string;name:string;pathId?:string}[];scenarioMode?:boolean;onRun?:()=>void;yaml?:string;onYamlChange?:(yaml:string)=>void;graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string};onViewChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number;selectedScreenId:string})=>void}){
  const [pending,setPending]=useState<{graph:CanvasGraph;source?:string;warnings:string[]}>();
  const [undo,setUndo]=useState<{graph:CanvasGraph;yaml?:string;after:CanvasGraph;afterYaml?:string}>();
  const [expandedRow,setExpandedRow]=useState('');
@@ -112,16 +131,23 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  let displayGraph=graph;try{if(graph&&yaml)displayGraph=refreshChecks(graph,yaml);}catch{ /* Retain graph while invalid YAML is repaired. */ }
  graph=displayGraph;
  if(graph&&scenarioMode&&scenarioId)graph={...graph,paths:graph.paths.map(path=>({...path,scenarioId:scenarios.find(item=>item.pathId===path.id)?.id??path.scenarioId}))};
- const [selected,setSelected]=useState('');const [selectedVisit,setSelectedVisit]=useState('');
- const [referenceIndex,setReferenceIndex]=useState('');const [testLabel,setTestLabel]=useState('');const [role,setRole]=useState<CanvasTest['role']>('test');
+ const recovered=useContext(RecoveredFields);
+ const restoredForms=(()=>{try{return recovered['canvas-authoring']?JSON.parse(recovered['canvas-authoring']) as Record<string,string>:{};}catch{return {};}})();
+ const [selected,setSelected]=useState(()=>initialView?.selectedScreenId&&graph?.screens.some(screen=>screen.id===initialView.selectedScreenId)?initialView.selectedScreenId:'');const [selectedVisit,setSelectedVisit]=useState('');
+ const [referenceIndex,setReferenceIndex]=useState('');const [testLabel,setTestLabel]=useState(restoredForms.testLabel??'');const [role,setRole]=useState<CanvasTest['role']>('test');
  const [repairTarget,setRepairTarget]=useState<{ownerId:string;visitId?:string}>();
- const [repairTest,setRepairTest]=useState('');const [from,setFrom]=useState('');const [to,setTo]=useState('');const [action,setAction]=useState('');const [assertion,setAssertion]=useState('');const [condition,setCondition]=useState('');const [pathName,setPathName]=useState('');const [nextEdge,setNextEdge]=useState('');const [error,setError]=useState('');
- useWorkspaceDraft(!!(testLabel||from||to||action||assertion||condition||pathName||nextEdge));
+ const [repairTest,setRepairTest]=useState('');const [from,setFrom]=useState(restoredForms.from??'');const [to,setTo]=useState(restoredForms.to??'');const [action,setAction]=useState(restoredForms.action??'');const [assertion,setAssertion]=useState(restoredForms.assertion??'');const [condition,setCondition]=useState(restoredForms.condition??'');const [pathName,setPathName]=useState(restoredForms.pathName??'');const [nextEdge,setNextEdge]=useState(restoredForms.nextEdge??'');const [error,setError]=useState('');
+ const canvasDraft={testLabel,from,to,action,assertion,condition,pathName,nextEdge};
+ useWorkspaceDraft(Object.values(canvasDraft).some(Boolean),'canvas-authoring',JSON.stringify(canvasDraft));
+ const viewport=useRef({zoom:initialView?.zoom??.85,scrollLeft:initialView?.scrollLeft??0,scrollTop:initialView?.scrollTop??0});
+ const skipSelectedReport=useRef(true);
+ useEffect(()=>{if(skipSelectedReport.current){skipSelectedReport.current=false;return;}onViewChange?.({...viewport.current,selectedScreenId:selected});},[selected]);
  const infoScreen=graph?.screens.find(screen=>screen.id===nodeInfoId);
  const screen=graph?.screens.find(screen=>screen.id===selected);const path=graph?.paths.find(path=>path.id===pathId);
  const entry=catalog[Number(referenceIndex)];
  const apiId=useId();
- useEffect(()=>{setSelectedVisit('');setSelected('');setRepairTarget(undefined);},[pathId]);
+ const seenPath=useRef(pathId);
+ useEffect(()=>{if(seenPath.current===pathId)return;seenPath.current=pathId;setSelectedVisit('');setSelected('');setRepairTarget(undefined);},[pathId]);
  useEffect(()=>{
   if(!repairTarget)return;
   const operation=Array.from(document.querySelectorAll<HTMLElement>('.canvas-editor [data-operation-id]')).find(node=>node.dataset.operationId===repairTarget.ownerId);
@@ -304,7 +330,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  <ol aria-label="Scenario sequence">{path.screenId&&routeVisits(graph,path).map((visit,index)=>{const id=visitScreenId(graph!,path,index);const title=graph!.screens.find(screen=>screen.id===id)?.title??'Missing screen';return <li key={visit.id}><button aria-label={'Visit '+(index+1)+' · '+title} aria-pressed={selectedVisit===visit.id} onClick={()=>{setSelected(id??'');setSelectedVisit(visit.id);}}>{index+1} · {title}</button></li>;})}</ol>
  <button disabled={disabled||!path.screenId} onClick={()=>onChange({...graph,paths:graph.paths.map(item=>item.id===pathId?{...item,finished:!item.finished}:item)})}>{path.finished?'Resume sequence':'Finish sequence'}</button><span>{path.finished?'Finished · finite end saved':'Choose the next connection at the current end'}</span>
  </section>}
- <CanvasBoard onAppend={scenarioMode&&path?.screenId&&!path.finished&&!disabled?id=>perform(()=>appendScreen(id)):undefined} graph={boardGraph!} pathId={pathId} selected={selected} onRun={disabled?undefined:onRun} onAdd={disabled?undefined:(x,y)=>perform(()=>addScreen('New screen',x,y))} onRename={disabled?undefined:(id,title)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,title}:screen)})} onInfo={disabled?undefined:id=>{setNodeInfoId(id);setSelected(id);setError('');}} onDelete={disabled?undefined:deleteScreen} onSelect={id=>{setSelected(id);setSelectedVisit(path?routeVisits(graph,path).find((visit,index)=>visitScreenId(graph,path,index)===id)?.id??'':'');setRepairTest('');}} renderChecks={yaml!==undefined&&onYamlChange?renderVisitSections:undefined} onMove={disabled?undefined:(id,x,y)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,x,y}:screen)})}/>
+ <CanvasBoard initialView={initialView} onViewportChange={next=>{viewport.current=next;onViewChange?.({...next,selectedScreenId:selected});}} onAppend={scenarioMode&&path?.screenId&&!path.finished&&!disabled?id=>perform(()=>appendScreen(id)):undefined} graph={boardGraph!} pathId={pathId} selected={selected} onRun={disabled?undefined:onRun} onAdd={disabled?undefined:(x,y)=>perform(()=>addScreen('New screen',x,y))} onRename={disabled?undefined:(id,title)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,title}:screen)})} onInfo={disabled?undefined:id=>{setNodeInfoId(id);setSelected(id);setError('');}} onDelete={disabled?undefined:deleteScreen} onSelect={id=>{setSelected(id);setSelectedVisit(path?routeVisits(graph,path).find((visit,index)=>visitScreenId(graph,path,index)===id)?.id??'':'');setRepairTest('');}} renderChecks={yaml!==undefined&&onYamlChange?renderVisitSections:undefined} onMove={disabled?undefined:(id,x,y)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,x,y}:screen)})}/>
  {!scenarioMode&&<p className="field-hint">The selected route runs initial checks, ordered connection actions, then destination checks. Other branches are not selected automatically. Unassociated YAML commands remain in execution. Results map after the run; live per-step reporting remains unavailable. Declared setup and checkpoint-specific handler outcomes map after completion.</p>}
  {!scenarioMode&&<div className="canvas-inspectors"><fieldset disabled={disabled}><legend>Advanced YAML associations</legend>
  {!screen&&<p className="field-hint">Select a node on the canvas to edit its YAML associations.</p>}

@@ -1,15 +1,17 @@
-import {useWorkspaceDraft} from './workspace-drafts.js';
+import {RecoveredFields,useWorkspaceDraft} from './workspace-drafts.js';
 import {createPortal} from 'react-dom';
-import {useEffect,useRef,useState,type ReactNode} from 'react';
+import {useContext,useEffect,useRef,useState,type ReactNode} from 'react';
 import type {ScenarioDefinition} from '../server/scenario-definitions.js';
 
 type Props={children?:ReactNode;items:ScenarioDefinition[];selected:string;disabled:boolean;canRun:boolean;onSelect:(id:string)=>void;onCreate:()=>void;onRun:(id:string)=>void;onRunAll:()=>void;onRename:(name:string,id:string)=>void;onDuplicate:(id:string)=>void;onDelete:(id:string)=>void;onToggleSkip:(id:string)=>void};
 export function ScenarioSidebar({children,items,selected,disabled,canRun,onSelect,onCreate,onRun,onRunAll,onRename,onDuplicate,onDelete,onToggleSkip}:Props){
  const [search,setSearch]=useState('');
  const [menu,setMenu]=useState<{id:string;x:number;y:number}>();
- const [rename,setRename]=useState<{id:string;name:string}>();
+ const recovered=useContext(RecoveredFields);
+ const recoveredRename=Object.entries(recovered).find(([key])=>key.startsWith('scenario-rename:'));
+ const [rename,setRename]=useState<{id:string;name:string}|undefined>(recoveredRename?{id:recoveredRename[0].slice('scenario-rename:'.length),name:recoveredRename[1]}:undefined);
  const [error,setError]=useState('');
- useWorkspaceDraft(!!rename);
+ useWorkspaceDraft(!!rename,rename?`scenario-rename:${rename.id}`:undefined,rename?.name);
  const menuRef=useRef<HTMLDivElement>(null);
  const trigger=useRef<HTMLElement|null>(null);
  const renameRef=useRef<HTMLInputElement>(null);

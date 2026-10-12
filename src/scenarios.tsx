@@ -1,5 +1,5 @@
 import {WorkspaceManager,type WorkspaceAction} from './workspace-manager.js';
-import {WorkspaceDrafts} from './workspace-drafts.js';
+import {RecoveredFields,WorkspaceDrafts,type DraftReport} from './workspace-drafts.js';
 import {ScenarioSidebar} from './scenario-sidebar.js';
 import type {Batch} from '../server/batches.js';
 import {canvasTestLabel,routeVisits,operationProblem} from '../shared/canvas-authoring.js';
@@ -13,6 +13,7 @@ import {YamlEditor} from './yaml-editor.js';
 import { runnerClient,RunnerRequestError } from './runner-client.js';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import type { Run, Workspace } from '../server/scenarios.js';
+import type {WorkspaceDraft} from '../server/workspace-store.js';
 import {CanvasEditor,emptyCanvas} from './canvas.js';
 import type {CanvasGraph,CanvasDiagnostic,CatalogEntry} from '../server/canvas.js';
 import { MockSetup } from './mock-setup.js';
@@ -20,7 +21,7 @@ import type { MockPlan } from '../server/mockoon.js';
 import { parseAllDocuments } from 'yaml';
 import { Picker } from './picker.js';
 
-export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: { token: string; deviceId: string; bundleId: string; launchBusy: boolean; onRunning: (running: boolean) => void }) {
+export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, recoverSession=false }: { token: string; deviceId: string; bundleId: string; launchBusy: boolean; onRunning: (running: boolean) => void; recoverSession?: boolean }) {
   const [definitions,setDefinitions]=useState<ScenarioDefinition[]>([]);
   const [scenarioId,setScenarioId]=useState('');
   const [deletedScenario,setDeletedScenario]=useState<{name:string;restore:()=>void}>();
@@ -66,11 +67,42 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   const [saveProblem,setSaveProblem]=useState('');
   const [conflict,setConflict]=useState(false);
   const [retrySave,setRetrySave]=useState(0);
-  const persistence=useRef({id:'',revision:0,epoch:0});
+  const persistence=useRef({id:'',revision:0,draftRevision:0,epoch:0});
   const saveQueue=useRef<Promise<unknown>>(Promise.resolve());
   const failedKey=useRef('');
+  const failedDraftKey=useRef('');
+  const lastValid=useRef<Workspace|undefined>(undefined);
+  const viewRef=useRef<Record<string,unknown>>({format:1});
+  const draftRecord=useRef<WorkspaceDraft|null>(null);
+  const latestDraftKey=useRef('');
+  const fieldsRef=useRef(new Map<string,DraftReport>());
+  const sessionOnce=useRef(false);
   const [drafts,setDrafts]=useState<string[]>([]);
-  const reportDraft=useCallback((id:string,pending:boolean)=>setDrafts(current=>pending?(current.includes(id)?current:[...current,id]):current.filter(item=>item!==id)),[]);
+  const [fieldEpoch,setFieldEpoch]=useState(0);
+  const [viewTick,setViewTick]=useState(0);
+  const [recoveredFields,setRecoveredFields]=useState<Record<string,string>>({});
+  const [draftSavedAt,setDraftSavedAt]=useState('');
+  const [draftBase,setDraftBase]=useState(0);
+  const [draftRevisionShown,setDraftRevisionShown]=useState(0);
+  const [dismissedDraft,setDismissedDraft]=useState(0);
+  const [savedRevision,setSavedRevision]=useState(0);
+  const [draftError,setDraftError]=useState('');
+  const [draftFailed,setDraftFailed]=useState(false);
+  const [draftSaving,setDraftSaving]=useState(false);
+  const [acknowledgedDraftKey,setAcknowledgedDraftKey]=useState('');
+  const [scenarioNotice,setScenarioNotice]=useState('');
+  const [conflictBar,setConflictBar]=useState(false);
+  const [chooserNotice,setChooserNotice]=useState('');
+  const [chooserSignal,setChooserSignal]=useState(0);
+  const [confirmCorrupt,setConfirmCorrupt]=useState(false);
+  const reportDraft=useCallback((id:string,report:DraftReport)=>{
+    const previous=fieldsRef.current.get(id);
+    const same=!!previous&&previous.pending===report.pending&&previous.key===report.key&&previous.value===report.value;
+    if(!report.pending&&!previous)return;
+    if(report.pending)fieldsRef.current.set(id,report);else fieldsRef.current.delete(id);
+    setDrafts(current=>report.pending?(current.includes(id)?current:[...current,id]):current.filter(item=>item!==id));
+    if(!same)setFieldEpoch(value=>value+1);
+  },[]);
   const contentKey=(value:{name:string;yaml:string;flows?:unknown;mock?:unknown;canvas?:unknown;automation?:unknown;scenarios?:unknown})=>JSON.stringify({name:value.name,yaml:value.yaml,flows:value.flows??{},mock:value.mock,canvas:value.canvas,automation:value.automation,scenarios:value.scenarios??[]});
   let parsedFlows:unknown;try{parsedFlows=JSON.parse(flows);}catch{parsedFlows=flows;}
   const authoredContent={name,yaml,flows:parsedFlows,mock,canvas,automation,scenarios:definitions};
@@ -84,13 +116,44 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   const incompleteCanvas=!!canvas?.screens.some(screen=>screen.tests.some(test=>operationProblem(test)));
   const pendingDraft=!!(drafts.length||definitionError||mockError||automationError||expectedPage||invalidSource||incompleteCanvas);
   const dirty=pendingDraft||currentKey!==(acknowledged||initialKey.current);
-  const persistenceStatus=pendingDraft?'Unsaved draft · apply or repair':conflict?'Revision conflict · edits retained':saveFailed?'Save failed · changes retained':saving?'Saving locally…':dirty?'Unsaved changes':workspaceId?'Saved locally':'Not saved · local editing';
+  const draftFields:Record<string,string>={};
+  for(const report of fieldsRef.current.values())if(report.pending&&report.key&&typeof report.value==='string')draftFields[report.key]=report.value;
+  const draftContent={yaml,flows,canvas,scenarios:definitions,automation,mock};
+  const draftKey=JSON.stringify({name,content:draftContent,fields:draftFields});
+  latestDraftKey.current=draftKey;
+  const queuedWrite=saving||draftSaving;
+  const persistenceStatus=conflict?'This workspace was changed in another tab.':saveFailed||draftFailed?"Couldn't save.":pendingDraft&&acknowledgedDraftKey===draftKey?'Draft kept, not valid yet.':queuedWrite?'Saving…':!pendingDraft&&!!workspaceId&&currentKey===(acknowledged||initialKey.current)?'Saved locally':'Not saved yet';
+  const showRecovery=draftRevisionShown>0&&draftRevisionShown>dismissedDraft&&!draftError;
+  const staleDraft=showRecovery&&draftBase<savedRevision;
+  const storedCanvas=viewRef.current.canvas;
+  const initialCanvasView=storedCanvas&&typeof storedCanvas==='object'&&!Array.isArray(storedCanvas)?storedCanvas as {zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string}:undefined;
   useEffect(()=>{
-    if(!token||pendingDraft||conflict||submitting||pickerBusy||currentKey===(acknowledged||initialKey.current)||failedKey.current===currentKey)return;
+    if(!token||conflict||submitting||pickerBusy)return;
+    if(pendingDraft){
+      if(failedDraftKey.current===draftKey||acknowledgedDraftKey===draftKey)return;
+      const timer=setTimeout(()=>{void persistDraft().catch(()=>{});},300);
+      return()=>clearTimeout(timer);
+    }
+    if(currentKey===(acknowledged||initialKey.current)||failedKey.current===currentKey)return;
     const timer=setTimeout(()=>{void save().catch(()=>{});},300);
     return()=>clearTimeout(timer);
-  },[currentKey,acknowledged,pendingDraft,conflict,token,submitting,pickerBusy,retrySave]);
+  },[currentKey,acknowledged,pendingDraft,draftKey,acknowledgedDraftKey,conflict,token,submitting,pickerBusy,retrySave,fieldEpoch]);
   useEffect(()=>{if(!dirty)return;const guard=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard);},[dirty]);
+  useEffect(()=>{
+    if(!recoverSession||!token||sessionOnce.current)return;
+    sessionOnce.current=true;
+    const unavailable=()=>{setChooserNotice("That workspace isn't available anymore.");setChooserSignal(value=>value+1);};
+    void api('/api/session').then(async(session:{lastActiveId?:string|null;unavailable?:boolean})=>{
+      if(!session?.lastActiveId){if(session?.unavailable)unavailable();return;}
+      loadWorkspace(await api('/api/workspaces/'+session.lastActiveId));
+    }).catch(()=>unavailable());
+  },[recoverSession,token]);
+  useEffect(()=>{
+    if(!viewTick||!token||!persistence.current.id)return;
+    const epoch=persistence.current.epoch;const id=persistence.current.id;
+    const timer=setTimeout(()=>{void api('/api/workspaces/'+id+'/view',viewRef.current).then(saved=>{if(epoch===persistence.current.epoch&&persistence.current.id===id&&saved&&typeof saved==='object'&&!Array.isArray(saved))viewRef.current=saved;}).catch(()=>{});},300);
+    return()=>clearTimeout(timer);
+  },[viewTick,token]);
   const headers = { 'X-TnT-Token': token, 'Content-Type': 'application/json' };
   const api = runnerClient(token);
   useEffect(()=>{
@@ -196,26 +259,49 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     };
     setDeletedScenario({name:target.name,restore});
   }
-  function loadWorkspace(workspace:Workspace){
-    persistence.current={id:workspace.id,revision:workspace.metadata?.revision??0,epoch:persistence.current.epoch+1};failedKey.current='';setSaveProblem('');setConflict(false);
-    setLegacyCanvas(!workspace.scenarios?.some(item=>item.authoring==='canvas'));setDefinitions(workspace.scenarios??[]);setScenarioId(workspace.scenarios?.[0]?.id??'');setDefinitionError('');setResetApp(false);
+  function loadWorkspace(workspace:Workspace&{draft?:WorkspaceDraft|null;draftError?:string;view?:Record<string,unknown>|null}){
+    persistence.current={id:workspace.id,revision:workspace.metadata?.revision??0,draftRevision:workspace.draft?.draftRevision??0,epoch:persistence.current.epoch+1};
+    failedKey.current='';failedDraftKey.current='';setSaveProblem('');setConflict(false);setConflictBar(false);setSaveFailed(false);setDraftFailed(false);
+    const view=workspace.view&&typeof workspace.view==='object'&&!Array.isArray(workspace.view)?workspace.view:{format:1};
+    viewRef.current=view;
+    const scenarios=workspace.scenarios??[];
+    const savedScenario=typeof view.scenarioId==='string'?scenarios.find(item=>item.id===view.scenarioId):undefined;
+    const missingName=typeof view.scenarioName==='string'&&view.scenarioName?view.scenarioName:typeof view.scenarioId==='string'?view.scenarioId:'';
+    if(savedScenario){setScenarioId(savedScenario.id);setScenarioNotice('');}
+    else if(scenarios[0]&&missingName){setScenarioId(scenarios[0].id);setScenarioNotice(`Scenario '${missingName}' was deleted, showing '${scenarios[0].name}'.`);}
+    else{setScenarioId(scenarios[0]?.id??'');setScenarioNotice('');}
+    const savedPath=typeof view.pathId==='string'&&workspace.canvas?.paths.some(path=>path.id===view.pathId)?view.pathId:'';
+    setPathId(savedPath);
+    setLegacyCanvas(!scenarios.some(item=>item.authoring==='canvas'));setDefinitions(scenarios);setDefinitionError('');setResetApp(false);
     setDeletedScenario(undefined);setBatch(undefined);setWorkspaceId(workspace.id);setName(workspace.name);setYaml(workspace.yaml);setFlows(JSON.stringify(workspace.flows??{},null,2));
-    setAutomation(workspace.automation);setAutomationError('');setPreview(undefined);setCanvas(workspace.canvas);setPathId('');setLoadedMock(workspace.mock);setMock(workspace.mock);setMockError('');setLoadRevision(value=>value+1);
-    artifactSequence.current++;setRun(undefined);setArtifact(undefined);setInputs('');setExpectedPage('');setDrafts([]);setAcknowledged(contentKey(workspace));setSaveFailed(false);setSourceRepair(undefined);
+    setAutomation(workspace.automation);setAutomationError('');setPreview(undefined);setCanvas(workspace.canvas);setLoadedMock(workspace.mock);setMock(workspace.mock);setMockError('');setLoadRevision(value=>value+1);
+    artifactSequence.current++;setRun(undefined);setArtifact(undefined);setInputs('');setExpectedPage('');setDrafts([]);fieldsRef.current.clear();
+    setAcknowledged(contentKey(workspace));setSourceRepair(undefined);
+    setDraftError(workspace.draftError??'');setDraftSavedAt(workspace.draft?.savedAt??'');setDraftBase(workspace.draft?.baseRevision??0);setDraftRevisionShown(workspace.draft?.draftRevision??0);
+    setDismissedDraft(typeof view.dismissedDraftRevision==='number'?view.dismissedDraftRevision:0);setSavedRevision(workspace.metadata?.revision??0);
+    setRecoveredFields({});setAcknowledgedDraftKey('');setConfirmCorrupt(false);draftRecord.current=workspace.draft??null;
+    if(workspace.id)lastValid.current=workspace;
   }
   function requireAppliedDrafts(){const documents=parseAllDocuments(yaml);if(documents.length!==2||documents.some(doc=>doc.errors.length)||!Array.isArray(documents[1].toJS()))throw new Error('Repair incomplete YAML before saving, copying or switching workspaces. Your code is retained.');if(pendingDraft)throw new Error('Apply or cancel incomplete authoring drafts before saving, copying or switching workspaces. Your draft is retained in the editor.');}
-  async function workspaceAction(action:WorkspaceAction,saved?:Workspace){
+  async function prepareSwitch(action:WorkspaceAction){
     if(running||submitting||pickerBusy||launchBusy)throw new Error('Wait for execution and cleanup before managing the workspace.');
-    if(action.kind!=='rename'){requireAppliedDrafts();const incomplete=canvas?.screens.flatMap(screen=>screen.tests).find(test=>operationProblem(test));if(incomplete)throw new Error('Repair the incomplete canvas action or check before copying or switching. '+operationProblem(incomplete));}setSubmitting(true);setError('');
+    if(action.kind==='rename'||(action.kind==='copy'&&conflict&&!pendingDraft)||(!pendingDraft&&!dirty))return;
+    setSubmitting(true);
+    try{if(pendingDraft){await persistDraft();return lastValid.current;}return await save(scenarioId,true);}
+    finally{setSubmitting(false);}
+  }
+  async function workspaceAction(action:WorkspaceAction,saved?:Workspace,options?:{discard?:boolean}){
+    if(running||submitting||pickerBusy||launchBusy)throw new Error('Wait for execution and cleanup before managing the workspace.');
+    setSubmitting(true);setError('');
     const requestKey=latestKey.current;
-    const receive=(workspace:Workspace)=>{if(latestKey.current!==requestKey&&(!saved||latestKey.current!==contentKey(saved)))throw new Error('Newer edits are still unsaved. Current work is retained; retry the workspace action after saving.');loadWorkspace(workspace);};
+    const receive=(workspace:Workspace&{draft?:WorkspaceDraft|null;draftError?:string;view?:Record<string,unknown>|null})=>{if(!options?.discard&&latestKey.current!==requestKey&&(!saved||latestKey.current!==contentKey(saved)))throw new Error('Newer edits are still unsaved. Current work is retained; retry the workspace action after saving.');loadWorkspace(workspace);};
     try{
       if(action.kind==='open')receive(await api('/api/workspaces/'+action.id+'/open',{}));
       else if(action.kind==='new')loadWorkspace({id:'',name:action.name,yaml:'appId: com.example.HybridApp\n---\n- launchApp\n',flows:{},scenarios:[],canvas:emptyCanvas()});
-      else if(action.kind==='rename'){
-        setName(action.name);
-      }else{
-        const next=await api('/api/workspaces/copy',saved?{...saved,name:action.name}:reviewedContent({name:action.name}));receive(next);
+      else if(action.kind==='rename')setName(action.name);
+      else{
+        const source=options?.discard?(lastValid.current??reviewedContent({name:action.name})):saved?{...saved,name:action.name}:reviewedContent({name:action.name});
+        receive(await api('/api/workspaces/copy',{...source,id:undefined,name:action.name}));
       }
     }finally{setSubmitting(false);}
   }
@@ -231,19 +317,23 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     if(pickedYaml===undefined&&target?.authoring==='canvas'&&bundleId){const docs=parseAllDocuments(yaml);if(docs.length===2&&!docs.some(doc=>doc.errors.length)){docs[0].set('appId',bundleId);source=docs[0].toString()+'---\n'+docs[1].toString({directives:false});}}
     const content=reviewedContent({yaml:source});
     const epoch=persistence.current.epoch;
+    const clearDraft=persistence.current.draftRevision||undefined;
     const operation=saveQueue.current.then(async()=>{
       if(epoch!==persistence.current.epoch)throw new Error('Workspace changed before saving.');
       setSaving(true);
       try{
-        const workspace:Workspace=await api('/api/workspaces',{...content,id:persistence.current.id||undefined,expectedRevision:persistence.current.revision});
+        const workspace:Workspace=await api('/api/workspaces',{...content,id:persistence.current.id||undefined,expectedRevision:persistence.current.revision,clearDraft});
         if(epoch!==persistence.current.epoch)return workspace;
         const hasNewEdits=latestKey.current!==savingKey;
-        persistence.current={id:workspace.id,revision:workspace.metadata?.revision??0,epoch};
-        setWorkspaceId(workspace.id);setAcknowledged(contentKey(workspace));setSaveFailed(false);setSaveProblem('');failedKey.current='';
+        const draftStillCurrent=clearDraft!==undefined&&persistence.current.draftRevision===clearDraft;
+        persistence.current={id:workspace.id,revision:workspace.metadata?.revision??0,draftRevision:draftStillCurrent?0:persistence.current.draftRevision,epoch};
+        setWorkspaceId(workspace.id);setAcknowledged(contentKey(workspace));setSaveFailed(false);setDraftFailed(false);setSaveProblem('');setConflict(false);failedKey.current='';failedDraftKey.current='';
+        lastValid.current=workspace;setSavedRevision(workspace.metadata?.revision??0);
+        if(draftStillCurrent){setAcknowledgedDraftKey('');setRecoveredFields({});setDraftRevisionShown(0);setDraftSavedAt('');draftRecord.current=null;}
         if(!hasNewEdits){setYaml(workspace.yaml);setCanvas(workspace.canvas);setDefinitions(workspace.scenarios??[]);setAutomation(workspace.automation);setMock(workspace.mock);setFlows(JSON.stringify(workspace.flows??{},null,2));}
         return workspace;
       }catch(error){
-        if(epoch===persistence.current.epoch){const message=error instanceof Error?error.message:'Local save failed.';failedKey.current=savingKey;setSaveFailed(true);setSaveProblem(message);setConflict(error instanceof RunnerRequestError&&error.status===409);}
+        if(epoch===persistence.current.epoch){const message=error instanceof Error?error.message:'Local save failed.';failedKey.current=savingKey;setSaveFailed(true);setSaveProblem(message);const conflicted=error instanceof RunnerRequestError&&error.status===409;setConflict(conflicted);if(conflicted)setConflictBar(true);}
         throw error;
       }finally{setSaving(false);}
     });
@@ -251,6 +341,104 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     const workspace=await operation;
     if(requireCurrent&&latestKey.current!==savingKey&&latestKey.current!==contentKey(workspace))throw new Error('Newer edits are still unsaved. Review them and retry before continuing.');
     return workspace;
+  }
+  async function persistDraft(){
+    const key=latestDraftKey.current;const epoch=persistence.current.epoch;const fields={...draftFields};const content={...draftContent};const draftName=name;
+    const operation=saveQueue.current.then(async()=>{
+      if(epoch!==persistence.current.epoch)throw new Error('Workspace changed before saving.');
+      setDraftSaving(true);
+      try{
+        if(!persistence.current.id){
+          const created=await api('/api/workspaces/draft',{name:draftName,content,fields});
+          if(!created?.draft||!Number.isInteger(created.draft.draftRevision))throw new Error('Draft was not acknowledged.');
+          if(epoch!==persistence.current.epoch)return created;
+          persistence.current={id:created.workspace.id,revision:created.workspace.metadata?.revision??1,draftRevision:created.draft.draftRevision,epoch};
+          setWorkspaceId(created.workspace.id);lastValid.current=created.workspace;setSavedRevision(created.workspace.metadata?.revision??1);
+          if(latestDraftKey.current===key){setAcknowledgedDraftKey(key);setDraftFailed(false);setSaveFailed(false);setSaveProblem('');failedDraftKey.current='';setDraftSavedAt(created.draft.savedAt);setDraftBase(created.draft.baseRevision);setDraftRevisionShown(created.draft.draftRevision);draftRecord.current=created.draft;}
+          return created;
+        }
+        const result=await api('/api/workspaces/'+persistence.current.id+'/draft',{baseRevision:persistence.current.revision,expectedDraftRevision:persistence.current.draftRevision,name:draftName,content,fields});
+        if(!Number.isInteger(result?.draftRevision))throw new Error('Draft was not acknowledged.');
+        if(epoch!==persistence.current.epoch)return result;
+        persistence.current={...persistence.current,draftRevision:result.draftRevision};
+        if(latestDraftKey.current===key){
+          setAcknowledgedDraftKey(key);setDraftFailed(false);setSaveFailed(false);setSaveProblem('');failedDraftKey.current='';
+          setDraftSavedAt(result.savedAt);setDraftBase(persistence.current.revision);setDraftRevisionShown(result.draftRevision);
+          draftRecord.current=result.draft??{format:1,workspaceId:persistence.current.id,baseRevision:persistence.current.revision,draftRevision:result.draftRevision,savedAt:result.savedAt,name:draftName,content,fields};
+        }
+        return result;
+      }catch(error){
+        if(epoch===persistence.current.epoch){const message=error instanceof Error?error.message:'Local save failed.';failedDraftKey.current=key;setDraftFailed(true);setSaveProblem(message);const conflicted=error instanceof RunnerRequestError&&error.status===409;setConflict(conflicted);if(conflicted)setConflictBar(true);}
+        throw error;
+      }finally{setDraftSaving(false);}
+    });
+    saveQueue.current=operation.catch(()=>{});
+    return operation;
+  }
+  function rememberView(patch:Record<string,unknown>){
+    const current=viewRef.current;
+    const canvas=patch.canvas&&typeof patch.canvas==='object'&&!Array.isArray(patch.canvas)?{...(current.canvas&&typeof current.canvas==='object'&&!Array.isArray(current.canvas)?current.canvas as Record<string,unknown>:{}),...patch.canvas as Record<string,unknown>}:current.canvas;
+    const panels=patch.panels&&typeof patch.panels==='object'&&!Array.isArray(patch.panels)?{...(current.panels&&typeof current.panels==='object'&&!Array.isArray(current.panels)?current.panels as Record<string,unknown>:{}),...patch.panels as Record<string,unknown>}:current.panels;
+    const incomingFormat=typeof patch.format==='number'&&patch.format>=1?patch.format:1;
+    const existingFormat=typeof current.format==='number'&&current.format>=1?current.format:1;
+    viewRef.current={...current,...patch,format:Math.max(incomingFormat,existingFormat),...(canvas===undefined?{}:{canvas}),...(panels===undefined?{}:{panels})};
+    if(typeof patch.dismissedDraftRevision==='number')setDismissedDraft(patch.dismissedDraftRevision);
+    setViewTick(value=>value+1);
+  }
+  function selectScenario(id:string){
+    setScenarioId(id);setInputs('');
+    const item=definitions.find(entry=>entry.id===id);
+    setPathId(item?.pathId??'');
+    rememberView({scenarioId:id,scenarioName:item?.name??'',pathId:item?.pathId??''});
+  }
+  function restoreDraft(draft:WorkspaceDraft){
+    const content=draft.content??{};
+    const flowsValue=typeof content.flows==='string'?content.flows:JSON.stringify(content.flows??{},null,2);
+    setName(draft.name);if(typeof content.yaml==='string')setYaml(content.yaml);setFlows(flowsValue);
+    if(content.canvas&&typeof content.canvas==='object')setCanvas(content.canvas as CanvasGraph);
+    if(Array.isArray(content.scenarios))setDefinitions(content.scenarios as ScenarioDefinition[]);
+    if(content.automation&&typeof content.automation==='object')setAutomation(content.automation as Automation);
+    if(content.mock&&typeof content.mock==='object'){setMock(content.mock as MockPlan);setLoadedMock(content.mock as MockPlan);}
+    setRecoveredFields({...draft.fields});setLoadRevision(value=>value+1);draftRecord.current=draft;
+    setAcknowledgedDraftKey(JSON.stringify({name:draft.name,content:{yaml:typeof content.yaml==='string'?content.yaml:yaml,flows:flowsValue,canvas:content.canvas,scenarios:content.scenarios,automation:content.automation,mock:content.mock},fields:draft.fields??{}}));
+  }
+  async function keepSaved(){
+    const revision=draftRevisionShown;
+    viewRef.current={...viewRef.current,dismissedDraftRevision:revision};setDismissedDraft(revision);
+    if(!persistence.current.id)return;
+    try{const saved=await api('/api/workspaces/'+persistence.current.id+'/view',viewRef.current);if(saved&&typeof saved==='object'&&!Array.isArray(saved))viewRef.current=saved;}catch{/* A view write is not a document save. */}
+  }
+  async function copyWithDraft(){
+    const base=lastValid.current;if(!base?.id)throw new Error('Save a valid version before restoring the draft as a copy.');
+    const copyName=(base.name.slice(0,115)+' copy').slice(0,120);
+    const copy:Workspace=await api('/api/workspaces/copy',{...base,id:undefined,name:copyName});
+    const draft=draftRecord.current;
+    const written=await api('/api/workspaces/'+copy.id+'/draft',{baseRevision:copy.metadata?.revision??1,expectedDraftRevision:0,name:draft?.name??name,content:draft?.content??draftContent,fields:draft?.fields??draftFields});
+    const detail=await api('/api/workspaces/'+copy.id);
+    loadWorkspace(detail);
+    if(written?.draft)restoreDraft(written.draft);
+    setConflict(false);setConflictBar(false);
+  }
+  async function copyConflict(){
+    const copyName=(name.slice(0,115)+' copy').slice(0,120);
+    loadWorkspace(await api('/api/workspaces/copy',reviewedContent({name:copyName})));
+    setConflict(false);setConflictBar(false);setSaveFailed(false);setSaveProblem('');
+  }
+  async function loadLatest(){
+    if(!persistence.current.id)return;
+    loadWorkspace(await api('/api/workspaces/'+persistence.current.id));
+    setConflict(false);setConflictBar(false);setSaveFailed(false);setSaveProblem('');
+  }
+  async function discardCorrupt(){
+    if(!persistence.current.id)return;
+    await api('/api/workspaces/'+persistence.current.id+'/draft/discard',{expectedDraftRevision:0});
+    setDraftError('');setConfirmCorrupt(false);setDraftRevisionShown(0);setDraftSavedAt('');draftRecord.current=null;persistence.current={...persistence.current,draftRevision:0};
+  }
+  function goToFirstIssue(){
+    const details=advanced.current;if(details)details.open=true;
+    const yamlField=document.getElementById('scenario-yaml') as HTMLTextAreaElement|null;
+    const target=invalidSource?yamlField:document.querySelector<HTMLElement>('.yaml-value input, #reusable-flows, #scenario-public-inputs, .default-actions input, .default-actions select, #scenario-yaml');
+    target?.focus();
   }
 
   async function submit(execute: boolean,targetId=scenarioId) {
@@ -318,14 +506,19 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       setFlows(JSON.stringify(nextFlows,null,2));setYaml(docs[0].toString()+docs[1].toString());setError('');
     } catch(error){setError(error instanceof Error?error.message:'Cannot add assertion.');}
   }
-  return <WorkspaceDrafts.Provider value={reportDraft}><section className="panel scenario-panel" aria-labelledby="scenario-heading">
+  return <WorkspaceDrafts.Provider value={reportDraft}><RecoveredFields.Provider value={recoveredFields}><section className="panel scenario-panel" aria-labelledby="scenario-heading">
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Scenario workspace</h2><p>Design scenarios on the shared canvas. Connect a simulator when ready to run.</p></div></div>
-    <div className="canvas-workspace"><ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={!!deviceId&&!!token} onSelect={id=>{setScenarioId(id);setInputs('');}} onCreate={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item))} key={'sidebar-'+loadRevision}>{run?.status==='running'&&!batchRunning&&<button className="confirm" onClick={()=>void cancel()}>Cancel run</button>}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</ScenarioSidebar><div className="workspace-canvas"><WorkspaceManager token={token} id={workspaceId} name={name} status={persistenceStatus} dirty={dirty} busy={submitting||pickerBusy} blocked={running||launchBusy||pickerBusy} onAction={workspaceAction} onSave={manualSave} recovery={conflict}/>
-    <CanvasEditor onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={()=>void submit(true)} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));}} disabled={running||submitting||pickerBusy||launchBusy}/>
+    <div className="canvas-workspace"><ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={!!deviceId&&!!token} onSelect={selectScenario} onCreate={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);rememberView({scenarioId:id,scenarioName:'Scenario '+(definitions.length+1),pathId:path});}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item))} key={'sidebar-'+loadRevision}>{run?.status==='running'&&!batchRunning&&<button className="confirm" onClick={()=>void cancel()}>Cancel run</button>}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</ScenarioSidebar><div className="workspace-canvas"><WorkspaceManager token={token} id={workspaceId} name={name} status={persistenceStatus} dirty={dirty} busy={submitting||pickerBusy} blocked={running||launchBusy||pickerBusy} onAction={workspaceAction} onSave={manualSave} onPrepare={prepareSwitch} recovery={conflict} notice={chooserNotice} openSignal={chooserSignal}/>
+    {pendingDraft&&<button type="button" className="confirm" onClick={goToFirstIssue}>Go to first issue</button>}
+    <p className="field-hint">Drafts are kept on this computer's runner store (.tnt), excluding confidential runtime inputs.</p>
+    {draftError&&<div className="notice error" role="alert"><p>A recovered draft couldn't be read.</p>{confirmCorrupt?<><p>Discard the unreadable draft? This can't be undone.</p><button type="button" className="workspace-danger" onClick={()=>void discardCorrupt()}>Discard</button><button type="button" onClick={()=>setConfirmCorrupt(false)}>Cancel</button></>:<button type="button" onClick={()=>setConfirmCorrupt(true)}>Discard draft</button>}</div>}
+    {showRecovery&&<div className="draft-banner" role="status"><p>Unsaved changes from <time dateTime={draftSavedAt}>{draftSavedAt?new Date(draftSavedAt).toLocaleString():'earlier'}</time> were recovered.{staleDraft?' Based on an older version.':''}</p>{staleDraft?<button type="button" className="primary" onClick={()=>void copyWithDraft()}>Restore as a copy</button>:<button type="button" className="primary" onClick={()=>draftRecord.current&&restoreDraft(draftRecord.current)}>Restore draft</button>}<button type="button" onClick={()=>void keepSaved()}>Keep saved version</button></div>}
+    {conflictBar&&<div className="notice" role="status"><p>This workspace was changed in another tab.</p><button type="button" className="primary" onClick={()=>void loadLatest()}>Load latest</button><button type="button" onClick={()=>void (pendingDraft?copyWithDraft():copyConflict())}>Restore as a copy</button></div>}
+    <CanvasEditor initialView={initialCanvasView} onViewChange={next=>rememberView({canvas:next})} onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={()=>void submit(true)} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));rememberView({pathId:id});}} disabled={running||submitting||pickerBusy||launchBusy}/>
     </div></div>
       {batch&&batch.workspaceId===workspaceId&&<section aria-label="Batch report" aria-live="polite"><h3>Batch · {batch.status}</h3><p>Saved order · separate reports · {batch.snapshot.resetApp?'Declared app reset':'No additional app reset'}</p>{batch.entries.map(entry=><div key={entry.scenarioId}><p>{entry.name} · {entry.status}</p>{entry.reason&&<p>{entry.reason}</p>}{entry.runId&&<button className="confirm" onClick={()=>void openReport(entry.runId!)}>Open report for {entry.name}</button>}</div>)}</section>}
-    <details ref={advanced} className="workspace-advanced"><summary>Advanced mode · legacy authoring and settings</summary><button className="confirm" onClick={()=>setLegacyCanvas(value=>!value)}>{legacyCanvas?'Return to contextual canvas':'Show legacy canvas controls'}</button>
-    <ScenarioLibrary key={'scenarios-'+loadRevision} items={definitions} onChange={setDefinitions} selected={scenarioId} onSelect={id=>{setScenarioId(id);setPathId(definitions.find(item=>item.id===id)?.pathId??'');setInputs('');}} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} canvas={canvas} automation={automation} mock={mock} disabled={running||submitting||pickerBusy||launchBusy} onError={setDefinitionError}/>
+    <details ref={advanced} className="workspace-advanced" onToggle={event=>rememberView({panels:{advanced:(event.currentTarget as HTMLDetailsElement).open}})}><summary>Advanced mode · legacy authoring and settings</summary><button className="confirm" onClick={()=>setLegacyCanvas(value=>!value)}>{legacyCanvas?'Return to contextual canvas':'Show legacy canvas controls'}</button>
+    <ScenarioLibrary key={'scenarios-'+loadRevision} items={definitions} onChange={setDefinitions} selected={scenarioId} onSelect={selectScenario} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} canvas={canvas} automation={automation} mock={mock} disabled={running||submitting||pickerBusy||launchBusy} onError={setDefinitionError}/>
     <MockSetup key={loadRevision} initialPlan={loadedMock} disabled={running||submitting||pickerBusy} onChange={setMockPlan}/>
     <div className="scenario-editor">
       <label htmlFor="expected-page">Expected page text for reusable assertion</label><input id="expected-page" value={expectedPage} onChange={event=>setExpectedPage(event.target.value)} disabled={running||submitting||pickerBusy}/><button className="confirm" disabled={running||submitting||pickerBusy} onClick={addAssertion}>Append reusable assertion</button>
@@ -379,8 +572,9 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       </>}
     </div>
     <details><summary>Advanced screenshot picker</summary><Picker token={token} deviceId={deviceId} yaml={yaml} disabled={launchBusy || running || submitting} onBusy={setPickerBusy} onSave={savePicked} onExecute={executePicked} /></details>
+    {scenarioNotice&&<div className="scenario-delete-notice" role="status"><span>{scenarioNotice}</span><button className="text-button" onClick={()=>setScenarioNotice('')}>Dismiss</button></div>}
     {deletedScenario&&<div className="scenario-delete-notice" role="status"><span>Deleted {deletedScenario.name}</span><button className="confirm" disabled={running||submitting||pickerBusy||launchBusy} onClick={()=>{deletedScenario.restore();setDeletedScenario(undefined);}}>Undo</button><button className="text-button" onClick={()=>setDeletedScenario(undefined)}>Dismiss</button></div>}
-    {saveProblem&&<div className="notice error" role="alert"><p>{saveProblem}</p>{!conflict&&<button onClick={()=>{failedKey.current='';setSaveFailed(false);setRetrySave(value=>value+1);}}>Retry</button>}{conflict&&<p>Use Save a copy in the workspace manager to recover your current edits.</p>}</div>}
+    {saveProblem&&!conflict&&<div className="notice error" role="alert"><p>{saveProblem}</p><button onClick={()=>{failedKey.current='';failedDraftKey.current='';setSaveFailed(false);setDraftFailed(false);setRetrySave(value=>value+1);}}>Retry</button></div>}
     {runError&&<div className="run-error-toast" role="alert"><button className="text-button" aria-label="Dismiss run error" onClick={()=>setRunError('')}>×</button><strong>Cannot run scenario</strong><p>{runError}</p></div>}
-  </section></WorkspaceDrafts.Provider>;
+  </section></RecoveredFields.Provider></WorkspaceDrafts.Provider>;
 }
