@@ -95,6 +95,10 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const [chooserNotice,setChooserNotice]=useState('');
   const [chooserSignal,setChooserSignal]=useState(0);
   const [confirmCorrupt,setConfirmCorrupt]=useState(false);
+  const discardDraftButton=useRef<HTMLButtonElement>(null);
+  const discardConfirmButton=useRef<HTMLButtonElement>(null);
+  const corruptConfirmOpen=useRef(false);
+  useEffect(()=>{if(confirmCorrupt)discardConfirmButton.current?.focus();else if(corruptConfirmOpen.current)discardDraftButton.current?.focus();corruptConfirmOpen.current=confirmCorrupt;},[confirmCorrupt,draftError]);
   const reportDraft=useCallback((id:string,report:DraftReport)=>{
     const previous=fieldsRef.current.get(id);
     const same=!!previous&&previous.pending===report.pending&&previous.key===report.key&&previous.value===report.value;
@@ -122,7 +126,8 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const draftKey=JSON.stringify({name,content:draftContent,fields:draftFields});
   latestDraftKey.current=draftKey;
   const queuedWrite=saving||draftSaving;
-  const persistenceStatus=conflict?'This workspace was changed in another tab.':saveFailed||draftFailed?"Couldn't save.":pendingDraft&&acknowledgedDraftKey===draftKey?'Draft kept, not valid yet.':queuedWrite?'Saving…':!pendingDraft&&!!workspaceId&&currentKey===(acknowledged||initialKey.current)?'Saved locally':'Not saved yet';
+  const persistedBaseline=acknowledged||initialKey.current;
+  const persistenceStatus=saveFailed||draftFailed?"Couldn't save.":pendingDraft&&acknowledgedDraftKey===draftKey?'Draft kept, not valid yet.':queuedWrite?'Saving…':!pendingDraft&&!!workspaceId&&currentKey===persistedBaseline?'Saved locally':!workspaceId&&!pendingDraft&&currentKey===persistedBaseline?'Not saved yet':'Saving…';
   const showRecovery=draftRevisionShown>0&&draftRevisionShown>dismissedDraft&&!draftError;
   const staleDraft=showRecovery&&draftBase<savedRevision;
   const storedCanvas=viewRef.current.canvas;
@@ -322,14 +327,14 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       if(epoch!==persistence.current.epoch)throw new Error('Workspace changed before saving.');
       setSaving(true);
       try{
-        const workspace:Workspace=await api('/api/workspaces',{...content,id:persistence.current.id||undefined,expectedRevision:persistence.current.revision,clearDraft});
+        const workspace:Workspace & {draftCleared?:boolean}=await api('/api/workspaces',{...content,id:persistence.current.id||undefined,expectedRevision:persistence.current.revision,clearDraft});
         if(epoch!==persistence.current.epoch)return workspace;
         const hasNewEdits=latestKey.current!==savingKey;
-        const draftStillCurrent=clearDraft!==undefined&&persistence.current.draftRevision===clearDraft;
-        persistence.current={id:workspace.id,revision:workspace.metadata?.revision??0,draftRevision:draftStillCurrent?0:persistence.current.draftRevision,epoch};
+        const draftCleared=workspace.draftCleared===true;
+        persistence.current={id:workspace.id,revision:workspace.metadata?.revision??0,draftRevision:draftCleared?0:persistence.current.draftRevision,epoch};
         setWorkspaceId(workspace.id);setAcknowledged(contentKey(workspace));setSaveFailed(false);setDraftFailed(false);setSaveProblem('');setConflict(false);failedKey.current='';failedDraftKey.current='';
         lastValid.current=workspace;setSavedRevision(workspace.metadata?.revision??0);
-        if(draftStillCurrent){setAcknowledgedDraftKey('');setRecoveredFields({});setDraftRevisionShown(0);setDraftSavedAt('');draftRecord.current=null;}
+        if(draftCleared){setAcknowledgedDraftKey('');setRecoveredFields({});setDraftRevisionShown(0);setDraftSavedAt('');draftRecord.current=null;}
         if(!hasNewEdits){setYaml(workspace.yaml);setCanvas(workspace.canvas);setDefinitions(workspace.scenarios??[]);setAutomation(workspace.automation);setMock(workspace.mock);setFlows(JSON.stringify(workspace.flows??{},null,2));}
         return workspace;
       }catch(error){
@@ -509,11 +514,11 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   return <WorkspaceDrafts.Provider value={reportDraft}><RecoveredFields.Provider value={recoveredFields}><section className="panel scenario-panel" aria-labelledby="scenario-heading">
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Scenario workspace</h2><p>Design scenarios on the shared canvas. Connect a simulator when ready to run.</p></div></div>
     <div className="canvas-workspace"><ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={!!deviceId&&!!token} onSelect={selectScenario} onCreate={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);rememberView({scenarioId:id,scenarioName:'Scenario '+(definitions.length+1),pathId:path});}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item))} key={'sidebar-'+loadRevision}>{run?.status==='running'&&!batchRunning&&<button className="confirm" onClick={()=>void cancel()}>Cancel run</button>}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</ScenarioSidebar><div className="workspace-canvas"><WorkspaceManager token={token} id={workspaceId} name={name} status={persistenceStatus} dirty={dirty} busy={submitting||pickerBusy} blocked={running||launchBusy||pickerBusy} onAction={workspaceAction} onSave={manualSave} onPrepare={prepareSwitch} recovery={conflict} notice={chooserNotice} openSignal={chooserSignal}/>
-    {pendingDraft&&<button type="button" className="confirm" onClick={goToFirstIssue}>Go to first issue</button>}
+    {pendingDraft&&<button type="button" className="confirm go-to-issue" onClick={goToFirstIssue}>Go to first issue</button>}
     <p className="field-hint">Drafts are kept on this computer's runner store (.tnt), excluding confidential runtime inputs.</p>
-    {draftError&&<div className="notice error" role="alert"><p>A recovered draft couldn't be read.</p>{confirmCorrupt?<><p>Discard the unreadable draft? This can't be undone.</p><button type="button" className="workspace-danger" onClick={()=>void discardCorrupt()}>Discard</button><button type="button" onClick={()=>setConfirmCorrupt(false)}>Cancel</button></>:<button type="button" onClick={()=>setConfirmCorrupt(true)}>Discard draft</button>}</div>}
+    {draftError&&<div className="draft-banner danger" role="alert"><p>A recovered draft couldn't be read.</p>{confirmCorrupt?<><p>Discard the unreadable draft? This can't be undone.</p><button type="button" className="workspace-danger" ref={discardConfirmButton} onClick={()=>void discardCorrupt()}>Discard</button><button type="button" onClick={()=>setConfirmCorrupt(false)}>Cancel</button></>:<button type="button" ref={discardDraftButton} onClick={()=>setConfirmCorrupt(true)}>Discard draft</button>}</div>}
     {showRecovery&&<div className="draft-banner" role="status"><p>Unsaved changes from <time dateTime={draftSavedAt}>{draftSavedAt?new Date(draftSavedAt).toLocaleString():'earlier'}</time> were recovered.{staleDraft?' Based on an older version.':''}</p>{staleDraft?<button type="button" className="primary" onClick={()=>void copyWithDraft()}>Restore as a copy</button>:<button type="button" className="primary" onClick={()=>draftRecord.current&&restoreDraft(draftRecord.current)}>Restore draft</button>}<button type="button" onClick={()=>void keepSaved()}>Keep saved version</button></div>}
-    {conflictBar&&<div className="notice" role="status"><p>This workspace was changed in another tab.</p><button type="button" className="primary" onClick={()=>void loadLatest()}>Load latest</button><button type="button" onClick={()=>void (pendingDraft?copyWithDraft():copyConflict())}>Restore as a copy</button></div>}
+    {conflictBar&&<div className="draft-banner conflict-bar" role="status"><p>This workspace was changed in another tab.</p><button type="button" className="primary" onClick={()=>void loadLatest()}>Load latest</button><button type="button" onClick={()=>void (pendingDraft?copyWithDraft():copyConflict())}>Restore as a copy</button></div>}
     <CanvasEditor initialView={initialCanvasView} onViewChange={next=>rememberView({canvas:next})} onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={()=>void submit(true)} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));rememberView({pathId:id});}} disabled={running||submitting||pickerBusy||launchBusy}/>
     </div></div>
       {batch&&batch.workspaceId===workspaceId&&<section aria-label="Batch report" aria-live="polite"><h3>Batch · {batch.status}</h3><p>Saved order · separate reports · {batch.snapshot.resetApp?'Declared app reset':'No additional app reset'}</p>{batch.entries.map(entry=><div key={entry.scenarioId}><p>{entry.name} · {entry.status}</p>{entry.reason&&<p>{entry.reason}</p>}{entry.runId&&<button className="confirm" onClick={()=>void openReport(entry.runId!)}>Open report for {entry.name}</button>}</div>)}</section>}
@@ -574,7 +579,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     <details><summary>Advanced screenshot picker</summary><Picker token={token} deviceId={deviceId} yaml={yaml} disabled={launchBusy || running || submitting} onBusy={setPickerBusy} onSave={savePicked} onExecute={executePicked} /></details>
     {scenarioNotice&&<div className="scenario-delete-notice" role="status"><span>{scenarioNotice}</span><button className="text-button" onClick={()=>setScenarioNotice('')}>Dismiss</button></div>}
     {deletedScenario&&<div className="scenario-delete-notice" role="status"><span>Deleted {deletedScenario.name}</span><button className="confirm" disabled={running||submitting||pickerBusy||launchBusy} onClick={()=>{deletedScenario.restore();setDeletedScenario(undefined);}}>Undo</button><button className="text-button" onClick={()=>setDeletedScenario(undefined)}>Dismiss</button></div>}
-    {saveProblem&&!conflict&&<div className="notice error" role="alert"><p>{saveProblem}</p><button onClick={()=>{failedKey.current='';failedDraftKey.current='';setSaveFailed(false);setDraftFailed(false);setRetrySave(value=>value+1);}}>Retry</button></div>}
+    {saveProblem&&!conflict&&<div className="notice error" role="alert"><p>{saveProblem}</p><button className="save-retry" onClick={()=>{failedKey.current='';failedDraftKey.current='';setSaveFailed(false);setDraftFailed(false);setRetrySave(value=>value+1);}}>Retry</button></div>}
     {runError&&<div className="run-error-toast" role="alert"><button className="text-button" aria-label="Dismiss run error" onClick={()=>setRunError('')}>×</button><strong>Cannot run scenario</strong><p>{runError}</p></div>}
   </section></RecoveredFields.Provider></WorkspaceDrafts.Provider>;
 }

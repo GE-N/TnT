@@ -24,6 +24,8 @@ export type WorkspaceStoreFaults={
  rejectWrite?:()=>unknown;
  /** Return an error after the temp file is fsynced and before rename. */
  failBeforeRename?:()=>unknown;
+ /** Return an error for session or draft cleanup after workspace.json has been renamed. */
+ failAfterCommit?:()=>unknown;
 };
 export class WorkspaceConflict extends Error { constructor(){super('Another editor saved a newer revision. Current edits are retained. Save a copy to recover them, and keep the saved version intact.');} }
 export class DraftConflict extends Error { constructor(){super('This workspace was changed in another tab.');} }
@@ -38,7 +40,7 @@ const toError=(value:unknown)=>value instanceof Error?value:new Error(String(val
 
 /** Test helper for the write hooks consumed by createWorkspaceStore. */
 export function createWriteFaults(){
- let mode:'ok'|'queue'|'reject'|'fail-before-rename'='ok';
+ let mode:'ok'|'queue'|'reject'|'fail-before-rename'|'fail-after-commit'='ok';
  let waiting=0;
  let releaseQueue:()=>void=()=>{};
  let queued=Promise.resolve();
@@ -52,6 +54,7 @@ export function createWriteFaults(){
   },
   rejectWrite:()=>mode==='reject'?new Error('Injected write rejection'):undefined,
   failBeforeRename:()=>mode==='fail-before-rename'?new Error('Injected failure before rename'):undefined,
+  failAfterCommit:()=>mode==='fail-after-commit'?new Error('Injected failure after commit'):undefined,
  };
  return {
   faults,
@@ -59,6 +62,7 @@ export function createWriteFaults(){
   release(){const finish=releaseQueue;mode='ok';finish();},
   reject(){mode='reject';},
   failBeforeRename(){mode='fail-before-rename';},
+  failAfterCommit(){mode='fail-after-commit';},
   pass(){mode='ok';},
   untilQueued(count=1){
    if(waiting>=count)return Promise.resolve();
@@ -204,10 +208,11 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
  }
  async function writeDraft(draft:WorkspaceDraft){const path=await contained(await workspaceDirectory(draft.workspaceId,true),'draft.json',true);await writeJson(path,draft,recordLimit,'Draft exceeds the supported size.');return draft;}
  async function clearDraft(id:string,clearRevision:number,newRevision:number){
-  if(!Number.isSafeInteger(clearRevision)||clearRevision<0)return;
+  if(!Number.isSafeInteger(clearRevision)||clearRevision<0)return false;
   const current=await readDraftOnce(id);
-  if(!current.draft||current.draft.draftRevision!==clearRevision||current.draft.baseRevision>newRevision)return;
+  if(!current.draft||current.draft.draftRevision!==clearRevision||current.draft.baseRevision>newRevision)return false;
   await rm(await contained(await workspaceDirectory(id),'draft.json',false),{force:true});
+  return true;
  }
  return {
   read:(id:string)=>serialize(()=>read(id)),
@@ -219,9 +224,13 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
    if(previous&&previous.metadata!.revision!==expectedRevision)throw new WorkspaceConflict();
    const stamp=now();
    const written=await write({...content,id:content.id||randomUUID(),metadata:{createdAt:previous?.metadata?.createdAt??stamp,updatedAt:stamp,openedAt:previous?.metadata?.openedAt??stamp,revision:(previous?.metadata?.revision??0)+1}});
-   if(!previous)await writeSession({lastActiveId:written.id,updatedAt:stamp});
-   if(clearDraftRevision!==undefined)await clearDraft(written.id,clearDraftRevision,written.metadata!.revision);
-   return written;
+   let draftCleared=false;
+   try{
+    if(!previous||clearDraftRevision!==undefined){const failed=faults?.failAfterCommit?.();if(failed)throw toError(failed);}
+    if(!previous)await writeSession({lastActiveId:written.id,updatedAt:stamp});
+    if(clearDraftRevision!==undefined)draftCleared=await clearDraft(written.id,clearDraftRevision,written.metadata!.revision);
+   }catch(error){console.error('Workspace save committed; session or draft cleanup failed.',error);draftCleared=false;}
+   return {...written,draftCleared};
   }),
   saveDraft:(id:string,input:{baseRevision:number;expectedDraftRevision:number;name:string;content:unknown;fields:unknown})=>serialize(async()=>{const draft=await draftInput(id,input);await writeDraft(draft);return {draftRevision:draft.draftRevision,savedAt:draft.savedAt,draft};}),
   createWithDraft:(content:Workspace,input:{name:string;content:unknown;fields:unknown})=>serialize(async()=>{
@@ -259,7 +268,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
    catch{await writeSession({lastActiveId:null,updatedAt:now(),unavailable:true});return {lastActiveId:null,unavailable:true};}
   }),
   setSession:(id:string|null)=>serialize(async()=>{if(id)await read(validId(id));const session={lastActiveId:id,updatedAt:now()};await writeSession(session);return session;}),
-  open:(id:string)=>serialize(async()=>{const value=await read(id);const written=await write({...value,metadata:{...value.metadata!,openedAt:now()}});await writeSession({lastActiveId:id,updatedAt:now()});const draftState=await readDraftOnce(id);return {...written,draft:draftState.draft,draftError:draftState.draftError,view:await readView(id)};}),
+  open:(id:string)=>serialize(async()=>{const value=await read(id);const written=await write({...value,metadata:{...value.metadata!,openedAt:now()}});try{const failed=faults?.failAfterCommit?.();if(failed)throw toError(failed);await writeSession({lastActiveId:id,updatedAt:now()});}catch(error){console.error('Workspace open committed; session update failed.',error);}const draftState=await readDraftOnce(id);return {...written,draft:draftState.draft,draftError:draftState.draftError,view:await readView(id)};}),
   rename:(id:string,name:string,expectedRevision:number)=>serialize(async()=>{if(typeof name!=='string'||!name.trim()||name.trim().length>120)throw new Error('Use a workspace title of 1–120 characters.');const value=await read(id);if(value.metadata!.revision!==expectedRevision)throw new WorkspaceConflict();return write({...value,name:name.trim(),metadata:{...value.metadata!,updatedAt:now(),revision:value.metadata!.revision+1}});}),
   list:(query=''):Promise<WorkspaceLibrary>=>serialize(async()=>{
    const items:WorkspaceSummary[]=[];let unreadable=0;

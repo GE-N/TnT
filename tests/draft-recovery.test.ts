@@ -56,7 +56,7 @@ test('a write that fails before rename leaves the previous draft, view, and sess
   assert.equal(await readFile(join(root,'workspaces',saved.id,'draft.json'),'utf8'),before);
   assert.equal(JSON.parse(await readFile(join(root,'workspaces',saved.id,'view.json'),'utf8')).scenarioId,'kept');
   assert.equal(JSON.parse(await readFile(join(root,'session.json'),'utf8')).lastActiveId,saved.id);
-  assert.deepEqual(await tempFiles(root),[]);
+  assert.deepEqual(await tempFiles(root),[],'no *.tmp file remains after a write fails before rename');
  }finally{faults.pass();await close();}
 });
 
@@ -224,6 +224,54 @@ test('draft and view HTTP routes report conflict and size limits without treatin
   const session=await fetch(base+'/api/session',{headers});assert.equal((await session.json()).lastActiveId,saved.id);
   assert.equal((await service.workspace(saved.id)).yaml,yaml);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));await close();}
+});
+
+test('a post-rename session or draft failure still reports the committed save',async()=>{
+ const faults=createWriteFaults();
+ const {service,close}=await fixture({faults:faults.faults});
+ try{
+  faults.failAfterCommit();
+  const created=await service.save({name:'Created',yaml});
+  assert.equal((created as {draftCleared?:boolean}).draftCleared,false);
+  assert.match(created.id,/^[0-9a-f-]{36}$/);
+  faults.pass();
+  assert.equal((await service.listWorkspaces()).items.length,1);
+  const retried=await service.save({...created,name:'Created again'});
+  assert.equal(retried.id,created.id);
+  assert.equal(retried.metadata!.revision,2);
+  assert.equal((await service.listWorkspaces()).items.length,1);
+  const draft=await service.saveDraft(created.id,draftBody(retried.metadata!.revision,0));
+  faults.failAfterCommit();
+  const committed=await service.save({...retried,name:'Committed',clearDraft:draft.draftRevision});
+  assert.equal((committed as {draftCleared?:boolean}).draftCleared,false);
+  assert.equal(committed.metadata!.revision,retried.metadata!.revision+1);
+  assert.equal((await service.workspaceDetail(created.id)).draft?.draftRevision,draft.draftRevision);
+  faults.pass();
+  const again=await service.save({...committed,name:'Retried'});
+  assert.equal(again.id,created.id);
+  assert.equal(again.metadata!.revision,committed.metadata!.revision+1);
+  assert.equal((await service.listWorkspaces()).items.length,1);
+ }finally{faults.pass();await close();}
+});
+
+test('a session failure after openedAt commits still opens the workspace',async()=>{
+ const faults=createWriteFaults();
+ let tick=0;
+ const {service,close}=await fixture({faults:faults.faults,now:()=>new Date(Date.UTC(2026,0,1,0,0,tick++))});
+ try{
+  const saved=await service.save({name:'Opened',yaml});
+  await service.setSession(null);
+  faults.failAfterCommit();
+  const opened=await service.openWorkspace(saved.id);
+  assert.equal(opened.id,saved.id);
+  assert.equal(opened.name,'Opened');
+  assert.notEqual(opened.metadata!.openedAt,saved.metadata!.openedAt);
+  assert.equal((await service.session()).lastActiveId,null);
+  faults.pass();
+  const again=await service.openWorkspace(saved.id);
+  assert.equal(again.id,saved.id);
+  assert.equal((await service.session()).lastActiveId,saved.id);
+ }finally{faults.pass();await close();}
 });
 
 test('creating the first draft validates before leaving an empty workspace directory',async()=>{
