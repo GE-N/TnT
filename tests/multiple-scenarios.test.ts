@@ -36,9 +36,9 @@ test('named scenarios share executable flows but run fresh inputs and declared s
   assert.ok(result.artifacts.includes('commands.json'),'public test values retain mapped evidence');
  }
  const submitted=await service.start({workspaceId:workspace.id,deviceId,scenarioId:'success',runtimeInputs:{TOKEN:'never-save-this-token'}});
- await service.save({...workspace,scenarios:definitions.map(item=>({...item,name:'Later edit'}))});
+ await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata,scenarios:definitions.map(item=>({...item,name:'Later edit'}))});
  const confidential=await service.wait(submitted.id);
- assert.equal(confidential.snapshot.scenario?.name,'Success');assert.doesNotMatch(JSON.stringify(confidential),/never-save-this-token/);assert.ok(!confidential.artifacts.includes('commands.json'));await service.save(workspace);
+ assert.equal(confidential.snapshot.scenario?.name,'Success');assert.doesNotMatch(JSON.stringify(confidential),/never-save-this-token/);assert.ok(!confidential.artifacts.includes('commands.json'));await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata});
  const reset=await service.wait((await service.start({workspaceId:workspace.id,deviceId,scenarioId:'success',resetApp:true})).id);
  assert.equal(reset.snapshot.resetApp,true);assert.equal(parseAllDocuments(reset.snapshot.executionYaml!)[1].toJS()[0].launchApp.clearState,true);
  }finally{await rm(root,{recursive:true,force:true});}
@@ -52,13 +52,13 @@ test('required reusable-flow inputs and stale selected steps are rejected before
  const steps=(await service.references({yaml:inputYaml,flows})).references.filter(ref=>ref.kind==='step');
  const scenario={id:'maintenance',name:'Maintenance',steps,inputs:{START_PAGE:'Home'},parameters:{},setup:{file:'setup.yaml',parameters:{}},enabledHandlerIds:[]};
  const workspace=await service.save({name:'Inputs',yaml:yaml.replace('---','env:\n  DEVICE_ID: ${MAESTRO_DEVICE_UDID}\n---'),flows,scenarios:[scenario]});
- await service.save({...workspace,scenarios:[{...scenario,inputs:{EXPECTED_PAGE:'Maintenance'},setup:{file:'setup.yaml',parameters:{START_PAGE:'${MISSING}'}}}]});
+ await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata,scenarios:[{...scenario,inputs:{EXPECTED_PAGE:'Maintenance'},setup:{file:'setup.yaml',parameters:{START_PAGE:'${MISSING}'}}}]});
  await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:scenario.id}),/Missing.*MISSING/);
- await service.save({...workspace,flows:{...flows,'setup.yaml':flows['setup.yaml'].replace('---','env:\n  DEVICE_ID: ${MAESTRO_DEVICE_UDID}\n---')}});
+ await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata,flows:{...flows,'setup.yaml':flows['setup.yaml'].replace('---','env:\n  DEVICE_ID: ${MAESTRO_DEVICE_UDID}\n---')}});
  await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:scenario.id}),/Missing.*EXPECTED_PAGE/);
- await service.save({...workspace,scenarios:[{...scenario,parameters:{EXPECTED_PAGE:{type:'number',required:true}},inputs:{START_PAGE:'Home',EXPECTED_PAGE:'not-number'}}]});
+ await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata,scenarios:[{...scenario,parameters:{EXPECTED_PAGE:{type:'number',required:true}},inputs:{START_PAGE:'Home',EXPECTED_PAGE:'not-number'}}]});
  await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:scenario.id}),/Invalid number.*EXPECTED_PAGE/);
- await service.save({...workspace,yaml:yaml.replace('tapOn: Load','tapOn: Other'),scenarios:[{...scenario,inputs:{START_PAGE:'Home',EXPECTED_PAGE:'Maintenance'}}]});
+ await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata,yaml:yaml.replace('tapOn: Load','tapOn: Other'),scenarios:[{...scenario,inputs:{START_PAGE:'Home',EXPECTED_PAGE:'Maintenance'}}]});
  await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:scenario.id}),/stale scenario step/);
  }finally{await rm(root,{recursive:true,force:true});}
 });

@@ -85,12 +85,14 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       if(automationError)catalog.diagnostics.push({ownerId:'automation',detail:automationError});
       return catalog;
     },
-    async save(input: { id?: string; name: string; yaml: string; flows?: Record<string,string>; mock?: unknown; canvas?: unknown; automation?:unknown; scenarios?:unknown }): Promise<Workspace> {
-      return workspaceStore.save(authoredWorkspace(input));
+    async save(input: { expectedRevision?:number; metadata?:WorkspaceMetadata; id?: string; name: string; yaml: string; flows?: Record<string,string>; mock?: unknown; canvas?: unknown; automation?:unknown; scenarios?:unknown }): Promise<Workspace> {
+      const revision=input.expectedRevision??input.metadata?.revision??0;
+      if(!Number.isSafeInteger(revision)||revision<0)throw new Error('Invalid workspace revision.');
+      return workspaceStore.save(authoredWorkspace(input),revision);
     },
     async workspace(id: string): Promise<Workspace> { return workspaceStore.read(id); },
     async openWorkspace(id:string){return workspaceStore.open(id);},
-    async renameWorkspace(id:string,name:string){return workspaceStore.rename(id,name);},
+    async renameWorkspace(id:string,name:string,expectedRevision=0){if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0)throw new Error('Invalid workspace revision.');return workspaceStore.rename(id,name,expectedRevision);},
     async listWorkspaces(query=''){return workspaceStore.list(query);},
     async copyWorkspace(input:Parameters<typeof authoredWorkspace>[0]){
       const content=authoredWorkspace({...input,id:undefined});

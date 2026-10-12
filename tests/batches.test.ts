@@ -23,11 +23,11 @@ async function evidence(directory:string,failed=false){
 test('batch freezes saved order and definitions, skips an invalid request, and continues after assertion cleanup',async()=>{
  let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);let entered!:()=>void;const started=new Promise<void>(resolve=>entered=resolve);let calls=0;
  await fixture(async service=>{
-  const workspace=await saved(service);const invalid={...workspace.scenarios![1],steps:[]};await service.save({...workspace,scenarios:[workspace.scenarios![0],invalid,workspace.scenarios![2]]});
+  const workspace=await saved(service);const invalid={...workspace.scenarios![1],steps:[]};await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata,scenarios:[workspace.scenarios![0],invalid,workspace.scenarios![2]]});
   const batch=await service.startBatch({workspaceId:workspace.id,deviceId});await started;
   assert.deepEqual((await service.batch(batch.id)).entries.map(item=>item.status),['running','not-run','queued']);
   await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:'third'}),/batch/i);
-  await service.save({...workspace,scenarios:[{...workspace.scenarios![2],name:'Later edit'}]});release();
+  await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata,scenarios:[{...workspace.scenarios![2],name:'Later edit'}]});release();
   const result=await service.waitBatch(batch.id);assert.equal(result.status,'completed');assert.deepEqual(result.entries.map(item=>item.status),['assertion-failed','not-run','passed']);assert.match(result.entries[1].reason!,/Draft/);
   const runs=await Promise.all(result.entries.filter(item=>item.runId).map(item=>service.result(item.runId!)));assert.deepEqual(runs.map(item=>item.snapshot.name),['first','third']);assert.notEqual(runs[0].id,runs[1].id);assert.equal(calls,2);assert.ok(runs.every(item=>item.cleanup.verified));
  },async({directory})=>{calls++;if(calls===1){entered();await gate;}return evidence(directory,calls===1);});
@@ -91,7 +91,7 @@ test('a failed batch summary write cancels the dispatched process and waits for 
 
 test('workspace skip preferences survive reopening while legacy scenarios remain included',async()=>fixture(async service=>{
  const workspace=await saved(service);
- const updated=await service.save({...workspace,scenarios:workspace.scenarios!.map((item,index)=>({...item,...(index===1?{skipInRunAll:true}:{})}))});
+ const updated=await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata,scenarios:workspace.scenarios!.map((item,index)=>({...item,...(index===1?{skipInRunAll:true}:{})}))});
  const reopened=await service.workspace(updated.id);
  assert.equal(reopened.scenarios![1].skipInRunAll,true);
  assert.equal(reopened.scenarios![0].skipInRunAll,undefined);
@@ -101,17 +101,17 @@ test('workspace skip preferences survive reopening while legacy scenarios remain
 test('Run All omits intentional skips in saved order, validates included drafts, and allows individual skipped runs',async()=>fixture(async service=>{
  const workspace=await saved(service);
  const scenarios=Array.from({length:12},(_,index)=>({...workspace.scenarios![0],id:'case-'+(index+1),name:'Case '+(index+1),skipInRunAll:[2,9].includes(index)}));
- await service.save({...workspace,scenarios});
+ await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata,scenarios});
  const batch=await service.waitBatch((await service.startBatch({workspaceId:workspace.id,deviceId})).id);
  assert.deepEqual(batch.entries.map(entry=>entry.name),['Case 1','Case 2','Case 4','Case 5','Case 6','Case 7','Case 8','Case 9','Case 11','Case 12']);
  assert.ok(batch.entries.every(entry=>entry.status==='passed'));
  const individual=await service.wait((await service.start({workspaceId:workspace.id,deviceId,scenarioId:'case-3'})).id);
  assert.equal(individual.status,'passed');assert.equal(individual.snapshot.scenario?.skipInRunAll,true);
- await service.save({...workspace,scenarios:scenarios.map((item,index)=>({...item,steps:index===0||index===2?[]:item.steps}))});
+ await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata,scenarios:scenarios.map((item,index)=>({...item,steps:index===0||index===2?[]:item.steps}))});
  const drafts=await service.waitBatch((await service.startBatch({workspaceId:workspace.id,deviceId})).id);
  assert.equal(drafts.entries[0].status,'not-run');assert.match(drafts.entries[0].reason!,/Draft/);
  assert.equal(drafts.entries.length,10);
- await service.save({...workspace,scenarios:scenarios.map(item=>({...item,skipInRunAll:true}))});
+ await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata,scenarios:scenarios.map(item=>({...item,skipInRunAll:true}))});
  await assert.rejects(service.startBatch({workspaceId:workspace.id,deviceId}),/No scenarios.*included/i);
  await assert.rejects(service.startBatch({workspaceId:workspace.id,deviceId,scenarioIds:[]}),/distinct scenario IDs/);
  // An explicit subset is still an intentional request, independent of the Run All preference.

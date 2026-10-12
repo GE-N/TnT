@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import {act} from 'react';
 export async function workspaceCommand(document:Document,command:'save'|'open',settle:()=>Promise<void>=async()=>{}){
  async function press(button:HTMLButtonElement|undefined){assert.ok(button);await act(async()=>{button.click();await settle();});}
- if(!document.querySelector('[aria-label="Workspace manager"]'))await press(document.querySelector<HTMLButtonElement>('[aria-label="Manage workspace"]')??undefined);
  if(command==='save'){
-  await press([...document.querySelectorAll<HTMLButtonElement>('[aria-label="Workspace manager"] button')].find(button=>button.textContent==='Save workspace'));
-  await press(document.querySelector<HTMLButtonElement>('[aria-label="Close workspace manager"]')??undefined);
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await settle();});
+  return;
  }else{
+  if(!document.querySelector('[aria-label="Workspace manager"]'))await press(document.querySelector<HTMLButtonElement>('[aria-label="Manage workspace"]')??undefined);
+
   await act(async()=>{await settle();});
   await press(document.querySelector<HTMLButtonElement>('.workspace-library button')??undefined);
   if(document.querySelector('[aria-label="Workspace manager"]')?.textContent?.includes('Save changes'))await press([...document.querySelectorAll<HTMLButtonElement>('[aria-label="Workspace manager"] button')].find(button=>button.textContent==='Save and continue'));

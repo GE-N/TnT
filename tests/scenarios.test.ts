@@ -28,7 +28,7 @@ test('an authored scenario executes an immutable version and exposes mapped resu
     } });
     const workspace = await scenarios.save({ name: 'Home', yaml });
     const run = await scenarios.start({ workspaceId: workspace.id, deviceId });
-    await scenarios.save({ id: workspace.id, name: 'Edited', yaml: yaml.replace('Home', 'Changed') });
+    await scenarios.save({ id: workspace.id, metadata:workspace.metadata, name: 'Edited', yaml: yaml.replace('Home', 'Changed') });
     finish();
     const result = await scenarios.wait(run.id);
     assert.equal(result.status, 'passed');

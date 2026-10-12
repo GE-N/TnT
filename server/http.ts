@@ -1,3 +1,4 @@
+import {WorkspaceConflict} from './workspace-store.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -59,7 +60,7 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         if (request.method === 'GET' && url.pathname === '/api/workspaces') return json(200, await scenarios.listWorkspaces(url.searchParams.get('q')??''));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/copy') return json(200, await scenarios.copyWorkspace(await readJson(request)));
         const management = /^\/api\/workspaces\/([0-9a-f-]{36})\/(open|rename)$/.exec(url.pathname);
-        if(request.method==='POST' && management){const input=await readJson(request);return json(200,management[2]==='open'?await scenarios.openWorkspace(management[1]):await scenarios.renameWorkspace(management[1],input.name));}
+        if(request.method==='POST' && management){const input=await readJson(request);return json(200,management[2]==='open'?await scenarios.openWorkspace(management[1]):await scenarios.renameWorkspace(management[1],input.name,input.expectedRevision));}
         const workspace = /^\/api\/workspaces\/([0-9a-f-]{36})$/.exec(url.pathname);
         if (request.method === 'GET' && workspace) return json(200, await scenarios.workspace(workspace[1]));
         if (request.method === 'POST' && url.pathname === '/api/batches') return json(202, await scenarios.startBatch(await readJson(request)));
@@ -111,7 +112,7 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       return json(404, { error: 'Unknown runner operation.' });
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      return json(code === 'ENOENT' ? 404 : 400, { error: message(error) });
+      return json(error instanceof WorkspaceConflict?409:code === 'ENOENT' ? 404 : 400, { error: message(error) });
     }
   };
 }

@@ -57,7 +57,7 @@ test('an offline author creates a draft, adds ordered contextual checks, reopens
   const fileInput=popup.querySelector('input[type="file"]')!;
   const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1cAAAAASUVORK5CYII=';
   Object.defineProperty(fileInput,'files',{value:[new dom.window.File([Buffer.from(png,'base64')],'reference.png',{type:'image/png'})],configurable:true});
-  await act(async()=>{fileInput.dispatchEvent(new dom.window.Event('change',{bubbles:true}));for(let attempt=0;attempt<50&&!popup.querySelector('img');attempt++)await new Promise(resolve=>setTimeout(resolve,5));});
+  await act(async()=>fileInput.dispatchEvent(new dom.window.Event('change',{bubbles:true})));for(let attempt=0;attempt<50&&!popup.querySelector('img');attempt++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
   assert.ok(popup.querySelector('img'));
   await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.ok(!document.querySelector('[role="dialog"]'));assert.equal(document.activeElement?.getAttribute('aria-label'),'Screen Welcome');
   await click('Save workspace');await click('Open saved workspace');await click('Select screen Welcome');
@@ -66,7 +66,7 @@ test('an offline author creates a draft, adds ordered contextual checks, reopens
   assert.equal(document.querySelector('select[aria-label="Scenario path"]')?.closest('details')?.open,false,'The default journey requires no route form');
   assert.equal([...document.querySelectorAll('button')].find(button=>button.textContent==='Run scenario')!.disabled,true,'Execution requires a device while authoring remains available');
   await render(deviceId);await click('Run scenario');
-  assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+  assert.ok(document.querySelector('.result-tag'),document.body.textContent??'');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
   assert.match(document.querySelector('.scenario-result')!.textContent!,/Home scenario/);assert.match(document.querySelector('.scenario-result')!.textContent!,/Visible text · Home: passed/);assert.match(document.querySelector('.scenario-result')!.textContent!,/Absent text · Error: passed/);
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
 });

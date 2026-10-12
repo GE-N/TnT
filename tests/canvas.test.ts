@@ -25,7 +25,7 @@ test('an explicitly selected canvas route maps actual outcomes to its immutable 
  const graph={screens:[{id:'home',title:'Home',x:60,y:100,tests:[{id:'trigger',label:'Open Settings',role:'action',reference:catalog.references[1]}]},{id:'settings',title:'Settings',x:430,y:100,tests:[{id:'destination',label:'Settings visible',role:'assertion',reference:catalog.references[2]}]}],edges:[{id:'open-settings',from:'home',to:'settings',actionTestId:'trigger',assertionTestId:'destination',responseCondition:'No API condition'}],paths:[{id:'settings-path',name:'Settings route',edgeIds:['open-settings']} ]};
  const workspace=await scenarios.save({name:'Canvas route',yaml,canvas:graph} as any);
  const run=await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'settings-path'} as any);
- await scenarios.save({id:workspace.id,name:'Later edit',yaml,canvas:{...graph,screens:graph.screens.map(s=>({...s,title:'Edited'}))}} as any);
+ await scenarios.save({id:workspace.id,metadata:workspace.metadata,name:'Later edit',yaml,canvas:{...graph,screens:graph.screens.map(s=>({...s,title:'Edited'}))}} as any);
  const result=await scenarios.wait(run.id);
  assert.equal(result.status,'passed');
  assert.equal((result as any).canvas.pathId,'settings-path');
@@ -96,7 +96,7 @@ test('duplicated moved commands produce repairable ambiguous references and prev
  await assert.rejects(scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'}),/Ambiguous/);
  const updated=await scenarios.references({yaml:changed});
  graph.screens[0].tests[0].reference=updated.references[2];graph.screens[1].tests[0].reference=updated.references[4];
- const repaired=await scenarios.save({id:workspace.id,name:'Explicit repair',yaml:changed,canvas:graph});
+ const repaired=await scenarios.save({id:workspace.id,metadata:workspace.metadata,name:'Explicit repair',yaml:changed,canvas:graph});
  assert.deepEqual(repaired.canvasDiagnostics,[]);
  }finally{await rm(root,{recursive:true,force:true});}
 });
@@ -253,7 +253,7 @@ test('a single screen reloads YAML edits into checks and blocks incomplete draft
   assert.equal(loaded.yaml,source);assert.equal(loaded.canvas!.screens[0].x,70);
   assert.match(loaded.canvasDiagnostics!.find(item=>item.ownerId==='draft')!.detail,/selector/i);
   await assert.rejects(scenarios.start({workspaceId:loaded.id,deviceId,pathId:'single'}),/selector/i);
-  const invalid=await scenarios.save({...loaded,yaml:'appId: ['});assert.equal((await scenarios.workspace(invalid.id)).yaml,'appId: [');assert.ok(invalid.canvasDiagnostics!.some(item=>item.ownerId==='yaml'));await assert.rejects(scenarios.start({workspaceId:invalid.id,deviceId,pathId:'single'}),/YAML/i);
+  const invalid=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,yaml:'appId: ['});assert.equal((await scenarios.workspace(invalid.id)).yaml,'appId: [');assert.ok(invalid.canvasDiagnostics!.some(item=>item.ownerId==='yaml'));await assert.rejects(scenarios.start({workspaceId:invalid.id,deviceId,pathId:'single'}),/YAML/i);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
@@ -301,11 +301,11 @@ test('canvas-authored Home tap and Coordinator check reload and execute their co
   const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'tap',label:'Tap',role:'action',reference,tap:{target:'text',match:'exact',value:'Coordinator'}}]},{id:'coordinator',title:'Coordinator',x:400,y:0,tests:[{id:'destination',label:'Coordinator',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Coordinator'}}]}],edges:[{id:'navigate',from:'home',to:'coordinator',actionTestId:'tap',assertionTestId:'destination',responseCondition:'Tap Coordinator'}],paths:[{id:'route',name:'Home → Coordinator',edgeIds:['navigate']}]};
   const saved=await scenarios.save({name:'Canvas navigation',yaml:source,canvas});const loaded=await scenarios.workspace(saved.id);assert.deepEqual(loaded.canvas!.screens[0].tests[0].tap,{target:'text',match:'exact',value:'Coordinator'});assert.equal(loaded.canvasDiagnostics!.length,0);
   const result=await scenarios.wait((await scenarios.start({workspaceId:loaded.id,deviceId,pathId:'route'})).id);assert.equal(result.status,'passed');assert.equal(result.canvas!.edges[0].status,'passed');assert.deepEqual(result.canvas!.tests.map(test=>test.status),['passed','passed']);
-  const pending=await scenarios.save({...loaded,yaml:source.slice(0,source.indexOf('# tnt-check:destination')),canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>screen.id==='coordinator'?{...screen,tests:[]}:screen),edges:loaded.canvas!.edges.map(edge=>({...edge,assertionTestId:'pending:'+edge.id}))}});assert.equal((await scenarios.workspace(pending.id)).canvas!.edges[0].to,'coordinator');const unchecked=await scenarios.preview({...pending,pathId:'route'});assert.match(unchecked.executionYaml,/tapOn/);assert.doesNotMatch(unchecked.executionYaml,/assertVisible/);
+  const pending=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,yaml:source.slice(0,source.indexOf('# tnt-check:destination')),canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>screen.id==='coordinator'?{...screen,tests:[]}:screen),edges:loaded.canvas!.edges.map(edge=>({...edge,assertionTestId:'pending:'+edge.id}))}});assert.equal((await scenarios.workspace(pending.id)).canvas!.edges[0].to,'coordinator');const unchecked=await scenarios.preview({...pending,pathId:'route'});assert.match(unchecked.executionYaml,/tapOn/);assert.doesNotMatch(unchecked.executionYaml,/assertVisible/);
   const completed=await scenarios.save({...pending,yaml:source,canvas:{...pending.canvas!,screens:loaded.canvas!.screens}});assert.equal(completed.canvas!.edges[0].assertionTestId,'destination');
-  const unlinked=await scenarios.save({...loaded,canvas:{...loaded.canvas!,edges:[],paths:[{id:'route',name:'Draft action',screenId:'home',edgeIds:[]}]}});await assert.rejects(scenarios.start({workspaceId:unlinked.id,deviceId,pathId:'route'}),/destination/i);
-  const invalidDestination=await scenarios.save({...loaded,yaml:source.replace('- assertVisible:', '- tapOn:'),canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.check?{...test,check:undefined,tap:{target:test.check.target,match:test.check.match,value:test.check.value},role:'action'}:test)}))}});const unused=await scenarios.preview({...invalidDestination,pathId:'route'});assert.equal((unused.executionYaml.match(/tapOn/g)??[]).length,1);
-  const draft=await scenarios.save({...loaded,yaml:source.replace(/# tnt-check:tap\n# tnt-match:exact\n- tapOn:\n    text: "\^Coordinator\$"\n/,''),canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.tap?{...test,tap:{...test.tap,value:''}}:test)}))}});await assert.rejects(scenarios.start({workspaceId:draft.id,deviceId,pathId:'route'}),/selector/);
+  const unlinked=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,canvas:{...loaded.canvas!,edges:[],paths:[{id:'route',name:'Draft action',screenId:'home',edgeIds:[]}]}});await assert.rejects(scenarios.start({workspaceId:unlinked.id,deviceId,pathId:'route'}),/destination/i);
+  const invalidDestination=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,yaml:source.replace('- assertVisible:', '- tapOn:'),canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.check?{...test,check:undefined,tap:{target:test.check.target,match:test.check.match,value:test.check.value},role:'action'}:test)}))}});const unused=await scenarios.preview({...invalidDestination,pathId:'route'});assert.equal((unused.executionYaml.match(/tapOn/g)??[]).length,1);
+  const draft=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,yaml:source.replace(/# tnt-check:tap\n# tnt-match:exact\n- tapOn:\n    text: "\^Coordinator\$"\n/,''),canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.tap?{...test,tap:{...test.tap,value:''}}:test)}))}});await assert.rejects(scenarios.start({workspaceId:draft.id,deviceId,pathId:'route'}),/selector/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
@@ -350,7 +350,7 @@ test('a saved multi-action branch executes only its explicit route, retains othe
  assert.doesNotMatch(executed,/Other/);assert.match(executed,/# keep/);
  assert.equal(result.status,'passed');assert.deepEqual(result.canvas!.tests.filter(test=>['home-check','tap','input','back','destination'].includes(test.id)).map(test=>test.status),['passed','passed','passed','passed','passed']);
  assert.equal(result.canvas!.edges.find(edge=>edge.id==='branch')!.status,'unavailable');assert.equal(result.snapshot.authoredYaml,source);
- const missing=await scenarios.save({...loaded,canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.filter(test=>test.id!=='input')}))}});
+ const missing=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.filter(test=>test.id!=='input')}))}});
  await assert.rejects(scenarios.start({workspaceId:missing.id,deviceId,pathId:'route'}),/removed action|ordered actions/i);
  }finally{await rm(root,{recursive:true,force:true});}
 });
@@ -471,9 +471,9 @@ test('per-visit check subsets reload, share edits, and reject deleted selections
  const preview=await scenarios.preview({...loaded,pathId:'route'});assert.equal((preview.executionYaml.match(/assertVisible: Home/g)??[]).length,1);assert.equal((preview.executionYaml.match(/home.returned/g)??[]).length,1);
  const result=await scenarios.wait((await scenarios.start({workspaceId:loaded.id,deviceId,pathId:'route'})).id);
  assert.equal(result.status,'path-failed');assert.deepEqual(result.canvas!.visits!.map(visit=>visit.status),['passed','passed','unavailable']);assert.equal(result.canvas!.screens.find(screen=>screen.id==='home')!.status,'unavailable');
- const repaired=await scenarios.save({...loaded,canvas:{...loaded.canvas!,edges:loaded.canvas!.edges.map(edge=>edge.id==='return'?{...edge,assertionTestId:'deleted-original'}:edge)}});assert.match((await scenarios.preview({...repaired,pathId:'route'})).executionYaml,/home.returned/);
- const edited=await scenarios.save({...loaded,yaml:yaml.replace('home.returned','home.updated')});assert.match((await scenarios.preview({...edited,pathId:'route'})).executionYaml,/home.updated/);assert.deepEqual(edited.canvas!.paths[0].visits,canvas.paths[0].visits);
- const removed=await scenarios.save({...loaded,canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.filter(test=>test.id!=='returned')}))}});
+ const repaired=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,canvas:{...loaded.canvas!,edges:loaded.canvas!.edges.map(edge=>edge.id==='return'?{...edge,assertionTestId:'deleted-original'}:edge)}});assert.match((await scenarios.preview({...repaired,pathId:'route'})).executionYaml,/home.returned/);
+ const edited=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,yaml:yaml.replace('home.returned','home.updated')});assert.match((await scenarios.preview({...edited,pathId:'route'})).executionYaml,/home.updated/);assert.deepEqual(edited.canvas!.paths[0].visits,canvas.paths[0].visits);
+ const removed=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.filter(test=>test.id!=='returned')}))}});
  assert.match(removed.canvasDiagnostics!.map(item=>item.detail).join(' '),/deleted or stale check selections/);await assert.rejects(scenarios.start({workspaceId:removed.id,deviceId,pathId:'route'}),/deleted or stale/);
  }finally{await rm(root,{recursive:true,force:true});}
 });

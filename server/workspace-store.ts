@@ -8,12 +8,14 @@ export type WorkspaceSummary=WorkspaceMetadata & {id:string;name:string;screens:
 export type WorkspaceLibrary={items:WorkspaceSummary[];unreadable:number};
 // Legacy records use indented JSON and can include derived diagnostics.
 const recordLimit=16_000_000;
+const queues=new Map<string,Promise<unknown>>();
+export class WorkspaceConflict extends Error { constructor(){super('Another editor saved a newer revision. Current edits are retained. Save a copy to recover them, and keep the saved version intact.');} }
 const validId=(id:string)=>{if(typeof id!=='string'||! /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id))throw new Error('Invalid workspace identifier.');return id;};
 
 /** The existing local workspace records, with serialized atomic metadata/content writes. */
 export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>Workspace){
- let pending:Promise<unknown>=Promise.resolve();
- function serialize<T>(operation:()=>Promise<T>):Promise<T>{const next=pending.then(operation);pending=next.catch(()=>{});return next;}
+ const queueKey=resolve(root);
+ function serialize<T>(operation:()=>Promise<T>):Promise<T>{const next=(queues.get(queueKey)??Promise.resolve()).then(operation);const settled=next.catch(()=>{});queues.set(queueKey,settled);void settled.then(()=>{if(queues.get(queueKey)===settled)queues.delete(queueKey);});return next;}
  async function base(){const path=resolve(root,'workspaces');await mkdir(path,{recursive:true});if(!(await realpath(path)).startsWith((await realpath(root))+sep))throw new Error('Workspace path escapes its root.');return path;}
  async function file(id:string,create=false){
   const parent=await base();const directory=join(parent,validId(id));if(create)await mkdir(directory,{recursive:true});
@@ -25,6 +27,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
  async function read(id:string):Promise<Workspace>{
   const path=await file(id);const dates=await stat(path);if(dates.size>recordLimit)throw new Error('Workspace record exceeds the supported size.');const raw=JSON.parse(await readFile(path,'utf8'));
   if(!raw||raw.id!==id)throw new Error('Unreadable workspace identity.');
+  if(raw.metadata?.revision!==undefined&&(!Number.isSafeInteger(raw.metadata.revision)||raw.metadata.revision<0))throw new Error('Unreadable workspace revision.');
   const content=readContent(raw);
   const date=(value:unknown,fallback:string)=>typeof value==='string'&&Number.isFinite(Date.parse(value))?value:fallback;
   const metadata:WorkspaceMetadata={createdAt:date(raw.metadata?.createdAt,dates.birthtime.toISOString()),updatedAt:date(raw.metadata?.updatedAt,dates.mtime.toISOString()),openedAt:date(raw.metadata?.openedAt,dates.birthtime.toISOString()),revision:Number.isSafeInteger(raw.metadata?.revision)&&raw.metadata.revision>=0?raw.metadata.revision:0};
@@ -33,13 +36,14 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
  async function write(value:Workspace){const path=await file(value.id,true);const temporary=path+'.'+randomUUID()+'.tmp';const encoded=JSON.stringify({...value,canvasDiagnostics:undefined});if(Buffer.byteLength(encoded)>recordLimit)throw new Error('Workspace record exceeds the supported size.');try{await writeFile(temporary,encoded);await rename(temporary,path);return value;}finally{await rm(temporary,{force:true});}}
  return {
   read:(id:string)=>serialize(()=>read(id)),
-  save:(content:Workspace)=>serialize(async()=>{
+  save:(content:Workspace,expectedRevision:number=0)=>serialize(async()=>{
    const previous=content.id?await read(content.id):undefined;
+   if(previous&&previous.metadata!.revision!==expectedRevision)throw new WorkspaceConflict();
    const now=new Date().toISOString();
    return write({...content,id:content.id||randomUUID(),metadata:{createdAt:previous?.metadata?.createdAt??now,updatedAt:now,openedAt:previous?.metadata?.openedAt??now,revision:(previous?.metadata?.revision??0)+1}});
   }),
   open:(id:string)=>serialize(async()=>{const value=await read(id);return write({...value,metadata:{...value.metadata!,openedAt:new Date().toISOString()}});}),
-  rename:(id:string,name:string)=>serialize(async()=>{if(typeof name!=='string'||!name.trim()||name.trim().length>120)throw new Error('Use a workspace title of 1–120 characters.');const value=await read(id);return write({...value,name:name.trim(),metadata:{...value.metadata!,updatedAt:new Date().toISOString(),revision:value.metadata!.revision+1}});}),
+  rename:(id:string,name:string,expectedRevision:number)=>serialize(async()=>{if(typeof name!=='string'||!name.trim()||name.trim().length>120)throw new Error('Use a workspace title of 1–120 characters.');const value=await read(id);if(value.metadata!.revision!==expectedRevision)throw new WorkspaceConflict();return write({...value,name:name.trim(),metadata:{...value.metadata!,updatedAt:new Date().toISOString(),revision:value.metadata!.revision+1}});}),
   list:(query=''):Promise<WorkspaceLibrary>=>serialize(async()=>{
    const items:WorkspaceSummary[]=[];let unreadable=0;
    for(const entry of await readdir(await base(),{withFileTypes:true})){

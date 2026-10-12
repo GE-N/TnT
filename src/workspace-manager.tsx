@@ -21,7 +21,7 @@ function workspaceDate(value:string){
  const date=new Date(value);const today=new Date();const yesterday=new Date(today);yesterday.setDate(today.getDate()-1);
  return date.toDateString()===today.toDateString()?'Today':date.toDateString()===yesterday.toDateString()?'Yesterday':date.toLocaleDateString(undefined,{month:'short',day:'numeric',...(date.getFullYear()!==today.getFullYear()?{year:'numeric' as const}:{})});
 }
-export function WorkspaceManager({token,id,name,status,busy,blocked,dirty,onAction,onSave}:{token:string;id:string;name:string;status:string;busy:boolean;blocked:boolean;dirty:boolean;onAction:(action:Action,saved?:Workspace)=>Promise<void>;onSave:()=>Promise<Workspace>}){
+export function WorkspaceManager({token,id,name,status,busy,blocked,dirty,onAction,onSave,recovery}:{token:string;id:string;name:string;status:string;busy:boolean;blocked:boolean;dirty:boolean;onAction:(action:Action,saved?:Workspace)=>Promise<void>;onSave:()=>Promise<Workspace>;recovery:boolean}){
  const [panel,setPanel]=useState<'compact'|'library'|'rename'|'new'|'copy'>();
  const [query,setQuery]=useState('');const [title,setTitle]=useState('');
  const [library,setLibrary]=useState<WorkspaceLibrary>();const [error,setError]=useState('');const [loading,setLoading]=useState(false);
@@ -49,7 +49,7 @@ export function WorkspaceManager({token,id,name,status,busy,blocked,dirty,onActi
  }
  function choose(action:Action){
   if(blocked){setError('Wait for active execution and cleanup before switching workspaces.');return;}
-  if(dirty&&(action.kind==='new'||action.kind==='open'))setPending(action);else void perform(action,dirty&&action.kind==='copy');
+  if(dirty&&(action.kind==='new'||action.kind==='open'))setPending(action);else void perform(action,dirty&&action.kind==='copy'&&!recovery);
  }
  const items=library?.items??[];
  const formPanel=panel==='rename'||panel==='new'||panel==='copy';
@@ -93,10 +93,9 @@ export function WorkspaceManager({token,id,name,status,busy,blocked,dirty,onActi
     {panel==='compact'&&<button className="workspace-view-all" onClick={()=>setPanel('library')}><span>View all workspaces</span><WorkspaceIcon name="arrow"/></button>}
     <div className="workspace-commands">
      {panel==='library'&&<button className="workspace-command" disabled={busy||blocked} onClick={startRename}><WorkspaceIcon name="document"/><span>Rename workspace</span></button>}
-     <button className="workspace-command" disabled={busy||!token} onClick={()=>void onSave().catch(error=>setError(error.message))}><WorkspaceIcon name="save"/><span>Save workspace</span></button>
      <button className="workspace-command" disabled={busy||blocked} onClick={startCopy}><WorkspaceIcon name="copy"/><span>Save a copy</span></button>
     </div>
-    <footer className="workspace-manager-footer"><button className="workspace-command" disabled={busy||blocked} onClick={startNew}><WorkspaceIcon name="plus"/><span>New workspace</span></button><small>On this computer · Manual save</small></footer>
+    <footer className="workspace-manager-footer"><button className="workspace-command" disabled={busy||blocked} onClick={startNew}><WorkspaceIcon name="plus"/><span>New workspace</span></button><small>On this computer · Autosave</small></footer>
    </>}
    {error&&<p className="workspace-feedback workspace-error" role="alert">{error} {(panel==='compact'||panel==='library')&&<button disabled={busy} onClick={()=>setRetry(value=>value+1)}>Retry library</button>}</p>}
   </div></>}

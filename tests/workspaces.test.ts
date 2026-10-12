@@ -50,7 +50,7 @@ test('copies preserve authored internal references and exclude outer identity, r
   const copy=await service.copyWorkspace({...original,name:'Copy',runtimeInputs:{PASSWORD:'private'},token:'private',run:{status:'passed'}} as Parameters<typeof service.copyWorkspace>[0]);
   assert.notEqual(copy.id,original.id);assert.deepEqual(copy.canvas,original.canvas);assert.deepEqual(copy.scenarios,original.scenarios);
   assert.ok(!JSON.stringify(copy).includes('private'));assert.ok(!JSON.stringify(copy).includes('passed'));
-  await service.renameWorkspace(copy.id,'  Edited copy  ');assert.equal((await service.workspace(original.id)).name,'Original');
+  await service.renameWorkspace(copy.id,'  Edited copy  ',copy.metadata!.revision);assert.equal((await service.workspace(original.id)).name,'Original');
   assert.equal((await service.workspace(copy.id)).name,'Edited copy');
   const count=(await service.listWorkspaces()).items.length;
   await assert.rejects(service.copyWorkspace({...original,name:'Broken',yaml:'broken: ['}));
@@ -62,10 +62,10 @@ test('serialized opens and renames retain metadata; failed writes preserve the p
  const {root,service,close}=await fixture();const {chmod}=await import('node:fs/promises');let path='';
  try{
   const workspace=await service.save({name:'Original',yaml});path=join(root,'workspaces',workspace.id);
-  const [,renamed]=await Promise.all([service.openWorkspace(workspace.id),service.renameWorkspace(workspace.id,'Renamed')]);
+  const [,renamed]=await Promise.all([service.openWorkspace(workspace.id),service.renameWorkspace(workspace.id,'Renamed',workspace.metadata!.revision)]);
   assert.equal((await service.workspace(workspace.id)).metadata?.openedAt,renamed.metadata?.openedAt);
   await chmod(path,0o500);
-  await assert.rejects(service.save({...workspace,name:'Failure'}),/EACCES/);
+  await assert.rejects(service.save({...renamed,name:'Failure'}),/EACCES/);
   const retained=await service.workspace(workspace.id);assert.equal(retained.name,'Renamed');assert.deepEqual(retained.metadata,renamed.metadata);
   await chmod(path,0o700);await service.save({...retained,name:'Retry succeeded'});assert.equal((await service.workspace(workspace.id)).name,'Retry succeeded');
  }finally{if(path)await chmod(path,0o700);await close();}
@@ -82,7 +82,8 @@ test('workspace discovery and management require the existing authenticated same
   const {token}=await (await fetch(base+'/api/status')).json();const headers={'X-TnT-Token':token,'Content-Type':'application/json',Origin:base};
   assert.equal((await fetch(base+'/api/workspaces/'+source.id+'/rename',{method:'POST',headers:{...headers,Origin:'https://foreign.example'},body:JSON.stringify({name:'Wrong origin'})})).status,403);
   const library=await (await fetch(base+'/api/workspaces?q=HTTP',{headers})).json();assert.equal(library.items[0].name,'HTTP workspace');
-  const renamed=await fetch(base+'/api/workspaces/'+source.id+'/rename',{method:'POST',headers,body:JSON.stringify({name:'Renamed HTTP'})});assert.equal(renamed.status,200);
+  const renamed=await fetch(base+'/api/workspaces/'+source.id+'/rename',{method:'POST',headers,body:JSON.stringify({name:'Renamed HTTP',expectedRevision:source.metadata!.revision})});assert.equal(renamed.status,200);
+  const stale=await fetch(base+'/api/workspaces',{method:'POST',headers,body:JSON.stringify({...source,name:'Stale HTTP'})});assert.equal(stale.status,409);
   const opened=await (await fetch(base+'/api/workspaces/'+source.id+'/open',{method:'POST',headers,body:'{}'})).json();assert.equal(opened.name,'Renamed HTTP');
   const copy=await (await fetch(base+'/api/workspaces/copy',{method:'POST',headers,body:JSON.stringify({...opened,name:'HTTP copy'})})).json();assert.notEqual(copy.id,source.id);assert.equal((await service.listWorkspaces()).items.length,2);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));await close();}
@@ -96,5 +97,31 @@ test('an accepted large canvas and its legacy formatted record reopen through wo
   await writeFile(join(root,'workspaces',saved.id,'workspace.json'),JSON.stringify(saved,null,2));
   assert.equal((await service.workspace(saved.id)).canvas?.screens[9].tests.length,300);
   assert.equal((await service.listWorkspaces('Large')).items[0].id,saved.id);
+ }finally{await close();}
+});
+
+test('competing editor revisions reject stale and delayed saves without overwriting acknowledged content',async()=>{
+ const {service,close}=await fixture();
+ try{
+  const original=await service.save({name:'Original',yaml});
+  const results=await Promise.allSettled([service.save({...original,name:'First editor'}),service.save({...original,name:'Second editor'})]);
+  assert.equal(results.filter(result=>result.status==='fulfilled').length,1);
+  assert.match(String((results.find(result=>result.status==='rejected') as PromiseRejectedResult).reason),/newer revision/i);
+  await assert.rejects(service.save({...original,name:'Delayed edit'}),/newer revision/i);
+  const current=await service.workspace(original.id);assert.equal(current.name,'First editor');assert.equal(current.metadata?.revision,2);
+  assert.equal(current.metadata?.openedAt,original.metadata?.openedAt);
+ }finally{await close();}
+});
+
+test('malformed revision metadata is unreadable while legacy records without metadata remain editable',async()=>{
+ const {root,service,close}=await fixture();const {writeFile}=await import('node:fs/promises');
+ try{
+  const original=await service.save({name:'Legacy',yaml});const path=join(root,'workspaces',original.id,'workspace.json');
+  await writeFile(path,JSON.stringify({...original,metadata:{...original.metadata,revision:'bad'}}));
+  await assert.rejects(service.workspace(original.id),/Unreadable workspace revision/);
+  assert.equal((await service.listWorkspaces()).unreadable,1);
+  await writeFile(path,JSON.stringify({id:original.id,name:'Legacy',yaml}));
+  const legacy=await service.workspace(original.id);assert.equal(legacy.metadata?.revision,0);
+  const edited=await service.save({...legacy,name:'Updated legacy'});assert.equal(edited.metadata?.revision,1);assert.equal((await service.workspace(original.id)).name,'Updated legacy');
  }finally{await close();}
 });
