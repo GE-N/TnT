@@ -101,6 +101,31 @@ test('a valid save clears only the draft revision it was given',async()=>{
  }finally{faults.pass();await close();}
 });
 
+test('a draft created after Keep saved version is numbered above the dismissed revision, even after the file was cleared',async()=>{
+ const {service,close}=await fixture();
+ try{
+  const saved=await service.save({name:'Dismissed',yaml});
+  const first=await service.saveDraft(saved.id,draftBody(1,0,'appId: com.example.App\n---\n- tapOn: *missing\n'));
+  assert.equal(first.draftRevision,1);
+  await service.saveView(saved.id,{dismissedDraftRevision:1});
+  const newer=await service.saveDraft(saved.id,draftBody(1,1,'appId: com.example.App\n---\n- tapOn: *later\n'));
+  assert.equal(newer.draftRevision,2);
+  const cleared=await service.save({...saved,clearDraft:newer.draftRevision});
+  assert.equal((await service.workspaceDetail(saved.id)).draft,null);
+  const recreated=await service.saveDraft(saved.id,draftBody(cleared.metadata!.revision,0,'appId: com.example.App\n---\n- tapOn: *after-clear\n'));
+  assert.equal(recreated.draftRevision,3);
+  const detail=await service.workspaceDetail(saved.id);
+  assert.equal(detail.view?.dismissedDraftRevision,1);
+  assert.equal(detail.view?.allocatedDraftRevision,3);
+  assert.ok(detail.draft!.draftRevision>(detail.view?.dismissedDraftRevision??0));
+  const rewind=await service.saveView(saved.id,{allocatedDraftRevision:1,scenarioId:'kept'}) as {allocatedDraftRevision?:number;dismissedDraftRevision?:number;scenarioId?:string};
+  assert.equal(rewind.allocatedDraftRevision,3);
+  assert.equal(rewind.dismissedDraftRevision,1);
+  assert.equal(rewind.scenarioId,'kept');
+  await assert.rejects(service.saveDraft(saved.id,draftBody(cleared.metadata!.revision,0)),DraftConflict);
+ }finally{await close();}
+});
+
 test('unknown draft fields and confidential sentinels are rejected before any record is written',async()=>{
  const {root,service,close}=await fixture();
  try{

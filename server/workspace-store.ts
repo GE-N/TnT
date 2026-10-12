@@ -15,6 +15,8 @@ export type WorkspaceView=Record<string,unknown> & {
  canvas?:Record<string,unknown> & {zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string};
  panels?:Record<string,unknown> & {advanced?:boolean};
  dismissedDraftRevision?:number;
+ /** Highest draft revision issued for this workspace. A cleared draft must not be reissued at or below it. */
+ allocatedDraftRevision?:number;
 };
 export type WorkspaceSession={lastActiveId:string|null;updatedAt:string;unavailable?:boolean};
 export type WorkspaceStoreFaults={
@@ -161,6 +163,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
    return {draft:null,draftError:'A recovered draft could not be read.'};
   }
  }
+ function positiveInt(value:unknown){return typeof value==='number'&&Number.isSafeInteger(value)&&value>0?value:0;}
  function mergeView(existing:Record<string,unknown>|null,patch:Record<string,unknown>):WorkspaceView{
   const base=existing??{};
   const incomingFormat=typeof patch.format==='number'&&patch.format>=1?patch.format:undefined;
@@ -168,7 +171,8 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   const format=Math.max(incomingFormat??1,existingFormat??1);
   const canvas=patch.canvas&&typeof patch.canvas==='object'&&!Array.isArray(patch.canvas)?{...(base.canvas&&typeof base.canvas==='object'&&!Array.isArray(base.canvas)?base.canvas as Record<string,unknown>:{}),...patch.canvas as Record<string,unknown>}:base.canvas;
   const panels=patch.panels&&typeof patch.panels==='object'&&!Array.isArray(patch.panels)?{...(base.panels&&typeof base.panels==='object'&&!Array.isArray(base.panels)?base.panels as Record<string,unknown>:{}),...patch.panels as Record<string,unknown>}:base.panels;
-  return {...base,...patch,format,...(canvas===undefined?{}:{canvas}),...(panels===undefined?{}:{panels})} as WorkspaceView;
+  const allocated=Math.max(positiveInt(base.allocatedDraftRevision),positiveInt(patch.allocatedDraftRevision));
+  return {...base,...patch,format,...(canvas===undefined?{}:{canvas}),...(panels===undefined?{}:{panels}),...(allocated?{allocatedDraftRevision:allocated}:{})} as WorkspaceView;
  }
  async function readView(id:string):Promise<WorkspaceView|null>{
   try{
@@ -203,14 +207,26 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   const current=await readDraftOnce(id);
   if(current.draftError)throw new Error('A recovered draft could not be read. Discard it before saving a new draft.');
   if((current.draft?.draftRevision??0)!==input.expectedDraftRevision)throw new DraftConflict();
-  const draft:WorkspaceDraft={format:1,workspaceId:id,baseRevision:input.baseRevision,draftRevision:input.expectedDraftRevision+1,savedAt:now(),name:input.name.trim(),content:assertContent(input.content),fields:assertFields(input.fields)};
+  const view=await readView(id);
+  const draftRevision=Math.max(input.expectedDraftRevision+1,positiveInt(view?.dismissedDraftRevision)+1,positiveInt(view?.allocatedDraftRevision)+1);
+  if(!Number.isSafeInteger(draftRevision))throw new Error('Invalid draft revision.');
+  const draft:WorkspaceDraft={format:1,workspaceId:id,baseRevision:input.baseRevision,draftRevision,savedAt:now(),name:input.name.trim(),content:assertContent(input.content),fields:assertFields(input.fields)};
   return draft;
+ }
+ async function noteDraftRevision(id:string,revision:number){
+  if(!Number.isSafeInteger(revision)||revision<1)return;
+  const existing=await readView(id);
+  if(positiveInt(existing?.allocatedDraftRevision)>=revision)return;
+  const view=mergeView(existing,{allocatedDraftRevision:revision});
+  const path=await contained(await workspaceDirectory(id,true),'view.json',true);
+  await writeJson(path,view,viewLimit,'View preferences exceed the supported size.');
  }
  async function writeDraft(draft:WorkspaceDraft){const path=await contained(await workspaceDirectory(draft.workspaceId,true),'draft.json',true);await writeJson(path,draft,recordLimit,'Draft exceeds the supported size.');return draft;}
  async function clearDraft(id:string,clearRevision:number,newRevision:number){
   if(!Number.isSafeInteger(clearRevision)||clearRevision<0)return false;
   const current=await readDraftOnce(id);
   if(!current.draft||current.draft.draftRevision!==clearRevision||current.draft.baseRevision>newRevision)return false;
+  await noteDraftRevision(id,current.draft.draftRevision);
   await rm(await contained(await workspaceDirectory(id),'draft.json',false),{force:true});
   return true;
  }
@@ -232,7 +248,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
    }catch(error){console.error('Workspace save committed; session or draft cleanup failed.',error);draftCleared=false;}
    return {...written,draftCleared};
   }),
-  saveDraft:(id:string,input:{baseRevision:number;expectedDraftRevision:number;name:string;content:unknown;fields:unknown})=>serialize(async()=>{const draft=await draftInput(id,input);await writeDraft(draft);return {draftRevision:draft.draftRevision,savedAt:draft.savedAt,draft};}),
+  saveDraft:(id:string,input:{baseRevision:number;expectedDraftRevision:number;name:string;content:unknown;fields:unknown})=>serialize(async()=>{const draft=await draftInput(id,input);await writeDraft(draft);try{await noteDraftRevision(id,draft.draftRevision);}catch(error){console.error('Draft revision was saved; the revision watermark was not.',error);}return {draftRevision:draft.draftRevision,savedAt:draft.savedAt,draft};}),
   createWithDraft:(content:Workspace,input:{name:string;content:unknown;fields:unknown})=>serialize(async()=>{
    const stamp=now();const id=randomUUID();
    const draftContent=assertContent(input.content);const fields=assertFields(input.fields);
@@ -250,6 +266,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
    if(current.draftError){if(expectedDraftRevision!==0)throw new DraftConflict();await rm(path,{force:true});return {discarded:true};}
    if(!current.draft)throw new Error('No draft to discard.');
    if(current.draft.draftRevision!==expectedDraftRevision)throw new DraftConflict();
+   await noteDraftRevision(id,current.draft.draftRevision);
    await rm(path,{force:true});return {discarded:true};
   }),
   saveView:(id:string,patch:unknown)=>serialize(async()=>{

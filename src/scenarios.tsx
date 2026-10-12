@@ -413,6 +413,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     if(content.mock&&typeof content.mock==='object'){setMock(content.mock as MockPlan);setLoadedMock(content.mock as MockPlan);}
     setRecoveredFields({...draft.fields});setLoadRevision(value=>value+1);draftRecord.current=draft;
     setAcknowledgedDraftKey(JSON.stringify({name:draft.name,content:{yaml:typeof content.yaml==='string'?content.yaml:yaml,flows:flowsValue,canvas:content.canvas,scenarios:content.scenarios,automation:content.automation,mock:content.mock},fields:draft.fields??{}}));
+    setDismissedDraft(draft.draftRevision);
   }
   async function keepSaved(){
     const revision=draftRevisionShown;

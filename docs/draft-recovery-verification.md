@@ -5,7 +5,7 @@ Automated tests cover the storage, conflict, and jsdom journeys in `tests/draft-
 ## Desktop
 
 1. Open a saved workspace, break the YAML, and wait until the header reads “Draft kept, not valid yet.” Refresh the page. The banner “Unsaved changes from {time} were recovered.” appears with Restore draft and Keep saved version. There is no Compare control.
-2. Restore draft returns the incomplete YAML and unapplied field text. Keep saved version hides the banner and leaves `draft.json` in the workspace directory. The next valid save removes that file.
+2. Restore draft returns the incomplete YAML and unapplied field text, and the banner closes. Keep saved version hides the banner and leaves `draft.json` in the workspace directory. The next valid save removes that file. A later invalid edit, including one made after that valid save, is offered again after refresh.
 3. Save the workspace from another editor so the draft’s base revision is older. The banner adds “Based on an older version.” and replaces Restore draft with Restore as a copy. The copy contains the draft; the original draft file remains.
 4. Replace `draft.json` with `{`. The saved workspace still opens, with “A recovered draft couldn't be read.” Discard draft asks “Discard the unreadable draft? This can't be undone.” and focuses Cancel. Cancel leaves the file and returns focus to Discard draft. Discard removes it.
 5. While a save is failing, choose New workspace. The dialog offers Retry, Cancel, and Discard changes and switch, with Retry focused. Tab cycles inside the dialog. Escape returns to the editor. Discard changes and switch focuses Cancel; Cancel returns to Discard changes and switch. Discard asks for the workspace name before switching.
@@ -14,5 +14,5 @@ Automated tests cover the storage, conflict, and jsdom journeys in `tests/draft-
 
 ## Narrow (under 760px)
 
-1. The save status becomes an icon. Failures use ×, a kept draft uses !, paused autosave uses ‖, and the paused tooltip and description say “while the picker is open” or “no runner connected”. Failures use an alert. The recovery banner is a full-width bar with stacked buttons at least 44px tall.
+1. The save status becomes an icon. Failures use ×, a kept draft uses !, paused autosave uses ‖, and the paused tooltip and description say “while the picker is open” or “no runner connected”. Failures use an alert. The recovery banner is a full-width bar with the text just above full-width buttons at least 44px tall.
 2. The workspace manager still opens as the existing bottom sheet. Canvas pan and zoom change only the canvas viewport.

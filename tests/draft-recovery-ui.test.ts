@@ -36,14 +36,15 @@ async function mount(options?:{recoverSession?:boolean;faults?:ReturnType<typeof
  };
  const fetchImpl=(path:string,init?:{body?:string})=>{const response=request(path,init);pending.push(response);return response;};
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetchImpl:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
- const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);const document=dom.window.document;
+ const {createRoot}=await import('react-dom/client');let root=createRoot(dom.window.document.getElementById('root')!);const document=dom.window.document;
  const settle=async()=>{do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);};
  const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();await settle();});
- const render=async(overrides?:{token?:string})=>{await act(async()=>{root.render(createElement(Scenarios,{token:overrides?.token??options?.token??'local',deviceId:options?.deviceId??'',bundleId:'com.example.App',launchBusy:false,onRunning:()=>{},recoverSession:options?.recoverSession??false}));});await act(async()=>{for(let attempt=0;attempt<12;attempt++)await settle();});};
+ const render=async(overrides?:{token?:string;recoverSession?:boolean})=>{await act(async()=>{root.render(createElement(Scenarios,{token:overrides?.token??options?.token??'local',deviceId:options?.deviceId??'',bundleId:'com.example.App',launchBusy:false,onRunning:()=>{},recoverSession:overrides?.recoverSession??options?.recoverSession??false}));});await act(async()=>{for(let attempt=0;attempt<12;attempt++)await settle();});};
+ const reload=async()=>{await act(async()=>{root.unmount();});root=createRoot(document.getElementById('root')!);await render({recoverSession:true});};
  const editYaml=async(value:string)=>act(async()=>{const node=document.getElementById('scenario-yaml') as HTMLTextAreaElement;Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const fill=async(label:string,value:string)=>act(async()=>{const input=[...document.querySelectorAll('label')].find(node=>node.textContent===label);const node=document.getElementById(input?.htmlFor??'') as HTMLInputElement;assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const openNamed=async(name:string)=>{await click('Manage workspace');const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>node.getAttribute('aria-label')?.startsWith('Open '+name+' ·'));assert.ok(button,name);await act(async()=>{button.click();await settle();});};
- return {directory,service,faults,document,dom,click,render,editYaml,fill,openNamed,settle,holdPicker,releasePicker,close:async()=>{await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor] of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true}).catch(()=>rm(directory,{recursive:true,force:true}));}};
+ return {directory,service,faults,document,dom,click,render,reload,editYaml,fill,openNamed,settle,holdPicker,releasePicker,close:async()=>{await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor] of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true}).catch(()=>rm(directory,{recursive:true,force:true}));}};
 }
 
 test('queued and rejected draft writes never show Saved locally, and Retry does after a durable ack',async()=>{
@@ -79,9 +80,6 @@ test('refresh offers the recovered draft, Keep saved version hides it, and a new
   assert.match(page.document.body.textContent!,/Unsaved changes from/);assert.match(page.document.body.textContent!,/were recovered/);
   assert.equal([...page.document.querySelectorAll('button')].some(button=>button.textContent==='Compare'),false);
   assert.match(page.document.getElementById('scenario-yaml')!.textContent??(page.document.getElementById('scenario-yaml') as HTMLTextAreaElement).value,/launchApp/);
-  await page.click('Restore draft');
-  assert.match((page.document.getElementById('scenario-yaml') as HTMLTextAreaElement).value,/missing/);
-  assert.equal((page.document.getElementById('form-value') as HTMLInputElement|null)?.value??'', 'pending command');
   await page.click('Keep saved version');
   assert.equal(page.document.querySelector('.draft-banner'),null);
   assert.equal((await page.service.workspaceDetail(saved.id)).view?.dismissedDraftRevision,1);
@@ -89,6 +87,73 @@ test('refresh offers the recovered draft, Keep saved version hides it, and a new
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await page.settle();});
   assert.ok(page.document.querySelector('.draft-banner'));
   assert.equal((await page.service.workspace(saved.id)).yaml,yaml);
+ }finally{await page.close();}
+});
+
+test('Keep saved version still offers a later invalid draft after reload',async()=>{
+ const page=await mount({recoverSession:true});
+ const later='appId: com.example.App\n---\n- tapOn: *later\n';
+ try{
+  const saved=await page.service.save({name:'Kept then edited',yaml});
+  await page.service.saveDraft(saved.id,{baseRevision:1,expectedDraftRevision:0,name:saved.name,content:{yaml:'appId: com.example.App\n---\n- tapOn: *missing\n'},fields:{}});
+  await page.service.setSession(saved.id);
+  await page.render();
+  await page.click('Keep saved version');
+  assert.equal(page.document.querySelector('.draft-banner'),null);
+  await page.editYaml(later);
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await page.settle();});
+  const detail=await page.service.workspaceDetail(saved.id);
+  assert.match(String(detail.draft?.content.yaml),/\*later/);
+  assert.ok((detail.draft?.draftRevision??0)>(detail.view?.dismissedDraftRevision??0));
+  await page.reload();
+  assert.match(page.document.body.textContent!,/were recovered/);
+  assert.equal([...page.document.querySelectorAll('button')].some(button=>button.textContent==='Restore draft'),true);
+  assert.match((page.document.getElementById('scenario-yaml') as HTMLTextAreaElement).value,/launchApp/);
+  await page.click('Restore draft');
+  assert.match((page.document.getElementById('scenario-yaml') as HTMLTextAreaElement).value,/\*later/);
+ }finally{await page.close();}
+});
+
+test('Keep saved version still offers a later invalid draft after a valid save clears the previous draft',async()=>{
+ const page=await mount({recoverSession:true});
+ const valid='appId: com.example.App\n---\n- tapOn: Home\n';
+ const later='appId: com.example.App\n---\n- tapOn: *after-clear\n';
+ try{
+  const saved=await page.service.save({name:'Kept then cleared',yaml});
+  await page.service.saveDraft(saved.id,{baseRevision:1,expectedDraftRevision:0,name:saved.name,content:{yaml:'appId: com.example.App\n---\n- tapOn: *missing\n'},fields:{}});
+  await page.service.setSession(saved.id);
+  await page.render();
+  await page.click('Keep saved version');
+  await page.editYaml(valid);
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await page.settle();});
+  assert.equal(saveText(page.document),'Saved locally');
+  assert.equal((await page.service.workspaceDetail(saved.id)).draft,null);
+  await page.editYaml(later);
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await page.settle();});
+  const detail=await page.service.workspaceDetail(saved.id);
+  assert.match(String(detail.draft?.content.yaml),/\*after-clear/);
+  assert.ok((detail.draft?.draftRevision??0)>(detail.view?.dismissedDraftRevision??0),`draft ${detail.draft?.draftRevision} should pass dismissed ${detail.view?.dismissedDraftRevision}`);
+  await page.reload();
+  assert.match(page.document.body.textContent!,/were recovered/);
+  assert.equal([...page.document.querySelectorAll('button')].some(button=>button.textContent==='Restore draft'),true);
+  assert.match((page.document.getElementById('scenario-yaml') as HTMLTextAreaElement).value,/tapOn: Home/);
+  await page.click('Restore draft');
+  assert.match((page.document.getElementById('scenario-yaml') as HTMLTextAreaElement).value,/\*after-clear/);
+ }finally{await page.close();}
+});
+
+test('Restore draft dismisses the recovery banner and shows the draft',async()=>{
+ const page=await mount({recoverSession:true});
+ try{
+  const saved=await page.service.save({name:'Restored workspace',yaml});
+  await page.service.saveDraft(saved.id,{baseRevision:1,expectedDraftRevision:0,name:saved.name,content:{yaml:'appId: com.example.App\n---\n- tapOn: *missing\n',flows:'{}'},fields:{'yaml-command':'pending command'}});
+  await page.service.setSession(saved.id);
+  await page.render();
+  await page.click('Restore draft');
+  assert.equal(page.document.querySelector('.draft-banner'),null);
+  assert.match((page.document.getElementById('scenario-yaml') as HTMLTextAreaElement).value,/missing/);
+  assert.equal((page.document.getElementById('form-value') as HTMLInputElement|null)?.value??'', 'pending command');
+  assert.equal((await page.service.workspaceDetail(saved.id)).view?.dismissedDraftRevision,undefined);
  }finally{await page.close();}
 });
 
@@ -217,7 +282,7 @@ test('narrow save status exposes an icon label, and the switch dialog keeps keyb
  assert.match(css,/\.workspace-danger\{color:var\(--danger\)\}/);
  assert.match(css,/\.draft-banner\.danger\{/);
  assert.match(css,/\.go-to-issue,\.save-retry/);
- assert.match(css,/draft-banner\{flex-direction:column/);
+ assert.match(css,/draft-banner\{flex-direction:column;align-items:stretch\}\.draft-banner p\{flex:0 0 auto\}/);
  assert.match(css,/workspace-management-surface,\.workspace-management-surface\.expanded\{position:fixed;inset:auto 12px 12px/);
  const faults=createWriteFaults();const page=await mount({faults});
  try{
