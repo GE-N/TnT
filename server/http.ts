@@ -60,6 +60,9 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         if (request.method === 'POST' && url.pathname === '/api/session') return json(200, await scenarios.setSession((await readJson(request)).lastActiveId??null));
         if (request.method === 'POST' && url.pathname === '/api/workspaces') return json(200, await scenarios.save(await readJson(request)));
         if (request.method === 'GET' && url.pathname === '/api/workspaces') return json(200, await scenarios.listWorkspaces(url.searchParams.get('q')??''));
+        if (request.method === 'POST' && url.pathname === '/api/workspaces/export') return json(200, await scenarios.exportWorkspace(await readJson(request)));
+        if (request.method === 'POST' && url.pathname === '/api/workspaces/import/review') return json(200, await scenarios.reviewWorkspacePackage(await readJson(request,2_300_000)));
+        if (request.method === 'POST' && url.pathname === '/api/workspaces/import') return json(200, await scenarios.importWorkspace(await readJson(request,2_300_000)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/copy') return json(200, await scenarios.copyWorkspace(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/draft') return json(200, await scenarios.createDraftWorkspace(await readJson(request,17_000_000)));
         const draftDiscard = /^\/api\/workspaces\/([0-9a-f-]{36})\/draft\/discard$/.exec(url.pathname);

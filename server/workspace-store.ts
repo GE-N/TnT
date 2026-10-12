@@ -235,6 +235,14 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   readDraft:(id:string)=>serialize(()=>readDraftOnce(id)),
   readView:(id:string)=>serialize(()=>readView(id)),
   bundle:(id:string)=>serialize(async()=>{const workspace=await read(id);const draftState=await readDraftOnce(id);const view=await readView(id);return {...workspace,draft:draftState.draft,draftError:draftState.draftError,view};}),
+  importCopy:(content:Workspace)=>serialize(async()=>{
+   const stamp=now();const id=randomUUID();
+   let written:Workspace;
+   try{written=await write({...content,id,metadata:{createdAt:stamp,updatedAt:stamp,openedAt:stamp,revision:1}});}
+   catch(error){await rm(join(await base(),id),{recursive:true,force:true});throw error;}
+   try{await writeSession({lastActiveId:id,updatedAt:stamp});}catch(error){console.error('Import committed; session update failed.',error);}
+   return written;
+  }),
   save:(content:Workspace,expectedRevision:number=0,clearDraftRevision?:number)=>serialize(async()=>{
    const previous=content.id?await read(content.id):undefined;
    if(previous&&previous.metadata!.revision!==expectedRevision)throw new WorkspaceConflict();

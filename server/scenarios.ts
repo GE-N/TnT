@@ -1,4 +1,5 @@
-import {createWorkspaceStore,type WorkspaceMetadata,type WorkspaceStoreFaults} from './workspace-store.js';
+import {parsePackage,portableContent,packageReview,readOmittedValues,missingValues,type OmittedValue,type WorkspacePackage} from './workspace-package.js';
+import {WorkspaceConflict,createWorkspaceStore,type WorkspaceMetadata,type WorkspaceStoreFaults} from './workspace-store.js';
 import {createBatches} from './batches.js';
 import {projectCanvasRoute} from './canvas-route.js';
 import {refreshChecks,operationProblem} from '../shared/canvas-authoring.js';
@@ -13,7 +14,7 @@ import {readCanvas,referenceCatalog,inspectCanvas,selectedCanvasPath,mapCanvas,t
 import { createMockSession, validateMock, type MockPlan, type MockResult } from './mockoon.js';
 import type { createRunner } from './runner.js';
 
-export type Workspace = { metadata?:WorkspaceMetadata; scenarios?:ScenarioDefinition[]; id: string; name: string; yaml: string; automation?:Automation; flows?: Record<string, string>; mock?: MockPlan; canvas?: CanvasGraph; canvasDiagnostics?: CanvasDiagnostic[] };
+export type Workspace = { omittedValues?:OmittedValue[]; metadata?:WorkspaceMetadata; scenarios?:ScenarioDefinition[]; id: string; name: string; yaml: string; automation?:Automation; flows?: Record<string, string>; mock?: MockPlan; canvas?: CanvasGraph; canvasDiagnostics?: CanvasDiagnostic[] };
 export type Step = { id: string; command: string; expected?: unknown; actual?:unknown; detail?:string; artifacts?:string[]; assertionStatus?:Step['status']; status: 'unavailable' | 'passed' | 'failed' | 'skipped' };
 export type Cleanup = { verified: boolean; detail: string };
 export type Run = {
@@ -44,21 +45,21 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     if (!(await realpath(path)).startsWith((await realpath(base)) + sep)) throw new Error('Workspace path escapes its root.');
     return path;
   }
-  function authoredWorkspace(input: {id?:string;name:string;yaml:string;flows?:Record<string,string>;mock?:unknown;canvas?:unknown;automation?:unknown;scenarios?:unknown}):Workspace {
+  function authoredWorkspace(input: {id?:string;name:string;yaml:string;flows?:Record<string,string>;mock?:unknown;canvas?:unknown;automation?:unknown;scenarios?:unknown;omittedValues?:unknown},unresolved?:string[]):Workspace {
       if (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 120 || typeof input.yaml !== 'string' || Buffer.byteLength(input.yaml) > 100_000) throw new Error('Provide a workspace title and YAML up to 100 KB.');
       const scenarios=readScenarios(input.scenarios);
-      const flows = validateFlows(input.flows);
+      const flows = validateFlows(input.flows,unresolved);
       const mock = validateMock(input.mock);
       const rawCanvas=readCanvas(input.canvas);
       const canvas=rawCanvas?refreshChecks(rawCanvas,input.yaml):undefined;
 
       if (Buffer.byteLength(JSON.stringify({flows,mock,canvas,automation:input.automation,scenarios})) > 900_000) throw new Error('Combined reusable flows and mock environment exceed 900 KB.');
-      const automation=readAutomation(input.automation,flows??{},input.yaml);
+      const automation=readAutomation(input.automation,flows??{},input.yaml,unresolved);
       const canvasDiagnostics=canvas?inspectCanvas(canvas,input.yaml,flows,automation).diagnostics:undefined;
-      return { scenarios, automation, flows, mock, canvas, canvasDiagnostics, id: input.id ? validId(input.id) : '', name: input.name.trim(), yaml: input.yaml };
+      return { omittedValues:readOmittedValues(input.omittedValues), scenarios, automation, flows, mock, canvas, canvasDiagnostics, id: input.id ? validId(input.id) : '', name: input.name.trim(), yaml: input.yaml };
 
   }
-  const workspaceStore=createWorkspaceStore(options.root,authoredWorkspace,{faults:options.faults,now:options.now});
+  const workspaceStore=createWorkspaceStore(options.root,input=>authoredWorkspace(input,[]),{faults:options.faults,now:options.now});
   const service = {
     async preview(input:{yaml:string;flows?:Record<string,string>;automation?:unknown;canvas?:unknown;mock?:unknown;scenarios?:unknown;scenarioId?:string;pathId?:string;runtimeInputs?:unknown;resetApp?:boolean}) {
       if(typeof input.yaml!=='string'||Buffer.byteLength(input.yaml)>100_000)throw new Error('Provide YAML up to 100 KB.');
@@ -85,7 +86,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       if(automationError)catalog.diagnostics.push({ownerId:'automation',detail:automationError});
       return catalog;
     },
-    async save(input: { clearDraft?:number; expectedRevision?:number; metadata?:WorkspaceMetadata; id?: string; name: string; yaml: string; flows?: Record<string,string>; mock?: unknown; canvas?: unknown; automation?:unknown; scenarios?:unknown }): Promise<Workspace> {
+    async save(input: { clearDraft?:number; expectedRevision?:number; metadata?:WorkspaceMetadata; id?: string; name: string; yaml: string; flows?: Record<string,string>; mock?: unknown; canvas?: unknown; automation?:unknown; scenarios?:unknown; omittedValues?:unknown }): Promise<Workspace> {
       const revision=input.expectedRevision??input.metadata?.revision??0;
       if(!Number.isSafeInteger(revision)||revision<0)throw new Error('Invalid workspace revision.');
       if(input.clearDraft!==undefined&&(!Number.isSafeInteger(input.clearDraft)||input.clearDraft<0))throw new Error('Invalid draft revision.');
@@ -115,6 +116,32 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       for(const flow of Object.values(content.flows??{}))validate(flow,content.flows);
       return workspaceStore.save(content);
     },
+    async exportWorkspace(input:{id:string;expectedRevision:number;includeValues?:boolean}){
+      if(input.includeValues!==undefined&&typeof input.includeValues!=='boolean')throw new Error('Include values must be a boolean.');
+      const workspace=await workspaceStore.read(input.id);
+      if(workspace.metadata!.revision!==input.expectedRevision)throw new WorkspaceConflict();
+      const incomplete=workspace.canvas?.screens.flatMap(screen=>screen.tests).find(test=>operationProblem(test));
+      if(incomplete)throw new Error('Repair incomplete authored content before export. '+operationProblem(incomplete));
+      validate(workspace.yaml,workspace.flows);
+      const content=portableContent(workspace,input.includeValues===true);
+      const pkg:WorkspacePackage={dependencies:packageReview(content,[]).dependencies,format:'tnt-workspace',version:1,source:{revision:workspace.metadata!.revision,savedAt:workspace.metadata!.updatedAt},workspace:content};
+      if(Buffer.byteLength(JSON.stringify(pkg,null,2)+'\n')>1_100_000)throw new Error('Formatted workspace package exceeds 1.1 MB. Reduce embedded images or authored content.');
+      const reviewed=await service.reviewWorkspacePackage({package:pkg});
+      return {...reviewed,filename:(workspace.name.replace(/[^\p{L}\p{N}._-]+/gu,'-').slice(0,100)||'workspace')+'.tnt-workspace.json'};
+    },
+    async reviewWorkspacePackage(input:{package:unknown}){
+      const pkg=parsePackage(input.package);
+      const missing:string[]=[];
+      const content=authoredWorkspace({...pkg.workspace,id:undefined},missing);
+      validate(content.yaml,content.flows,[],new Set(),missing);
+      for(const scenario of content.scenarios??[])try{await service.preview({...content,scenarioId:scenario.id});}catch(error){missing.push(scenario.name+': '+(error instanceof Error?error.message:'Repair scenario.'));}
+      const review=packageReview(content,[...missing,...(content.canvasDiagnostics??[]).map(item=>item.detail)]);
+      return {package:{...pkg,dependencies:review.dependencies,workspace:portableContent(content,true)},review};
+    },
+    async importWorkspace(input:{package:unknown;name:string}){
+      const reviewed=await service.reviewWorkspacePackage(input);
+      return workspaceStore.importCopy(authoredWorkspace({...reviewed.package.workspace,name:input.name,id:undefined},[]));
+    },
     async start(input: RunInput): Promise<Run> {
       if (batches.busy) throw new Error('A scenario batch is in progress. Wait for cleanup.');
       const workspace = await service.workspace(input.workspaceId);
@@ -137,6 +164,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const runtimeInputs = validateInputs(input.runtimeInputs);
       const confidential = Object.keys(runtimeInputs).length > 0;
       if(input.resetApp!==undefined&&typeof input.resetApp!=='boolean')throw new Error('Reset app must be a boolean.');
+      const omitted=missingValues(authored,runtimeInputs,input.scenarioId);if(omitted.length)throw new Error('Repair imported workspace before execution. '+omitted.join(' '));
       const selection=selectScenario(authored,input.scenarioId,runtimeInputs);
       let workspace=selection?{...authored,...selection,name:selection.scenario.name}:authored;
       const selectedPathId=selection?.scenario.pathId??input.pathId;
@@ -152,7 +180,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const canvasPath=canvas?selectedCanvasPath(canvas,workspace.yaml,workspace.flows??{},selectedPathId,automation):undefined;
       const { appId, steps } = validate(workspace.yaml, workspace.flows);
       const derived=automation?instrument(workspace.yaml,automation,resetApp):undefined;
-      if(selection?.scenario.authoring==='canvas')validateFlowInputs(derived?.yaml??workspace.yaml,workspace.flows??{},selection.inputs);
+      validateFlowInputs(derived?.yaml??workspace.yaml,workspace.flows??{},selection?.inputs??runtimeInputs);
       for (const flow of Object.values(workspace.flows ?? {})) { if (validate(flow, workspace.flows).appId !== appId) throw new Error('Reusable flows must declare the same appId as the scenario.'); }
       if ((input.captureId === undefined) !== (input.pickerReviewId === undefined)) throw new Error('Provide both capture and reviewed step identity.');
       const pickerReference = input.captureId ? options.runner.picker.assertReview(input.captureId, input.pickerReviewId!, workspace.yaml) : undefined;
@@ -275,13 +303,13 @@ function validateInputs(value: unknown): Record<string, string> {
   return Object.fromEntries(entries);
 }
 
-function validate(yaml: string, flows: Record<string,string> = {}, ancestors: string[] = [], verified = new Set<string>()) {
+function validate(yaml: string, flows: Record<string,string> = {}, ancestors: string[] = [], verified = new Set<string>(),unresolved?:string[]) {
   const documents = parseAllDocuments(yaml);
   if (documents.length !== 2 || documents.some(doc => doc.errors.length)) throw new Error('Invalid Maestro YAML: use an appId header, --- separator, and command list.');
   const config = documents[0].toJS();
   const commands = documents[1].toJS();
-  rejectFileReferences(config, flows, ancestors, verified);
-  rejectFileReferences(commands, flows, ancestors, verified);
+  rejectFileReferences(config, flows, ancestors, verified,unresolved);
+  rejectFileReferences(commands, flows, ancestors, verified,unresolved);
   if (typeof config?.appId !== 'string' || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(config.appId) || !Array.isArray(commands) || !commands.length) throw new Error('Provide a literal installed appId and at least one Maestro command.');
   const steps: Step[] = commands.map((value, index) => {
     const command = typeof value === 'string' ? value : value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value)[0] : undefined;
@@ -290,29 +318,30 @@ function validate(yaml: string, flows: Record<string,string> = {}, ancestors: st
   });
   return { appId: config.appId as string, steps };
 }
-function validateFlows(value: unknown): Record<string,string> | undefined {
+function validateFlows(value: unknown,unresolved?:string[]): Record<string,string> | undefined {
   if (value === undefined) return;
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 20) throw new Error('Provide up to 20 reusable YAML flows.');
   const entries = Object.entries(value);
   if (entries.some(([name,yaml]) => !/^[A-Za-z][A-Za-z0-9_-]{0,63}\.yaml$/.test(name) || name === 'flow.yaml' || typeof yaml !== 'string' || Buffer.byteLength(yaml) > 100_000)) throw new Error('Reusable flow names must be simple .yaml filenames, with content up to 100 KB.');
   const flows = Object.fromEntries(entries) as Record<string,string>;
-  for (const [name,yaml] of entries) validate(yaml as string, flows, [name]);
+  for (const [name,yaml] of entries) validate(yaml as string, flows, [name],new Set(),unresolved);
   return flows;
 }
-function rejectFileReferences(value: unknown, flows: Record<string,string>, ancestors: string[], verified: Set<string>) {
+function rejectFileReferences(value: unknown, flows: Record<string,string>, ancestors: string[], verified: Set<string>,unresolved?:string[]) {
   if (!value || typeof value !== 'object') return;
   for (const [key, child] of Object.entries(value)) {
     if (['runScript', 'addMedia', 'takeScreenshot', 'startRecording'].includes(key)) throw new Error('External file references and authored artifact paths are unsupported.');
     if (key === 'runFlow' && (typeof child === 'string' || (child && typeof child === 'object' && 'file' in child))) {
       const name = typeof child === 'string' ? child : (child as {file: unknown}).file;
-      if (typeof name !== 'string' || !Object.hasOwn(flows,name)) throw new Error('External file references require a declared reusable YAML flow.');
+      if (typeof name !== 'string'||! /^[A-Za-z][A-Za-z0-9_-]{0,63}\.yaml$/.test(name)||name==='flow.yaml')throw new Error('External file references require a simple declared reusable YAML flow.');
+      if(!Object.hasOwn(flows,name)){if(!unresolved)throw new Error('External file references require a declared reusable YAML flow.');unresolved.push('Missing reusable flow: '+name);if(typeof child==='object'){const {file,...other}=child as Record<string,unknown>;rejectFileReferences(other,flows,ancestors,verified,unresolved);}continue;}
       if (ancestors.includes(name) || ancestors.length >= 10) throw new Error('Recursive or excessively nested reusable flow reference.');
-      if (!verified.has(name)) { validate(flows[name],flows,[...ancestors,name],verified); verified.add(name); }
-      if (typeof child === 'object') { const {file, ...other} = child as Record<string,unknown>; rejectFileReferences(other,flows,ancestors,verified); }
+      if (!verified.has(name)) { validate(flows[name],flows,[...ancestors,name],verified,unresolved); verified.add(name); }
+      if (typeof child === 'object') { const {file, ...other} = child as Record<string,unknown>; rejectFileReferences(other,flows,ancestors,verified,unresolved); }
       continue;
     }
     if (key === 'file') throw new Error('External file references are unsupported outside declared runFlow calls.');
-    rejectFileReferences(child, flows, ancestors, verified);
+    rejectFileReferences(child, flows, ancestors, verified,unresolved);
   }
 }
 async function listFiles(base: string, prefix = ''): Promise<string[]> {

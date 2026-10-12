@@ -18,6 +18,7 @@ export function validateMock(value: unknown): MockPlan | undefined {
   const plan = structuredClone(value) as MockPlan;
   const checked = EnvironmentSchemaNoFix.validate(plan.environment);
   if (checked.error) throw new Error('Import a valid Mockoon 9.9 environment JSON: ' + checked.error.message);
+  plan.environment=checked.value;
   if (!Number.isInteger(plan.port) || plan.port < 1024 || plan.port > 65535 || plan.port === 4317) throw new Error('Choose a dedicated mock port from 1024 to 65535, separate from the workbench.');
   const backend = new URL(plan.backendUrl);
   if (!['http:', 'https:'].includes(backend.protocol) || backend.username || backend.password || backend.hash || backend.search) throw new Error('Provide an HTTP(S) test-backend URL without credentials, query, or fragment.');

@@ -10,19 +10,20 @@ export type Automation={setup:FlowCall;actions:DefaultAction[];checkpoints:{befo
 export type ExecutionItem={kind:'reset'|'setup'|'checkpoint'|'step';index?:number};
 export type AutomationResult={setup:{status:Step['status']};actions:{id:string;name:string;beforeStep:number;status:Step['status'];detail:string}[]};
 const navigationCommands=new Set<string>(checkpointCommands);
-function call(value:unknown,flows:Record<string,string>):FlowCall {
+function call(value:unknown,flows:Record<string,string>,unresolved?:string[]):FlowCall {
  if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Declare a reusable setup/action flow.');
  const input=value as FlowCall;
- if(typeof input.file!=='string'||!Object.hasOwn(flows,input.file))throw new Error('Setup/actions require a declared reusable YAML file.');
+ if(typeof input.file!=='string'||! /^[A-Za-z][A-Za-z0-9_-]{0,63}\.yaml$/.test(input.file)||input.file==='flow.yaml')throw new Error('Setup/actions require a simple reusable YAML file.');
+ if(!Object.hasOwn(flows,input.file)){if(!unresolved)throw new Error('Setup/actions require a declared reusable YAML file.');unresolved.push('Missing setup/action flow: '+input.file);}
  const parameters=input.parameters??{};
  if(!parameters||typeof parameters!=='object'||Array.isArray(parameters)||Object.keys(parameters).length>20||Object.entries(parameters).some(([key,value])=>! /^[A-Z][A-Z0-9_]{0,63}$/.test(key)||key.startsWith('MAESTRO_')||typeof value!=='string'||value.length>4000||value.includes('\0')))throw new Error('Flow parameters require up to 20 uppercase names and bounded string values. Use runtime placeholders for secrets.');
  return {file:input.file,parameters:{...parameters}};
 }
-export function readAutomation(value:unknown,flows:Record<string,string>,yaml:string):Automation|undefined {
+export function readAutomation(value:unknown,flows:Record<string,string>,yaml:string,unresolved?:string[]):Automation|undefined {
  if(value===undefined)return;
  if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Provide setup and default-action configuration.');
  const input=value as Automation;
- const setup=call(input.setup,flows);
+ const setup=call(input.setup,flows,unresolved);
  if(!Array.isArray(input.actions)||input.actions.length>20||!Array.isArray(input.checkpoints)||input.checkpoints.length>100)throw new Error('Use up to 20 default actions and 100 checkpoints.');
  const ids=new Set<string>();
  const actions=input.actions.map(action=>{
@@ -30,7 +31,7 @@ export function readAutomation(value:unknown,flows:Record<string,string>,yaml:st
   ids.add(action.id);
   const condition=action.condition;
   if(!condition||typeof condition!=='object'||Array.isArray(condition)||Object.keys(condition).length!==1||!['text','id'].includes(Object.keys(condition)[0])||Object.values(condition).some(value=>typeof value!=='string'||!value.trim()||value.length>1000))throw new Error('Choose a nonempty text or accessibility ID screen condition.');
-  return {...call(action,flows),id:action.id,name:action.name.trim(),enabled:action.enabled,condition:{...condition}};
+  return {...call(action,flows,unresolved),id:action.id,name:action.name.trim(),enabled:action.enabled,condition:{...condition}};
  });
  const catalog=referenceCatalog(yaml,flows);
  if(catalog.diagnostics.length)throw new Error(catalog.diagnostics[0].detail);
@@ -38,7 +39,8 @@ export function readAutomation(value:unknown,flows:Record<string,string>,yaml:st
  const checkpoints=input.checkpoints.map(checkpoint=>{
   if(!checkpoint||!Number.isInteger(checkpoint.beforeStep)||checkpoint.beforeStep<0||positions.has(checkpoint.beforeStep)||!Number.isInteger(checkpoint.timeoutMs)||checkpoint.timeoutMs<0||checkpoint.timeoutMs>5000)throw new Error('Checkpoints need unique step positions and a visibility window from 0 to 5000 ms.');
   const reference=catalog.references.find(reference=>reference.kind==='step'&&reference.index===checkpoint.beforeStep);
-  if(!reference||!navigationCommands.has(reference.command)||reference.fingerprint!==checkpoint.fingerprint)throw new Error('Broken or stale checkpoint reference. Explicitly relink the checkpoint to a navigation/assertion step.');
+  if(typeof checkpoint.fingerprint!=='string'||checkpoint.fingerprint.length!==64)throw new Error('Invalid checkpoint fingerprint.');
+  if(!reference||!navigationCommands.has(reference.command)||reference.fingerprint!==checkpoint.fingerprint){const message='Broken or stale checkpoint reference. Explicitly relink the checkpoint to a navigation/assertion step.';if(!unresolved)throw new Error(message);unresolved.push(message);}
   positions.add(checkpoint.beforeStep);
   return {beforeStep:checkpoint.beforeStep,fingerprint:checkpoint.fingerprint,timeoutMs:checkpoint.timeoutMs};
  });
