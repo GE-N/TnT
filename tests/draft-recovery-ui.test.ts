@@ -483,10 +483,10 @@ test('narrow save status exposes an icon label, and the switch dialog keeps keyb
   const css = await readFile(new URL('../src/style.css', import.meta.url), 'utf8');
   assert.match(css, /@media \(max-width: 760px\) \{\s*\.workspace-save-text \{\s*position: absolute;/);
   assert.match(css, /min-height: 44px/);
-  assert.match(css, /\.workspace-danger \{\s*color: var\(--danger\);/);
+  assert.match(css, /\.workspace-danger \{\s*color: var\(--danger\);\s*\}/);
   assert.match(css, /\.draft-banner\.danger \{/);
   assert.match(css, /\.go-to-issue,\s*\.save-retry/);
-  assert.match(css, /\.draft-banner \{\s*flex-direction: column;\s*align-items: stretch;\s*\}\s*\.draft-banner p \{\s*flex: 0 0 auto;/);
+  assert.match(css, /\.draft-banner \{\s*flex-direction: column;\s*align-items: stretch;\s*\}\s*\.draft-banner p \{\s*flex: 0 0 auto;\s*\}/);
   assert.match(css, /\.workspace-management-surface,\s*\.workspace-management-surface\.expanded \{\s*position: fixed;\s*inset: auto 12px 12px/);
   const faults = createWriteFaults();
   const page = await mount({ faults });
