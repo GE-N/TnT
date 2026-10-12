@@ -1,5 +1,5 @@
-import {useWorkspaceDraft} from './workspace-drafts.js';
-import {useEffect,useMemo,useState} from 'react';
+import {RecoveredFields,useWorkspaceDraft} from './workspace-drafts.js';
+import {useContext,useEffect,useMemo,useState} from 'react';
 import {readForms,editForm,appendForm,deleteForm,formCommands,type FormCommand,type FormStep,type FormField} from './yaml-forms.js';
 
 type EditorProps={
@@ -9,9 +9,12 @@ type EditorProps={
 };
 function ValueEditor({step,field,yaml,onChange,disabled}:{step:FormStep;field?:FormField;yaml:string;onChange:(yaml:string)=>void;disabled:boolean}){
   const value=field?.value??step.value??'';
-  const [draft,setDraft]=useState({source:yaml,value,dirty:false});
+  const recovered=useContext(RecoveredFields);
+  const fieldKey=`yaml-form:${step.index}${field?':'+encodeURIComponent(field.name):''}`;
+  const recoveredValue=recovered[fieldKey];
+  const [draft,setDraft]=useState({source:yaml,value:recoveredValue??value,dirty:recoveredValue!==undefined&&recoveredValue!==value});
   const [error,setError]=useState('');
-  useWorkspaceDraft(draft.dirty);
+  useWorkspaceDraft(draft.dirty,fieldKey,draft.value);
   useEffect(()=>{setDraft(current=>current.dirty?current:{source:yaml,value,dirty:false});},[yaml,value]);
   const id=`form-step-${step.index}${field?'-'+field.name:''}`;
   const name=`step ${step.index+1}${field?' '+field.name:''}`;
@@ -46,10 +49,11 @@ export function YamlEditor({yaml,onChange,disabled,deletionWarnings,onDelete}:Ed
   const [mode,setMode]=useState<'code'|'forms'>('code');
   const [expanded,setExpanded]=useState<number>();
   const [command,setCommand]=useState<FormCommand>('tapOn');
-  const [value,setValue]=useState('');const [error,setError]=useState('');
+  const recovered=useContext(RecoveredFields);
+  const [value,setValue]=useState(recovered['yaml-command']??'');const [error,setError]=useState('');
   const [pending,setPending]=useState<{index:number;source:string;warnings:string[]}>();
   const [undo,setUndo]=useState<{before:string;after:string;restore?:()=>void}>();
-  useWorkspaceDraft(value.length>0);
+  useWorkspaceDraft(value.length>0,'yaml-command',value);
   function append(){try{onChange(appendForm(yaml,command,value));setValue('');setError('');}catch(error){setError(error instanceof Error?error.message:'Form edit failed.');}}
   function remove(index:number){
     try{

@@ -45,6 +45,6 @@ test('deleting an identical selected command marks scenario references stale and
   assert.match(saved.scenarios[0].steps[0].fingerprint,/^deleted:/);
   await click('Undo deletion');await click('Save workspace');assert.equal(saved.scenarios[0].steps[0].fingerprint,catalog[0].fingerprint);
   await fill('scenario-public-inputs','{pending draft');await click('Open saved workspace');
-  assert.equal((document.getElementById('scenario-public-inputs') as HTMLTextAreaElement).value,'{pending draft','navigation retains incomplete work');assert.match(document.body.textContent!,/Apply or cancel/);
+  assert.equal((document.getElementById('scenario-public-inputs') as HTMLTextAreaElement).value,'{pending draft','navigation retains incomplete work');assert.match(document.body.textContent!,/Couldn't save your changes before switching/);
  }finally{await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor] of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });

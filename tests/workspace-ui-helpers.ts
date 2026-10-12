@@ -10,6 +10,7 @@ export async function workspaceCommand(document:Document,command:'save'|'open',s
 
   await act(async()=>{await settle();});
   await press(document.querySelector<HTMLButtonElement>('.workspace-library button')??undefined);
+  for(let attempt=0;attempt<8;attempt++)await act(async()=>{await new Promise(resolve=>setImmediate(resolve));await settle();});
   if(document.querySelector('[aria-label="Workspace manager"]')?.textContent?.includes('Save changes'))await press([...document.querySelectorAll<HTMLButtonElement>('[aria-label="Workspace manager"] button')].find(button=>button.textContent==='Save and continue'));
  }
 }

@@ -543,3 +543,15 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 @media(max-width:760px),(pointer:coarse){.workspace-row-details summary{width:44px}.workspace-library .workspace-duplicate>button{padding-right:48px}}
 .workspace-search:focus-within{box-shadow:0 0 0 2px var(--accent)}
 .workspace-management-surface .workspace-search input:focus-visible{outline:none;box-shadow:none}
+.workspace-save-status.success{color:var(--success)}
+.workspace-save-status.warning{color:var(--warning)}
+.workspace-save-status.danger{color:var(--danger)}
+.workspace-save-status.muted{color:var(--muted)}
+.workspace-save-icon{display:none}
+.draft-banner{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px;padding:12px;border:1px solid var(--warning-border);border-radius:8px;background:var(--warning-surface)}
+.draft-banner p{margin:0;flex:1 1 200px}
+.workspace-danger{color:var(--danger)}
+.workspace-form-actions .workspace-danger{margin-right:auto}
+.draft-banner.danger{border-color:var(--danger-border);background:var(--danger-surface);color:var(--danger)}
+.draft-banner button,.go-to-issue,.save-retry,.workspace-management-surface .workspace-danger{min-height:44px;min-width:44px}
+@media(max-width:760px){.workspace-save-text{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.workspace-save-icon{display:inline-flex}.draft-banner{flex-direction:column;align-items:stretch}.draft-banner p{flex:0 0 auto}.draft-banner button{width:100%}}

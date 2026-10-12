@@ -1,18 +1,22 @@
-import {useWorkspaceDraft} from './workspace-drafts.js';
+import {RecoveredFields,useWorkspaceDraft} from './workspace-drafts.js';
 import {checkpointCommands} from '../shared/checkpoints.js';
-import {useEffect,useState} from 'react';
+import {useContext,useEffect,useState} from 'react';
 import type {Automation,FlowCall} from '../server/default-actions.js';
 import type {CatalogEntry} from '../server/canvas.js';
 type Props={value?:Automation;onChange:(value:Automation|undefined)=>void;files:string[];catalog:CatalogEntry[];disabled:boolean;onError:(error:string)=>void};
-function Parameters({value,onChange,onError,label}:{value:Record<string,string>;onChange:(value:Record<string,string>)=>void;onError:(error:string)=>void;label:string}){
- const [draft,setDraft]=useState(JSON.stringify(value));
+function Parameters({value,onChange,onError,label,fieldKey}:{value:Record<string,string>;onChange:(value:Record<string,string>)=>void;onError:(error:string)=>void;label:string;fieldKey:string}){
+ const recovered=useContext(RecoveredFields);
+ const canonical=JSON.stringify(value);
+ const [draft,setDraft]=useState(recovered[fieldKey]??canonical);
+ useWorkspaceDraft(draft!==canonical,fieldKey,draft);
  function change(text:string){setDraft(text);try{const parsed=JSON.parse(text);if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)||Object.values(parsed).some(value=>typeof value!=='string'))throw new Error();onChange(parsed);onError('');}catch{onError(label+' must be a JSON object of strings.');}}
  return <><label>{label}<textarea value={draft} onChange={event=>change(event.target.value)} spellCheck={false}/></label><p className="field-hint">Use placeholders such as {'${TOKEN}'} for confidential runtime inputs. Never enter secrets here.</p></>;
 }
 export function DefaultActions({value,onChange,files,catalog,disabled,onError}:Props){
  const [errors,setErrors]=useState<Record<string,string>>({});
- const [step,setStep]=useState('');const [timeout,setTimeout]=useState(1000);
- useWorkspaceDraft(!!step);
+ const recovered=useContext(RecoveredFields);
+ const [step,setStep]=useState(recovered['checkpoint-draft']??'');const [timeout,setTimeout]=useState(1000);
+ useWorkspaceDraft(!!step,'checkpoint-draft',step);
  useEffect(()=>{onError(Object.values(errors).filter(Boolean).join(' '));},[errors,onError]);
  function error(id:string,message:string){setErrors(current=>({...current,[id]:message}));}
  function updateSetup(update:Partial<FlowCall>){if(value)onChange({...value,setup:{...value.setup,...update}});}
@@ -23,7 +27,7 @@ export function DefaultActions({value,onChange,files,catalog,disabled,onError}:P
   {value&&<>
    <p className="field-hint">Every run relaunches the app, keeps app data, then runs setup. Checks happen only before selected steps. First matching enabled action wins; it can run again at a later checkpoint. Action failure stops the run. Disable actions when testing their matching screen.</p>
    <label>Setup flow<select value={value.setup.file} onChange={event=>updateSetup({file:event.target.value})}><option value="">Choose a declared reusable flow</option>{files.map(file=><option key={file}>{file}</option>)}</select></label>
-   <Parameters value={value.setup.parameters} onChange={parameters=>updateSetup({parameters})} onError={message=>error('setup',message)} label="Setup parameters"/>
+   <Parameters value={value.setup.parameters} onChange={parameters=>updateSetup({parameters})} onError={message=>error('setup',message)} label="Setup parameters" fieldKey="setup-parameters"/>
    <h4>Default actions · priority order</h4>
    {value.actions.map((action,index)=><details key={action.id} className="default-action"><summary>{index+1}. {action.name} · {action.enabled?'enabled':'disabled'}</summary>
     <label>Name<input value={action.name} onChange={event=>onChange({...value,actions:value.actions.map(item=>item.id===action.id?{...item,name:event.target.value}:item)})}/></label>
@@ -31,7 +35,7 @@ export function DefaultActions({value,onChange,files,catalog,disabled,onError}:P
     <label>Match by<select value={action.condition.id!==undefined?'id':'text'} onChange={event=>onChange({...value,actions:value.actions.map(item=>item.id===action.id?{...item,condition:{[event.target.value]:Object.values(action.condition)[0]}}:item)})}><option value="text">Visible text</option><option value="id">Accessibility ID</option></select></label>
     <label>Screen condition<input value={Object.values(action.condition)[0]} onChange={event=>onChange({...value,actions:value.actions.map(item=>item.id===action.id?{...item,condition:{[Object.keys(action.condition)[0]]:event.target.value}}:item)})}/></label>
     <label>Action flow<select value={action.file} onChange={event=>onChange({...value,actions:value.actions.map(item=>item.id===action.id?{...item,file:event.target.value}:item)})}><option value="">Choose a declared reusable flow</option>{files.map(file=><option key={file}>{file}</option>)}</select></label>
-    <Parameters value={action.parameters} label={action.name+' parameters'} onError={message=>error(action.id,message)} onChange={parameters=>onChange({...value,actions:value.actions.map(item=>item.id===action.id?{...item,parameters}:item)})}/>
+    <Parameters value={action.parameters} label={action.name+' parameters'} fieldKey={'action-parameters:'+action.id} onError={message=>error(action.id,message)} onChange={parameters=>onChange({...value,actions:value.actions.map(item=>item.id===action.id?{...item,parameters}:item)})}/>
     <button type="button" className="text-button" disabled={index===0} onClick={()=>{const actions=[...value.actions];[actions[index-1],actions[index]]=[actions[index],actions[index-1]];onChange({...value,actions});}}>Move earlier</button>
     <button type="button" className="text-button" onClick={()=>{error(action.id,'');onChange({...value,actions:value.actions.filter(item=>item.id!==action.id)});}}>Remove action</button>
    </details>)}

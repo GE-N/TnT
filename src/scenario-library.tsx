@@ -1,13 +1,17 @@
-import {useState,useEffect} from 'react';
+import {RecoveredFields,useWorkspaceDraft} from './workspace-drafts.js';
+import {useContext,useState,useEffect} from 'react';
 import type {ScenarioDefinition} from '../server/scenario-definitions.js';
 import type {CatalogEntry,CanvasGraph} from '../server/canvas.js';
 import type {Automation} from '../server/default-actions.js';
 import type {MockPlan} from '../server/mockoon.js';
 const emptyInputs:Record<string,string>={};
 type Props={items:ScenarioDefinition[];onChange:(items:ScenarioDefinition[])=>void;selected:string;onSelect:(id:string)=>void;catalog:CatalogEntry[];files:string[];canvas?:CanvasGraph;automation?:Automation;mock?:MockPlan;disabled:boolean;onError:(error:string)=>void};
-function JsonField({id,label,value,onApply,onError}:{id:string;label:string;value:unknown;onApply:(value:any)=>void;onError:(error:string)=>void}){
- const [draft,setDraft]=useState(JSON.stringify(value,null,2));const [error,setError]=useState('');
- useEffect(()=>{setDraft(JSON.stringify(value,null,2));},[value]);
+function JsonField({id,label,value,onApply,onError,fieldKey}:{id:string;label:string;value:unknown;onApply:(value:any)=>void;onError:(error:string)=>void;fieldKey:string}){
+ const recovered=useContext(RecoveredFields);
+ const canonical=JSON.stringify(value,null,2);
+ const [draft,setDraft]=useState(recovered[fieldKey]??canonical);const [error,setError]=useState('');
+ useWorkspaceDraft(draft!==canonical,fieldKey,draft);
+ useEffect(()=>{if(recovered[fieldKey]===undefined)setDraft(canonical);},[canonical]);
  return <div><label htmlFor={id}>{label}</label><textarea id={id} value={draft} spellCheck={false} onChange={event=>{setDraft(event.target.value);setError('Apply this draft before saving or switching scenarios.');onError('Apply '+label+' before saving or switching scenarios.');}}/><button type="button" className="confirm" onClick={()=>{try{const parsed=JSON.parse(draft);if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw new Error('Use a JSON object.');onApply(parsed);setError('');onError('');}catch(error){const detail=error instanceof Error?error.message:'Invalid JSON';setError(detail);onError(detail);}}}>Apply {label.toLowerCase()}</button>{error&&<p role="alert">{error}</p>}</div>;
 }
 export function ScenarioLibrary({items,onChange,selected,onSelect,catalog,files,canvas,automation,mock,disabled,onError}:Props){
@@ -32,10 +36,10 @@ export function ScenarioLibrary({items,onChange,selected,onSelect,catalog,files,
     <button type="button" className="confirm" onClick={()=>update({steps:steps.filter(ref=>current.steps.some(step=>step.index===ref.index)).map(({kind,file,index,fingerprint})=>({kind,file,index,fingerprint}))})}>Relink selected steps</button>
    </details>
    <label>Scenario setup flow<select aria-label="Scenario setup flow" value={current.setup?.file??''} onChange={event=>update({setup:{parameters:current.setup?.parameters??emptyInputs,file:event.target.value}})}>{files.map(file=><option key={file}>{file}</option>)}</select></label>
-   <JsonField id="scenario-setup-inputs" label="Setup parameters" value={current.setup?.parameters??emptyInputs} onApply={parameters=>update({setup:current.setup?{...current.setup,parameters}:undefined})} onError={message=>fieldError('setup',message)}/>
-   <JsonField id="scenario-public-inputs" label="Scenario inputs" value={current.inputs} onApply={inputs=>update({inputs})} onError={message=>fieldError('inputs',message)}/>
+   <JsonField id="scenario-setup-inputs" fieldKey={'scenario-setup:'+current.id} label="Setup parameters" value={current.setup?.parameters??emptyInputs} onApply={parameters=>update({setup:current.setup?{...current.setup,parameters}:undefined})} onError={message=>fieldError('setup',message)}/>
+   <JsonField id="scenario-public-inputs" fieldKey={'scenario-inputs:'+current.id} label="Scenario inputs" value={current.inputs} onApply={inputs=>update({inputs})} onError={message=>fieldError('inputs',message)}/>
    <p className="field-hint">Saved test data only. Reference inputs as {'${NAME}'} in reusable YAML. Supply secrets using confidential runtime inputs below.</p>
-   <details><summary>Input requirements</summary><JsonField id="scenario-input-rules" label="Input requirements" value={current.parameters} onApply={parameters=>update({parameters})} onError={message=>fieldError('requirements',message)}/><p className="field-hint">Example: {'{"EXPECTED_PAGE":{"type":"text","required":true}}'}. Types: text, number, boolean.</p></details>
+   <details><summary>Input requirements</summary><JsonField id="scenario-input-rules" fieldKey={'scenario-requirements:'+current.id} label="Input requirements" value={current.parameters} onApply={parameters=>update({parameters})} onError={message=>fieldError('requirements',message)}/><p className="field-hint">Example: {'{"EXPECTED_PAGE":{"type":"text","required":true}}'}. Types: text, number, boolean.</p></details>
    <details><summary>Enabled default actions · {current.enabledHandlerIds.length}</summary>{automation?.actions.map(action=><label className="checkbox-label" key={action.id}><input type="checkbox" checked={current.enabledHandlerIds.includes(action.id)} onChange={event=>update({enabledHandlerIds:event.target.checked?[...current.enabledHandlerIds,action.id]:current.enabledHandlerIds.filter(id=>id!==action.id)})}/>{action.name}</label>)}</details>
    <label>Scenario mock response<select aria-label="Scenario mock response" value={current.mockResponseId??''} onChange={event=>update({mockResponseId:event.target.value||undefined})}><option value="">No mock</option>{responses.map(response=><option key={response.uuid} value={response.uuid}>{response.label||response.uuid} · HTTP {response.statusCode}</option>)}</select></label>
    <button type="button" className="text-button" onClick={()=>{onChange(items.filter(item=>item.id!==current.id));choose('');}}>Remove selected scenario</button>
