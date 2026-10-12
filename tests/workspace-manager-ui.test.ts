@@ -147,7 +147,8 @@ test('workspace manager creates independent named copies and preserves unapplied
   await editCode('appId: com.example.App\n---\n- tapOn: *missing\n');
   assert.match(title(),/Saving|Draft kept/);await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await Promise.all(pendingRequests.splice(0));});
   assert.equal((await service.workspace(recovered.id)).yaml,validCode);
-  const unload=new dom.window.Event('beforeunload',{cancelable:true});dom.window.dispatchEvent(unload);assert.equal(unload.defaultPrevented,true);
+  assert.match(title(),/Draft kept, not valid yet/);
+  const unload=new dom.window.Event('beforeunload',{cancelable:true});dom.window.dispatchEvent(unload);assert.equal(unload.defaultPrevented,false);
   await click('Manage workspace');await click('New workspace');await fill('New workspace title','Guarded');await click('Create workspace');
   assert.match(title(),/Guarded/);assert.match(String((await service.workspaceDetail(recovered.id)).draft?.content.yaml),/missing/);
   await click('Manage workspace');await fill('Find workspace',recovered.name);await act(async()=>{await Promise.all(pendingRequests.splice(0));});await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.getAttribute('aria-label')?.startsWith('Open '+recovered.name+' ·'))!.click();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});

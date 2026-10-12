@@ -21,7 +21,7 @@ function workspaceDate(value:string){
  const date=new Date(value);const today=new Date();const yesterday=new Date(today);yesterday.setDate(today.getDate()-1);
  return date.toDateString()===today.toDateString()?'Today':date.toDateString()===yesterday.toDateString()?'Yesterday':date.toLocaleDateString(undefined,{month:'short',day:'numeric',...(date.getFullYear()!==today.getFullYear()?{year:'numeric' as const}:{})});
 }
-export function WorkspaceManager({token,id,name,status,busy,blocked,dirty,onAction,onSave,onPrepare,recovery,notice,openSignal}:{token:string;id:string;name:string;status:string;busy:boolean;blocked:boolean;dirty:boolean;onAction:(action:Action,saved?:Workspace,options?:{discard?:boolean})=>Promise<void>;onSave:()=>Promise<Workspace>;onPrepare:(action:Action)=>Promise<Workspace|undefined>;recovery:boolean;notice?:string;openSignal?:number}){
+export function WorkspaceManager({token,id,name,status,statusNote,busy,blocked,dirty,onAction,onSave,onPrepare,recovery,notice,openSignal}:{token:string;id:string;name:string;status:string;statusNote?:string;busy:boolean;blocked:boolean;dirty:boolean;onAction:(action:Action,saved?:Workspace,options?:{discard?:boolean})=>Promise<void>;onSave:()=>Promise<Workspace>;onPrepare:(action:Action)=>Promise<Workspace|undefined>;recovery:boolean;notice?:string;openSignal?:number}){
  const [panel,setPanel]=useState<'compact'|'library'|'rename'|'new'|'copy'>();
  const [query,setQuery]=useState('');const [title,setTitle]=useState('');
  const [library,setLibrary]=useState<WorkspaceLibrary>();const [error,setError]=useState('');const [loading,setLoading]=useState(false);
@@ -76,13 +76,15 @@ export function WorkspaceManager({token,id,name,status,busy,blocked,dirty,onActi
  const items=library?.items??[];
  const formPanel=panel==='rename'||panel==='new'||panel==='copy';
  const heading=switchFailure?(confirmDiscard?'Discard changes':"Couldn't save"):panel==='library'?'All workspaces':panel==='rename'?'Rename workspace':panel==='new'?'New workspace':panel==='copy'?'Save a copy':name;
- const statusTone=status.startsWith("Couldn't save")?'danger':status.startsWith('Draft kept')?'warning':status==='Saved locally'?'success':'muted';
+ const paused=status.startsWith('Unsaved changes');
+ const statusTone=status.startsWith("Couldn't save")?'danger':paused||status.startsWith('Draft kept')?'warning':status==='Saved locally'?'success':'muted';
+ const statusIcon=status.startsWith("Couldn't save")?'×':paused?'‖':status.startsWith('Draft kept')?'!':status==='Saved locally'?'✓':'…';
  const startRename=()=>{setTitle(name);setPanel('rename');};
  const startNew=()=>{setTitle('Untitled workspace');setPanel('new');};
  const startCopy=()=>{setTitle((name.slice(0,115)+' copy').slice(0,120));setPanel('copy');};
  return <div className="workspace-manager">
   <button ref={trigger} className="workspace-title" aria-label="Manage workspace" aria-expanded={!!panel} title={name} onClick={()=>{if(panel)close();else{setQuery('');setPanel('compact');}}}>
-   <WorkspaceIcon name="document"/><span className="workspace-identity"><strong>{name}</strong><span className={'workspace-save-status '+statusTone} role={statusTone==='danger'?'alert':'status'} aria-live={statusTone==='danger'?'assertive':'polite'} aria-label={status} title={status}><span className="workspace-save-icon" aria-hidden="true">{statusTone==='danger'?'×':statusTone==='warning'?'!':statusTone==='success'?'✓':'…'}</span><span className="workspace-save-text">{status}</span></span></span><WorkspaceIcon name="chevron"/>
+   <WorkspaceIcon name="document"/><span className="workspace-identity"><strong>{name}</strong><span className={'workspace-save-status '+statusTone} role={statusTone==='danger'?'alert':'status'} aria-live={statusTone==='danger'?'assertive':'polite'} aria-label={status} title={statusNote||status} {...(statusNote?{'aria-description':statusNote}:{})}><span className="workspace-save-icon" aria-hidden="true">{statusIcon}</span><span className="workspace-save-text">{status}</span></span></span><WorkspaceIcon name="chevron"/>
   </button>
   {panel&&<><div className={'workspace-management-backdrop '+(panel==='library'||formPanel||switchFailure?'dimmed':'')} onPointerDown={()=>{if(panel==='compact'&&!switchFailure)close();}}/><div ref={surface} role="dialog" aria-modal="true" aria-label={panel==='library'?'All workspaces':'Workspace manager'} className={'workspace-management-surface '+(panel==='library'?'expanded':'compact')} onKeyDown={event=>{
    if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(confirmDiscard){setConfirmDiscard(false);setError('');}else if(switchFailure){setSwitchFailure(undefined);setError('');}else close();}

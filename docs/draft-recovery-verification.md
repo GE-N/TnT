@@ -14,5 +14,5 @@ Automated tests cover the storage, conflict, and jsdom journeys in `tests/draft-
 
 ## Narrow (under 760px)
 
-1. The save status becomes an icon with the same text as its tooltip and accessible name. Failures use an alert. The recovery banner is a full-width bar with stacked buttons at least 44px tall.
+1. The save status becomes an icon. Failures use ×, a kept draft uses !, paused autosave uses ‖, and the paused tooltip and description say “while the picker is open” or “no runner connected”. Failures use an alert. The recovery banner is a full-width bar with stacked buttons at least 44px tall.
 2. The workspace manager still opens as the existing bottom sheet. Canvas pan and zoom change only the canvas viewport.
