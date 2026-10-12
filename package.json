@@ -12,7 +12,9 @@
     "start": "tsx server/main.ts --production",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
-    "check:canvas-contract": "bash scripts/check-canvas-contract.sh"
+    "check:canvas-contract": "bash scripts/check-canvas-contract.sh",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@mockoon/cli": "9.9.0",
@@ -29,6 +31,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
     "jsdom": "^29.1.1",
+    "prettier": "3.9.10",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vite": "8.3.2"
