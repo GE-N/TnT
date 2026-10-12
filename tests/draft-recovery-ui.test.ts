@@ -408,7 +408,7 @@ test('Saving does not stick after a rejected write, a 409, a switch that cancels
  }finally{faults.pass();await page.close();}
 });
 
-function leaveSite(page:{dom:JSDOM}){const event=new page.dom.window.Event('beforeunload',{cancelable:true});page.dom.window.dispatchEvent(event);return event.defaultPrevented;}
+function leaveSite(page:{dom:JSDOM}){const event=page.dom.window.document.createEvent('BeforeUnloadEvent');event.initEvent('beforeunload',false,true);let message='';Object.defineProperty(event,'returnValue',{configurable:true,get:()=>message,set:(value:string)=>{message=String(value);}});page.dom.window.dispatchEvent(event);return event.defaultPrevented&&message.length>0;}
 const saveStatus=(document:Document)=>document.querySelector('.workspace-save-status')!;
 const saveText=(document:Document)=>saveStatus(document).querySelector('.workspace-save-text')!.textContent!;
 const settleWrites=async(page:{settle:()=>Promise<void>})=>act(async()=>{await new Promise(resolve=>setTimeout(resolve,500));await page.settle();});
@@ -475,6 +475,23 @@ test('beforeunload fires while a write is in flight',async()=>{
   assert.equal(saveText(page.document),'Saving…');
   assert.equal(leaveSite(page),true);
   faults.release();await act(async()=>{await page.settle();});
+ }finally{faults.pass();await page.close();}
+});
+
+test('beforeunload fires after a failed write with and without the switch dialog',async()=>{
+ const faults=createWriteFaults();const page=await mount({faults});
+ try{
+  await page.render();
+  faults.failBeforeRename();
+  await page.editYaml('appId: com.example.App\n---\n- tapOn: Away\n');
+  await settleWrites(page);
+  assert.equal(page.document.querySelector('[role="dialog"]'),null);
+  assert.equal(saveText(page.document),"Couldn't save.");
+  assert.equal(leaveSite(page),true);
+  await page.click('Manage workspace');await page.click('New workspace');await page.click('Create workspace');
+  assert.match(page.document.body.textContent!,/Couldn't save your changes before switching/);
+  assert.equal(saveText(page.document),"Couldn't save.");
+  assert.equal(leaveSite(page),true);
  }finally{faults.pass();await page.close();}
 });
 

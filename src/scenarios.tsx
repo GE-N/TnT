@@ -75,6 +75,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const viewRef=useRef<Record<string,unknown>>({format:1});
   const draftRecord=useRef<WorkspaceDraft|null>(null);
   const latestDraftKey=useRef('');
+  const warnOnLeaveRef=useRef(false);
   const fieldsRef=useRef(new Map<string,DraftReport>());
   const sessionOnce=useRef(false);
   const [drafts,setDrafts]=useState<string[]>([]);
@@ -134,7 +135,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const autosavePaused=(!token||pickerBusy)&&!blockedFailure&&!draftAcked&&!persistedClean;
   const pauseNote=autosavePaused?!token?'no runner connected':'while the picker is open':undefined;
   const persistenceStatus=blockedFailure?"Couldn't save.":draftAcked?'Draft kept, not valid yet.':saving||draftSaving||willAutosave||(submitting&&!persistedClean)?'Saving…':persistedClean&&workspaceId?'Saved locally':persistedClean?'Not saved yet':autosavePaused?'Unsaved changes · Autosave paused':'Not saved yet';
-  const warnOnLeave=persistenceStatus==="Couldn't save."||persistenceStatus==='Saving…'||persistenceStatus.startsWith('Unsaved changes');
+  warnOnLeaveRef.current=!persistedClean&&!draftAcked;
   const showRecovery=draftRevisionShown>0&&draftRevisionShown>dismissedDraft&&!draftError;
   const staleDraft=showRecovery&&draftBase<savedRevision;
   const storedCanvas=viewRef.current.canvas;
@@ -150,7 +151,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     const timer=setTimeout(()=>{void save().catch(()=>{});},300);
     return()=>clearTimeout(timer);
   },[currentKey,acknowledged,pendingDraft,draftKey,acknowledgedDraftKey,conflict,token,submitting,pickerBusy,retrySave,fieldEpoch]);
-  useEffect(()=>{if(!warnOnLeave)return;const guard=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard);},[warnOnLeave]);
+  useEffect(()=>{const guard=(event:BeforeUnloadEvent)=>{if(!warnOnLeaveRef.current)return;event.preventDefault();event.returnValue='Unsaved changes';};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard);},[]);
   useEffect(()=>{
     if(!recoverSession||!token||sessionOnce.current)return;
     sessionOnce.current=true;
