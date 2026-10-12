@@ -84,5 +84,9 @@ test('workspace manager creates independent named copies and preserves unapplied
   await click('Manage workspace');await click('Save a copy');await fill('Copy title','Unsaved source copy');await click('Create copy');
   const sourceRecord=(await service.listWorkspaces('Unsaved source')).items.find(item=>item.name==='Unsaved source')!;const copiedRecord=(await service.listWorkspaces('Unsaved source')).items.find(item=>item.name==='Unsaved source copy')!;
   assert.equal((await service.workspace(copiedRecord.id)).yaml,(await service.workspace(sourceRecord.id)).yaml,'copy uses the acknowledged source content after normalization');assert.match(document.querySelector('[aria-label="Manage workspace"]')!.textContent!,/Unsaved source copy/);
+  const duplicateA=await service.save({name:'Same title',yaml:'appId: com.example.App\n---\n- launchApp\n'});const duplicateB=await service.save({name:'Same title',yaml:'appId: com.example.App\n---\n- launchApp\n'});
+  await click('Manage workspace');await fill('Find workspace','Same title');await act(async()=>{await Promise.all(pendingRequests.splice(0));});
+  const diagnosticControls=[...document.querySelectorAll<HTMLElement>('summary[aria-label="Diagnostic details for Same title"]')];assert.equal(diagnosticControls.length,2);
+  await act(async()=>{diagnosticControls[0].click();diagnosticControls[1].click();});const details=[...document.querySelectorAll('details[open]')].map(detail=>detail.textContent).join(' ');assert.ok(details.includes(duplicateA.id));assert.ok(details.includes(duplicateB.id),'same-name copies have accessible distinct diagnostic identities');
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
 });

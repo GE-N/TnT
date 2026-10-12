@@ -31,3 +31,9 @@ Review exposed missing draft guards, late-response edit loss and a read bound th
 `npm run typecheck` and `npm run build` pass. The final `npm test` run passes all 158 tests. HTTP integration checks require local listen permissions; the sandbox-blocked attempt was rerun with those permissions.
 
 Review totals: Standards 0 unresolved findings; Spec 0 unresolved findings.
+
+## Appearance alignment follow-up
+
+The user requested alignment with the previously discussed Title popover. The original visual reference is `work/design-preview/workspace-alternatives.html`, Title popover variant. The implemented capsule now uses its document icon, two-line identity/status, chevron, restrained rounded surface and shadow, with a 280–350px desktop footprint. The popover is 350px wide with 16px inset, Rename beside the current title, muted search, flat named recent rows, a View all link, and separated Save/Copy and New command groups. Same-name rows retain concise creation dates and an unobtrusive optional diagnostic disclosure. Form panels retain the compact desktop treatment. Narrow screens use the same controls in a temporary sheet; forms fit their content rather than filling an empty screen.
+
+Reviewed the actual workbench at 1280×900 and 390×844, including the compact manager, full library, copy form, initial input focus, Escape cancellation and focus return. Existing public UI/service journeys remain the functional checks; the journey additionally verifies that duplicate-name diagnostic disclosures expose distinct identities. Standards review: 0 findings. Spec review's duplicate-disambiguation finding was fixed and its resolution confirmed. Final verification: all 158 tests pass, typechecking and production build pass, and both review axes have 0 unresolved findings. The active-batch fixture now waits for cancellation cleanup before deleting its temporary store, and its Rename assertion uses the unchanged accessible label.

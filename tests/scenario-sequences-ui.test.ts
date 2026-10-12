@@ -15,7 +15,7 @@ import type {CanvasGraph} from '../server/canvas.js';
 
 async function journey(work:(ui:{document:Document;selectedCommand:(label:string)=>Promise<void>;click:(label:string)=>Promise<void>;fill:(label:string,value:string)=>Promise<void>;saved:()=>Promise<Awaited<ReturnType<ReturnType<typeof createScenarios>['workspace']>>>;service:ReturnType<typeof createScenarios>;failNext:(index?:number)=>void;holdNext:()=>void;calls:()=>number})=>Promise<void>,draft=false){
  const directory=await mkdtemp(join(tmpdir(),'tnt-sequences-ui-'));const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
- let fail=false;let failIndex=3;let hold=false;let liveBatch=false;let runCalls=0;
+ let fail=false;let failIndex=3;let hold=false;let liveBatch=false;let runCalls=0;let batchId='';
  const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=> '2.11.0',run:async({directory,flow,signal})=>{
   runCalls++;if(hold){hold=false;await new Promise<void>(resolve=>{if(signal.aborted)resolve();else signal.addEventListener('abort',()=>resolve(),{once:true});});}
   const commands=parseAllDocuments(await readFile(flow,'utf8'))[1].toJS();
@@ -24,6 +24,7 @@ async function journey(work:(ui:{document:Document;selectedCommand:(label:string
   await writeFile(join(directory,'commands.json'),JSON.stringify(commands.map((command:any,index:number)=>({command:{[command==='back'?'backPressCommand':command==='launchApp'||command.launchApp?'launchAppCommand':command.tapOn?'tapOnElement':command.inputText?'inputTextCommand':'assertConditionCommand']:{}},metadata:{depth:0,status:failing&&index===failIndex?'FAILED':failing&&index>failIndex?'SKIPPED':'COMPLETED'}}))));
   return {code:failing?1:0,log:'Simulator boundary fixture',cleanup:{verified:true,detail:'Fixture exited'}};
  }}});
+ async function startBatch(input:Parameters<typeof service.startBatch>[0]){const batch=await service.startBatch(input);batchId=batch.id;return liveBatch?batch:service.waitBatch(batch.id);}
  const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
  const canvas:CanvasGraph={screens:['1','2','3','4'].map((id,index)=>({id,title:id,x:400*index,y:0,tests:[{id:'check'+id,label:id,role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Screen '+id}}]})),edges:[],paths:[]};
  const edges=[['1','2'],['2','3'],['3','2'],['2','1'],['3','4']];
@@ -34,7 +35,7 @@ async function journey(work:(ui:{document:Document;selectedCommand:(label:string
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  const pending:Promise<Response>[]=[];
- const request=async(path:string,options?:{body?:string})=>{try{const body=options?.body?JSON.parse(options.body):undefined;return Response.json(path==='/api/workspaces'?await service.save(body):path.startsWith('/api/workspaces?q=')?await service.listWorkspaces():path.endsWith('/open')?await service.openWorkspace(path.split('/')[3]):path==='/api/canvas/references'?await service.references(body):path==='/api/batches'?(liveBatch?await service.startBatch(body):await service.waitBatch((await service.startBatch(body)).id)):path.startsWith('/api/batches/')?(path.endsWith('/cancel')?await service.cancelBatch(path.split('/')[3]):await service.batch(path.split('/')[3])):path.startsWith('/api/runs/')?await service.result(path.slice('/api/runs/'.length)):path==='/api/runs'?await service.wait((await service.start(body)).id):await service.workspace(path.slice('/api/workspaces/'.length)));}catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}};
+ const request=async(path:string,options?:{body?:string})=>{try{const body=options?.body?JSON.parse(options.body):undefined;return Response.json(path==='/api/workspaces'?await service.save(body):path.startsWith('/api/workspaces?q=')?await service.listWorkspaces():path.endsWith('/open')?await service.openWorkspace(path.split('/')[3]):path==='/api/canvas/references'?await service.references(body):path==='/api/batches'?await startBatch(body):path.startsWith('/api/batches/')?(path.endsWith('/cancel')?await service.cancelBatch(path.split('/')[3]):await service.batch(path.split('/')[3])):path.startsWith('/api/runs/')?await service.result(path.slice('/api/runs/'.length)):path==='/api/runs'?await service.wait((await service.start(body)).id):await service.workspace(path.slice('/api/workspaces/'.length)));}catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}};
  const fetch=(path:string,options?:{body?:string})=>{const result=request(path,options);pending.push(result);return result;};
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetch:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root')!);
@@ -42,7 +43,7 @@ async function journey(work:(ui:{document:Document;selectedCommand:(label:string
  const selectedCommand=async(label:string)=>{await click('Actions for '+document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent);await click(label);};
  const fill=async(label:string,value:string)=>{if(label==='Scenario name'){const selected=document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!;await click('Actions for '+selected.textContent);await click('Rename');await fill('Rename scenario',value);await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));return;}return act(async()=>{const node=document.querySelector('[aria-label="'+label+'"]')??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});};
  try{await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));await click('Open saved workspace');await work({document,selectedCommand,click,fill,saved:()=>service.workspace(workspace.id),service,failNext:(index=3)=>{fail=true;failIndex=index;},holdNext:()=>{hold=true;liveBatch=true;},calls:()=>runCalls});}
- finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
+ finally{if(batchId){const batch=await service.batch(batchId);if(batch.status==='running'||batch.status==='cancelling')await service.cancelBatch(batchId);await service.waitBatch(batchId);}await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
 }
 
 test('sidebar duplication creates fresh scenario and visit identities while sharing canvas nodes and connections',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
@@ -450,7 +451,7 @@ test('the workspace library remains browsable during a batch while switching, Ne
  await click('New scenario');await click('Use 1 as scenario start');await click('Save workspace');holdNext();await click('Run all');
  await click('Manage workspace');
  const manager=document.querySelector('[aria-label="Workspace manager"]')!;
- for(const label of ['New workspace','Save a copy','Rename workspace'])assert.equal([...manager.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent===label)?.disabled,true);
+ for(const label of ['New workspace','Save a copy','Rename workspace'])assert.equal([...manager.querySelectorAll<HTMLButtonElement>('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label)?.disabled,true);
  assert.ok(document.querySelector<HTMLButtonElement>('.workspace-library button')?.disabled);
  assert.match(manager.textContent!,/Active execution/);
  await click('Close workspace manager');await click('Cancel batch');
