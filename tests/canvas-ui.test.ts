@@ -1,3 +1,4 @@
+import {workspaceCommand,singleWorkspaceLibrary} from './workspace-ui-helpers.js';
 import {test} from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';import {act,createElement,useState,type ChangeEvent} from 'react';import {CanvasEditor,CanvasBoard} from '../src/canvas.js';import {selectedCanvasPath} from '../server/canvas.js';import type {CanvasGraph,CatalogEntry} from '../server/canvas.js';
 async function addNode(dom:JSDOM,title:string){
  const document=dom.window.document;
@@ -35,7 +36,7 @@ test('canvas authors create inline checks, reorder, delete with warnings and und
  let authored='';let saved:CanvasGraph|undefined;
  function Host(){const [graph,setGraph]=useState<CanvasGraph>({screens:[],edges:[],paths:[]});const [yaml,setYaml]=useState('appId: com.example.App\n---\n- launchApp\n- evalScript: ${output.keep = true} # untouched\n');const [path,setPath]=useState('');authored=yaml;saved=graph;return createElement('div',null,createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:path,onPathChange:setPath,disabled:false}),createElement('textarea',{'aria-label':'Executable YAML',value:yaml,onChange:(event:ChangeEvent<HTMLTextAreaElement>)=>setYaml(event.target.value)}));}
  const document=dom.window.document;
- const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();});
+ const click=async(label:string)=>{if(label==='Open saved workspace'||label==='Save workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open');return act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();})};
  const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`) as HTMLInputElement;assert.ok(node,label);Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?dom.window.HTMLTextAreaElement.prototype:dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const select=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`) as HTMLSelectElement;assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  try{
@@ -61,12 +62,11 @@ test('opening a saved workspace replaces the canvas editor without duplicating i
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  const workspace={id:'saved',name:'Saved home',yaml:'appId: com.example.App\n---\n- launchApp\n',canvas:{screens:[{id:'home',title:'Reloaded',x:60,y:70,tests:[]}],edges:[],paths:[]}};
- for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?async()=>new Response(JSON.stringify(workspace)):key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?async(path:string)=>Response.json(path.startsWith('/api/workspaces?q=')?singleWorkspaceLibrary(workspace):workspace):key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {Scenarios}=await import('../src/scenarios.js');const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);
  try{
   await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId:'',bundleId:'',launchBusy:false,onRunning:()=>{}})));
-  await act(async()=>{const input=dom.window.document.getElementById('open-workspace')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,'saved');input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
-  await act(async()=>{[...dom.window.document.querySelectorAll('button')].find(button=>button.textContent==='Open saved workspace')!.click();});
+  await workspaceCommand(dom.window.document,'open');
   assert.equal(dom.window.document.querySelectorAll('#canvas-heading').length,1);
   assert.equal(dom.window.document.querySelectorAll('[aria-label="Select screen Reloaded"]').length,1);
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
@@ -79,7 +79,7 @@ test('Home can choose a destination in Add action and immediately see its connec
  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);let authored='';let saved:CanvasGraph|undefined;
  function Host(){const [graph,setGraph]=useState<CanvasGraph>({screens:[{id:'home',title:'Home',x:0,y:0,tests:[]},{id:'coordinator',title:'Coordinator',x:400,y:0,tests:[]}],edges:[],paths:[]});const [yaml,setYaml]=useState('appId: com.example.App\n---\n- launchApp\n');const [path,setPath]=useState('');authored=yaml;saved=graph;return createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:path,onPathChange:setPath,disabled:false});}
  const document=dom.window.document;
- const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();});
+ const click=async(label:string)=>{if(label==='Open saved workspace'||label==='Save workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open');return act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();})};
  const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const select=async(label:string,value:string)=>act(async()=>{const id=[...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor;const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById(id??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  try{
@@ -98,7 +98,7 @@ test('action destinations clean deleted references and Undo restores the origina
  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);let authored='';let saved:CanvasGraph|undefined;let chosen='';
  function Host(){const [graph,setGraph]=useState<CanvasGraph>({screens:[{id:'home',title:'Home',x:0,y:0,tests:[]},{id:'other',title:'Other',x:400,y:400,tests:[]}],edges:[],paths:[{id:'route',name:'Chosen route',screenId:'home',edgeIds:[]}]});const [yaml,setYaml]=useState('appId: com.example.App\n---\n- launchApp\n- evalScript: ${output.keep = true} # untouched\n');const [path,setPath]=useState('route');authored=yaml;saved=graph;chosen=path;return createElement('div',null,createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:path,onPathChange:setPath,disabled:false}),createElement('textarea',{'aria-label':'Executable YAML',value:yaml,onChange:(event:ChangeEvent<HTMLTextAreaElement>)=>setYaml(event.target.value)}));}
  const document=dom.window.document;
- const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();});
+ const click=async(label:string)=>{if(label==='Open saved workspace'||label==='Save workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open');return act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();})};
  const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?dom.window.HTMLTextAreaElement.prototype:dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const select=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`);assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  const connect=async(from:string,to:string)=>{await click('Add action to '+from);await act(async()=>{const destination=document.querySelector<HTMLSelectElement>(`[aria-label="Screen ${from}"] [aria-label$=" destination"]`)!;destination.value=saved!.screens.find(screen=>screen.title===to)!.id;destination.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});};
@@ -142,7 +142,7 @@ test('creating the first screen selects its explicit route without Add next scre
  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);let authored='';let saved:CanvasGraph|undefined;let chosen='';
  function Host(){const [graph,setGraph]=useState<CanvasGraph>({screens:[],edges:[],paths:[]});const [yaml,setYaml]=useState('appId: com.example.App\n---\n- launchApp\n- evalScript: ${output.keep = true} # untouched\n');const [path,setPath]=useState('');authored=yaml;saved=graph;chosen=path;return createElement('div',null,createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:path,onPathChange:setPath,disabled:false}),createElement('textarea',{'aria-label':'Executable YAML',value:yaml,onChange:(event:ChangeEvent<HTMLTextAreaElement>)=>setYaml(event.target.value)}));}
  const document=dom.window.document;
- const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();});
+ const click=async(label:string)=>{if(label==='Open saved workspace'||label==='Save workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open');return act(async()=>{const button=[...document.querySelectorAll('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label);assert.ok(button,label);button.click();})};
  const fill=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?dom.window.HTMLTextAreaElement.prototype:dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  try{
   await act(async()=>root.render(createElement(Host)));await addNode(dom,'Home');
@@ -165,7 +165,7 @@ test('visit editors preserve subsets and identities through repeated transitions
  let saved=initial;
  function Host(){const [graph,setGraph]=useState(initial);const [yaml,setYaml]=useState('appId: com.example.App\n---\n# tnt-check:initial\n- assertVisible: Initial\n# tnt-check:returned\n- assertVisible: Returned\n# tnt-check:open\n- tapOn: Coordinator\n# tnt-check:fixed\n- assertVisible: Fixed\n# tnt-check:back\n- back\n');saved=graph;return createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:'route',onPathChange:()=>{},disabled:false});}
  const document=dom.window.document;
- const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll<HTMLElement>('button,input[type=checkbox]')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();});
+ const click=async(label:string)=>{if(label==='Open saved workspace'||label==='Save workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open');return act(async()=>{const button=[...document.querySelectorAll<HTMLElement>('button,input[type=checkbox]')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();})};
  const select=async(label:string,value:string)=>act(async()=>{const node=document.querySelector(`[aria-label="${label}"]`) as HTMLSelectElement;assert.ok(node,label);node.value=value;node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  try{
   await act(async()=>root.render(createElement(Host)));
@@ -188,7 +188,7 @@ test('canvas context menus add at the clicked position and delete nodes with war
  function Host({disabled=false}:{disabled?:boolean}){const [graph,setGraph]=useState<CanvasGraph>({screens:[],edges:[],paths:[]});const [selected,setSelected]=useState('');saved=graph;path=selected;return createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),catalog:[],diagnostics:[],pathId:selected,onPathChange:setSelected,disabled});}
  const document=dom.window.document;
  const context=async(target:Element)=>act(async()=>{target.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:340,clientY:170}));});
- const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();});
+ const click=async(label:string)=>{if(label==='Open saved workspace'||label==='Save workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open');return act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();})};
  try{
   await act(async()=>root.render(createElement(Host)));
   await context(document.querySelector('.canvas-surface')!);assert.ok(document.querySelector('[role=menu]'));assert.equal(document.activeElement?.getAttribute('role'),'menuitem');
@@ -215,16 +215,16 @@ test('canvas Run scenario uses the selected path and shows blocked runs in a dis
    return Response.json({id:'run',status:'passed',snapshot:{id:'snapshot',name:workspace.name,yaml:workspace.yaml,toolVersions:{maestro:'test',node:'test'}},cleanup:{verified:true,detail:'Done'},steps:[],artifacts:[],log:''});
   }
   if(path==='/api/canvas/references')return Response.json({references:[],diagnostics:[]});
-  return Response.json(workspace);
+  return Response.json(path.startsWith('/api/workspaces?q=')?singleWorkspaceLibrary(workspace):workspace);
  };
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetchMock:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {Scenarios}=await import('../src/scenarios.js');const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);const document=dom.window.document;
  const render=async(deviceId='device')=>act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'',launchBusy:false,onRunning:()=>{}})));
- const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();});
+ const click=async(label:string)=>{if(label==='Open saved workspace'||label==='Save workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open');return act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();})};
  const context=async()=>act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));
  const runFromMenu=async()=>{await context();await act(async()=>{const menu=document.querySelector('[role=menu]')!;menu.querySelectorAll<HTMLButtonElement>('button')[1].click();});};
  try{
-  await render();await act(async()=>{const input=document.getElementById('open-workspace')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,'saved');input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});await click('Open saved workspace');
+  await render();await click('Open saved workspace');
   await context();assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(node=>node.textContent),['Add node','Run scenario']);
   await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'Run scenario');
   await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'Add node');

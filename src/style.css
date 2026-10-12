@@ -475,3 +475,20 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 @media(max-width:540px){main{padding:18px 16px}.workspace-advanced{margin:16px;padding:12px}.label-row{flex-wrap:wrap;gap:8px}.canvas-route-bar select{min-width:0;width:100%}.canvas-empty{left:24px;width:calc(100% - 48px);max-width:400px}.result-tag{white-space:normal}.scenario-result>.label-row{align-items:flex-start}.scenario-actions{align-items:stretch}.scenario-actions .primary{min-width:120px}.picker-grid{grid-template-columns:minmax(0,1fr)}}
 
 .confirm[aria-pressed="true"],.confirm[aria-pressed="true"]:hover:not(:disabled){border-color:var(--accent);background:var(--selected)}
+
+.workspace-manager{position:relative;z-index:12;margin-bottom:16px;max-width:100%}
+.workspace-title{display:flex;flex-direction:column;align-items:flex-start;gap:5px;max-width:100%;min-height:48px;padding:10px 14px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:10px;text-align:left}
+.workspace-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:min(420px,100%)}
+.workspace-title span{font-size:12px;color:var(--muted)}
+.workspace-management-surface{position:absolute;top:100%;left:0;width:min(440px,100%);max-height:min(70vh,var(--workspace-space,70vh));overflow:auto;padding:20px;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:0 12px 40px #0004}
+.workspace-management-surface.expanded{position:fixed;top:12vh;left:50%;transform:translateX(-50%);width:min(720px,90vw);max-height:78vh}
+.workspace-management-surface button{min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)}
+.workspace-management-surface button:focus-visible,.workspace-title:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.workspace-management-surface h3{margin:0}
+.workspace-management-surface form{display:grid;gap:10px}
+.workspace-library{list-style:none;padding:0;display:grid;gap:8px}
+.workspace-library button{width:100%;display:grid;gap:6px;text-align:left;overflow-wrap:anywhere}
+.workspace-library small{font-size:11px;color:var(--muted)}
+.workspace-commands{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+@media(max-width:760px){.workspace-management-surface,.workspace-management-surface.expanded{position:fixed;inset:12px;transform:none;width:auto;max-height:calc(100dvh - 24px);border-radius:12px}.workspace-title strong{max-width:calc(100vw - 90px)}}
+.workspace-management-backdrop{position:fixed;inset:0;z-index:-1;background:#0002}

@@ -1,3 +1,4 @@
+import {useWorkspaceDraft} from './workspace-drafts.js';
 import {useEffect,useMemo,useState} from 'react';
 import {readForms,editForm,appendForm,deleteForm,formCommands,type FormCommand,type FormStep,type FormField} from './yaml-forms.js';
 
@@ -10,6 +11,7 @@ function ValueEditor({step,field,yaml,onChange,disabled}:{step:FormStep;field?:F
   const value=field?.value??step.value??'';
   const [draft,setDraft]=useState({source:yaml,value,dirty:false});
   const [error,setError]=useState('');
+  useWorkspaceDraft(draft.dirty);
   useEffect(()=>{setDraft(current=>current.dirty?current:{source:yaml,value,dirty:false});},[yaml,value]);
   const id=`form-step-${step.index}${field?'-'+field.name:''}`;
   const name=`step ${step.index+1}${field?' '+field.name:''}`;
@@ -47,6 +49,7 @@ export function YamlEditor({yaml,onChange,disabled,deletionWarnings,onDelete}:Ed
   const [value,setValue]=useState('');const [error,setError]=useState('');
   const [pending,setPending]=useState<{index:number;source:string;warnings:string[]}>();
   const [undo,setUndo]=useState<{before:string;after:string;restore?:()=>void}>();
+  useWorkspaceDraft(value.length>0);
   function append(){try{onChange(appendForm(yaml,command,value));setValue('');setError('');}catch(error){setError(error instanceof Error?error.message:'Form edit failed.');}}
   function remove(index:number){
     try{
@@ -64,12 +67,12 @@ export function YamlEditor({yaml,onChange,disabled,deletionWarnings,onDelete}:Ed
     <div className="label-row"><button className="confirm" type="button" aria-pressed={mode==='code'} onClick={()=>setMode('code')}>YAML code</button><button className="confirm" type="button" aria-pressed={mode==='forms'} onClick={()=>setMode('forms')}>Command forms</button></div>
     {view.error&&<div role="alert" className="notice error">{view.error} Your code is retained. Repair it in YAML code; form transformations are blocked.</div>}
     {undo&&<div role="status" className="yaml-undo">Step deleted. <button type="button" disabled={disabled||yaml!==undo.after} onClick={()=>{onChange(undo.before);undo.restore?.();setUndo(undefined);setError('');}}>Undo deletion</button>{yaml!==undo.after&&<span> Undo unavailable after further YAML edits.</span>}</div>}
-    {mode==='code'?<><label htmlFor="scenario-yaml">Maestro YAML</label><textarea id="scenario-yaml" value={yaml} disabled={disabled} onChange={event=>onChange(event.target.value)} spellCheck={false} maxLength={100_000}/></>:<>
+    <div hidden={mode!=='code'}><label htmlFor="scenario-yaml">Maestro YAML</label><textarea id="scenario-yaml" value={yaml} disabled={disabled} onChange={event=>onChange(event.target.value)} spellCheck={false} maxLength={100_000}/></div><div hidden={mode!=='forms'}>
       <p className="field-hint">Edit values inline; expand Details for arguments. Enter or Apply saves a value. Complex YAML remains editable in code.</p>
       {view.steps.map(step=><StepRow key={step.index+':'+step.command} step={step} yaml={yaml} onChange={onChange} disabled={disabled} expanded={expanded===step.index} onExpand={()=>setExpanded(expanded===step.index?undefined:step.index)} onDelete={()=>requestDeletion(step.index)} onCode={()=>setMode('code')}/>)}
       <fieldset className="yaml-add" disabled={disabled||!!view.error||!view.canAppend}><legend>Add command</legend><label className="sr-only" htmlFor="form-command">Command</label><select id="form-command" value={command} onChange={event=>setCommand(event.target.value as FormCommand)}>{formCommands.map(command=><option key={command}>{command}</option>)}</select><label className="sr-only" htmlFor="form-value">New command value</label><input id="form-value" placeholder="Command value" value={value} onChange={event=>setValue(event.target.value)}/><button type="button" className="confirm" onClick={append}>Append command</button></fieldset>
       {!view.canAppend&&!view.error&&<p className="field-hint">This command-list style is code-only for additions.</p>}
-    </>}
+    </div>
     {pending&&<div role="alertdialog" aria-label="Step reference warning" className="notice"><p>Deleting step {pending.index+1} affects references: {pending.warnings.join(', ')}. These references will need repair before running the affected path.</p><button type="button" disabled={disabled||yaml!==pending.source} onClick={()=>remove(pending.index)}>Delete anyway</button><button type="button" onClick={()=>setPending(undefined)}>Cancel deletion</button>{yaml!==pending.source&&<p>YAML changed. Cancel and select the step again.</p>}</div>}
     {error&&<p className="notice error" role="alert">{error}</p>}
   </section>;

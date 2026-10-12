@@ -1,3 +1,4 @@
+import {useWorkspaceDraft} from './workspace-drafts.js';
 import {createPortal} from 'react-dom';
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import type {ScenarioDefinition} from '../server/scenario-definitions.js';
@@ -8,6 +9,7 @@ export function ScenarioSidebar({children,items,selected,disabled,canRun,onSelec
  const [menu,setMenu]=useState<{id:string;x:number;y:number}>();
  const [rename,setRename]=useState<{id:string;name:string}>();
  const [error,setError]=useState('');
+ useWorkspaceDraft(!!rename);
  const menuRef=useRef<HTMLDivElement>(null);
  const trigger=useRef<HTMLElement|null>(null);
  const renameRef=useRef<HTMLInputElement>(null);

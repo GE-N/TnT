@@ -56,6 +56,10 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         if (request.method === 'POST' && url.pathname === '/api/canvas/references') return json(200, await scenarios.references(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/automation/preview') return json(200, await scenarios.preview(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces') return json(200, await scenarios.save(await readJson(request)));
+        if (request.method === 'GET' && url.pathname === '/api/workspaces') return json(200, await scenarios.listWorkspaces(url.searchParams.get('q')??''));
+        if (request.method === 'POST' && url.pathname === '/api/workspaces/copy') return json(200, await scenarios.copyWorkspace(await readJson(request)));
+        const management = /^\/api\/workspaces\/([0-9a-f-]{36})\/(open|rename)$/.exec(url.pathname);
+        if(request.method==='POST' && management){const input=await readJson(request);return json(200,management[2]==='open'?await scenarios.openWorkspace(management[1]):await scenarios.renameWorkspace(management[1],input.name));}
         const workspace = /^\/api\/workspaces\/([0-9a-f-]{36})$/.exec(url.pathname);
         if (request.method === 'GET' && workspace) return json(200, await scenarios.workspace(workspace[1]));
         if (request.method === 'POST' && url.pathname === '/api/batches') return json(202, await scenarios.startBatch(await readJson(request)));

@@ -1,3 +1,4 @@
+import {workspaceCommand} from './workspace-ui-helpers.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
@@ -30,14 +31,14 @@ for(const shareBeforeStart of [false,true])test('a second scenario shares operat
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  const pending:Promise<Response>[]=[];
- const request=async(path:string,options?:{body?:string})=>{try{const body=options?.body?JSON.parse(options.body):undefined;return Response.json(path==='/api/workspaces'?await service.save(body):path==='/api/canvas/references'?await service.references(body):path==='/api/runs'?await service.wait((await service.start(body)).id):await service.workspace(path.slice('/api/workspaces/'.length)));}catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}};
+ const request=async(path:string,options?:{body?:string})=>{try{const body=options?.body?JSON.parse(options.body):undefined;return Response.json(path==='/api/workspaces'?await service.save(body):path.startsWith('/api/workspaces?q=')?await service.listWorkspaces():path.endsWith('/open')?await service.openWorkspace(path.split('/')[3]):path==='/api/canvas/references'?await service.references(body):path==='/api/runs'?await service.wait((await service.start(body)).id):await service.workspace(path.slice('/api/workspaces/'.length)));}catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}};
  const fetch=(path:string,options?:{body?:string})=>{const result=request(path,options);pending.push(result);return result;};
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetch:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root')!);
- const click=async(label:string)=>act(async()=>{const node=[...document.querySelectorAll<HTMLElement>('button,summary,input[type=checkbox]')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(node,label);node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});
+ const click=async(label:string)=>{if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',async()=>{do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});return act(async()=>{const node=[...document.querySelectorAll<HTMLElement>('button,summary,input[type=checkbox]')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(node,label);node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);})};
  try{
   await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));
-  await act(async()=>{const input=document.getElementById('open-workspace')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,workspace.id);input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});await click('Open saved workspace');await click('Scenario 2');
+  await click('Open saved workspace');await click('Scenario 2');
   assert.ok(!document.querySelector('[aria-label="Action 1 selector"]'),'Another scenario action is not presented as active');
   if(!shareBeforeStart){await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.doesNotMatch(executed,/tapOn|assertVisible/);}
   if(shareBeforeStart){await click('Use existing actions/checks');await click('Scenarios');await click('Use Tap text · Go in Scenario 2');await click('Use Visible text · Done in Scenario 2');await click('Use Home as scenario start');}

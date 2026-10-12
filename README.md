@@ -92,8 +92,14 @@ Deleting an ordered connection action, a connection, or a referenced node report
 
 ## Screen test canvas (#7)
 
-Choose **Create screen canvas**, add one node per app screen, and associate current YAML commands or declared reusable flows in the screen inspector. Drag headers or use arrow keys to arrange screens; zoom and scroll to inspect the graph. Optional reference screenshots are local annotations up to 250 KB. Reopen saved work using its workspace ID; graph, YAML, reusable flows and mock configuration are restored, while the route must be explicitly selected again.
+Choose **Create screen canvas**, add one node per app screen, and associate current YAML commands or declared reusable flows in the screen inspector. Drag headers or use arrow keys to arrange screens; zoom and scroll to inspect the graph. Optional reference screenshots are local annotations up to 250 KB. Open the workspace title manager and find saved work by name; graph, YAML, reusable flows and mock configuration are restored, while the route must be explicitly selected again.
 
 Connect a source action and destination assertion, add a response-condition explanation, then create an explicitly ordered scenario path. Select it before **Run scenario**. YAML owns execution: the selected route must match its existing command order. Stale/broken/ambiguous references block the selected route and require explicit repair. The executed result canvas uses an immutable graph snapshot, reports verified outcomes after execution, and fails an unverified required destination instead of switching branches. Shared screens expose their reusable assertion flows.
 
 Setup/default-action handlers remain unavailable until #6. The actual API maintenance-route integration gate remains outstanding; see [canvas evidence and limits](docs/canvas-verification.md).
+
+## Workspace manager (#32)
+
+The title above the canvas opens recent work, searches the entire active local store, and expands into **View all workspaces**. **Rename workspace** commits with Done/Enter and cancels with Cancel/Escape. Titles do not rename scenarios or historical results.
+
+Saving is manual: use **Save workspace** in the manager. Unsaved changes remain visible; Open and New offer Save and continue or Cancel. Apply or repair pending YAML/JSON/form edits before navigating or copying. **New workspace** starts a named empty editor without saving a blank record. **Save a copy** offers an editable title, saves pending valid source work, and creates an independent workspace with its internal authored references. Runtime inputs and previous run evidence are excluded. Switching waits for active execution to finish; browsing remains available. All saved work belongs to the active local runner store.

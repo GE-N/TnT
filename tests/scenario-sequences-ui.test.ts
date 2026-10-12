@@ -1,3 +1,4 @@
+import {workspaceCommand} from './workspace-ui-helpers.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
@@ -33,14 +34,14 @@ async function journey(work:(ui:{document:Document;selectedCommand:(label:string
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  const pending:Promise<Response>[]=[];
- const request=async(path:string,options?:{body?:string})=>{try{const body=options?.body?JSON.parse(options.body):undefined;return Response.json(path==='/api/workspaces'?await service.save(body):path==='/api/canvas/references'?await service.references(body):path==='/api/batches'?(liveBatch?await service.startBatch(body):await service.waitBatch((await service.startBatch(body)).id)):path.startsWith('/api/batches/')?(path.endsWith('/cancel')?await service.cancelBatch(path.split('/')[3]):await service.batch(path.split('/')[3])):path.startsWith('/api/runs/')?await service.result(path.slice('/api/runs/'.length)):path==='/api/runs'?await service.wait((await service.start(body)).id):await service.workspace(path.slice('/api/workspaces/'.length)));}catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}};
+ const request=async(path:string,options?:{body?:string})=>{try{const body=options?.body?JSON.parse(options.body):undefined;return Response.json(path==='/api/workspaces'?await service.save(body):path.startsWith('/api/workspaces?q=')?await service.listWorkspaces():path.endsWith('/open')?await service.openWorkspace(path.split('/')[3]):path==='/api/canvas/references'?await service.references(body):path==='/api/batches'?(liveBatch?await service.startBatch(body):await service.waitBatch((await service.startBatch(body)).id)):path.startsWith('/api/batches/')?(path.endsWith('/cancel')?await service.cancelBatch(path.split('/')[3]):await service.batch(path.split('/')[3])):path.startsWith('/api/runs/')?await service.result(path.slice('/api/runs/'.length)):path==='/api/runs'?await service.wait((await service.start(body)).id):await service.workspace(path.slice('/api/workspaces/'.length)));}catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}};
  const fetch=(path:string,options?:{body?:string})=>{const result=request(path,options);pending.push(result);return result;};
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetch:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root')!);
- const click=async(label:string)=>act(async()=>{if(label.startsWith('Actions for ')){const name=label.slice('Actions for '.length);const row=[...document.querySelectorAll<HTMLElement>('[aria-label="Scenario list"] [aria-pressed]')].find(node=>node.textContent===name);assert.ok(row,name);row.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:150,clientY:150}));return;}const node=[...document.querySelectorAll<HTMLElement>('[role="menu"] button'),...document.querySelectorAll<HTMLElement>('button,summary')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(node,label);assert.ok(!(node as HTMLButtonElement).disabled,label+' is enabled');node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});
+ const click=async(label:string)=>{if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',async()=>{do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});return act(async()=>{if(label.startsWith('Actions for ')){const name=label.slice('Actions for '.length);const row=[...document.querySelectorAll<HTMLElement>('[aria-label="Scenario list"] [aria-pressed]')].find(node=>node.textContent===name);assert.ok(row,name);row.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:150,clientY:150}));return;}const node=[...document.querySelectorAll<HTMLElement>('[role="menu"] button'),...document.querySelectorAll<HTMLElement>('button,summary')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(node,label);assert.ok(!(node as HTMLButtonElement).disabled,label+' is enabled');node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);})};
  const selectedCommand=async(label:string)=>{await click('Actions for '+document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent);await click(label);};
  const fill=async(label:string,value:string)=>{if(label==='Scenario name'){const selected=document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!;await click('Actions for '+selected.textContent);await click('Rename');await fill('Rename scenario',value);await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));return;}return act(async()=>{const node=document.querySelector('[aria-label="'+label+'"]')??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});};
- try{await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));await fill('Saved workspace ID',workspace.id);await click('Open saved workspace');await work({document,selectedCommand,click,fill,saved:()=>service.workspace(workspace.id),service,failNext:(index=3)=>{fail=true;failIndex=index;},holdNext:()=>{hold=true;liveBatch=true;},calls:()=>runCalls});}
+ try{await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));await click('Open saved workspace');await work({document,selectedCommand,click,fill,saved:()=>service.workspace(workspace.id),service,failNext:(index=3)=>{fail=true;failIndex=index;},holdNext:()=>{hold=true;liveBatch=true;},calls:()=>runCalls});}
  finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
 }
 
@@ -316,7 +317,7 @@ test('deleting an unselected row and undo restores saved references without over
  await click('New scenario');await fill('Scenario name','Original');await click('Use 1 as scenario start');await click('Run scenario');
  await click('Actions for Original');await click('Duplicate');await fill('Scenario name','Other');await click('Save workspace');const initial=await saved();initial.canvas!.screens[0].tests[0].scenarioIds=initial.scenarios!.map(item=>item.id);await service.save(initial);await click('Open saved workspace');await click('Other');await click('Run Original');const before=await saved();
  await click('Actions for Original');await click('Delete');
- assert.match(document.querySelector('[role="status"]')!.textContent!,/Deleted Original/);
+ assert.match(document.querySelector('.scenario-delete-notice[role="status"]')!.textContent!,/Deleted Original/);
  assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Other');
  await fill('Scenario name','Later edit');await click('Save workspace');assert.equal((await saved()).scenarios!.length,1);
  assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Original');
@@ -351,7 +352,7 @@ test('an unselected row can duplicate its definition and dismissal clears the la
  await click('New scenario');await fill('Scenario name','Selected');await click('Actions for Target');await click('Duplicate');await click('Save workspace');const after=await saved();
  assert.deepEqual(after.scenarios![2],{...before.scenarios![0],id:after.scenarios![2].id,pathId:after.scenarios![2].pathId,name:'Target copy'});
  assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Target copy');
- await click('Actions for Target');await click('Delete');await click('Dismiss');assert.equal(document.querySelector('[role="status"]'),null);
+ await click('Actions for Target');await click('Delete');await click('Dismiss');assert.equal(document.querySelector('.scenario-delete-notice[role="status"]'),null);
  await click('Save workspace');await click('Open saved workspace');assert.deepEqual((await saved()).scenarios!.map(item=>item.name),['Selected','Target copy']);
 }));
 
@@ -444,3 +445,13 @@ for(const mode of ['destination','node'] as const)test(mode+' cleanup confirms, 
  if(mode!=='node'){assert.deepEqual(after.paths[0],before.paths[0]);assert.equal(after.screens.length,2);await click('Original');assert.ok(document.querySelector('[aria-label="Visit 3 · Home operations"]'));await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');}
  else{assert.equal(after.paths[0].visits!.length,1);assert.ok(!after.screens.some(screen=>screen.title==='Details'));assert.equal(after.edges.length,0);}
 },true));
+
+test('the workspace library remains browsable during a batch while switching, New and copy wait for cleanup',()=>journey(async({document,click,holdNext})=>{
+ await click('New scenario');await click('Use 1 as scenario start');await click('Save workspace');holdNext();await click('Run all');
+ await click('Manage workspace');
+ const manager=document.querySelector('[aria-label="Workspace manager"]')!;
+ for(const label of ['New workspace','Save a copy','Rename workspace'])assert.equal([...manager.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent===label)?.disabled,true);
+ assert.ok(document.querySelector<HTMLButtonElement>('.workspace-library button')?.disabled);
+ assert.match(manager.textContent!,/Active execution/);
+ await click('Close workspace manager');await click('Cancel batch');
+}));

@@ -1,6 +1,7 @@
+import {createWorkspaceStore,type WorkspaceMetadata} from './workspace-store.js';
 import {createBatches} from './batches.js';
 import {projectCanvasRoute} from './canvas-route.js';
-import {refreshChecks} from '../shared/canvas-authoring.js';
+import {refreshChecks,operationProblem} from '../shared/canvas-authoring.js';
 import {readScenarios,selectScenario,validateFlowInputs,type ScenarioDefinition} from './scenario-definitions.js';
 import {readAutomation,instrument,mapAutomation,metadataStatus,type Automation,type AutomationResult,type ExecutionItem} from './default-actions.js';
 import { mkdir, readFile, writeFile, realpath, readdir, mkdtemp, rm, rename } from 'node:fs/promises';
@@ -12,7 +13,7 @@ import {readCanvas,referenceCatalog,inspectCanvas,selectedCanvasPath,mapCanvas,t
 import { createMockSession, validateMock, type MockPlan, type MockResult } from './mockoon.js';
 import type { createRunner } from './runner.js';
 
-export type Workspace = { scenarios?:ScenarioDefinition[]; id: string; name: string; yaml: string; automation?:Automation; flows?: Record<string, string>; mock?: MockPlan; canvas?: CanvasGraph; canvasDiagnostics?: CanvasDiagnostic[] };
+export type Workspace = { metadata?:WorkspaceMetadata; scenarios?:ScenarioDefinition[]; id: string; name: string; yaml: string; automation?:Automation; flows?: Record<string, string>; mock?: MockPlan; canvas?: CanvasGraph; canvasDiagnostics?: CanvasDiagnostic[] };
 export type Step = { id: string; command: string; expected?: unknown; actual?:unknown; detail?:string; artifacts?:string[]; assertionStatus?:Step['status']; status: 'unavailable' | 'passed' | 'failed' | 'skipped' };
 export type Cleanup = { verified: boolean; detail: string };
 export type Run = {
@@ -43,6 +44,21 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     if (!(await realpath(path)).startsWith((await realpath(base)) + sep)) throw new Error('Workspace path escapes its root.');
     return path;
   }
+  function authoredWorkspace(input: {id?:string;name:string;yaml:string;flows?:Record<string,string>;mock?:unknown;canvas?:unknown;automation?:unknown;scenarios?:unknown}):Workspace {
+      if (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 120 || typeof input.yaml !== 'string' || Buffer.byteLength(input.yaml) > 100_000) throw new Error('Provide a workspace title and YAML up to 100 KB.');
+      const scenarios=readScenarios(input.scenarios);
+      const flows = validateFlows(input.flows);
+      const mock = validateMock(input.mock);
+      const rawCanvas=readCanvas(input.canvas);
+      const canvas=rawCanvas?refreshChecks(rawCanvas,input.yaml):undefined;
+
+      if (Buffer.byteLength(JSON.stringify({flows,mock,canvas,automation:input.automation,scenarios})) > 900_000) throw new Error('Combined reusable flows and mock environment exceed 900 KB.');
+      const automation=readAutomation(input.automation,flows??{},input.yaml);
+      const canvasDiagnostics=canvas?inspectCanvas(canvas,input.yaml,flows,automation).diagnostics:undefined;
+      return { scenarios, automation, flows, mock, canvas, canvasDiagnostics, id: input.id ? validId(input.id) : '', name: input.name.trim(), yaml: input.yaml };
+
+  }
+  const workspaceStore=createWorkspaceStore(options.root,authoredWorkspace);
   const service = {
     async preview(input:{yaml:string;flows?:Record<string,string>;automation?:unknown;canvas?:unknown;mock?:unknown;scenarios?:unknown;scenarioId?:string;pathId?:string;runtimeInputs?:unknown;resetApp?:boolean}) {
       if(typeof input.yaml!=='string'||Buffer.byteLength(input.yaml)>100_000)throw new Error('Provide YAML up to 100 KB.');
@@ -70,21 +86,19 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       return catalog;
     },
     async save(input: { id?: string; name: string; yaml: string; flows?: Record<string,string>; mock?: unknown; canvas?: unknown; automation?:unknown; scenarios?:unknown }): Promise<Workspace> {
-      if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 120 || typeof input.yaml !== 'string' || Buffer.byteLength(input.yaml) > 100_000) throw new Error('Provide a scenario name and YAML up to 100 KB.');
-      const scenarios=readScenarios(input.scenarios);
-      const flows = validateFlows(input.flows);
-      const mock = validateMock(input.mock);
-      const rawCanvas=readCanvas(input.canvas);
-      const canvas=rawCanvas?refreshChecks(rawCanvas,input.yaml):undefined;
-
-      if (Buffer.byteLength(JSON.stringify({flows,mock,canvas,automation:input.automation,scenarios})) > 900_000) throw new Error('Combined reusable flows and mock environment exceed 900 KB.');
-      const automation=readAutomation(input.automation,flows??{},input.yaml);
-      const canvasDiagnostics=canvas?inspectCanvas(canvas,input.yaml,flows,automation).diagnostics:undefined;
-      const workspace = { scenarios, automation, flows, mock, canvas, canvasDiagnostics, id: input.id ? validId(input.id) : randomUUID(), name: input.name.trim(), yaml: input.yaml };
-      await writeRecord(join(await directory('workspaces', workspace.id), 'workspace.json'), workspace);
-      return workspace;
+      return workspaceStore.save(authoredWorkspace(input));
     },
-    async workspace(id: string): Promise<Workspace> { return readRecord(await directory('workspaces', id), 'workspace.json'); },
+    async workspace(id: string): Promise<Workspace> { return workspaceStore.read(id); },
+    async openWorkspace(id:string){return workspaceStore.open(id);},
+    async renameWorkspace(id:string,name:string){return workspaceStore.rename(id,name);},
+    async listWorkspaces(query=''){return workspaceStore.list(query);},
+    async copyWorkspace(input:Parameters<typeof authoredWorkspace>[0]){
+      const content=authoredWorkspace({...input,id:undefined});
+      const incomplete=content.canvas?.screens.flatMap(screen=>screen.tests).find(test=>operationProblem(test));if(incomplete)throw new Error('Repair incomplete canvas content before copying. '+operationProblem(incomplete));
+      validate(content.yaml,content.flows);
+      for(const flow of Object.values(content.flows??{}))validate(flow,content.flows);
+      return workspaceStore.save(content);
+    },
     async start(input: RunInput): Promise<Run> {
       if (batches.busy) throw new Error('A scenario batch is in progress. Wait for cleanup.');
       const workspace = await service.workspace(input.workspaceId);

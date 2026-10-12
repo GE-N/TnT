@@ -1,3 +1,4 @@
+import {useWorkspaceDraft} from './workspace-drafts.js';
 import {checkpointCommands} from '../shared/checkpoints.js';
 import {useEffect,useState} from 'react';
 import type {Automation,FlowCall} from '../server/default-actions.js';
@@ -11,6 +12,7 @@ function Parameters({value,onChange,onError,label}:{value:Record<string,string>;
 export function DefaultActions({value,onChange,files,catalog,disabled,onError}:Props){
  const [errors,setErrors]=useState<Record<string,string>>({});
  const [step,setStep]=useState('');const [timeout,setTimeout]=useState(1000);
+ useWorkspaceDraft(!!step);
  useEffect(()=>{onError(Object.values(errors).filter(Boolean).join(' '));},[errors,onError]);
  function error(id:string,message:string){setErrors(current=>({...current,[id]:message}));}
  function updateSetup(update:Partial<FlowCall>){if(value)onChange({...value,setup:{...value.setup,...update}});}
@@ -42,6 +44,7 @@ export function DefaultActions({value,onChange,files,catalog,disabled,onError}:P
    <label>Checkpoint step<select value={step} onChange={event=>setStep(event.target.value)}><option value="">Choose a navigation/assertion step</option>{steps.filter(entry=>!value.checkpoints.some(checkpoint=>checkpoint.beforeStep===entry.index)).map(entry=><option key={entry.index} value={entry.index}>{entry.label}</option>)}</select></label>
    <label>Visibility window (ms, 0–5000)<input type="number" min="0" max="5000" value={timeout} onChange={event=>setTimeout(Number(event.target.value))}/></label>
    <p className="field-hint">0 checks once. A polling window allows delayed screens; an in-progress Maestro visibility query may finish after the window.</p>
+   {step&&<button type="button" onClick={()=>setStep('')}>Cancel checkpoint draft</button>}
    <button type="button" className="confirm" disabled={!step||value.checkpoints.length>=100} onClick={()=>{const entry=steps.find(entry=>entry.index===Number(step));if(entry){onChange({...value,checkpoints:[...value.checkpoints,{beforeStep:entry.index!,fingerprint:entry.fingerprint,timeoutMs:timeout}]});setStep('');}}}>Add checkpoint</button>
    {Object.values(errors).some(Boolean)&&<p role="alert" className="notice error">{Object.values(errors).filter(Boolean).join(' ')}</p>}
   </>}

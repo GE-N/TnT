@@ -1,3 +1,4 @@
+import {workspaceCommand} from './workspace-ui-helpers.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
@@ -25,7 +26,7 @@ test('an offline author creates a draft, adds ordered contextual checks, reopens
  const request=async(path:string,options?:{body?:string})=>{
   try{
    const body=options?.body?JSON.parse(options.body):undefined;
-   const data=path==='/api/workspaces'?await service.save(body):path==='/api/canvas/references'?await service.references(body):path==='/api/runs'?await service.wait((await service.start(body)).id):path.startsWith('/api/workspaces/')?await service.workspace(path.slice('/api/workspaces/'.length)):undefined;
+   const data=path==='/api/workspaces'?await service.save(body):path.startsWith('/api/workspaces?q=')?await service.listWorkspaces():path.endsWith('/open')?await service.openWorkspace(path.split('/')[3]):path==='/api/canvas/references'?await service.references(body):path==='/api/runs'?await service.wait((await service.start(body)).id):path.startsWith('/api/workspaces/')?await service.workspace(path.slice('/api/workspaces/'.length)):undefined;
    return Response.json(data);
   }catch(error){return Response.json({error:error instanceof Error?error.message:'Request failed'},{status:400});}
  };
@@ -33,14 +34,14 @@ test('an offline author creates a draft, adds ordered contextual checks, reopens
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetch:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);const document=dom.window.document;
  const render=async(device='')=>act(async()=>root.render(createElement(Scenarios,{token:'local',deviceId:device,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));
- const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});
+ const click=async(label:string)=>{if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',async()=>{do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});return act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);})};
  const field=(label:string)=>document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');
  const fill=async(label:string,value:string)=>act(async()=>{const node=field(label) as HTMLInputElement;assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const select=async(label:string,value:string)=>act(async()=>{const node=field(label) as HTMLSelectElement;assert.ok(node,label);node.value=value;node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  try{
   await render();await click('New scenario');await act(async()=>document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:150,clientY:150})));await click('Rename');await fill('Rename scenario','Home scenario');await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));await click('Save workspace');
   const workspaceId=document.querySelector('.artifact-id')!.textContent!.replace('Workspace: ','');
-  await fill('Saved workspace ID',workspaceId);await click('Open saved workspace');assert.ok([...document.querySelectorAll('button')].some(button=>button.textContent==='Home scenario'));
+  await click('Open saved workspace');assert.ok([...document.querySelectorAll('button')].some(button=>button.textContent==='Home scenario'));
   assert.ok(![...document.querySelectorAll('legend')].some(node=>node.textContent==='Screen inspector'));
   await act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));await click('Add node');
   await fill('Screen title for New screen','Welcome');await act(async()=>field('Screen title for New screen')!.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));

@@ -1,6 +1,8 @@
+import {WorkspaceManager,type WorkspaceAction} from './workspace-manager.js';
+import {WorkspaceDrafts} from './workspace-drafts.js';
 import {ScenarioSidebar} from './scenario-sidebar.js';
 import type {Batch} from '../server/batches.js';
-import {canvasTestLabel,routeVisits} from '../shared/canvas-authoring.js';
+import {canvasTestLabel,routeVisits,operationProblem} from '../shared/canvas-authoring.js';
 import {ExecutedCanvas} from './executed-canvas.js';
 import {ScenarioLibrary} from './scenario-library.js';
 import type {ScenarioDefinition} from '../server/scenario-definitions.js';
@@ -25,9 +27,8 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   const [definitionError,setDefinitionError]=useState('');
   const [resetApp,setResetApp]=useState(false);
   const selectedScenario=definitions.find(item=>item.id===scenarioId);
-  const [name, setName] = useState('Home screen');
+  const [name, setName] = useState('Untitled workspace');
   const [yaml, setYaml] = useState('appId: com.example.HybridApp\n---\n- launchApp\n');
-  const [openWorkspaceId,setOpenWorkspaceId]=useState('');
   const [loadedMock,setLoadedMock]=useState<MockPlan>();
   const [loadRevision,setLoadRevision]=useState(0);
   const [canvas,setCanvas]=useState<CanvasGraph|undefined>(emptyCanvas);
@@ -59,6 +60,21 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
   const batchRunning=batch?.status==='running'||batch?.status==='cancelling';
   const running = run?.status === 'running'||batchRunning;
   useEffect(() => { onRunning(running || submitting || pickerBusy); }, [running, submitting, pickerBusy, onRunning]);
+  const [acknowledged,setAcknowledged]=useState('');
+  const [saveFailed,setSaveFailed]=useState(false);
+  const [drafts,setDrafts]=useState<string[]>([]);
+  const reportDraft=useCallback((id:string,pending:boolean)=>setDrafts(current=>pending?(current.includes(id)?current:[...current,id]):current.filter(item=>item!==id)),[]);
+  const contentKey=(value:{name:string;yaml:string;flows?:unknown;mock?:unknown;canvas?:unknown;automation?:unknown;scenarios?:unknown})=>JSON.stringify({name:value.name,yaml:value.yaml,flows:value.flows??{},mock:value.mock,canvas:value.canvas,automation:value.automation,scenarios:value.scenarios??[]});
+  let parsedFlows:unknown;try{parsedFlows=JSON.parse(flows);}catch{parsedFlows=flows;}
+  const authoredContent={name,yaml,flows:parsedFlows,mock,canvas,automation,scenarios:definitions};
+  const reviewedContent=(overrides:Partial<Pick<Workspace,'name'|'yaml'>>={})=>({...authoredContent,flows:JSON.parse(flows),...overrides});
+  const currentKey=contentKey(authoredContent);
+  const initialKey=useRef(currentKey);
+  const latestKey=useRef(currentKey);latestKey.current=currentKey;
+  const pendingDraft=!!(drafts.length||definitionError||mockError||automationError||expectedPage);
+  const dirty=pendingDraft||currentKey!==(acknowledged||initialKey.current);
+  const persistenceStatus=submitting?'Saving / preparing…':saveFailed?'Save failed · changes retained':dirty?'Unsaved changes':workspaceId?'Saved locally · manual save':'Not saved · local editing';
+  useEffect(()=>{if(!dirty)return;const guard=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard);},[dirty]);
   const headers = { 'X-TnT-Token': token, 'Content-Type': 'application/json' };
   const api = runnerClient(token);
   useEffect(()=>{
@@ -164,26 +180,43 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     };
     setDeletedScenario({name:target.name,restore});
   }
-  async function openWorkspace() {
-    setSubmitting(true);setError('');setRunError('');
-    try {
-      const workspace:Workspace=await api('/api/workspaces/'+openWorkspaceId.trim());
-      setLegacyCanvas(!workspace.scenarios?.some(item=>item.authoring==='canvas'));setDefinitions(workspace.scenarios??[]);setScenarioId(workspace.scenarios?.[0]?.id??'');setDefinitionError('');setResetApp(false);
-      setDeletedScenario(undefined);setBatch(undefined);setWorkspaceId(workspace.id);setName(workspace.name);setYaml(workspace.yaml);setFlows(JSON.stringify(workspace.flows??{},null,2));
-      setAutomation(workspace.automation);setAutomationError('');setPreview(undefined);setCanvas(workspace.canvas);setPathId('');setLoadedMock(workspace.mock);setMock(workspace.mock);setLoadRevision(value=>value+1);
-      artifactSequence.current++;setRun(undefined);setArtifact(undefined);setInputs('');
-    }catch(error){setError(error instanceof Error?error.message:'Cannot open workspace.');}
-    finally{setSubmitting(false);}
+  function loadWorkspace(workspace:Workspace){
+    setLegacyCanvas(!workspace.scenarios?.some(item=>item.authoring==='canvas'));setDefinitions(workspace.scenarios??[]);setScenarioId(workspace.scenarios?.[0]?.id??'');setDefinitionError('');setResetApp(false);
+    setDeletedScenario(undefined);setBatch(undefined);setWorkspaceId(workspace.id);setName(workspace.name);setYaml(workspace.yaml);setFlows(JSON.stringify(workspace.flows??{},null,2));
+    setAutomation(workspace.automation);setAutomationError('');setPreview(undefined);setCanvas(workspace.canvas);setPathId('');setLoadedMock(workspace.mock);setMock(workspace.mock);setMockError('');setLoadRevision(value=>value+1);
+    artifactSequence.current++;setRun(undefined);setArtifact(undefined);setInputs('');setExpectedPage('');setDrafts([]);setAcknowledged(contentKey(workspace));setSaveFailed(false);setSourceRepair(undefined);
   }
-  async function save(targetId=scenarioId) {
+  function requireAppliedDrafts(){const documents=parseAllDocuments(yaml);if(documents.length!==2||documents.some(doc=>doc.errors.length)||!Array.isArray(documents[1].toJS()))throw new Error('Repair incomplete YAML before saving, copying or switching workspaces. Your code is retained.');if(pendingDraft)throw new Error('Apply or cancel incomplete authoring drafts before saving, copying or switching workspaces. Your draft is retained in the editor.');}
+  async function workspaceAction(action:WorkspaceAction,saved?:Workspace){
+    if(running||submitting||pickerBusy||launchBusy)throw new Error('Wait for execution and cleanup before managing the workspace.');
+    if(action.kind!=='rename'){requireAppliedDrafts();const incomplete=canvas?.screens.flatMap(screen=>screen.tests).find(test=>operationProblem(test));if(incomplete)throw new Error('Repair the incomplete canvas action or check before copying or switching. '+operationProblem(incomplete));}setSubmitting(true);setError('');
+    const requestKey=latestKey.current;
+    const receive=(workspace:Workspace)=>{if(latestKey.current!==requestKey&&(!saved||latestKey.current!==contentKey(saved)))throw new Error('Newer edits are still unsaved. Current work is retained; retry the workspace action after saving.');loadWorkspace(workspace);};
+    try{
+      if(action.kind==='open')receive(await api('/api/workspaces/'+action.id+'/open',{}));
+      else if(action.kind==='new')loadWorkspace({id:'',name:action.name,yaml:'appId: com.example.HybridApp\n---\n- launchApp\n',flows:{},scenarios:[],canvas:emptyCanvas()});
+      else if(action.kind==='rename'){
+        if(workspaceId)await api('/api/workspaces/'+workspaceId+'/rename',{name:action.name});
+        setName(action.name);if(acknowledged){const saved=JSON.parse(acknowledged);setAcknowledged(contentKey({...saved,name:action.name}));}
+      }else{
+        const next=await api('/api/workspaces/copy',saved?{...saved,name:action.name}:reviewedContent({name:action.name}));receive(next);
+      }
+    }finally{setSubmitting(false);}
+  }
+  async function manualSave(){setSubmitting(true);setError('');try{return await save(scenarioId,true);}catch(error){setSaveFailed(true);setError(error instanceof Error?error.message:'Save failed. Current work is retained.');throw error;}finally{setSubmitting(false);}}
+  async function save(targetId=scenarioId,requireCurrent=false) {
+    requireAppliedDrafts();
+    const savingKey=latestKey.current;
     const target=definitions.find(item=>item.id===targetId);
     if(definitionError)throw new Error(definitionError);
     if(mockError) throw new Error(mockError);
     if(automationError)throw new Error(automationError);
     let source=yaml;
     if(target?.authoring==='canvas'&&bundleId){const docs=parseAllDocuments(yaml);if(docs.length===2&&!docs.some(doc=>doc.errors.length)){docs[0].set('appId',bundleId);source=docs[0].toString()+'---\n'+docs[1].toString({directives:false});}}
-    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml:source, flows: JSON.parse(flows), mock, canvas, automation, scenarios:definitions });
-    setWorkspaceId(workspace.id);setYaml(workspace.yaml);
+    const workspace: Workspace = await api('/api/workspaces', {...reviewedContent({yaml:source}),id:workspaceId||undefined});
+    const hasNewEdits=latestKey.current!==savingKey;
+    setWorkspaceId(workspace.id);setAcknowledged(contentKey(workspace));setSaveFailed(false);if(!hasNewEdits){setYaml(workspace.yaml);setCanvas(workspace.canvas);setDefinitions(workspace.scenarios??[]);setAutomation(workspace.automation);setMock(workspace.mock);setFlows(JSON.stringify(workspace.flows??{},null,2));}
+    if(requireCurrent&&hasNewEdits)throw new Error('Newer edits are still unsaved. Review them and retry before continuing.');
     return workspace;
   }
   async function submit(execute: boolean,targetId=scenarioId) {
@@ -208,13 +241,13 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       }
     } catch (error) {
       const message=error instanceof Error ? error.message : 'Scenario request failed.';
-      if(execute)setRunError(message);else setError(message);
+      if(execute)setRunError(message);else {setError(message);setSaveFailed(true);}
     }
     finally { setSubmitting(false); }
   }
   async function savePicked(yaml: string) {
-    const workspace: Workspace = await api('/api/workspaces', { id: workspaceId || undefined, name, yaml, flows: JSON.parse(flows), mock, canvas, automation, scenarios:definitions });
-    setWorkspaceId(workspace.id); setYaml(workspace.yaml);
+    const workspace: Workspace = await api('/api/workspaces', {...reviewedContent({yaml}),id:workspaceId||undefined});
+    setWorkspaceId(workspace.id); setYaml(workspace.yaml);setAcknowledged(contentKey(workspace));setSaveFailed(false);
   }
   async function executePicked(flowYaml: string, captureId: string, pickerReviewId: string) {
     artifactSequence.current++; setArtifact(undefined); setError('');
@@ -254,10 +287,9 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       setFlows(JSON.stringify(nextFlows,null,2));setYaml(docs[0].toString()+docs[1].toString());setError('');
     } catch(error){setError(error instanceof Error?error.message:'Cannot add assertion.');}
   }
-  return <section className="panel scenario-panel" aria-labelledby="scenario-heading">
+  return <WorkspaceDrafts.Provider value={reportDraft}><section className="panel scenario-panel" aria-labelledby="scenario-heading">
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Scenario workspace</h2><p>Design scenarios on the shared canvas. Connect a simulator when ready to run.</p></div></div>
-    <div className="workspace-open"><label htmlFor="open-workspace">Saved workspace ID</label><input id="open-workspace" value={openWorkspaceId} onChange={event=>setOpenWorkspaceId(event.target.value)} placeholder="Paste the ID shown after saving"/><button className="confirm" disabled={!token||!openWorkspaceId.trim()||running||submitting||pickerBusy||launchBusy} onClick={()=>void openWorkspace()}>Open saved workspace</button></div>
-    <div className="canvas-workspace"><ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={!!deviceId&&!!token} onSelect={id=>{setScenarioId(id);setInputs('');}} onCreate={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item))} key={'sidebar-'+loadRevision}>{run?.status==='running'&&!batchRunning&&<button className="confirm" onClick={()=>void cancel()}>Cancel run</button>}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</ScenarioSidebar><div className="workspace-canvas">
+    <div className="canvas-workspace"><ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={!!deviceId&&!!token} onSelect={id=>{setScenarioId(id);setInputs('');}} onCreate={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item))} key={'sidebar-'+loadRevision}>{run?.status==='running'&&!batchRunning&&<button className="confirm" onClick={()=>void cancel()}>Cancel run</button>}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</ScenarioSidebar><div className="workspace-canvas"><WorkspaceManager token={token} id={workspaceId} name={name} status={persistenceStatus} dirty={dirty} busy={submitting||pickerBusy} blocked={running||launchBusy||pickerBusy} onAction={workspaceAction} onSave={manualSave}/>
     <CanvasEditor onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={()=>void submit(true)} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));}} disabled={running||submitting||pickerBusy||launchBusy}/>
     </div></div>
       {batch&&batch.workspaceId===workspaceId&&<section aria-label="Batch report" aria-live="polite"><h3>Batch · {batch.status}</h3><p>Saved order · separate reports · {batch.snapshot.resetApp?'Declared app reset':'No additional app reset'}</p>{batch.entries.map(entry=><div key={entry.scenarioId}><p>{entry.name} · {entry.status}</p>{entry.reason&&<p>{entry.reason}</p>}{entry.runId&&<button className="confirm" onClick={()=>void openReport(entry.runId!)}>Open report for {entry.name}</button>}</div>)}</section>}
@@ -267,11 +299,10 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     <div className="scenario-editor">
       <label htmlFor="expected-page">Expected page text for reusable assertion</label><input id="expected-page" value={expectedPage} onChange={event=>setExpectedPage(event.target.value)} disabled={running||submitting||pickerBusy}/><button className="confirm" disabled={running||submitting||pickerBusy} onClick={addAssertion}>Append reusable assertion</button>
       <label htmlFor="reusable-flows">Reusable YAML flows (JSON filename → YAML)</label><textarea id="reusable-flows" value={flows} onChange={event=>setFlows(event.target.value)} disabled={running||submitting||pickerBusy} spellCheck={false}/>
-      <label htmlFor="scenario-name">Scenario name</label><input id="scenario-name" value={name} disabled={pickerBusy} onChange={event => setName(event.target.value)} maxLength={120} />
-      <div className="label-row"><span>Executable flow</span><button className="text-button" disabled={!bundleId || pickerBusy} onClick={() => setYaml(`appId: ${bundleId}\n---\n- launchApp\n- assertVisible: Home\n`)}>Use launch app ID</button></div>
-      <DefaultActions key={'automation-'+loadRevision} value={automation} onChange={setAutomation} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} disabled={pickerBusy} onError={setAutomationError}/>
+      <div className="label-row"><span>Executable flow</span><button className="text-button" disabled={!bundleId || pickerBusy || submitting} onClick={() => setYaml(`appId: ${bundleId}\n---\n- launchApp\n- assertVisible: Home\n`)}>Use launch app ID</button></div>
+      <DefaultActions key={'automation-'+loadRevision} value={automation} onChange={setAutomation} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} disabled={pickerBusy||submitting} onError={setAutomationError}/>
       {(automation||selectedScenario||canvas)&&<><button type="button" className="confirm" disabled={pickerBusy||submitting||!!automationError} onClick={async()=>{try{const source=JSON.stringify({yaml,flows,automation,definitions,scenarioId,resetApp,inputs,canvas,pathId});const result=await api('/api/automation/preview',{yaml,flows:JSON.parse(flows),automation,canvas,mock,pathId,scenarios:definitions,scenarioId:definitions.length?scenarioId:undefined,resetApp,runtimeInputs:inputs.trim()?JSON.parse(inputs):undefined});setPreview({source,yaml:result.executionYaml});setError('');}catch(error){setError(error instanceof Error?error.message:'Cannot preview execution.');}}}>Preview execution YAML</button>{preview&&<details open><summary>Derived execution preview{preview.source!==JSON.stringify({yaml,flows,automation,definitions,scenarioId,resetApp,inputs,canvas,pathId})?' · outdated, refresh before running':''}</summary><pre className="execution-yaml">{preview.yaml}</pre></details>}</>}
-      <YamlEditor key={loadRevision} yaml={yaml} onChange={setYaml} disabled={pickerBusy}
+      <YamlEditor key={loadRevision} yaml={yaml} onChange={setYaml} disabled={pickerBusy||submitting}
         deletionWarnings={index=>[...definitions.filter(item=>item.steps.some(ref=>ref.index!>=index)).map(item=>'Scenario · '+item.name),...(canvas?.screens.flatMap(screen=>screen.tests.filter(test=>test.reference.kind==='flow'||(test.reference.file==='flow.yaml'&&(test.reference.index??-1)>=index)).map(test=>screen.title+' · '+test.label))??[]),...(automation?.checkpoints.filter(checkpoint=>checkpoint.beforeStep>=index).map(checkpoint=>'Default-action checkpoint before step '+(checkpoint.beforeStep+1))??[])]}
         onDelete={(next,index)=>{
           const previous=canvas;const changed=canvasAfterDeletion(canvas,index);
@@ -293,8 +324,8 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
       <label htmlFor="runtime-inputs">Confidential runtime inputs (optional JSON)</label><input id="runtime-inputs" type="password" value={inputs} onChange={event => setInputs(event.target.value)} autoComplete="off" placeholder={'{"PASSWORD":"value"}'} />
       <p className="field-hint">Use uppercase names and reference them as ${'{NAME}'} in YAML. Values are never saved. Runs with inputs withhold raw logs and images. Keep secrets out of authored YAML.</p>
     </div></details>
-      <div className="scenario-actions"><button className="confirm" onClick={() => void submit(false)} disabled={submitting || pickerBusy}>Save workspace</button><button className="primary" onClick={() => void submit(true)} disabled={!deviceId || !token || submitting || running || launchBusy || pickerBusy}>{submitting ? 'Preparing…' : 'Run scenario'}</button></div>
-      {workspaceId && <p className="artifact-id">Workspace: {workspaceId}</p>}
+      <div className="scenario-actions"><button className="primary" onClick={() => void submit(true)} disabled={!deviceId || !token || submitting || running || launchBusy || pickerBusy}>{submitting ? 'Preparing…' : 'Run scenario'}</button></div>
+      {workspaceId && <details><summary>Workspace diagnostic details</summary><p className="artifact-id">Workspace: {workspaceId}</p></details>}
       {error && <div role="alert" className="notice error">{error}</div>}
     {reports.some(item=>item.snapshot.workspaceId===workspaceId)&&<nav aria-label="Scenario reports"><p>Reports from this workspace session · selecting a scenario leaves the inspected report open.</p>{reports.filter(item=>item.snapshot.workspaceId===workspaceId).map((item,index)=><button className="confirm" key={item.id} disabled={submitting} aria-pressed={run?.id===item.id} onClick={()=>setRun(item)}>{item.snapshot.scenario?.name??item.snapshot.name} · {item.status} · Run {index+1}</button>)}</nav>}
     <div className="scenario-result" aria-live="polite">
@@ -319,5 +350,5 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning }: 
     <details><summary>Advanced screenshot picker</summary><Picker token={token} deviceId={deviceId} yaml={yaml} disabled={launchBusy || running || submitting} onBusy={setPickerBusy} onSave={savePicked} onExecute={executePicked} /></details>
     {deletedScenario&&<div className="scenario-delete-notice" role="status"><span>Deleted {deletedScenario.name}</span><button className="confirm" disabled={running||submitting||pickerBusy||launchBusy} onClick={()=>{deletedScenario.restore();setDeletedScenario(undefined);}}>Undo</button><button className="text-button" onClick={()=>setDeletedScenario(undefined)}>Dismiss</button></div>}
     {runError&&<div className="run-error-toast" role="alert"><button className="text-button" aria-label="Dismiss run error" onClick={()=>setRunError('')}>×</button><strong>Cannot run scenario</strong><p>{runError}</p></div>}
-  </section>;
+  </section></WorkspaceDrafts.Provider>;
 }
