@@ -73,7 +73,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const root=validate(yaml,flows);
       for(const flow of Object.values(flows??{}))if(validate(flow,flows).appId!==root.appId)throw new Error('Reusable flows must declare the same appId as the scenario.');
       const executionYaml=automation?instrument(yaml,automation,input.resetApp??false).yaml:yaml;
-      if(selection?.scenario.authoring==='canvas')validateFlowInputs(executionYaml,flows??{},selection.inputs);
+      validateFlowInputs(executionYaml,flows??{},selection?.inputs??validateInputs(input.runtimeInputs));
       return {authoredYaml:yaml,executionYaml};
     },
     async references(input: {yaml:string;flows?:Record<string,string>;canvas?:unknown;automation?:unknown}) {
@@ -134,6 +134,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const missing:string[]=[];
       const content=authoredWorkspace({...pkg.workspace,id:undefined},missing);
       validate(content.yaml,content.flows,[],new Set(),missing);
+      if(!content.scenarios?.length)try{validateFlowInputs(content.yaml,content.flows??{},{});}catch(error){missing.push(error instanceof Error?error.message:'Repair missing YAML inputs.');}
       for(const scenario of content.scenarios??[])try{await service.preview({...content,scenarioId:scenario.id});}catch(error){missing.push(scenario.name+': '+(error instanceof Error?error.message:'Repair scenario.'));}
       const review=packageReview(content,[...missing,...(content.canvasDiagnostics??[]).map(item=>item.detail)]);
       return {package:{...pkg,dependencies:review.dependencies,workspace:portableContent(content,true)},review};
@@ -164,7 +165,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const runtimeInputs = validateInputs(input.runtimeInputs);
       const confidential = Object.keys(runtimeInputs).length > 0;
       if(input.resetApp!==undefined&&typeof input.resetApp!=='boolean')throw new Error('Reset app must be a boolean.');
-      const omitted=missingValues(authored,runtimeInputs,input.scenarioId);if(omitted.length)throw new Error('Repair imported workspace before execution. '+omitted.join(' '));
+      const omitted=missingValues(authored,{runtime:runtimeInputs,scenarioId:input.scenarioId});if(omitted.length)throw new Error('Repair imported workspace before execution. '+omitted.join(' '));
       const selection=selectScenario(authored,input.scenarioId,runtimeInputs);
       let workspace=selection?{...authored,...selection,name:selection.scenario.name}:authored;
       const selectedPathId=selection?.scenario.pathId??input.pathId;

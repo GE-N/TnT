@@ -91,3 +91,40 @@ test('export during execution captures a stable acknowledged revision and leaves
   release();await service.wait(run.id);assert.deepEqual((await service.result(run.id)).snapshot,snapshot);
  }finally{release();await rm(root,{recursive:true,force:true});}
 });
+
+test('unsafe scenario setup and canvas reference paths are rejected rather than imported as repairable dependencies',async()=>{
+ const {service,close}=await fixture();
+ try{
+  const source=await service.save({name:'Safe source',yaml});const exported=await service.exportWorkspace({id:source.id,expectedRevision:1});
+  const scenario={id:'scenario',name:'Scenario',steps:[],inputs:{},parameters:{},enabledHandlerIds:[],setup:{file:'/Users/alice/setup.yaml',parameters:{}}};
+  const badScenario={...exported.package,workspace:{...exported.package.workspace,scenarios:[scenario]}};
+  await assert.rejects(service.importWorkspace({package:badScenario,name:'Unsafe setup'}),/simple|filename/);
+  const badCanvas={...exported.package,workspace:{...exported.package.workspace,canvas:{screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'test',label:'Unsafe reference',role:'test',reference:{kind:'flow',file:'/Users/alice/private.yaml',fingerprint:'a'.repeat(64)}}]}],edges:[],paths:[]}}};
+  await assert.rejects(service.importWorkspace({package:badCanvas,name:'Unsafe reference'}),/simple|filename/);
+  assert.equal((await service.listWorkspaces()).items.length,1);
+ }finally{await close();}
+});
+
+test('legacy placeholders are declared as repair requirements before import',async()=>{
+ const {service,close}=await fixture();
+ try{
+  const source=await service.save({name:'Legacy input',yaml:yaml+'- inputText: ${ACCOUNT}\n'});
+  const exported=await service.exportWorkspace({id:source.id,expectedRevision:1});
+  assert.ok(exported.review.missing.some(detail=>detail.includes('ACCOUNT')));
+  const review=await service.reviewWorkspacePackage({package:exported.package});assert.ok(review.review.missing.some(detail=>detail.includes('ACCOUNT')));
+ }finally{await close();}
+});
+
+test('an imported scenario can execute independently of omitted values in another scenario or a disabled handler',async()=>{
+ const {writeFile}=await import('node:fs/promises');const root=await mkdtemp(join(tmpdir(),'tnt-import-scope-'));const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
+ const runner=createRunner({artifactDirectory:root,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})});
+ const service=createScenarios({root,runner,maestro:{version:async()=>'2.11.0',run:async({directory})=>{await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');await writeFile(join(directory,'commands.json'),'[]');return {code:0,log:'Fixture',cleanup:{verified:true,detail:'Fixture exited'}};}}});
+ try{
+  const refs=(await service.references({yaml})).references.map(({kind,file,index,fingerprint})=>({kind,file,index,fingerprint}));
+  const source=await service.save({name:'Independent scenarios',yaml,flows:{'setup.yaml':yaml},automation:{setup:{file:'setup.yaml',parameters:{}},actions:[{id:'disabled',name:'Disabled',file:'setup.yaml',parameters:{UNUSED:'private-handler'},condition:{text:'Popup'},enabled:false}],checkpoints:[]},scenarios:[{id:'ready',name:'Ready',steps:refs,inputs:{},parameters:{},enabledHandlerIds:[]},{id:'needsValues',name:'Needs values',steps:refs,inputs:{ACCOUNT:'private-account'},parameters:{ACCOUNT:{type:'text',required:true}},enabledHandlerIds:[]}]});
+  const exported=await service.exportWorkspace({id:source.id,expectedRevision:1});const copy=await service.importWorkspace({package:exported.package,name:'Independent import'});
+  assert.ok(exported.review.missing.some(item=>item.includes('ACCOUNT')));assert.ok(exported.review.missing.some(item=>item.includes('UNUSED')));
+  const run=await service.wait((await service.start({workspaceId:copy.id,deviceId,scenarioId:'ready'})).id);assert.equal(run.status,'passed');assert.equal(run.snapshot.scenario!.id,'ready');
+  await assert.rejects(service.start({workspaceId:copy.id,deviceId,scenarioId:'needsValues'}),/ACCOUNT/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});

@@ -1,3 +1,4 @@
+import {parseAllDocuments} from 'yaml';
 import {workspaceValueSets,missingValues,type OmittedValue} from '../shared/workspace-values.js';
 export {missingValues,type OmittedValue} from '../shared/workspace-values.js';
 import type {Workspace} from './scenarios.js';
@@ -52,6 +53,9 @@ export function parsePackage(value:unknown){
  if(!Array.isArray(pkg.dependencies)||pkg.dependencies.length>25||pkg.dependencies.some(item=>typeof item!=='string'||item.length>300))throw new Error('Package requires a bounded dependency summary.');
  if(Object.keys(pkg).some(key=>!['format','version','source','dependencies','workspace'].includes(key))||!pkg.source||Object.keys(pkg.source).some(key=>!['revision','savedAt'].includes(key))||!Number.isSafeInteger(pkg.source.revision)||pkg.source.revision<0||typeof pkg.source.savedAt!=='string'||!Number.isFinite(Date.parse(pkg.source.savedAt)))throw new Error('Invalid package revision or saved time.');
  const workspace=project(pkg.workspace,shape,true) as Workspace;
+ const safeFile=(file:unknown)=>typeof file==='string'&&/^[A-Za-z][A-Za-z0-9_-]{0,63}\.yaml$/.test(file);
+ for(const scenario of workspace.scenarios??[])if(scenario.setup&&(!safeFile(scenario.setup.file)||scenario.setup.file==='flow.yaml'))throw new Error('Scenario setup requires a simple reusable .yaml filename.');
+ for(const screen of workspace.canvas?.screens??[])for(const test of screen.tests??[])if(!safeFile(test.reference?.file))throw new Error('Canvas references require simple .yaml filenames.');
  for(const screen of workspace.canvas?.screens??[]){
   if(screen.referenceScreenshot===undefined)continue;
   const match=typeof screen.referenceScreenshot==='string'?screen.referenceScreenshot.match(/^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/):null;
@@ -63,5 +67,5 @@ export function parsePackage(value:unknown){
  return {...pkg,workspace} as WorkspacePackage;
 }
 export function packageReview(workspace:Workspace,missing:string[]):PackageReview{
- return {title:workspace.name,screens:workspace.canvas?.screens.length??0,connections:workspace.canvas?.edges.length??0,scenarios:workspace.scenarios?.length??0,flows:Object.keys(workspace.flows??{}).length,images:workspace.canvas?.screens.filter(screen=>screen.referenceScreenshot).length??0,mock:!!workspace.mock,automation:!!workspace.automation,missing:[...new Set([...missingValues(workspace),...missing])],dependencies:['Recipient supplies a compatible installed app and running iOS simulator.','Maestro 2.11.0',...(workspace.mock?['Mockoon 9.9.0; review backend URL and dedicated port.']:[])]};
+ return {title:workspace.name,screens:workspace.canvas?.screens.length??0,connections:workspace.canvas?.edges.length??0,scenarios:workspace.scenarios?.length??0,flows:Object.keys(workspace.flows??{}).length,images:workspace.canvas?.screens.filter(screen=>screen.referenceScreenshot).length??0,mock:!!workspace.mock,automation:!!workspace.automation,missing:[...new Set([...missingValues(workspace),...missing])],dependencies:['Installed app: '+parseAllDocuments(workspace.yaml)[0].toJS().appId,'Recipient supplies a compatible installed app and running iOS simulator.','Maestro 2.11.0',...(workspace.mock?['Mockoon 9.9.0; review backend URL and dedicated port.']:[])]};
 }
