@@ -43,7 +43,7 @@ async function mount(options?:{recoverSession?:boolean;faults?:ReturnType<typeof
  const editYaml=async(value:string)=>act(async()=>{const node=document.getElementById('scenario-yaml') as HTMLTextAreaElement;Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const fill=async(label:string,value:string)=>act(async()=>{const input=[...document.querySelectorAll('label')].find(node=>node.textContent===label);const node=document.getElementById(input?.htmlFor??'') as HTMLInputElement;assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const openNamed=async(name:string)=>{await click('Manage workspace');const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>node.getAttribute('aria-label')?.startsWith('Open '+name+' ·'));assert.ok(button,name);await act(async()=>{button.click();await settle();});};
- return {directory,service,faults,document,dom,click,render,editYaml,fill,openNamed,settle,holdPicker,releasePicker,close:async()=>{await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor] of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}};
+ return {directory,service,faults,document,dom,click,render,editYaml,fill,openNamed,settle,holdPicker,releasePicker,close:async()=>{await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor] of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true}).catch(()=>rm(directory,{recursive:true,force:true}));}};
 }
 
 test('queued and rejected draft writes never show Saved locally, and Retry does after a durable ack',async()=>{
@@ -343,67 +343,137 @@ test('Saving does not stick after a rejected write, a 409, a switch that cancels
  }finally{faults.pass();await page.close();}
 });
 
-test('paused autosave shows its own warning, and beforeunload follows only unacknowledged edits',async()=>{
- const faults=createWriteFaults();const page=await mount({faults,token:'',deviceId});
- const status=()=>page.document.querySelector('.workspace-save-status')!;
- const text=()=>status().querySelector('.workspace-save-text')!.textContent!;
- const leave=()=>{const event=new page.dom.window.Event('beforeunload',{cancelable:true});page.dom.window.dispatchEvent(event);return event.defaultPrevented;};
- const wait=async()=>act(async()=>{await new Promise(resolve=>setTimeout(resolve,500));await page.settle();});
+function leaveSite(page:{dom:JSDOM}){const event=new page.dom.window.Event('beforeunload',{cancelable:true});page.dom.window.dispatchEvent(event);return event.defaultPrevented;}
+const saveStatus=(document:Document)=>document.querySelector('.workspace-save-status')!;
+const saveText=(document:Document)=>saveStatus(document).querySelector('.workspace-save-text')!.textContent!;
+const settleWrites=async(page:{settle:()=>Promise<void>})=>act(async()=>{await new Promise(resolve=>setTimeout(resolve,500));await page.settle();});
+
+test('a missing runner token shows Unsaved changes · Autosave paused and resumes to Saving…',async()=>{
+ const page=await mount({token:''});
  try{
   await page.render();
-  assert.equal(text(),'Not saved yet');
-  assert.ok(status().classList.contains('muted'));
-  assert.equal(status().querySelector('.workspace-save-icon')!.textContent,'…');
-  assert.equal(leave(),false);
+  assert.equal(saveText(page.document),'Not saved yet');
   await page.editYaml('appId: com.example.App\n---\n- tapOn: Home\n');
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,50));});
-  assert.equal(text(),'Unsaved changes · Autosave paused');
-  assert.ok(status().classList.contains('warning'));
-  assert.equal(status().querySelector('.workspace-save-icon')!.textContent,'‖');
-  assert.equal(status().getAttribute('title'),'no runner connected');
-  assert.equal(status().getAttribute('aria-description'),'no runner connected');
-  assert.equal(status().getAttribute('aria-label'),'Unsaved changes · Autosave paused');
-  assert.equal(leave(),true);
+  const status=saveStatus(page.document);
+  assert.equal(saveText(page.document),'Unsaved changes · Autosave paused');
+  assert.ok(status.classList.contains('warning'));
+  assert.equal(status.querySelector('.workspace-save-icon')!.textContent,'‖');
+  assert.equal(status.getAttribute('title'),'no runner connected');
+  assert.equal(status.getAttribute('aria-description'),'no runner connected');
+  assert.equal(status.getAttribute('aria-label'),'Unsaved changes · Autosave paused');
   await page.render({token:'local'});
-  assert.equal(text(),'Saving…');
-  assert.equal(leave(),true);
-  await wait();
-  assert.equal(text(),'Saved locally');
-  assert.equal(leave(),false);
-  await page.editYaml('appId: com.example.App\n---\n- tapOn: *missing\n');
-  await wait();
-  assert.equal(text(),'Draft kept, not valid yet.');
-  assert.equal(status().querySelector('.workspace-save-icon')!.textContent,'!');
-  assert.equal(leave(),false);
+  assert.equal(saveText(page.document),'Saving…');
+ }finally{await page.close();}
+});
+
+test('an open picker shows Unsaved changes · Autosave paused and resumes to Saving…',async()=>{
+ const page=await mount({deviceId});
+ try{
+  await page.render();
   page.holdPicker();
   await page.editYaml('appId: com.example.App\n---\n- tapOn: Paused\n');
   const refresh=[...page.document.querySelectorAll('button')].find(button=>button.textContent==='Refresh screen') as HTMLButtonElement|undefined;
   assert.ok(refresh&&!refresh.disabled);
   await act(async()=>{refresh.click();});
-  assert.equal(text(),'Unsaved changes · Autosave paused');
-  assert.ok(status().classList.contains('warning'));
-  assert.equal(status().querySelector('.workspace-save-icon')!.textContent,'‖');
-  assert.equal(status().getAttribute('title'),'while the picker is open');
-  assert.equal(status().getAttribute('aria-description'),'while the picker is open');
-  assert.equal(leave(),true);
+  const status=saveStatus(page.document);
+  assert.equal(saveText(page.document),'Unsaved changes · Autosave paused');
+  assert.ok(status.classList.contains('warning'));
+  assert.equal(status.querySelector('.workspace-save-icon')!.textContent,'‖');
+  assert.equal(status.getAttribute('title'),'while the picker is open');
+  assert.equal(status.getAttribute('aria-description'),'while the picker is open');
+  assert.equal(status.getAttribute('aria-label'),'Unsaved changes · Autosave paused');
   page.releasePicker();
   await act(async()=>{await page.settle();});
-  assert.equal(text(),'Saving…');
-  assert.equal(leave(),true);
-  await wait();
-  assert.equal(text(),'Saved locally');
-  assert.equal(leave(),false);
+  assert.equal(saveText(page.document),'Saving…');
+ }finally{page.releasePicker();await page.close();}
+});
+
+test('beforeunload fires while autosave is paused',async()=>{
+ const page=await mount({token:''});
+ try{
+  await page.render();
+  await page.editYaml('appId: com.example.App\n---\n- tapOn: Home\n');
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,50));});
+  assert.equal(saveText(page.document),'Unsaved changes · Autosave paused');
+  assert.equal(leaveSite(page),true);
+ }finally{await page.close();}
+});
+
+test('beforeunload fires while a write is in flight',async()=>{
+ const faults=createWriteFaults();const page=await mount({faults});
+ try{
+  await page.render();
+  faults.queue();
+  await page.editYaml('appId: com.example.App\n---\n- tapOn: Home\n');
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await faults.untilQueued();});
+  assert.equal(saveText(page.document),'Saving…');
+  assert.equal(leaveSite(page),true);
+  faults.release();await act(async()=>{await page.settle();});
+ }finally{faults.pass();await page.close();}
+});
+
+test('beforeunload fires after a rejected write',async()=>{
+ const faults=createWriteFaults();const page=await mount({faults});
+ try{
+  await page.render();
   faults.reject();
-  await page.editYaml('appId: com.example.App\n---\n- tapOn: Rejected\n');
-  await wait();
-  assert.equal(text(),"Couldn't save.");
-  assert.equal(leave(),true);
-  faults.pass();
-  const saved=await page.service.workspace(page.document.querySelector('.artifact-id')!.textContent!.replace('Workspace: ',''));
+  await page.editYaml('appId: com.example.App\n---\n- tapOn: Home\n');
+  await settleWrites(page);
+  assert.equal(saveText(page.document),"Couldn't save.");
+  assert.equal(leaveSite(page),true);
+ }finally{faults.pass();await page.close();}
+});
+
+test('beforeunload fires after a 409',async()=>{
+ const page=await mount();
+ try{
+  await page.render();
+  await page.editYaml('appId: com.example.App\n---\n- tapOn: Home\n');
+  await settleWrites(page);
+  assert.equal(saveText(page.document),'Saved locally');
+  const id=page.document.querySelector('.artifact-id')!.textContent!.replace('Workspace: ','');
+  const saved=await page.service.workspace(id);
   await page.service.save({...saved,name:'Other editor version'});
   await page.editYaml('appId: com.example.App\n---\n- tapOn: Conflict\n');
-  await wait();
-  assert.equal(text(),"Couldn't save.");
-  assert.equal(leave(),true);
- }finally{faults.pass();page.releasePicker();await page.close();}
+  await settleWrites(page);
+  assert.equal(saveText(page.document),"Couldn't save.");
+  assert.equal(leaveSite(page),true);
+ }finally{await page.close();}
+});
+
+test('beforeunload does not fire for an acknowledged invalid draft',async()=>{
+ const page=await mount();
+ try{
+  await page.render();
+  await page.editYaml('appId: com.example.App\n---\n- tapOn: *missing\n');
+  await settleWrites(page);
+  assert.equal(saveText(page.document),'Draft kept, not valid yet.');
+  const id=page.document.querySelector('.artifact-id')!.textContent!.replace('Workspace: ','');
+  assert.match(await readFile(join(page.directory,'workspaces',id,'draft.json'),'utf8'),/missing/);
+  assert.equal(leaveSite(page),false);
+ }finally{await page.close();}
+});
+
+test('beforeunload does not fire when saved locally',async()=>{
+ const page=await mount();
+ try{
+  await page.render();
+  await page.editYaml('appId: com.example.App\n---\n- tapOn: Home\n');
+  await settleWrites(page);
+  assert.equal(saveText(page.document),'Saved locally');
+  assert.equal(leaveSite(page),false);
+ }finally{await page.close();}
+});
+
+test('beforeunload does not fire for an untouched new workspace',async()=>{
+ const page=await mount();
+ try{
+  await page.render();
+  const status=saveStatus(page.document);
+  assert.equal(saveText(page.document),'Not saved yet');
+  assert.ok(status.classList.contains('muted'));
+  assert.equal(status.querySelector('.workspace-save-icon')!.textContent,'…');
+  assert.equal(leaveSite(page),false);
+ }finally{await page.close();}
 });
