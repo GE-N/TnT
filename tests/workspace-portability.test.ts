@@ -120,11 +120,21 @@ test('an imported scenario can execute independently of omitted values in anothe
  const runner=createRunner({artifactDirectory:root,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})});
  const service=createScenarios({root,runner,maestro:{version:async()=>'2.11.0',run:async({directory})=>{await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');await writeFile(join(directory,'commands.json'),'[]');return {code:0,log:'Fixture',cleanup:{verified:true,detail:'Fixture exited'}};}}});
  try{
-  const refs=(await service.references({yaml})).references.map(({kind,file,index,fingerprint})=>({kind,file,index,fingerprint}));
-  const source=await service.save({name:'Independent scenarios',yaml,flows:{'setup.yaml':yaml},automation:{setup:{file:'setup.yaml',parameters:{}},actions:[{id:'disabled',name:'Disabled',file:'setup.yaml',parameters:{UNUSED:'private-handler'},condition:{text:'Popup'},enabled:false}],checkpoints:[]},scenarios:[{id:'ready',name:'Ready',steps:refs,inputs:{},parameters:{},enabledHandlerIds:[]},{id:'needsValues',name:'Needs values',steps:refs,inputs:{ACCOUNT:'private-account'},parameters:{ACCOUNT:{type:'text',required:true}},enabledHandlerIds:[]}]});
+  const scopedYaml=yaml+'- tapOn: Other\n';
+  const refs=(await service.references({yaml:scopedYaml})).references.map(({kind,file,index,fingerprint})=>({kind,file,index,fingerprint}));
+  const source=await service.save({name:'Independent scenarios',yaml:scopedYaml,flows:{'setup.yaml':yaml},automation:{setup:{file:'setup.yaml',parameters:{}},actions:[{id:'disabled',name:'Disabled',file:'setup.yaml',parameters:{UNUSED:'private-handler'},condition:{text:'Popup'},enabled:false},{id:'otherOnly',name:'Other only',file:'setup.yaml',parameters:{TARGET:'private-other'},condition:{text:'Other popup'},enabled:true}],checkpoints:[{beforeStep:1,fingerprint:refs[1].fingerprint,timeoutMs:0}]},scenarios:[{id:'ready',name:'Ready',steps:[refs[0]],inputs:{},parameters:{},enabledHandlerIds:['otherOnly']},{id:'needsValues',name:'Needs values',steps:[refs[1]],inputs:{ACCOUNT:'private-account'},parameters:{ACCOUNT:{type:'text',required:true}},enabledHandlerIds:[]}]});
   const exported=await service.exportWorkspace({id:source.id,expectedRevision:1});const copy=await service.importWorkspace({package:exported.package,name:'Independent import'});
-  assert.ok(exported.review.missing.some(item=>item.includes('ACCOUNT')));assert.ok(exported.review.missing.some(item=>item.includes('UNUSED')));
+  assert.ok(exported.review.missing.some(item=>item.includes('ACCOUNT')));assert.ok(exported.review.missing.some(item=>item.includes('UNUSED')));assert.ok(exported.review.missing.some(item=>item.includes('TARGET')));
   const run=await service.wait((await service.start({workspaceId:copy.id,deviceId,scenarioId:'ready'})).id);assert.equal(run.status,'passed');assert.equal(run.snapshot.scenario!.id,'ready');
   await assert.rejects(service.start({workspaceId:copy.id,deviceId,scenarioId:'needsValues'}),/ACCOUNT/);
  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('legacy review diagnoses missing setup invocation values in the execution projection',async()=>{
+ const {service,close}=await fixture();
+ try{
+  const source=await service.save({name:'Legacy setup',yaml,flows:{'setup.yaml':yaml+'- inputText: ${ACCOUNT}\n'},automation:{setup:{file:'setup.yaml',parameters:{}},actions:[],checkpoints:[]}});
+  const exported=await service.exportWorkspace({id:source.id,expectedRevision:1});
+  assert.ok(exported.review.missing.some(detail=>detail.includes('ACCOUNT')));
+ }finally{await close();}
 });

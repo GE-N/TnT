@@ -134,7 +134,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const missing:string[]=[];
       const content=authoredWorkspace({...pkg.workspace,id:undefined},missing);
       validate(content.yaml,content.flows,[],new Set(),missing);
-      if(!content.scenarios?.length)try{validateFlowInputs(content.yaml,content.flows??{},{});}catch(error){missing.push(error instanceof Error?error.message:'Repair missing YAML inputs.');}
+      if(!content.scenarios?.length)try{await service.preview(content);}catch(error){missing.push(error instanceof Error?error.message:'Repair missing YAML inputs.');}
       for(const scenario of content.scenarios??[])try{await service.preview({...content,scenarioId:scenario.id});}catch(error){missing.push(scenario.name+': '+(error instanceof Error?error.message:'Repair scenario.'));}
       const review=packageReview(content,[...missing,...(content.canvasDiagnostics??[]).map(item=>item.detail)]);
       return {package:{...pkg,dependencies:review.dependencies,workspace:portableContent(content,true)},review};
@@ -165,8 +165,8 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const runtimeInputs = validateInputs(input.runtimeInputs);
       const confidential = Object.keys(runtimeInputs).length > 0;
       if(input.resetApp!==undefined&&typeof input.resetApp!=='boolean')throw new Error('Reset app must be a boolean.');
-      const omitted=missingValues(authored,{runtime:runtimeInputs,scenarioId:input.scenarioId});if(omitted.length)throw new Error('Repair imported workspace before execution. '+omitted.join(' '));
       const selection=selectScenario(authored,input.scenarioId,runtimeInputs);
+      const omitted=missingValues({...authored,automation:selection?.automation??authored.automation},{runtime:runtimeInputs,scenarioId:input.scenarioId});if(omitted.length)throw new Error('Repair imported workspace before execution. '+omitted.join(' '));
       let workspace=selection?{...authored,...selection,name:selection.scenario.name}:authored;
       const selectedPathId=selection?.scenario.pathId??input.pathId;
       const resetApp=input.resetApp??false;

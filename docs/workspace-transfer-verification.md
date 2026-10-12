@@ -14,10 +14,10 @@ Active execution permits export of an explicitly identified saved revision and r
 
 ## Evidence
 
-- `tests/workspace-portability.test.ts`: real service round trips, default/opt-in values, retained contracts, revision conflicts, malformed/unsafe/newer/oversized content, unresolved flow repair, failed atomic writes, reference image validation, unsafe scenario setup/canvas paths, legacy placeholder diagnostics, scenario-specific omitted-value validation, and export while an immutable run is active.
+- `tests/workspace-portability.test.ts`: real service round trips, default/opt-in values, retained contracts, revision conflicts, malformed/unsafe/newer/oversized content, unresolved flow repair, failed atomic writes, reference image validation, unsafe scenario setup/canvas paths, legacy placeholder diagnostics, scenario-specific omitted-value validation including projected checkpoints and legacy setup invocations, and export while an immutable run is active.
 - `tests/workspace-portability-ui.test.ts`: public React journeys backed by the real service. Picker review/commit, downloaded representative package through library drop, repeated visits, flows/setup/mocks/imagery, original preservation and separate identities, malformed/multiple-file feedback, cancellation, invalid-draft preservation, keyboard Escape/focus return, explicit saved-revision fallback, and retry after persistence failure.
 - Browser review used an isolated temporary runner store on port 4355. Native Choose file selected an actual exported package; review and Import and open restored the canvas as a separately named copy. Desktop and 390 × 844 layouts were inspected. Narrow layout uses the existing scrollable single sheet; cancellation/focus and file drop are additionally covered in UI journeys.
-- Typecheck and production build passed. Full suite: 214 tests passed, no failures. Existing suite emits React `act` warnings in older journeys; assertions pass.
+- Typecheck and production build passed. Full suite: 215 tests passed, no failures. Existing suite emits React `act` warnings in older journeys; assertions pass.
 
 No simulator/app portability or automatic secret detection is claimed. Recipients must supply their compatible app/simulator and required omitted values. Temporary browser fixtures and stores are separate from the user's `.tnt` records.
 
