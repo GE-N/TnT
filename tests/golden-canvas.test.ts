@@ -142,3 +142,16 @@ describe('golden canvas routes',{concurrency:1},()=>{
     });
   }
 });
+
+// Hold Open until the initial empty editor has published its reference request.
+// A reference request from before Open must never become the fixture baseline.
+test('linear-route ignores references from the editor before the workspace opens',async()=>{
+  const fixture=buildGoldenFixtures().find(item=>item.id==='linear-route')!;
+  let release!:()=>void;
+  const initialReferences=new Promise<void>(resolve=>{release=resolve;});
+  const ui=await runUi(fixture,{beforeRequest:async path=>{
+    if(path==='/api/canvas/references')release();
+    if(path.endsWith('/open'))await initialReferences;
+  }});
+  assert.equal(snapshotText(ui),snapshotText(runPure(fixture)));
+});

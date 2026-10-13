@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import {act} from 'react';
 export async function workspaceCommand(document:Document,command:'save'|'open',settle:()=>Promise<void>=async()=>{}){
+ async function waitFor<T>(read:()=>T|undefined,description:string):Promise<T>{
+  const deadline=Date.now()+8000;
+  while(Date.now()<deadline){
+   await act(async()=>{await new Promise(resolve=>setImmediate(resolve));await settle();});
+   const result=read();if(result!==undefined)return result;
+  }
+  assert.fail('Timed out waiting for '+description+'. '+(document.querySelector('.workspace-management-surface')?.textContent??''));
+ }
  async function press(button:HTMLButtonElement|undefined){assert.ok(button);await act(async()=>{button.click();await settle();});}
  if(command==='save'){
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await settle();});
@@ -8,10 +16,9 @@ export async function workspaceCommand(document:Document,command:'save'|'open',s
  }else{
   if(!document.querySelector('[aria-label="Workspace manager"]'))await press(document.querySelector<HTMLButtonElement>('[aria-label="Manage workspace"]')??undefined);
 
-  await act(async()=>{await settle();});
-  await press(document.querySelector<HTMLButtonElement>('.workspace-library button')??undefined);
-  for(let attempt=0;attempt<8;attempt++)await act(async()=>{await new Promise(resolve=>setImmediate(resolve));await settle();});
-  if(document.querySelector('[aria-label="Workspace manager"]')?.textContent?.includes('Save changes'))await press([...document.querySelectorAll<HTMLButtonElement>('[aria-label="Workspace manager"] button')].find(button=>button.textContent==='Save and continue'));
+  // Event-loop turns do not acknowledge filesystem/network work under load.
+  await press(await waitFor(()=>document.querySelector<HTMLButtonElement>('.workspace-library button:not(:disabled)')??undefined,'the workspace library'));
+  await waitFor(()=>document.querySelector('.workspace-management-surface')?undefined:true,'the workspace to finish opening');
  }
 }
 /** Step controls live in the floating inspector, which only exists for the selected screen. */
