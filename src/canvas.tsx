@@ -118,7 +118,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   const bounds=visibleBounds(rectOf(viewportRef.current),{width:window.innerWidth,height:window.innerHeight});
   if(viewportRef.current.closest('.workbench')){const bottom=Math.min(bounds.top+bounds.height,window.innerHeight-88);bounds.top=Math.max(bounds.top,156);bounds.height=Math.max(0,bottom-bounds.top);}
   const rects=(elements:Element[])=>elements.map(rectOf).filter(rect=>rect.width>0&&rect.height>0);
-  const controls=rects(Array.from(document.querySelectorAll('.workbench .device-toolbar[open],.workbench .scenario-controls[open],.workbench .workspace-advanced[open],.workbench .report-tools[open],.workbench .launch-tools[open],.workbench .workspace-management-surface')));
+  const controls=rects(Array.from(document.querySelectorAll('.workbench .device-toolbar[open],.workbench .scenario-controls[open],.workbench .workspace-advanced[open],.workbench .report-tools[open],.workbench .launch-tools[open],.workbench .workspace-management-surface,.workbench .canvas-inspectors,.workbench .draft-banner,.workbench .canvas-editor>.notice,.workbench .go-to-issue')));
   for(const control of controls){
    if(control.width<260||control.height<120||control.left+control.width<=bounds.left||control.left>=bounds.left+bounds.width)continue;
    const leftSpace=control.left-bounds.left-12;const rightSpace=bounds.left+bounds.width-control.left-control.width-12;
