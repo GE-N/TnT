@@ -44,3 +44,12 @@ Each isolated mutation was applied to the current source, run against its named 
 | Keep new-step marker after unchanged Back save | a saved new Back step remains saved |
 
 The production source was restored before final validation. The initial red run exposed the missing selector guard and label behavior before implementation. Existing cleanup tests continue asserting exact graph/source Undo restoration; their confirmation expectations now reflect the agreed immediate behavior.
+
+
+## Selected visit header correction
+
+The user identified a white strip beside the blue visit heading in the initial follow-up screenshot. The heading used 100% width with negative 8px side margins inside a section padded by 8px; the width did not include the removed padding. Its selected width now includes both sides with `calc(100% + 16px)`.
+
+Browser verification at the desktop QA size and default viewport measured header left/right at 47/317px and section left/right at 46/318px: exactly the section’s 1px border on both sides. Focused inspector tests remain 22/22 passing and the production build/typecheck passes (same bundle-size advisory). This visual revision must be reviewed again before merge.
+
+![Corrected full-width selected visit heading](evidence/issue45-full-row-header.jpg)

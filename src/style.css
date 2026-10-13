@@ -408,7 +408,7 @@ textarea:focus{outline:1px solid var(--accent)}
 .floating-inspector .canvas-visit-section{background:var(--surface);padding:0 8px}
 .floating-inspector .canvas-visit-section.selected-visit{border-color:var(--inspector-highlight);background:var(--surface)}
 .floating-inspector .visit-section-heading{display:flex;align-items:center;gap:8px;margin:0;padding:6px 0;border-bottom:0;font-size:13px}
-.floating-inspector .selected-visit>.visit-section-heading{color:var(--inspector-selected-text);background:var(--inspector-selected);margin:0 -8px;padding:6px 8px;border-radius:6px 6px 0 0}
+.floating-inspector .selected-visit>.visit-section-heading{width:calc(100% + 16px);color:var(--inspector-selected-text);background:var(--inspector-selected);margin:0 -8px;padding:6px 8px;border-radius:6px 6px 0 0}
 .floating-inspector .visit-disclosure{width:14px;flex:none}
 .floating-inspector .visit-section-body{padding:8px 0}
 
