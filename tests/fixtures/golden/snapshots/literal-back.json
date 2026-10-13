@@ -127,7 +127,7 @@
     ],
     "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:go-back\n- back\n# tnt-check:previous-ready\n# tnt-match:exact\n- assertVisible:\n    text: \"^Previous$\"\n"
   },
-  "description": "A literal - back command is linked to a Back action whose backSelector matches an element id. Route projection rewrites that command as tapOn by id. Saving and opening refresh the canvas, and the page then projects the default Back text.",
+  "description": "A literal - back command is linked to a Back action whose backSelector matches an element id. Route projection rewrites that command as tapOn by id. Saving and opening refresh the canvas, and the page keeps projecting the authored Back element id.",
   "fixture": "literal-back",
   "operations": []
 }

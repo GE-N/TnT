@@ -4,7 +4,7 @@ These fixtures lock the canvas linking and YAML behaviour from before the floati
 
 `shared/`, `server/canvas.ts`, `server/canvas-route.ts` and `server/default-actions.ts` are protected. `npm run check:canvas-contract` runs `scripts/check-canvas-contract.sh`, which compares them with the contract base `6639263` (the merge of #44, optional destination and same-screen actions, in #53, on top of the #41 golden snapshots). It is not part of `npm test`.
 
-The diff against that base must equal the named exceptions in `scripts/canvas-contract-exceptions/` exactly. There are currently no exceptions, so any change to the protected files fails the check. Changes to the exceptions folder and the contract script require review from @GE-N (`.github/CODEOWNERS`).
+The diff against that base must equal the named exceptions in `scripts/canvas-contract-exceptions/` exactly. The #52 exception records the exact literal Back selector-preservation fix in `52-literal-back-selector.patch`; any other change to the protected files fails the check. Changes to the exceptions folder and the contract script require review from @GE-N (`.github/CODEOWNERS`).
 
 CI must check out the repository with `fetch-depth: 0`. A shallow clone may not contain the contract base, and the script fails with that requirement instead of reporting a vacuous pass. On a push to `main` in CI there is no feature branch to compare, so the script prints a skip message and exits 0. That skip runs only when `CI` is set. A local checkout of `main` is still checked.
 
@@ -19,7 +19,7 @@ npm run check:canvas-contract
 | `linear-route.json` | Home → Detail, then connect to an existing screen, clear that destination, and undo |
 | `text-tap.json` | `tapOn` by text, rewritten when its selector is edited, then retargeted from Detail onto More |
 | `id-tap.json` | `tapOn` by element id, rewritten when its selector is edited, then retargeted from Detail onto More |
-| `literal-back.json` | A literal `- back` command linked to an id `backSelector`. Projection rewrites it as `tapOn` by id; the opened page projects the default Back text |
+| `literal-back.json` | A literal `- back` command linked to an id `backSelector`. Projection rewrites it as `tapOn` by id; the opened page retains the same id selector |
 | `back.json` | Back by element id; editing the selector rewrites the `tnt-back` tap |
 | `repeated-visit.json` | Home → Detail → Home. Editing Visit 3 by `visitId` copies the shared Home check |
 | `shared-step.json` | One tap shared by two scenario routes. An edit in scenario A leaves scenario B unchanged |

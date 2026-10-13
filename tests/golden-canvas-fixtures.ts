@@ -79,7 +79,7 @@ function idTap():GoldenFixture{
   ]};
 }
 
-// Reopen baseline (`text: ^Back$`) records a known bug on main: `refreshChecks` drops the id backSelector on a literal `- back`. The fix will update this snapshot on purpose.
+// Literal Back retains its authored id selector through save/open refresh (#52).
 function literalBack():GoldenFixture{
   const step=(index:number):YAMLReference=>({kind:'step',file:'flow.yaml',index,fingerprint:'draft'});
   const yaml='appId: com.example.App\n---\n- launchApp\n# tnt-check:go-back\n- back\n# tnt-check:previous-ready\n# tnt-match:exact\n- assertVisible:\n    text: "^Previous$"\n';
@@ -91,7 +91,7 @@ function literalBack():GoldenFixture{
     edges:[edge('back-edge','home','previous','go-back','previous-ready','Back')],
     paths:[{id:'route',name:'Literal back',screenId:'home',edgeIds:['back-edge'],visits:[{id:'visit-home',operationIds:['go-back']},{id:'visit-previous',operationIds:['previous-ready']}]}],
   };
-  return {id:'literal-back',description:'A literal - back command is linked to a Back action whose backSelector matches an element id. Route projection rewrites that command as tapOn by id. Saving and opening refresh the canvas, and the page then projects the default Back text.',scenarioMode:false,pathId:'route',scenarios:[],yaml,canvas,scripts:[]};
+  return {id:'literal-back',description:'A literal - back command is linked to a Back action whose backSelector matches an element id. Route projection rewrites that command as tapOn by id. Saving and opening refresh the canvas, and the page keeps projecting the authored Back element id.',scenarioMode:false,pathId:'route',scenarios:[],yaml,canvas,scripts:[]};
 }
 
 function backControlFixture():GoldenFixture{
