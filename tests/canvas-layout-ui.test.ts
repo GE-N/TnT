@@ -32,6 +32,8 @@ test('offline simulator status stays in the toolbar and Run exposes the disabled
  assert.equal(run.getAttribute('aria-label'),'Run scenario — Simulator not connected');
  assert.equal(document.querySelectorAll('[role="status"]').length,2);
  assert.equal(document.querySelector('.picker'),null);
+ const stale=new JSDOM(renderToStaticMarkup(createElement(Scenarios,{token:'',deviceId:'remembered-device',bundleId:'',launchBusy:false,onRunning:()=>{},simulatorConnected:true}))).window.document;
+ assert.ok(stale.querySelector('[aria-label="Run scenario — Simulator not connected"]')!.hasAttribute('disabled'),'A remembered connection without a runner token must remain offline');
 });
 
 test('opening a floating control closes the previous floating popover',async()=>{

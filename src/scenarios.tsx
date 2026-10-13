@@ -22,6 +22,7 @@ import type { MockPlan } from '../server/mockoon.js';
 import { parseAllDocuments } from 'yaml';
 
 export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, recoverSession=false, simulatorConnected=!!deviceId&&!!token }: { token: string; deviceId: string; bundleId: string; launchBusy: boolean; onRunning: (running: boolean) => void; recoverSession?: boolean; simulatorConnected?: boolean }) {
+  simulatorConnected=simulatorConnected&&!!deviceId&&!!token;
   const [definitions,setDefinitions]=useState<ScenarioDefinition[]>([]);
   const [scenarioId,setScenarioId]=useState('');
   const [deletedScenario,setDeletedScenario]=useState<{name:string;restore:()=>void}>();
