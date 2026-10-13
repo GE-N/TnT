@@ -81,8 +81,9 @@ function assertMutations(pure:GoldenSnapshot){
   }
   const steps=(state:GoldenSnapshot['baseline'])=>{
     const route=state.routes[0];
-    if(!('steps' in route))assert.fail(pure.fixture+' route did not project: '+('error' in route?route.error:'no steps'));
-    return route.steps.map(step=>[step.testId,step.edgeId]);
+    const projected='steps' in route?route.steps:undefined;
+    if(!projected)assert.fail(pure.fixture+' route did not project: '+('error' in route?route.error:'no steps'));
+    return projected.map(step=>[step.testId,step.edgeId]);
   };
   if(pure.fixture==='same-screen-steps'){
     assert.deepEqual(steps(pure.baseline),[['home-ready',null],['show-error',null],['type-name',null],['open-detail','go'],['detail-ready',null]]);
