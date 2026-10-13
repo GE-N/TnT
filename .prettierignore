@@ -16,6 +16,9 @@ pnpm-lock.yaml
 *.generated.*
 generated/
 
+# Golden snapshot JSON is compared byte-for-byte with generated output
+tests/fixtures/golden/**/*.json
+
 # Runner state, including anything nested under .tnt
 .tnt/
 **/.tnt/**
