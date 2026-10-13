@@ -109,9 +109,9 @@ type View = {
 };
 
 async function mount(
-  options: { initialView?: View; rects?: Map<string, Rect> } = {},
+  options: { initialView?: View; rects?: Map<string, Rect>; workbench?: boolean } = {},
 ) {
-  const dom = new JSDOM('<div id="root"></div>', { url: "http://localhost/" });
+  const dom = new JSDOM('<div id="root"'+(options.workbench?' class="workbench"':'')+'></div>', { url: "http://localhost/" });
   const window = dom.window;
   const document = window.document;
   const keys = [
@@ -147,7 +147,7 @@ async function mount(
   ) {
     const key = this.classList.contains("canvas-viewport")
       ? "viewport"
-      : (this.dataset.screenId ??
+      : (this.dataset.layout ?? this.dataset.screenId ??
         (this.classList.contains("transition-label")
           ? "label:" +
             this.closest<SVGGElement>("[data-edge-id]")?.dataset.edgeId
@@ -887,4 +887,25 @@ test('visit review styles retain minimum hit targets and accessible validation c
  assert.match(rule('.visit-selector-error'),/color:#b3261e/);assert.match(rule('.visit-selector-error'),/font-size:12px/);assert.match(rule('.visit-inline-fields input[aria-invalid=true]'),/border:2px solid #b3261e/);
  assert.match(css,/--warning: #8a4b00/);assert.match(css,/--warning-surface: #fff4e5/);assert.match(rule('.navigation-hint'),/color:var\(--warning\)/);assert.match(rule('.navigation-hint'),/background:var\(--warning-surface\)/);
  assert.match(rule('.floating-inspector .selected-visit>.visit-section-heading'),/width:calc\(100% \+ 16px\)/);
+});
+
+test("floating controls reserve inspector bounds and an open popover moves the card to a clear side", async () => {
+  const page = await mount({workbench:true,initialView:{selectedScreenId:"home"},rects:new Map([
+    ["viewport",{left:0,top:0,width:1200,height:800}],
+    ["home",{left:450,top:20,width:250,height:180}]
+  ])});
+  try {
+    assert.ok(page.placement().top >= 164, "Inspector stays below the top control band");
+    assert.ok(page.placement().top + Number.parseFloat(page.card()!.style.maxHeight) <= 704, "Inspector stays above zoom controls");
+    page.rects.set("home",{left:450,top:300,width:250,height:180});
+    await page.relayout();
+    assert.equal(page.placement().side,"right");
+    const controls=page.document.createElement("details");
+    controls.className="device-toolbar";
+    controls.dataset.layout="device-controls";
+    page.rects.set("device-controls",{left:700,top:92,width:450,height:350});
+    page.document.getElementById("root")!.append(controls);
+    await act(async()=>{controls.open=true;controls.dispatchEvent(new page.window.Event("toggle"));});
+    assert.equal(page.placement().side,"left", "An open simulator popover must not cover the inspector");
+  } finally { await page.close(); }
 });

@@ -674,3 +674,7 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .screen-capture-label,.node-outcome{font-size:calc(12px / var(--canvas-zoom,1))!important}
 .workbench .screen-node-heading{font-size:calc(14px / var(--canvas-zoom,1))}
 .workbench .screen-node-title{font-size:calc(14px / var(--canvas-zoom,1))}
+
+.workbench .transition-label,.workbench .transition-label small{font-size:calc(12px / var(--canvas-zoom,1));color:var(--muted)}
+.workbench .transition-label small{color:#0a63d1}
+.workbench .workspace-save-icon{display:inline-flex;margin-right:4px}
