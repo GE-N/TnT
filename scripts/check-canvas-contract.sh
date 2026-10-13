@@ -40,11 +40,60 @@ shopt -u nullglob
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 tab=$'\t'
+gitq() { git -c core.quotePath=false "$@"; }
 
 # Reads a git diff on stdin and writes one file per "diff --git" section into $work.
-# Prints "path<TAB>source<TAB>section file" for each section. Exits 3 if text precedes the first section.
+# Prints "path<TAB>source<TAB>section file" for each section.
+# Exit 3: text precedes the first section. Exit 4: a quoted path was written to $work/quoted.
+# File paths are passed through ENVIRON so awk -v cannot interpret backslash escapes.
 split_sections() {
-  awk -v out="$work" -v tag="$1" -v src="$2" '
+  CONTRACT_SPLIT_OUT="$work" \
+  CONTRACT_SPLIT_TAG="$1" \
+  CONTRACT_SPLIT_SRC="$2" \
+  CONTRACT_SPLIT_QUOTED="$work/quoted" \
+  awk '
+    BEGIN {
+      out = ENVIRON["CONTRACT_SPLIT_OUT"]
+      tag = ENVIRON["CONTRACT_SPLIT_TAG"]
+      src = ENVIRON["CONTRACT_SPLIT_SRC"]
+      quoted_file = ENVIRON["CONTRACT_SPLIT_QUOTED"]
+    }
+    function unquote_from(s, start,  i, n, c, out, oct, nacc, k) {
+      n = length(s)
+      if (substr(s, start, 1) != "\"") return ""
+      for (i = start + 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (c == "\"") { qend = i; return out }
+        if (c == "\\") {
+          i++
+          if (i > n) return out
+          c = substr(s, i, 1)
+          if (c == "n") out = out "\n"
+          else if (c == "t") out = out "\t"
+          else if (c == "r") out = out "\r"
+          else if (c ~ /[0-7]/) {
+            oct = c
+            if (i + 1 <= n && substr(s, i + 1, 1) ~ /[0-7]/) { i++; oct = oct substr(s, i, 1) }
+            if (i + 1 <= n && substr(s, i + 1, 1) ~ /[0-7]/) { i++; oct = oct substr(s, i, 1) }
+            nacc = 0
+            for (k = 1; k <= length(oct); k++) nacc = nacc * 8 + substr(oct, k, 1)
+            out = out sprintf("%c", nacc)
+          } else out = out c
+        } else out = out c
+      }
+      return out
+    }
+    function strip_ab(p) {
+      if (substr(p, 1, 2) == "a/" || substr(p, 1, 2) == "b/") return substr(p, 3)
+      return p
+    }
+    function quoted_name(h,  a, b) {
+      a = unquote_from(h, 1)
+      b = unquote_from(h, qend + 2)
+      if (b != "") return strip_ab(b)
+      if (a != "") return strip_ab(a)
+      return h
+    }
     function path_of(h,  n, l, i) {
       n = length(h)
       if ((n - 5) % 2 == 0) {
@@ -54,43 +103,72 @@ split_sections() {
       for (i = n - 2; i > 0; i--) if (substr(h, i, 3) == " b/") return substr(h, i + 3)
       return h
     }
+    function header() {
+      h = $0
+      sub(/\r$/, "", h)
+      return substr(h, 12)
+    }
     /^diff --git / {
+      h = header()
+      if (index(h, "\"") != 0) {
+        print quoted_name(h) > quoted_file
+        close(quoted_file)
+        exit 4
+      }
       if (file != "") close(file)
-      blanks = 0
       file = out "/" tag "." (++seq)
-      printf "%s\t%s\t%s\n", path_of(substr($0, 12)), src, file
+      printf "%s\t%s\t%s\n", path_of(h), src, file
       print > file
       next
     }
     file == "" { if ($0 != "") { bad = 1; exit } next }
-    $0 == "" { blanks++; next }
-    { for (; blanks > 0; blanks--) print "" > file; print > file }
+    { print > file }
     END { if (file != "") close(file); if (bad) exit 3 }
   '
+}
+
+fail_split() {
+  local status=$1 src=$2
+  if (( status == 3 )); then
+    echo "Canvas authoring contract failed: $src is not a git diff (text before the first \"diff --git\" line)." >&2
+    exit 1
+  fi
+  if (( status == 4 )); then
+    echo "Canvas authoring contract failed: quoted path $(cat "$work/quoted") cannot be recorded as an exception (tab, double quote, or backslash in the filename)." >&2
+    exit 1
+  fi
+  if (( status != 0 )); then
+    exit "$status"
+  fi
 }
 
 : > "$work/expected.idx"
 i=0
 for patch in "${exception_patches[@]}"; do
   i=$((i + 1))
-  if ! split_sections "e$i" "$patch" < "$patch" >> "$work/expected.idx"; then
-    echo "Canvas authoring contract failed: $patch is not a git diff (text before the first \"diff --git\" line)." >&2
-    exit 1
-  fi
+  set +e
+  split_sections "e$i" "$patch" < "$patch" >> "$work/expected.idx"
+  status=$?
+  set -e
+  fail_split "$status" "$patch"
 done
 
 duplicate="$(cut -f1 "$work/expected.idx" | LC_ALL=C sort | uniq -d | head -n 1)"
 if [[ -n "$duplicate" ]]; then
   echo "Canvas authoring contract failed: more than one exception patch touches $duplicate. Record each exception as one combined patch, and give each file to one patch only." >&2
-  awk -F "$tab" -v p="$duplicate" '$1 == p { print "  " $2 }' "$work/expected.idx" >&2
+  CONTRACT_AWK_PATH="$duplicate" awk -F "$tab" '$1 == ENVIRON["CONTRACT_AWK_PATH"] { print "  " $2 }' "$work/expected.idx" >&2
   exit 1
 fi
 
-git diff --no-color --full-index "$base" HEAD -- "${paths[@]}" | split_sections a diff > "$work/actual.idx"
+set +e +o pipefail
+gitq diff --no-color --full-index "$base" HEAD -- "${paths[@]}" | split_sections a diff > "$work/actual.idx"
+status=${PIPESTATUS[1]}
+set -e -o pipefail
+fail_split "$status" "diff"
 
 LC_ALL=C sort -t "$tab" -k1,1 "$work/expected.idx" > "$work/expected.sorted"
 LC_ALL=C sort -t "$tab" -k1,1 "$work/actual.idx" > "$work/actual.sorted"
-section_of() { awk -F "$tab" -v p="$1" '$1 == p { print $3 }' "$2"; }
+section_of() { CONTRACT_AWK_PATH="$1" awk -F "$tab" '$1 == ENVIRON["CONTRACT_AWK_PATH"] { print $3 }' "$2"; }
 mismatches=()
 while IFS= read -r path; do
   want="$(section_of "$path" "$work/expected.sorted")"
@@ -104,16 +182,16 @@ while IFS= read -r path; do
   fi
 done < <(cut -f1 "$work/expected.sorted" "$work/actual.sorted" | LC_ALL=C sort -u)
 if (( ${#mismatches[@]} )); then
-  git diff --stat "$base" HEAD -- "${paths[@]}" >&2
+  gitq diff --stat "$base" HEAD -- "${paths[@]}" >&2
   echo "Canvas authoring contract failed: the diff against $base ($base_ref) differs from the named exceptions in $exception." >&2
   printf '  %s\n' "${mismatches[@]}" >&2
   exit 1
 fi
-if ! git diff --exit-code --stat HEAD -- "${paths[@]}"; then
+if ! gitq diff --exit-code --stat HEAD -- "${paths[@]}"; then
   echo "Canvas authoring contract failed: uncommitted edits in protected canvas files." >&2
   exit 1
 fi
-status="$(git status --porcelain -- "${paths[@]}")"
+status="$(gitq status --porcelain -- "${paths[@]}")"
 if [[ -n "$status" ]]; then
   echo "Canvas authoring contract failed: protected canvas files are not clean." >&2
   printf '%s\n' "$status" >&2

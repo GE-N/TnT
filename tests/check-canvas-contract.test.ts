@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {mkdirSync,mkdtempSync,renameSync,rmSync,writeFileSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readFileSync,renameSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -27,7 +27,7 @@ function fixture(){
  write('shared/a.ts',lines('a'));write('server/canvas.ts',lines('canvas'));write('server/default-actions.ts',lines('action'));write(`${exceptions}/.gitkeep`,'');
  commit('base');
  const base=git('rev-parse','HEAD').trim();
- const diff=(...paths:string[])=>git('diff','--no-color','--full-index',base,'HEAD','--',...paths);
+ const diff=(...paths:string[])=>git('-c','core.quotePath=false','diff','--no-color','--full-index',base,'HEAD','--',...paths);
  return {root,git,write,commit,run,diff,close:()=>rmSync(root,{recursive:true,force:true})};
 }
 
@@ -112,4 +112,88 @@ test('a committed protected edit with no exception patch fails',()=>{
   assert.notEqual(result.status,0);
   assert.match(result.stderr,/server\/default-actions\.ts: changed but not in any exception patch/);
  }finally{f.close();}
+});
+
+test('a patch that differs from the real diff only in whitespace fails',()=>{
+ const f=splitAcrossTwoPatches();try{
+  const file=join(f.root,exceptions,'a.patch');
+  const original=readFileSync(file,'utf8');
+  const mutated=original.replace('+export const a2=200;','+export  const a2=200;');
+  assert.notEqual(mutated,original);
+  writeFileSync(file,mutated);
+  f.commit('whitespace');
+  const result=f.run();
+  assert.notEqual(result.status,0);
+  assert.match(result.stderr,/shared\/a\.ts: the diff differs from its exception patch/);
+ }finally{f.close();}
+});
+
+test('a patch section for a file the diff does not change fails',()=>{
+ const f=splitAcrossTwoPatches();try{
+  f.write(`${exceptions}/ghost.patch`,[
+   'diff --git a/server/ghost.ts b/server/ghost.ts',
+   'index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 100644',
+   '--- a/server/ghost.ts',
+   '+++ b/server/ghost.ts',
+   '@@ -0,0 +1 @@',
+   '+export const ghost=1;',
+   ''
+  ].join('\n'));
+  f.commit('ghost');
+  const result=f.run();
+  assert.notEqual(result.status,0);
+  assert.match(result.stderr,/server\/ghost\.ts: in an exception patch but not in the diff/);
+ }finally{f.close();}
+});
+
+test('text before the first diff --git in a patch exits 1',()=>{
+ const f=splitAcrossTwoPatches();try{
+  const file=join(f.root,exceptions,'a.patch');
+  writeFileSync(file,'Subject: junk\n'+readFileSync(file,'utf8'));
+  f.commit('preamble');
+  const result=f.run();
+  assert.equal(result.status,1);
+  assert.match(result.stderr,/text before the first "diff --git" line/);
+ }finally{f.close();}
+});
+
+test('a non-ASCII path passes with a matching exception patch',()=>{
+ const f=fixture();try{
+  f.write('shared/é.ts',edit(lines('e'),2,'export const e2=200;'));
+  f.commit('feature');
+  f.write(`${exceptions}/e.patch`,f.diff('shared/é.ts'));
+  f.commit('exceptions');
+  const result=f.run();
+  assert.equal(result.status,0,result.stderr);
+  assert.match(result.stdout,/canvas contract check passed \(1 exception patch\)/);
+ }finally{f.close();}
+});
+
+test('a path with a space passes with a matching exception patch',()=>{
+ const f=fixture();try{
+  f.write('shared/foo bar.ts',edit(lines('s'),2,'export const s2=200;'));
+  f.commit('feature');
+  f.write(`${exceptions}/s.patch`,f.diff('shared/foo bar.ts'));
+  f.commit('exceptions');
+  const result=f.run();
+  assert.equal(result.status,0,result.stderr);
+  assert.match(result.stdout,/canvas contract check passed \(1 exception patch\)/);
+ }finally{f.close();}
+});
+
+test('a path with a tab, double quote, or backslash fails and names the file',()=>{
+ for(const path of ['shared/tab\there.ts','shared/quote"here.ts','shared/back\\slash.ts']){
+  const f=fixture();try{
+   f.write(path,edit(lines('q'),2,'export const q2=200;'));
+   f.commit('feature');
+   f.write(`${exceptions}/q.patch`,f.diff(path));
+   f.commit('exceptions');
+   const result=f.run();
+   assert.notEqual(result.status,0,path+' '+result.stderr);
+   assert.match(result.stderr,/quoted path /);
+   assert.ok(result.stderr.includes(path),result.stderr);
+   assert.doesNotMatch(result.stderr,/the diff differs from its exception patch/);
+   assert.doesNotMatch(result.stderr,/changed but not in any exception patch/);
+  }finally{f.close();}
+ }
 });
