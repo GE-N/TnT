@@ -1,7 +1,7 @@
 import {act,createElement} from 'react';
 import {JSDOM} from 'jsdom';
 import type {CanvasGraph} from '../server/canvas.js';
-import {workspaceCommand} from './workspace-ui-helpers.js';
+import {inspectScreen,workspaceCommand} from './workspace-ui-helpers.js';
 import {captureState,withSeededIdsAsync,type GoldenFixture,type GoldenScript,type GoldenSnapshot} from './golden-canvas-runner.js';
 
 const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
@@ -48,6 +48,11 @@ async function editSelector(document:Document,actionId:string,value:string,visit
 }
 
 async function perform(document:Document,script:GoldenScript,graph:()=>CanvasGraph){
+  if('actionId' in script&&script.actionId){
+    const owner=graph().screens.find(screen=>screen.tests.some(test=>test.id===script.actionId));
+    if(!owner)throw new Error('Missing screen for '+script.actionId);
+    await inspectScreen(document,{id:owner.id},script.visitId?{id:script.visitId}:undefined);
+  }
   if(script.op==='edit')await editSelector(document,script.actionId,script.value,script.visitId);
   else if(script.op==='connect'||script.op==='retarget'){
     if(!script.to)throw new Error(script.op+' requires a destination screen.');

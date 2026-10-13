@@ -18,6 +18,11 @@
   --danger-border: #d9a5a8;
   --overlay: #25304166;
   --shadow: 0 8px 24px #25304114;
+  /* White on #0a63d1 is 5.65:1; #0a84ff is reserved for non-text accents. */
+  --inspector-primary: #0a63d1;
+  --inspector-highlight: #0a84ff;
+  --inspector-selected-text: #0a4fa8;
+  --inspector-selected: #e7f3ff;
 }
 
 :root{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5;color-scheme:light;color:var(--text);background:var(--page);font-synthesis:none}
@@ -170,8 +175,9 @@ textarea:focus{outline:1px solid var(--accent)}
 .canvas-viewport{height:580px;overflow:auto;border:1px solid var(--border);border-top:0;border-radius:0 0 9px 9px;background:var(--subtle);position:relative}
 .canvas-surface{width:2700px;height:1650px;transform-origin:0 0;position:relative;background-image:radial-gradient(var(--border-strong) 1px,transparent 1px);background-size:22px 22px}
 .canvas-lines{position:absolute;inset:0;pointer-events:none}
-.transition-label{font:11px/1.5 system-ui;background:var(--surface);color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:5px;text-align:center;overflow-wrap:anywhere;max-height:48px;overflow:auto}
+.transition-label{font:12px/1.5 system-ui;background:var(--surface);color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:5px;text-align:center;overflow-wrap:anywhere;max-height:48px;overflow:auto}
 .transition-label small{display:block;color:var(--accent)}
+.transition-label small{font-size:12px}
 .screen-node{width:250px;background:var(--surface);position:absolute;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);overflow:hidden}
 .screen-node.selected-screen{border-color:var(--accent);box-shadow:0 0 0 3px var(--selected),var(--shadow)}
 .screen-node-heading{width:100%;padding:16px 12px;display:flex;align-items:center;gap:10px;text-align:left;background:var(--surface);border:0;border-bottom:1px solid var(--border);color:var(--text);font-weight:600;touch-action:none;cursor:grab}
@@ -382,6 +388,29 @@ textarea:focus{outline:1px solid var(--accent)}
 .visit-section-heading small{display:block;margin-top:3px;color:var(--muted);font-weight:400;font-size:11px}
 .visit-start-button,.unused-operations>button{background:var(--subtle);color:var(--text);border:1px solid var(--border);border-radius:5px;padding:6px 9px;text-align:left;font-size:11px}
 .unused-operations>button{display:block;width:100%;margin:6px 0}
+
+.highlighted-transition path{filter:drop-shadow(0 0 4px #0a84ff80)}
+.highlighted-transition .transition-label{border-color:var(--inspector-highlight);color:var(--inspector-selected-text)}
+.floating-inspector{position:fixed;z-index:40;width:300px;box-sizing:border-box;overflow:auto;overscroll-behavior:contain;background:var(--surface);border-radius:12px;box-shadow:0 12px 32px #25304129,0 1px 3px #2530411f;padding:0 14px 14px;font-size:13px;--accent:var(--inspector-primary);--accent-hover:#08519f}
+.floating-inspector-header{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 -14px;padding:4px 4px 4px 14px;background:var(--surface);border-bottom:1px solid var(--border)}
+.floating-inspector-header h3{font-size:17px;margin:0;overflow-wrap:anywhere}
+.floating-inspector-close{min-width:44px;min-height:44px;border:0;border-radius:8px;background:transparent;color:var(--text);font-size:16px}
+.floating-inspector-close:hover{background:var(--subtle)}
+.floating-inspector-note{font-size:12px;color:var(--muted);margin:10px 0 0;line-height:1.5}
+.floating-inspector :focus-visible{outline:3px solid var(--inspector-highlight);outline-offset:2px}
+.floating-inspector button,.floating-inspector select,.floating-inspector input:not([type=checkbox]),.floating-inspector summary{min-height:44px;font-size:13px}
+.floating-inspector .field-hint,.floating-inspector small,.floating-inspector .unused-operations,.floating-inspector .operation-scenarios label,.floating-inspector .canvas-navigation-actions>input,.floating-inspector .canvas-delete-operation,.floating-inspector legend,.floating-inspector .outcome{font-size:12px}
+.floating-inspector li,.floating-inspector details{font-size:12px}
+.floating-inspector summary{display:flex;align-items:center}
+.floating-inspector .checkbox-label{min-height:44px}
+.floating-inspector .canvas-checks>button,.floating-inspector .visit-start-button,.floating-inspector .unused-operations>button{width:100%}
+.floating-inspector .canvas-check-row button{min-width:44px}
+.floating-inspector .canvas-visit-section{background:var(--surface);padding:0 8px}
+.floating-inspector .canvas-visit-section.selected-visit{border-color:var(--inspector-highlight);background:var(--surface)}
+.floating-inspector .visit-section-heading{display:flex;align-items:center;gap:8px;margin:0;padding:6px 0;border-bottom:0;font-size:13px}
+.floating-inspector .selected-visit>.visit-section-heading{color:var(--inspector-selected-text);background:var(--inspector-selected);margin:0 -8px;padding:6px 8px;border-radius:6px 6px 0 0}
+.floating-inspector .visit-disclosure{width:14px;flex:none}
+.floating-inspector .visit-section-body{padding:8px 0}
 
 [aria-label="Scenario reports"]{display:flex;flex-wrap:wrap;gap:8px;padding:16px 24px;border-top:1px solid var(--border)}
 [aria-label="Scenario reports"] p{width:100%;font-size:12px;color:var(--muted)}

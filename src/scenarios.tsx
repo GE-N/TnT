@@ -141,7 +141,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const showRecovery=draftRevisionShown>0&&draftRevisionShown>dismissedDraft&&!draftError;
   const staleDraft=showRecovery&&draftBase<savedRevision;
   const storedCanvas=viewRef.current.canvas;
-  const initialCanvasView=storedCanvas&&typeof storedCanvas==='object'&&!Array.isArray(storedCanvas)?storedCanvas as {zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string}:undefined;
+  const initialCanvasView=storedCanvas&&typeof storedCanvas==='object'&&!Array.isArray(storedCanvas)?storedCanvas as {zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string}:undefined;
   useEffect(()=>{
     if(noWorkspace||!token||conflict||submitting||pickerBusy)return;
     if(pendingDraft){
