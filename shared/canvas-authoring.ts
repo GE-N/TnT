@@ -205,7 +205,7 @@ export function privateVisitOperation(graph:CanvasGraph,pathId:string,visitId:st
  if(!shared)return {graph,testId};
  const id=crypto.randomUUID();const screenId=visitScreenId(graph,path,index)!;const test=graph.screens.find(screen=>screen.id===screenId)!.tests.find(test=>test.id===testId)!;
  const edgeId=path.edgeIds[index];
- graph={...graph,screens:graph.screens.map(screen=>screen.id===screenId?{...screen,tests:[...screen.tests,{...structuredClone(test),id,scenarioIds:path.scenarioId?[path.scenarioId]:undefined}]}:screen),edges:graph.edges.map(edge=>edge.id===edgeId&&!test.check?{...edge,actionTestIds:[...edgeActions(edge),id]}:edge)};
+ graph={...graph,screens:graph.screens.map(screen=>screen.id===screenId?{...screen,tests:[...screen.tests,{...structuredClone(test),id,scenarioIds:path.scenarioId?[path.scenarioId]:undefined}]}:screen),edges:graph.edges.map(edge=>edge.id===edgeId&&edgeActions(edge).includes(testId)?{...edge,actionTestIds:[...edgeActions(edge),id]}:edge)};
  return {graph:updateVisitOperations(graph,pathId,visitId,visitOperations(graph,path,index).map(item=>item===testId?id:item)),testId:id};
 }
 

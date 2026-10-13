@@ -15,7 +15,7 @@ export function projectCanvasRoute(graph:CanvasGraph,yaml:string,flows:Record<st
  const ordered=visits.flatMap((visit,index)=>{
   const checks=visitChecks(graph,path,index);const edge=edges[index];
   const ids=visitOperations(graph,path,index);
-  return ids.map(testId=>({testId,visitId:visit.id,assertion:checks.includes(testId),edgeId:checks.includes(testId)?undefined:edge?.id}));
+  return ids.map(testId=>({testId,visitId:visit.id,assertion:checks.includes(testId),edgeId:edge&&edgeActions(edge).includes(testId)?edge.id:undefined}));
  });
  for(const [index,edge] of edges.entries())if(edge&&!visitOperations(graph,path,index).some(id=>edgeActions(edge).includes(id)))throw new Error('Add an action on connection '+edge.responseCondition+' in Visit '+(index+1)+' before running.');
  const required=new Set(['yaml',path.id,...path.edgeIds,...ordered.map(item=>item.testId)]);

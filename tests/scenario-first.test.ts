@@ -111,13 +111,14 @@ test('a shared connection executes only actions selected for the running scenari
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
-test('a selected scenario cannot silently omit an action with no destination',async()=>{
+test('a selected scenario runs an action with no destination in place instead of omitting it',async()=>{
  const root=await mkdtemp(join(tmpdir(),'tnt-incomplete-membership-'));
  try{
   const service=createScenarios({root,runner:createRunner({artifactDirectory:root,execute:async()=>{assert.fail('Incomplete action cannot reach simulator');}}),maestro:{version:async()=>{assert.fail('No version for draft');},run:async()=>{assert.fail('Cannot omit selected action');}}});
   const canvas=structuredClone(graph);canvas.screens[0].tests.push({id:'pending-action',label:'Go',role:'action',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},scenarioIds:['home'],tap:{target:'text',match:'exact',value:'Go'}});
   const source=writeChecks(yaml,graph,canvas);const workspace=await service.save({name:'Incomplete action',yaml:source,canvas,scenarios:[definition]});
-  await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:'home'}),/destination screen/);
+  const sameScreen=await service.preview({...workspace,scenarioId:'home'});
+  assert.match(sameScreen.executionYaml,/# tnt-check:pending-action\n# tnt-match:exact\n- tapOn:\n    text: \^Go\$/);
   const legacy=structuredClone(canvas);const orphan=legacy.screens[0].tests.pop()!;delete orphan.scenarioIds;legacy.screens.push({id:'unrelated',title:'Unrelated',x:600,y:0,tests:[orphan]});
   const preview=await service.preview({...workspace,canvas:legacy,scenarioId:'home'});
   assert.doesNotMatch(preview.executionYaml,/tapOn/,'An unassigned legacy action does not block or execute in another scenario');
