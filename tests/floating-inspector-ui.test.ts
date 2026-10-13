@@ -734,6 +734,7 @@ test('visit menu filters groups, adds with arrows/Enter and restores focus on Es
   assert.match(rows[2].querySelector('.visit-step-summary')!.textContent!,/3 assertNotVisible/);assert.match(rows[2].textContent!,/after navigation, on Profile/);
   assert.equal(page.document.activeElement?.getAttribute('aria-label'),'Check 2 selector');
   await page.press(page.document.activeElement!,'Escape');await page.click(trigger);await page.press(page.document.querySelector('[role=combobox]')!,'Escape');same(page.document.activeElement,trigger);assert.ok(page.card());
+  await page.click(trigger);await page.press(page.document.querySelector('[role=combobox]')!,'Tab');const cancel=page.document.activeElement as HTMLButtonElement;assert.equal(cancel.textContent,'Cancel');assert.equal(await page.press(cancel,'Enter'),false,'Enter on Cancel must not select an option');await page.click(cancel);assert.equal(page.section(1,'Home')!.querySelectorAll('.visit-step').length,3);
  }finally{await page.close();}
 });
 
