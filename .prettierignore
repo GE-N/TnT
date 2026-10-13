@@ -19,6 +19,14 @@ generated/
 # Golden snapshot JSON is compared byte-for-byte with generated output
 tests/fixtures/golden/**/*.json
 
+# TODO: format with contract base reset
+server/canvas.ts
+server/canvas-route.ts
+server/default-actions.ts
+shared/canvas-authoring.ts
+shared/checkpoints.ts
+shared/workspace-values.ts
+
 # Runner state, including anything nested under .tnt
 .tnt/
 **/.tnt/**
