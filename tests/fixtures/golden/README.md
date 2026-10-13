@@ -2,9 +2,9 @@
 
 These fixtures lock the canvas linking and YAML behaviour from before the floating inspector. Later tasks re-run the same scripts and require the same bytes.
 
-`shared/`, `server/canvas.ts`, `server/canvas-route.ts` and `server/default-actions.ts` are protected. `npm run check:canvas-contract` runs `scripts/check-canvas-contract.sh`, which compares them with the contract base `2ca8cc3` (the #41 golden snapshots). It is not part of `npm test`.
+`shared/`, `server/canvas.ts`, `server/canvas-route.ts` and `server/default-actions.ts` are protected. `npm run check:canvas-contract` runs `scripts/check-canvas-contract.sh`, which compares them with the contract base `6639263` (the merge of #44, optional destination and same-screen actions, in #53, on top of the #41 golden snapshots). It is not part of `npm test`.
 
-The diff against that base must equal the named exceptions exactly. The only exception is #44 (optional destination, same-screen actions), recorded byte for byte in `scripts/canvas-contract-exceptions/44-optional-destination.patch`. Any other change to the protected files fails the check. Once #44 merges, the base moves to that merge commit and the exception is removed.
+The diff against that base must equal the named exceptions in `scripts/canvas-contract-exceptions/` exactly. There are currently no exceptions, so any change to the protected files fails the check. Changes to the exceptions folder and the contract script require review from @GE-N (`.github/CODEOWNERS`).
 
 CI must check out the repository with `fetch-depth: 0`. A shallow clone may not contain the contract base, and the script fails with that requirement instead of reporting a vacuous pass. On a push to `main` in CI there is no feature branch to compare, so the script prints a skip message and exits 0. That skip runs only when `CI` is set. A local checkout of `main` is still checked.
 

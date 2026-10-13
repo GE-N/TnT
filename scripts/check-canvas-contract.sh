@@ -16,8 +16,8 @@ if [[ -n "${CI:-}" && ( "$branch" == "main" || "$branch" == "master" || "$ref" =
   exit 0
 fi
 
-# Golden snapshots for canvas routes (#41). Reset this, and clear the exceptions, once #44 merges.
-contract_base=2ca8cc3
+# Merge of #44 (optional destination, same-screen actions) in #53, on top of the #41 golden snapshots.
+contract_base=6639263
 base_ref="${1:-$contract_base}"
 if ! base="$(git rev-parse --verify --quiet "$base_ref^{commit}")"; then
   echo "Canvas authoring contract failed: base $base_ref is not available. CI must fetch the full history (fetch-depth: 0)." >&2
@@ -29,13 +29,19 @@ if ! git merge-base --is-ancestor "$base" HEAD; then
 fi
 paths=(shared server/canvas.ts server/canvas-route.ts server/default-actions.ts)
 
-# Named exceptions: #44 (optional destination, same-screen actions) may change exactly this patch.
-exception=scripts/canvas-contract-exceptions/44-optional-destination.patch
-expected="$(cat "$exception")"
+# Named exceptions: the diff must equal the patches in this folder exactly. With none, it must be empty.
+exception=scripts/canvas-contract-exceptions
+shopt -s nullglob
+exception_patches=("$exception"/*.patch)
+shopt -u nullglob
+expected=""
+if (( ${#exception_patches[@]} )); then
+  expected="$(cat "${exception_patches[@]}")"
+fi
 actual="$(git diff --no-color --full-index "$base" HEAD -- "${paths[@]}")"
 if [[ "$actual" != "$expected" ]]; then
   git diff --stat "$base" HEAD -- "${paths[@]}" >&2
-  echo "Canvas authoring contract failed: the diff against $base ($base_ref) differs from the named exception $exception." >&2
+  echo "Canvas authoring contract failed: the diff against $base ($base_ref) differs from the named exceptions in $exception." >&2
   exit 1
 fi
 if ! git diff --exit-code --stat HEAD -- "${paths[@]}"; then
@@ -49,5 +55,5 @@ if [[ -n "$status" ]]; then
   exit 1
 fi
 if [[ -n "$actual" ]]; then
-  echo "Canvas authoring contract passed: the diff against $base matches the named exception $exception."
+  echo "Canvas authoring contract passed: the diff against $base matches the named exceptions in $exception."
 fi
