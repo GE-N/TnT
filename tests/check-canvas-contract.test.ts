@@ -197,3 +197,17 @@ test('a path with a tab, double quote, or backslash fails and names the file',()
   }finally{f.close();}
  }
 });
+
+test('a quoted path in the real diff with no exception patch fails and names the file',()=>{
+ for(const path of ['shared/tab\there.ts','shared/quote"here.ts']){
+  const f=fixture();try{
+   f.write(path,edit(lines('q'),2,'export const q2=200;'));
+   f.commit('feature');
+   const result=f.run();
+   assert.notEqual(result.status,0,path+' '+result.stderr);
+   assert.match(result.stderr,/quoted path /);
+   assert.match(result.stderr,/cannot be recorded as an exception/);
+   assert.ok(result.stderr.includes(path),result.stderr);
+  }finally{f.close();}
+ }
+});
