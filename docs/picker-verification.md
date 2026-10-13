@@ -17,11 +17,11 @@ Selector behavior was checked against the pinned [Maestro 2.11.0 filter source](
 
 ## Real runs and browser journey
 
-| Journey | Run ID | Observed outcome |
-| --- | --- | --- |
-| Browser: click Home, explicitly select its candidate, choose visible, preview, Save & run step | `8f01e3b5-2618-40aa-8934-3200d3b89717` | Passed; saved YAML appended `assertVisible`, isolated snapshot executed only that assertion; mapped step passed and cleanup verified. |
-| Runner API: picked Home not-visible assertion | `9ce21f53-e6b2-44b6-98e1-05405594832a` | Assertion-failed as intended; mapped assertion failed, real screenshot/hierarchy/logs retained, cleanup verified. |
-| Runner API: picked Settings tap with reviewed index 0 | `e3387776-5408-4289-bc76-a87b6b021876` | Tap passed; subsequent real hierarchy showed Settings with APPEARANCE, NOTIFICATIONS, LANGUAGE, and ABOUT sections. |
+| Journey                                                                                             | Run ID                                 | Observed outcome                                                                                                                                                                                                    |
+| --------------------------------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Browser: click Home, explicitly select its candidate, choose visible, preview, Save & run step      | `8f01e3b5-2618-40aa-8934-3200d3b89717` | Passed; saved YAML appended `assertVisible`, isolated snapshot executed only that assertion; mapped step passed and cleanup verified.                                                                               |
+| Runner API: picked Home not-visible assertion                                                       | `9ce21f53-e6b2-44b6-98e1-05405594832a` | Assertion-failed as intended; mapped assertion failed, real screenshot/hierarchy/logs retained, cleanup verified.                                                                                                   |
+| Runner API: picked Settings tap with reviewed index 0                                               | `e3387776-5408-4289-bc76-a87b6b021876` | Tap passed; subsequent real hierarchy showed Settings with APPEARANCE, NOTIFICATIONS, LANGUAGE, and ABOUT sections.                                                                                                 |
 | Runner API: overlapping Dark Mode candidates, explicit deepest candidate/index 0, visible assertion | `0314e21b-c7b0-4571-875e-6ea8097fd1b1` | Screenshot-region query returned both Dark Mode candidates; plain selector was blocked as ambiguous. Reviewed index identified `element-29`; real assertion passed and cleanup verified. No preference was changed. |
 
 The final negative proof retained `raw/2026-10-05_190357/flow/screenshots/step-003-assertCondition-^Home$.png`, structured command metadata, screen hierarchy, JUnit report, device logs, and Maestro logs. Artifacts live under `.tnt/runs/<run-id>` and are accessible through the existing protected run artifact API.

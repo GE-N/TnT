@@ -1,0 +1,24 @@
+# Build output
+dist/
+build/
+coverage/
+.vite/
+
+# Lockfiles
+package-lock.json
+npm-shrinkwrap.json
+yarn.lock
+pnpm-lock.yaml
+
+# Generated files
+*.min.js
+*.min.css
+*.generated.*
+generated/
+
+# Golden snapshot JSON is compared byte-for-byte with generated output
+tests/fixtures/golden/**/*.json
+
+# Runner state, including anything nested under .tnt
+.tnt/
+**/.tnt/**

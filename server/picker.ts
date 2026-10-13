@@ -19,7 +19,10 @@ export function createPicker(options: { artifactDirectory: string; execute: Exec
   const captures = new Map<string, StoredCapture>();
   function stored(id: string) {
     const record = captures.get(id);
-    if (!record || Date.parse(record.capture.expiresAt) <= Date.now()) { captures.delete(id); throw new Error('Capture expired or unavailable. Refresh the screen.'); }
+    if (!record || Date.parse(record.capture.expiresAt) <= Date.now()) {
+      captures.delete(id);
+      throw new Error('Capture expired or unavailable. Refresh the screen.');
+    }
     return record;
   }
   async function sample(deviceId: string) {
@@ -36,7 +39,8 @@ export function createPicker(options: { artifactDirectory: string; execute: Exec
       if (Date.parse(screenshotAt) - Date.parse(hierarchyAt) > 2000) throw new Error('Screenshot capture took too long after hierarchy capture. Refresh and retry.');
       const png = await readFile(path);
       if (png.length < 24 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new Error('Simulator returned an unsupported screenshot.');
-      const width = png.readUInt32BE(16), height = png.readUInt32BE(20);
+      const width = png.readUInt32BE(16),
+        height = png.readUInt32BE(20);
       const frame = bounds(tree.children?.[0]?.attributes?.bounds ?? '');
       if (!frame || !width || !height || Math.abs(width / height - frame.width / frame.height) > 0.02) throw new Error('Screenshot/hierarchy orientation or bounds do not agree. Refresh the screen.');
       const candidates: Candidate[] = [];
@@ -44,13 +48,18 @@ export function createPicker(options: { artifactDirectory: string; execute: Exec
         if (candidates.length > 10_000) throw new Error('Hierarchy exceeds the supported element limit.');
         const id = 'element-' + candidates.length;
         const box = bounds(node.attributes.bounds);
-        if (!box) { node.children?.forEach(child => visit(child, parentId)); return; }
-        candidates.push({ id, parentId, text: node.attributes.accessibilityText || node.attributes.text || node.attributes.title || node.attributes.value || '', textLabels: [node.attributes.text, node.attributes.hintText, node.attributes.accessibilityText, node.attributes.error].filter((value): value is string => !!value), identifier: node.attributes['resource-id'] || '', enabled: node.attributes.enabled !== 'false', bounds: { x: (box.x - frame!.x) * width / frame!.width, y: (box.y - frame!.y) * height / frame!.height, width: box.width * width / frame!.width, height: box.height * height / frame!.height } });
+        if (!box) {
+          node.children?.forEach(child => visit(child, parentId));
+          return;
+        }
+        candidates.push({ id, parentId, text: node.attributes.accessibilityText || node.attributes.text || node.attributes.title || node.attributes.value || '', textLabels: [node.attributes.text, node.attributes.hintText, node.attributes.accessibilityText, node.attributes.error].filter((value): value is string => !!value), identifier: node.attributes['resource-id'] || '', enabled: node.attributes.enabled !== 'false', bounds: { x: ((box.x - frame!.x) * width) / frame!.width, y: ((box.y - frame!.y) * height) / frame!.height, width: (box.width * width) / frame!.width, height: (box.height * height) / frame!.height } });
         node.children?.forEach(child => visit(child, id));
       }
       visit(tree);
       return { png, width, height, candidates, hierarchyAt, screenshotAt, toolVersion, hierarchyFingerprint: createHash('sha256').update(JSON.stringify(tree)).digest('hex'), fingerprint: createHash('sha256').update(png).digest('hex') };
-    } finally { await rm(directory, { recursive: true, force: true }); }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
   function preview(input: StepDraft) {
     const { capture } = stored(input.captureId);
@@ -117,7 +126,14 @@ export function createPicker(options: { artifactDirectory: string; execute: Exec
       const record = stored(input.captureId);
       if (record.reviews.size >= 16) record.reviews.delete(record.reviews.keys().next().value!);
       const reviewId = randomUUID();
-      record.reviews.set(reviewId, { draft: structuredClone(input), flowYaml, target: targetIdentity(record.capture.candidates.find(node => node.id === input.candidateId)!, record.capture.candidates) });
+      record.reviews.set(reviewId, {
+        draft: structuredClone(input),
+        flowYaml,
+        target: targetIdentity(
+          record.capture.candidates.find(node => node.id === input.candidateId)!,
+          record.capture.candidates
+        )
+      });
       return { yaml, flowYaml, stepsYaml: reviewed.stepsYaml, reviewId };
     },
     async capture(input: { deviceId: string }): Promise<Capture> {
@@ -132,16 +148,23 @@ export function createPicker(options: { artifactDirectory: string; execute: Exec
         if (captures.size >= 8) captures.delete(captures.keys().next().value!);
         captures.set(capture.id, { capture, png: sampled.png, fingerprint: sampled.fingerprint, hierarchyFingerprint: sampled.hierarchyFingerprint, reviews: new Map() });
         return structuredClone(capture);
-      } catch (error) { cleanupVerified = !(error instanceof InspectionCleanupError); throw error; }
-      finally { if (cleanupVerified) await release(); }
+      } catch (error) {
+        cleanupVerified = !(error instanceof InspectionCleanupError);
+        throw error;
+      } finally {
+        if (cleanupVerified) await release();
+      }
     },
     candidates(input: { captureId: string; x: number; y: number }) {
       if (!Number.isFinite(input.x) || !Number.isFinite(input.y) || input.x < 0 || input.x > 1 || input.y < 0 || input.y > 1) throw new Error('Click within the captured screen.');
       const { capture } = stored(input.captureId);
-      const x = input.x * capture.width, y = input.y * capture.height;
+      const x = input.x * capture.width,
+        y = input.y * capture.height;
       return structuredClone(capture.candidates.filter(({ bounds: b }) => x >= b.x && y >= b.y && x <= b.x + b.width && y <= b.y + b.height).sort((a, b) => a.bounds.width * a.bounds.height - b.bounds.width * b.bounds.height));
     },
-    async screen(id: string) { return stored(id).png; },
+    async screen(id: string) {
+      return stored(id).png;
+    }
   };
 }
 function bounds(value: string): Bounds | undefined {
@@ -167,7 +190,9 @@ function validateSelector(value: unknown, depth = 0): Selector {
   } else if (!selector.text && !selector.id) throw new Error('Include a literal text or id for each selector.');
   return selector as Selector;
 }
-function uses(selector: Selector, key: string): boolean { return Object.entries(selector).some(([name, value]) => name === key || (value && typeof value === 'object' && uses(value, key))); }
+function uses(selector: Selector, key: string): boolean {
+  return Object.entries(selector).some(([name, value]) => name === key || (value && typeof value === 'object' && uses(value, key)));
+}
 function compile(selector: Selector): Record<string, unknown> {
   return Object.fromEntries(Object.entries(selector).map(([key, value]) => [key, key === 'text' || key === 'id' ? '^' + String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$' : typeof value === 'object' ? compile(value) : value]));
 }
@@ -182,10 +207,10 @@ function selectMatches(nodes: Candidate[], selector: Selector, deepest = true, a
     const anchors = selectMatches(nodes, constraint);
     if (anchors.length !== 1) throw new Error('Selector constraint anchor must match one Maestro element. Review its literal label/constraints.');
     const anchor = anchors[0];
-    matches = matches.filter(node => key === 'childOf' ? isDescendant(node, anchor, nodes) : key === 'containsChild' ? anchor.parentId === node.id : key === 'above' ? node.bounds.y < anchor.bounds.y : key === 'below' ? node.bounds.y > anchor.bounds.y : key === 'leftOf' ? node.bounds.x < anchor.bounds.x : node.bounds.x > anchor.bounds.x);
+    matches = matches.filter(node => (key === 'childOf' ? isDescendant(node, anchor, nodes) : key === 'containsChild' ? anchor.parentId === node.id : key === 'above' ? node.bounds.y < anchor.bounds.y : key === 'below' ? node.bounds.y > anchor.bounds.y : key === 'leftOf' ? node.bounds.x < anchor.bounds.x : node.bounds.x > anchor.bounds.x));
   }
   matches.sort((a, b) => a.bounds.y - b.bounds.y || a.bounds.x - b.bounds.x);
-  return applyIndex && selector.index !== undefined ? matches[selector.index] ? [matches[selector.index]] : [] : matches;
+  return applyIndex && selector.index !== undefined ? (matches[selector.index] ? [matches[selector.index]] : []) : matches;
 }
 function isDescendant(node: Candidate, ancestor: Candidate, nodes: Candidate[]): boolean {
   for (let parentId = node.parentId; parentId; parentId = nodes.find(parent => parent.id === parentId)?.parentId) if (parentId === ancestor.id) return true;

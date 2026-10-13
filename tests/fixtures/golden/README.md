@@ -13,20 +13,20 @@ bash scripts/check-canvas-contract.sh origin/main
 
 ## Fixtures
 
-| File | What it locks |
-| --- | --- |
-| `linear-route.json` | Home → Detail, then connect to an existing screen, clear that destination, and undo |
-| `text-tap.json` | `tapOn` by text, rewritten when its selector is edited, then retargeted from Detail onto More |
-| `id-tap.json` | `tapOn` by element id, rewritten when its selector is edited, then retargeted from Detail onto More |
-| `literal-back.json` | A literal `- back` command linked to an id `backSelector`. Projection rewrites it as `tapOn` by id; the opened page projects the default Back text |
-| `back.json` | Back by element id; editing the selector rewrites the `tnt-back` tap |
-| `repeated-visit.json` | Home → Detail → Home. Editing Visit 3 by `visitId` copies the shared Home check |
-| `shared-step.json` | One tap shared by two scenario routes. An edit in scenario A leaves scenario B unchanged |
-| `multi-action-edge.json` | A tap and an input on one edge. After the sibling and destination check are removed, retargeting leaves a route whose execution YAML is projected |
-| `unfrozen-visits.json` | A scenario route whose visits have no `operationIds`. Editing Visit 1 by `visitId` freezes them |
-| `legacy-visits.json` | Saved visits with no `operationIds`. Deleting the return connection runs the visit freeze, then stores the surviving visits without `operationIds` |
-| `deletion-cut.json` | Delete a step, a connection, and a screen, each cutting the route suffix, with undo |
-| `default-actions.json` | Setup plus a handler checkpoint on an ordered route. Editing the authored tap keeps the checkpoint |
+| File                     | What it locks                                                                                                                                      |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `linear-route.json`      | Home → Detail, then connect to an existing screen, clear that destination, and undo                                                                |
+| `text-tap.json`          | `tapOn` by text, rewritten when its selector is edited, then retargeted from Detail onto More                                                      |
+| `id-tap.json`            | `tapOn` by element id, rewritten when its selector is edited, then retargeted from Detail onto More                                                |
+| `literal-back.json`      | A literal `- back` command linked to an id `backSelector`. Projection rewrites it as `tapOn` by id; the opened page projects the default Back text |
+| `back.json`              | Back by element id; editing the selector rewrites the `tnt-back` tap                                                                               |
+| `repeated-visit.json`    | Home → Detail → Home. Editing Visit 3 by `visitId` copies the shared Home check                                                                    |
+| `shared-step.json`       | One tap shared by two scenario routes. An edit in scenario A leaves scenario B unchanged                                                           |
+| `multi-action-edge.json` | A tap and an input on one edge. After the sibling and destination check are removed, retargeting leaves a route whose execution YAML is projected  |
+| `unfrozen-visits.json`   | A scenario route whose visits have no `operationIds`. Editing Visit 1 by `visitId` freezes them                                                    |
+| `legacy-visits.json`     | Saved visits with no `operationIds`. Deleting the return connection runs the visit freeze, then stores the surviving visits without `operationIds` |
+| `deletion-cut.json`      | Delete a step, a connection, and a screen, each cutting the route suffix, with undo                                                                |
+| `default-actions.json`   | Setup plus a handler checkpoint on an ordered route. Editing the authored tap keeps the checkpoint                                                 |
 
 Each snapshot records, for the baseline and after every script:
 

@@ -28,14 +28,14 @@ Real integration used the separate controlled API app compiled from `tests/fixtu
 
 Workspace `c3cb9e8b-d1c2-4a63-a15e-408042344d01` contains both scenarios sharing Home, `setup.yaml` and `page.yaml`. Setup asserts `${START_PAGE}` (Home); the shared page flow asserts `${EXPECTED_PAGE}` (Maintenance or Success). Both explicitly enable the same notice-dismissal handler before Load page and select their distinct paths/mock responses.
 
-| Order / choice | Scenario | Run | Result |
-| --- | --- | --- | --- |
-| A then B, reset No | Maintenance | `1d8ba552-ae7f-4084-a751-ab38299313a9` | Passed; captured GET /items HTTP 500 |
-| A then B, reset No | Success | `a7c7920c-6e11-4636-ba0f-28337680c5b5` | Passed; captured GET /items HTTP 200 |
-| B then A, reset No | Success | `f1bfe733-7079-42e8-b006-1294fb1402b3` | Passed; captured GET /items HTTP 200 |
-| B then A, reset No | Maintenance | `8c7392fb-68c7-42cb-bd69-7c39b0d2491a` | Passed; captured GET /items HTTP 500 |
-| Explicit reset Yes | Success | `edd7a326-a257-49dc-bce1-15f7f9599626` | Passed; snapshot reset true |
-| Browser selection, preview and run, reset No | Success | `16ac0a5f-a1e9-45fc-9aab-868eae4e1260` | Passed; setup/handler/action/assertion and Success edge mapped; Maintenance unavailable |
+| Order / choice                               | Scenario    | Run                                    | Result                                                                                  |
+| -------------------------------------------- | ----------- | -------------------------------------- | --------------------------------------------------------------------------------------- |
+| A then B, reset No                           | Maintenance | `1d8ba552-ae7f-4084-a751-ab38299313a9` | Passed; captured GET /items HTTP 500                                                    |
+| A then B, reset No                           | Success     | `a7c7920c-6e11-4636-ba0f-28337680c5b5` | Passed; captured GET /items HTTP 200                                                    |
+| B then A, reset No                           | Success     | `f1bfe733-7079-42e8-b006-1294fb1402b3` | Passed; captured GET /items HTTP 200                                                    |
+| B then A, reset No                           | Maintenance | `8c7392fb-68c7-42cb-bd69-7c39b0d2491a` | Passed; captured GET /items HTTP 500                                                    |
+| Explicit reset Yes                           | Success     | `edd7a326-a257-49dc-bce1-15f7f9599626` | Passed; snapshot reset true                                                             |
+| Browser selection, preview and run, reset No | Success     | `16ac0a5f-a1e9-45fc-9aab-868eae4e1260` | Passed; setup/handler/action/assertion and Success edge mapped; Maintenance unavailable |
 
 Owned native/Mockoon process cleanup and mock environment reset were verified. Local ignored proof script/results are `.tnt/issue-9-proof.ts` and `.tnt/issue-9-proof.json`; run artifacts remain under `.tnt/runs/<run-id>`. Browser screenshot: `.tnt/issue-9-browser-success.png`.
 

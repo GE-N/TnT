@@ -18,10 +18,10 @@ A real batch executed on the booted iPhone 15 simulator, iOS 17.0, using Maestro
 
 Workspace: `f13fb438-3019-42b8-9b17-991decbae74f`. Batch: `d3b5a5cc-9cd6-4f94-932d-a6f206e6ce19`.
 
-| Saved sequence | Independent run | Outcome | Started → finished (UTC) |
-| --- | --- | --- | --- |
-| 1 → 2 → 3 → 2 → 1 | `22eeca9c-195d-4337-9d07-4ab2857d1cac` | passed | 04:52:46.082 → 04:53:06.390 |
-| 1 → 2 → 3 → 4 | `f82a8e79-3734-47d6-b99b-a8ef5376d8f6` | passed | 04:53:08.988 → 04:53:22.642 |
-| 1 → 2 → 1 | `f251eea9-bc1a-47de-aac8-7094ef6f7a24` | passed | 04:53:24.974 → 04:53:36.318 |
+| Saved sequence    | Independent run                        | Outcome | Started → finished (UTC)    |
+| ----------------- | -------------------------------------- | ------- | --------------------------- |
+| 1 → 2 → 3 → 2 → 1 | `22eeca9c-195d-4337-9d07-4ab2857d1cac` | passed  | 04:52:46.082 → 04:53:06.390 |
+| 1 → 2 → 3 → 4     | `f82a8e79-3734-47d6-b99b-a8ef5376d8f6` | passed  | 04:53:08.988 → 04:53:22.642 |
+| 1 → 2 → 1         | `f251eea9-bc1a-47de-aac8-7094ef6f7a24` | passed  | 04:53:24.974 → 04:53:36.318 |
 
 Each next run started after the preceding run finished. All three independently verified owned CLI exit and process-group disappearance. Their immutable snapshots, sequence evidence, reports and tool artifacts remain under ignored `.tnt/runs/<run-id>/`. The acceptance script and summarized proof remain under ignored `.scratch/issue-26/simulator-proof.ts` and `.scratch/issue-26/proof-results.json`; fixture source is `.scratch/issue-25/ReportProof.swift`.

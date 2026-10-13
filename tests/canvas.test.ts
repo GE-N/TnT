@@ -1,479 +1,1129 @@
-import {test} from 'node:test';
-import {parseAllDocuments} from 'yaml';
+import { test } from 'node:test';
+import { parseAllDocuments } from 'yaml';
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,rm} from 'node:fs/promises';
-import {join} from 'node:path';
-import {tmpdir} from 'node:os';
-import {createRunner} from '../server/runner.js';
-import {createScenarios} from '../server/scenarios.js';
-import type {CanvasGraph,YAMLReference} from '../server/canvas.js';
-const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
-const yaml='appId: com.example.HybridApp\n---\n- launchApp\n- tapOn: Settings\n- assertVisible: Settings\n';
-function device(root:string){return createRunner({artifactDirectory:root,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/installed/app',stderr:''})});}
-test('an explicitly selected canvas route maps actual outcomes to its immutable screen and transition references',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-'));
- try {
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
- await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
- await writeFile(join(directory,'commands.json'),JSON.stringify([
- {command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},
- {command:{tapOnElement:{}},metadata:{depth:0,status:'COMPLETED'}},
- {command:{assertConditionCommand:{}},metadata:{depth:0,status:'COMPLETED'}}]));
- return {code:0,log:'Fixture run',cleanup:{verified:true,detail:'Fixture owned process exited.'}};
- }}});
- const catalog=await (scenarios as any).references({yaml});
- const graph={screens:[{id:'home',title:'Home',x:60,y:100,tests:[{id:'trigger',label:'Open Settings',role:'action',reference:catalog.references[1]}]},{id:'settings',title:'Settings',x:430,y:100,tests:[{id:'destination',label:'Settings visible',role:'assertion',reference:catalog.references[2]}]}],edges:[{id:'open-settings',from:'home',to:'settings',actionTestId:'trigger',assertionTestId:'destination',responseCondition:'No API condition'}],paths:[{id:'settings-path',name:'Settings route',edgeIds:['open-settings']} ]};
- const workspace=await scenarios.save({name:'Canvas route',yaml,canvas:graph} as any);
- const run=await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'settings-path'} as any);
- await scenarios.save({id:workspace.id,metadata:workspace.metadata,name:'Later edit',yaml,canvas:{...graph,screens:graph.screens.map(s=>({...s,title:'Edited'}))}} as any);
- const result=await scenarios.wait(run.id);
- assert.equal(result.status,'passed');
- assert.equal((result as any).canvas.pathId,'settings-path');
- assert.deepEqual((result as any).canvas.edges.map((edge:any)=>[edge.id,edge.status]),[['open-settings','passed']]);
- assert.equal((result.snapshot as any).canvas.screens[0].title,'Home');
- assert.equal((result as any).canvas.screens.find((s:any)=>s.id==='settings').status,'passed');
- }finally{await rm(root,{recursive:true,force:true});}
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createRunner } from '../server/runner.js';
+import { createScenarios } from '../server/scenarios.js';
+import type { CanvasGraph, YAMLReference } from '../server/canvas.js';
+const deviceId = 'E5C92F6E-40DC-493C-93B4-469E67193736';
+const yaml = 'appId: com.example.HybridApp\n---\n- launchApp\n- tapOn: Settings\n- assertVisible: Settings\n';
+function device(root: string) {
+  return createRunner({ artifactDirectory: root, execute: async (_file, args) => ({ stdout: args.includes('list') ? JSON.stringify({ devices: { iOS: [{ udid: deviceId, name: 'iPhone', state: 'Booted', isAvailable: true }] } }) : '/installed/app', stderr: '' }) });
+}
+test('an explicitly selected canvas route maps actual outcomes to its immutable screen and transition references', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-'));
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory }) => {
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+          await writeFile(
+            join(directory, 'commands.json'),
+            JSON.stringify([
+              { command: { launchAppCommand: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { tapOnElement: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { assertConditionCommand: {} }, metadata: { depth: 0, status: 'COMPLETED' } }
+            ])
+          );
+          return { code: 0, log: 'Fixture run', cleanup: { verified: true, detail: 'Fixture owned process exited.' } };
+        }
+      }
+    });
+    const catalog = await (scenarios as any).references({ yaml });
+    const graph = {
+      screens: [
+        { id: 'home', title: 'Home', x: 60, y: 100, tests: [{ id: 'trigger', label: 'Open Settings', role: 'action', reference: catalog.references[1] }] },
+        { id: 'settings', title: 'Settings', x: 430, y: 100, tests: [{ id: 'destination', label: 'Settings visible', role: 'assertion', reference: catalog.references[2] }] }
+      ],
+      edges: [{ id: 'open-settings', from: 'home', to: 'settings', actionTestId: 'trigger', assertionTestId: 'destination', responseCondition: 'No API condition' }],
+      paths: [{ id: 'settings-path', name: 'Settings route', edgeIds: ['open-settings'] }]
+    };
+    const workspace = await scenarios.save({ name: 'Canvas route', yaml, canvas: graph } as any);
+    const run = await scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'settings-path' } as any);
+    await scenarios.save({ id: workspace.id, metadata: workspace.metadata, name: 'Later edit', yaml, canvas: { ...graph, screens: graph.screens.map(s => ({ ...s, title: 'Edited' })) } } as any);
+    const result = await scenarios.wait(run.id);
+    assert.equal(result.status, 'passed');
+    assert.equal((result as any).canvas.pathId, 'settings-path');
+    assert.deepEqual(
+      (result as any).canvas.edges.map((edge: any) => [edge.id, edge.status]),
+      [['open-settings', 'passed']]
+    );
+    assert.equal((result.snapshot as any).canvas.screens[0].title, 'Home');
+    assert.equal((result as any).canvas.screens.find((s: any) => s.id === 'settings').status, 'passed');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test('changing a called assertion flow makes its canvas reference stale instead of changing the meaning silently',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-stale-'));
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async()=>{throw new Error('Must not execute');}}});
- const flowYaml='appId: com.example.HybridApp\n---\n- tapOn: Settings\n- runFlow: page.yaml\n';
- const flows={'page.yaml':'appId: com.example.HybridApp\n---\n- assertVisible: Settings\n'};
- const catalog=await scenarios.references({yaml:flowYaml,flows});
- const graph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'action',label:'Settings tap',role:'action',reference:catalog.references[0]}]},{id:'settings',title:'Settings',x:400,y:0,tests:[{id:'assert',label:'Settings assertion',role:'assertion',reference:catalog.references[1]}]}],edges:[{id:'edge',from:'home',to:'settings',actionTestId:'action',assertionTestId:'assert',responseCondition:'No API'}],paths:[{id:'route',name:'Settings',edgeIds:['edge']}]};
- const workspace=await scenarios.save({name:'Stale flow',yaml:flowYaml,flows,canvas:graph});
- await scenarios.save({...workspace,flows:{'page.yaml':flows['page.yaml'].replace('Settings','Maintenance')}});
- await assert.rejects(scenarios.start({workspaceId:workspace.id,deviceId,pathId:'route'}),/stale/);
- }finally{await rm(root,{recursive:true,force:true});}
+test('changing a called assertion flow makes its canvas reference stale instead of changing the meaning silently', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-stale-'));
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async () => {
+          throw new Error('Must not execute');
+        }
+      }
+    });
+    const flowYaml = 'appId: com.example.HybridApp\n---\n- tapOn: Settings\n- runFlow: page.yaml\n';
+    const flows = { 'page.yaml': 'appId: com.example.HybridApp\n---\n- assertVisible: Settings\n' };
+    const catalog = await scenarios.references({ yaml: flowYaml, flows });
+    const graph = {
+      screens: [
+        { id: 'home', title: 'Home', x: 0, y: 0, tests: [{ id: 'action', label: 'Settings tap', role: 'action', reference: catalog.references[0] }] },
+        { id: 'settings', title: 'Settings', x: 400, y: 0, tests: [{ id: 'assert', label: 'Settings assertion', role: 'assertion', reference: catalog.references[1] }] }
+      ],
+      edges: [{ id: 'edge', from: 'home', to: 'settings', actionTestId: 'action', assertionTestId: 'assert', responseCondition: 'No API' }],
+      paths: [{ id: 'route', name: 'Settings', edgeIds: ['edge'] }]
+    };
+    const workspace = await scenarios.save({ name: 'Stale flow', yaml: flowYaml, flows, canvas: graph });
+    await scenarios.save({ ...workspace, flows: { 'page.yaml': flows['page.yaml'].replace('Settings', 'Maintenance') } });
+    await assert.rejects(scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'route' }), /stale/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test('a passed tool report cannot pass a selected route whose destination assertion was skipped',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-skipped-'));
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
- await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
- await writeFile(join(directory,'commands.json'),JSON.stringify([{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{tapOnElement:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{assertConditionCommand:{}},metadata:{depth:0,status:'SKIPPED'}}]));
- return{code:0,log:'Optional assertion skipped',cleanup:{verified:true,detail:'Fixture stopped.'}};
- }}});
- const catalog=await scenarios.references({yaml});
- const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'tap',label:'Open Settings',role:'action',reference:catalog.references[1]}]},{id:'settings',title:'Settings',x:400,y:0,tests:[{id:'assert',label:'Settings required',role:'assertion',reference:catalog.references[2]}]}],edges:[{id:'edge',from:'home',to:'settings',actionTestId:'tap',assertionTestId:'assert',responseCondition:'Settings route'}],paths:[{id:'path',name:'Settings',edgeIds:['edge']}]};
- const workspace=await scenarios.save({name:'Skipped destination',yaml,canvas});
- const result=await scenarios.wait((await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'})).id);
- assert.equal(result.status,'path-failed');assert.match(result.error??'',/selected.*not verified/i);
- }finally{await rm(root,{recursive:true,force:true});}
+test('a passed tool report cannot pass a selected route whose destination assertion was skipped', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-skipped-'));
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory }) => {
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+          await writeFile(
+            join(directory, 'commands.json'),
+            JSON.stringify([
+              { command: { launchAppCommand: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { tapOnElement: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { assertConditionCommand: {} }, metadata: { depth: 0, status: 'SKIPPED' } }
+            ])
+          );
+          return { code: 0, log: 'Optional assertion skipped', cleanup: { verified: true, detail: 'Fixture stopped.' } };
+        }
+      }
+    });
+    const catalog = await scenarios.references({ yaml });
+    const canvas = {
+      screens: [
+        { id: 'home', title: 'Home', x: 0, y: 0, tests: [{ id: 'tap', label: 'Open Settings', role: 'action', reference: catalog.references[1] }] },
+        { id: 'settings', title: 'Settings', x: 400, y: 0, tests: [{ id: 'assert', label: 'Settings required', role: 'assertion', reference: catalog.references[2] }] }
+      ],
+      edges: [{ id: 'edge', from: 'home', to: 'settings', actionTestId: 'tap', assertionTestId: 'assert', responseCondition: 'Settings route' }],
+      paths: [{ id: 'path', name: 'Settings', edgeIds: ['edge'] }]
+    };
+    const workspace = await scenarios.save({ name: 'Skipped destination', yaml, canvas });
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'path' })).id);
+    assert.equal(result.status, 'path-failed');
+    assert.match(result.error ?? '', /selected.*not verified/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test('a wrong destination fails its chosen transition without switching to another branch',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-wrong-'));
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
- await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="1"/></testsuites>');
- await writeFile(join(directory,'commands.json'),JSON.stringify([{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{tapOnElement:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{assertConditionCommand:{condition:{visible:{textRegex:'Settings'}}}},metadata:{depth:0,status:'FAILED',error:{message:'Wrong destination'}}}]));
- return{code:1,log:'Wrong destination',cleanup:{verified:true,detail:'Fixture stopped.'}};
- }}});
- const flows={'maintenance.yaml':'appId: com.example.HybridApp\n---\n- assertVisible: Maintenance\n'};
- const catalog=await scenarios.references({yaml,flows});
- const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'tap',label:'Open Settings',role:'action',reference:catalog.references[1]}]},{id:'settings',title:'Settings',x:400,y:0,tests:[{id:'assert',label:'Settings required',role:'assertion',reference:catalog.references[2]}]},{id:'maintenance',title:'Maintenance',x:400,y:400,tests:[{id:'maintenance-assert',label:'Shared maintenance assertion',role:'assertion',reference:catalog.references[3]}]}],edges:[{id:'settings-edge',from:'home',to:'settings',actionTestId:'tap',assertionTestId:'assert',responseCondition:'Normal'},{id:'maintenance-edge',from:'home',to:'maintenance',actionTestId:'tap',assertionTestId:'maintenance-assert',responseCondition:'HTTP 500'}],paths:[{id:'settings-path',name:'Settings',edgeIds:['settings-edge']},{id:'maintenance-path',name:'Maintenance',edgeIds:['maintenance-edge']}]};
- const workspace=await scenarios.save({name:'Two destinations',yaml,flows,canvas});
- const result=await scenarios.wait((await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'settings-path'})).id);
- assert.equal(result.status,'assertion-failed');assert.equal(result.canvas?.pathId,'settings-path');
- assert.deepEqual(result.canvas?.edges.map(edge=>[edge.id,edge.status]),[['settings-edge','failed'],['maintenance-edge','unavailable']]);
- await assert.rejects(scenarios.start({workspaceId:workspace.id,deviceId,pathId:'maintenance-path'}),/uncalled/);
- }finally{await rm(root,{recursive:true,force:true});}
+test('a wrong destination fails its chosen transition without switching to another branch', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-wrong-'));
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory }) => {
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="1"/></testsuites>');
+          await writeFile(
+            join(directory, 'commands.json'),
+            JSON.stringify([
+              { command: { launchAppCommand: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { tapOnElement: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { assertConditionCommand: { condition: { visible: { textRegex: 'Settings' } } } }, metadata: { depth: 0, status: 'FAILED', error: { message: 'Wrong destination' } } }
+            ])
+          );
+          return { code: 1, log: 'Wrong destination', cleanup: { verified: true, detail: 'Fixture stopped.' } };
+        }
+      }
+    });
+    const flows = { 'maintenance.yaml': 'appId: com.example.HybridApp\n---\n- assertVisible: Maintenance\n' };
+    const catalog = await scenarios.references({ yaml, flows });
+    const canvas = {
+      screens: [
+        { id: 'home', title: 'Home', x: 0, y: 0, tests: [{ id: 'tap', label: 'Open Settings', role: 'action', reference: catalog.references[1] }] },
+        { id: 'settings', title: 'Settings', x: 400, y: 0, tests: [{ id: 'assert', label: 'Settings required', role: 'assertion', reference: catalog.references[2] }] },
+        { id: 'maintenance', title: 'Maintenance', x: 400, y: 400, tests: [{ id: 'maintenance-assert', label: 'Shared maintenance assertion', role: 'assertion', reference: catalog.references[3] }] }
+      ],
+      edges: [
+        { id: 'settings-edge', from: 'home', to: 'settings', actionTestId: 'tap', assertionTestId: 'assert', responseCondition: 'Normal' },
+        { id: 'maintenance-edge', from: 'home', to: 'maintenance', actionTestId: 'tap', assertionTestId: 'maintenance-assert', responseCondition: 'HTTP 500' }
+      ],
+      paths: [
+        { id: 'settings-path', name: 'Settings', edgeIds: ['settings-edge'] },
+        { id: 'maintenance-path', name: 'Maintenance', edgeIds: ['maintenance-edge'] }
+      ]
+    };
+    const workspace = await scenarios.save({ name: 'Two destinations', yaml, flows, canvas });
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'settings-path' })).id);
+    assert.equal(result.status, 'assertion-failed');
+    assert.equal(result.canvas?.pathId, 'settings-path');
+    assert.deepEqual(
+      result.canvas?.edges.map(edge => [edge.id, edge.status]),
+      [
+        ['settings-edge', 'failed'],
+        ['maintenance-edge', 'unavailable']
+      ]
+    );
+    await assert.rejects(scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'maintenance-path' }), /uncalled/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test('duplicated moved commands produce repairable ambiguous references and prevent tool execution',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-ambiguous-'));
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async()=>{assert.fail('Must not run a stale path');}}});
- const catalog=await scenarios.references({yaml});
- const graph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'tap',label:'Original tap',role:'action',reference:catalog.references[1]}]},{id:'settings',title:'Settings',x:400,y:0,tests:[{id:'assert',label:'Destination',role:'assertion',reference:catalog.references[2]}]}],edges:[{id:'edge',from:'home',to:'settings',actionTestId:'tap',assertionTestId:'assert',responseCondition:'Normal'}],paths:[{id:'path',name:'Normal',edgeIds:['edge']}]};
- const changed='appId: com.example.HybridApp\n---\n- launchApp\n- assertVisible: Home\n- tapOn: Settings\n- tapOn: Settings\n- assertVisible: Settings\n';
- const workspace=await scenarios.save({name:'Ambiguous edit',yaml:changed,canvas:graph});
- assert.match(workspace.canvasDiagnostics?.find(item=>item.ownerId==='tap')?.detail??'',/Ambiguous/);
- await assert.rejects(scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'}),/Ambiguous/);
- const updated=await scenarios.references({yaml:changed});
- graph.screens[0].tests[0].reference=updated.references[2];graph.screens[1].tests[0].reference=updated.references[4];
- const repaired=await scenarios.save({id:workspace.id,metadata:workspace.metadata,name:'Explicit repair',yaml:changed,canvas:graph});
- assert.deepEqual(repaired.canvasDiagnostics,[]);
- }finally{await rm(root,{recursive:true,force:true});}
+test('duplicated moved commands produce repairable ambiguous references and prevent tool execution', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-ambiguous-'));
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async () => {
+          assert.fail('Must not run a stale path');
+        }
+      }
+    });
+    const catalog = await scenarios.references({ yaml });
+    const graph = {
+      screens: [
+        { id: 'home', title: 'Home', x: 0, y: 0, tests: [{ id: 'tap', label: 'Original tap', role: 'action', reference: catalog.references[1] }] },
+        { id: 'settings', title: 'Settings', x: 400, y: 0, tests: [{ id: 'assert', label: 'Destination', role: 'assertion', reference: catalog.references[2] }] }
+      ],
+      edges: [{ id: 'edge', from: 'home', to: 'settings', actionTestId: 'tap', assertionTestId: 'assert', responseCondition: 'Normal' }],
+      paths: [{ id: 'path', name: 'Normal', edgeIds: ['edge'] }]
+    };
+    const changed = 'appId: com.example.HybridApp\n---\n- launchApp\n- assertVisible: Home\n- tapOn: Settings\n- tapOn: Settings\n- assertVisible: Settings\n';
+    const workspace = await scenarios.save({ name: 'Ambiguous edit', yaml: changed, canvas: graph });
+    assert.match(workspace.canvasDiagnostics?.find(item => item.ownerId === 'tap')?.detail ?? '', /Ambiguous/);
+    await assert.rejects(scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'path' }), /Ambiguous/);
+    const updated = await scenarios.references({ yaml: changed });
+    graph.screens[0].tests[0].reference = updated.references[2];
+    graph.screens[1].tests[0].reference = updated.references[4];
+    const repaired = await scenarios.save({ id: workspace.id, metadata: workspace.metadata, name: 'Explicit repair', yaml: changed, canvas: graph });
+    assert.deepEqual(repaired.canvasDiagnostics, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test('reusable flow header variables are part of the executable reference identity',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-header-'));
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async()=>{assert.fail('Stale header must not execute');}}});
- const source='appId: com.example.HybridApp\n---\n- tapOn: Settings\n- runFlow: page.yaml\n';
- const flows={'page.yaml':'appId: com.example.HybridApp\nenv:\n  EXPECTED_PAGE: Settings\n---\n- assertVisible: ${EXPECTED_PAGE}\n'};
- const catalog=await scenarios.references({yaml:source,flows});
- const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'tap',label:'Settings tap',role:'action',reference:catalog.references[0]}]},{id:'settings',title:'Settings',x:400,y:0,tests:[{id:'assert',label:'Expected page flow',role:'assertion',reference:catalog.references[2]}]}],edges:[{id:'edge',from:'home',to:'settings',actionTestId:'tap',assertionTestId:'assert',responseCondition:'Normal'}],paths:[{id:'path',name:'Settings',edgeIds:['edge']}]};
- const workspace=await scenarios.save({name:'Header changed',yaml:source,flows:{'page.yaml':flows['page.yaml'].replace('EXPECTED_PAGE: Settings','EXPECTED_PAGE: Maintenance')},canvas});
- assert.match(workspace.canvasDiagnostics?.find(item=>item.ownerId==='assert')?.detail??'',/stale/);
- await assert.rejects(scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'}),/stale/);
- }finally{await rm(root,{recursive:true,force:true});}
+test('reusable flow header variables are part of the executable reference identity', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-header-'));
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async () => {
+          assert.fail('Stale header must not execute');
+        }
+      }
+    });
+    const source = 'appId: com.example.HybridApp\n---\n- tapOn: Settings\n- runFlow: page.yaml\n';
+    const flows = { 'page.yaml': 'appId: com.example.HybridApp\nenv:\n  EXPECTED_PAGE: Settings\n---\n- assertVisible: ${EXPECTED_PAGE}\n' };
+    const catalog = await scenarios.references({ yaml: source, flows });
+    const canvas = {
+      screens: [
+        { id: 'home', title: 'Home', x: 0, y: 0, tests: [{ id: 'tap', label: 'Settings tap', role: 'action', reference: catalog.references[0] }] },
+        { id: 'settings', title: 'Settings', x: 400, y: 0, tests: [{ id: 'assert', label: 'Expected page flow', role: 'assertion', reference: catalog.references[2] }] }
+      ],
+      edges: [{ id: 'edge', from: 'home', to: 'settings', actionTestId: 'tap', assertionTestId: 'assert', responseCondition: 'Normal' }],
+      paths: [{ id: 'path', name: 'Settings', edgeIds: ['edge'] }]
+    };
+    const workspace = await scenarios.save({ name: 'Header changed', yaml: source, flows: { 'page.yaml': flows['page.yaml'].replace('EXPECTED_PAGE: Settings', 'EXPECTED_PAGE: Maintenance') }, canvas });
+    assert.match(workspace.canvasDiagnostics?.find(item => item.ownerId === 'assert')?.detail ?? '', /stale/);
+    await assert.rejects(scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'path' }), /stale/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test('root header variable changes also require explicit destination relinking',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-root-header-'));
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async()=>{assert.fail('Stale root header must not execute');}}});
- const source='appId: com.example.HybridApp\nenv:\n  PAGE: Settings\n---\n- tapOn: Settings\n- assertVisible: ${PAGE}\n';
- const catalog=await scenarios.references({yaml:source});
- const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'tap',label:'Tap',role:'action',reference:catalog.references[0]}]},{id:'settings',title:'Settings',x:400,y:0,tests:[{id:'assert',label:'Expected page',role:'assertion',reference:catalog.references[1]}]}],edges:[{id:'edge',from:'home',to:'settings',actionTestId:'tap',assertionTestId:'assert',responseCondition:'Normal'}],paths:[{id:'path',name:'Settings',edgeIds:['edge']}]};
- const workspace=await scenarios.save({name:'Root header changed',yaml:source.replace('PAGE: Settings','PAGE: Maintenance'),canvas});
- await assert.rejects(scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'}),/stale/);
- }finally{await rm(root,{recursive:true,force:true});}
+test('root header variable changes also require explicit destination relinking', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-root-header-'));
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async () => {
+          assert.fail('Stale root header must not execute');
+        }
+      }
+    });
+    const source = 'appId: com.example.HybridApp\nenv:\n  PAGE: Settings\n---\n- tapOn: Settings\n- assertVisible: ${PAGE}\n';
+    const catalog = await scenarios.references({ yaml: source });
+    const canvas = {
+      screens: [
+        { id: 'home', title: 'Home', x: 0, y: 0, tests: [{ id: 'tap', label: 'Tap', role: 'action', reference: catalog.references[0] }] },
+        { id: 'settings', title: 'Settings', x: 400, y: 0, tests: [{ id: 'assert', label: 'Expected page', role: 'assertion', reference: catalog.references[1] }] }
+      ],
+      edges: [{ id: 'edge', from: 'home', to: 'settings', actionTestId: 'tap', assertionTestId: 'assert', responseCondition: 'Normal' }],
+      paths: [{ id: 'path', name: 'Settings', edgeIds: ['edge'] }]
+    };
+    const workspace = await scenarios.save({ name: 'Root header changed', yaml: source.replace('PAGE: Settings', 'PAGE: Maintenance'), canvas });
+    await assert.rejects(scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'path' }), /stale/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test('a reusable-flow association becomes stale when its root invocation parameters change',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-invocation-'));
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async()=>{assert.fail('Changed invocation must not execute');}}});
- const source='appId: com.example.HybridApp\n---\n- tapOn: Settings\n- runFlow:\n    file: page.yaml\n    env:\n      PAGE: Settings\n';
- const flows={'page.yaml':'appId: com.example.HybridApp\n---\n- assertVisible: ${PAGE}\n'};
- const catalog=await scenarios.references({yaml:source,flows});
- const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'tap',label:'Tap',role:'action',reference:catalog.references[0]}]},{id:'settings',title:'Settings',x:400,y:0,tests:[{id:'assert',label:'Expected page',role:'assertion',reference:catalog.references[2]}]}],edges:[{id:'edge',from:'home',to:'settings',actionTestId:'tap',assertionTestId:'assert',responseCondition:'Normal'}],paths:[{id:'path',name:'Settings',edgeIds:['edge']}]};
- const workspace=await scenarios.save({name:'Invocation changed',yaml:source.replace('PAGE: Settings','PAGE: Maintenance'),flows,canvas});
- await assert.rejects(scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'}),/stale/);
- }finally{await rm(root,{recursive:true,force:true});}
+test('a reusable-flow association becomes stale when its root invocation parameters change', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-invocation-'));
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async () => {
+          assert.fail('Changed invocation must not execute');
+        }
+      }
+    });
+    const source = 'appId: com.example.HybridApp\n---\n- tapOn: Settings\n- runFlow:\n    file: page.yaml\n    env:\n      PAGE: Settings\n';
+    const flows = { 'page.yaml': 'appId: com.example.HybridApp\n---\n- assertVisible: ${PAGE}\n' };
+    const catalog = await scenarios.references({ yaml: source, flows });
+    const canvas = {
+      screens: [
+        { id: 'home', title: 'Home', x: 0, y: 0, tests: [{ id: 'tap', label: 'Tap', role: 'action', reference: catalog.references[0] }] },
+        { id: 'settings', title: 'Settings', x: 400, y: 0, tests: [{ id: 'assert', label: 'Expected page', role: 'assertion', reference: catalog.references[2] }] }
+      ],
+      edges: [{ id: 'edge', from: 'home', to: 'settings', actionTestId: 'tap', assertionTestId: 'assert', responseCondition: 'Normal' }],
+      paths: [{ id: 'path', name: 'Settings', edgeIds: ['edge'] }]
+    };
+    const workspace = await scenarios.save({ name: 'Invocation changed', yaml: source.replace('PAGE: Settings', 'PAGE: Maintenance'), flows, canvas });
+    await assert.rejects(scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'path' }), /stale/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
-test('a selected route maps its checkpoint handler and setup from the executed snapshot, not another invocation of the same flow',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-handler-'));
- try{
-  const source='appId: com.example.HybridApp\n---\n- assertVisible: Details\n';
-  const flows={'setup.yaml':'appId: com.example.HybridApp\n---\n- assertVisible: Home\n','action.yaml':'appId: com.example.HybridApp\n---\n- tapOn: ${TARGET}\n'};
-  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
-   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
-   await writeFile(join(directory,'commands.json'),JSON.stringify([
-    {command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:{runFlowCommand:{label:'TnT setup'}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:{runFlowCommand:{label:'TnT checkpoint 1'}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:{runFlowCommand:{label:'TnT handler open checkpoint 1'}},metadata:{depth:2,status:'COMPLETED'}},
-    {command:{runFlowCommand:{label:'TnT handler other checkpoint 1'}},metadata:{depth:2,status:'SKIPPED'}},
-    {command:{runFlowCommand:{label:'TnT step 1',commands:[{assertConditionCommand:{condition:{visible:{textRegex:'Details'}}}}]}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:{assertConditionCommand:{condition:{visible:{textRegex:'Details'}}}},metadata:{depth:1,status:'COMPLETED'}},
-   ]));return{code:0,log:'Fixture',cleanup:{verified:true,detail:'Exited'}};
-  }}});
-  const plain=await scenarios.references({yaml:source,flows});
-  const automation={setup:{file:'setup.yaml',parameters:{}},actions:[{id:'open',name:'Open details',condition:{text:'Home'},file:'action.yaml',parameters:{TARGET:'Coordinator'},enabled:true},{id:'other',name:'Other action',condition:{text:'Home'},file:'action.yaml',parameters:{TARGET:'Wrong'},enabled:true}],checkpoints:[{beforeStep:0,fingerprint:plain.references[0].fingerprint,timeoutMs:0}]};
-  const catalog=await scenarios.references({yaml:source,flows,automation});
-  const handler=catalog.references.find(reference=>reference.kind==='handler'&&reference.actionId==='open');assert.ok(handler);
-  const setup=catalog.references.find(reference=>reference.kind==='setup');assert.ok(setup);
-  const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'setup',label:'Independent setup',role:'setup',reference:setup},{id:'trigger',label:'Open details',role:'handler',reference:handler}]},{id:'details',title:'Details',x:400,y:0,tests:[{id:'assert',label:'Expected Details',role:'assertion',reference:catalog.references[0]}]}],edges:[{id:'edge',from:'home',to:'details',actionTestId:'trigger',assertionTestId:'assert',responseCondition:'Default action opens Details'}],paths:[{id:'path',name:'Details',edgeIds:['edge']}]};
-  const workspace=await scenarios.save({name:'Handler route',yaml:source,flows,automation,canvas});
-  const result=await scenarios.wait((await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'})).id);
-  assert.equal(result.status,'passed');assert.equal(result.canvas?.tests.find(test=>test.id==='setup')?.status,'passed');
-  assert.equal(result.canvas?.tests.find(test=>test.id==='trigger')?.status,'passed');assert.equal(result.canvas?.edges[0].status,'passed');
-  await scenarios.save({...workspace,automation:{...automation,actions:automation.actions.map(action=>({...action,parameters:{TARGET:'Edited after run'}}))}});
-  assert.equal((await scenarios.result(result.id)).canvas?.tests.find(test=>test.id==='trigger')?.status,'passed');
- }finally{await rm(root,{recursive:true,force:true});}
+test('a selected route maps its checkpoint handler and setup from the executed snapshot, not another invocation of the same flow', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-handler-'));
+  try {
+    const source = 'appId: com.example.HybridApp\n---\n- assertVisible: Details\n';
+    const flows = { 'setup.yaml': 'appId: com.example.HybridApp\n---\n- assertVisible: Home\n', 'action.yaml': 'appId: com.example.HybridApp\n---\n- tapOn: ${TARGET}\n' };
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory }) => {
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+          await writeFile(
+            join(directory, 'commands.json'),
+            JSON.stringify([
+              { command: { launchAppCommand: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT setup' } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT checkpoint 1' } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT handler open checkpoint 1' } }, metadata: { depth: 2, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT handler other checkpoint 1' } }, metadata: { depth: 2, status: 'SKIPPED' } },
+              { command: { runFlowCommand: { label: 'TnT step 1', commands: [{ assertConditionCommand: { condition: { visible: { textRegex: 'Details' } } } }] } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { assertConditionCommand: { condition: { visible: { textRegex: 'Details' } } } }, metadata: { depth: 1, status: 'COMPLETED' } }
+            ])
+          );
+          return { code: 0, log: 'Fixture', cleanup: { verified: true, detail: 'Exited' } };
+        }
+      }
+    });
+    const plain = await scenarios.references({ yaml: source, flows });
+    const automation = {
+      setup: { file: 'setup.yaml', parameters: {} },
+      actions: [
+        { id: 'open', name: 'Open details', condition: { text: 'Home' }, file: 'action.yaml', parameters: { TARGET: 'Coordinator' }, enabled: true },
+        { id: 'other', name: 'Other action', condition: { text: 'Home' }, file: 'action.yaml', parameters: { TARGET: 'Wrong' }, enabled: true }
+      ],
+      checkpoints: [{ beforeStep: 0, fingerprint: plain.references[0].fingerprint, timeoutMs: 0 }]
+    };
+    const catalog = await scenarios.references({ yaml: source, flows, automation });
+    const handler = catalog.references.find(reference => reference.kind === 'handler' && reference.actionId === 'open');
+    assert.ok(handler);
+    const setup = catalog.references.find(reference => reference.kind === 'setup');
+    assert.ok(setup);
+    const canvas = {
+      screens: [
+        {
+          id: 'home',
+          title: 'Home',
+          x: 0,
+          y: 0,
+          tests: [
+            { id: 'setup', label: 'Independent setup', role: 'setup', reference: setup },
+            { id: 'trigger', label: 'Open details', role: 'handler', reference: handler }
+          ]
+        },
+        { id: 'details', title: 'Details', x: 400, y: 0, tests: [{ id: 'assert', label: 'Expected Details', role: 'assertion', reference: catalog.references[0] }] }
+      ],
+      edges: [{ id: 'edge', from: 'home', to: 'details', actionTestId: 'trigger', assertionTestId: 'assert', responseCondition: 'Default action opens Details' }],
+      paths: [{ id: 'path', name: 'Details', edgeIds: ['edge'] }]
+    };
+    const workspace = await scenarios.save({ name: 'Handler route', yaml: source, flows, automation, canvas });
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'path' })).id);
+    assert.equal(result.status, 'passed');
+    assert.equal(result.canvas?.tests.find(test => test.id === 'setup')?.status, 'passed');
+    assert.equal(result.canvas?.tests.find(test => test.id === 'trigger')?.status, 'passed');
+    assert.equal(result.canvas?.edges[0].status, 'passed');
+    await scenarios.save({ ...workspace, automation: { ...automation, actions: automation.actions.map(action => ({ ...action, parameters: { TARGET: 'Edited after run' } })) } });
+    assert.equal((await scenarios.result(result.id)).canvas?.tests.find(test => test.id === 'trigger')?.status, 'passed');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
-test('an unrelated authored subflow label cannot make a skipped checkpoint handler pass its selected route',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-handler-scope-'));
- try{
-  const source='appId: com.example.HybridApp\n---\n- assertVisible: Details\n';
-  const flows={'setup.yaml':'appId: com.example.HybridApp\n---\n- assertVisible: Home\n','action.yaml':'appId: com.example.HybridApp\n---\n- tapOn: Coordinator\n'};
-  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
-   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
-   await writeFile(join(directory,'commands.json'),JSON.stringify([
-    {command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:{runFlowCommand:{label:'TnT setup'}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:{runFlowCommand:{label:'TnT checkpoint 1'}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:{runFlowCommand:{label:'TnT handler open checkpoint 1'}},metadata:{depth:2,status:'SKIPPED'}},
-    {command:{runFlowCommand:{label:'TnT step 1',commands:[{assertConditionCommand:{condition:{visible:{textRegex:'Details'}}}}]}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:{assertConditionCommand:{condition:{visible:{textRegex:'Details'}}}},metadata:{depth:1,status:'COMPLETED'}},
-    {command:{runFlowCommand:{label:'TnT handler open checkpoint 1'}},metadata:{depth:2,status:'COMPLETED'}},
-   ]));return{code:0,log:'Fixture',cleanup:{verified:true,detail:'Exited'}};
-  }}});
-  const plain=await scenarios.references({yaml:source,flows});
-  const automation={setup:{file:'setup.yaml',parameters:{}},actions:[{id:'open',name:'Open',condition:{text:'Absent'},file:'action.yaml',parameters:{},enabled:true}],checkpoints:[{beforeStep:0,fingerprint:plain.references[0].fingerprint,timeoutMs:0}]};
-  const catalog=await scenarios.references({yaml:source,flows,automation});const handler=catalog.references.find(reference=>reference.kind==='handler')!;
-  const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'trigger',label:'Open',role:'handler',reference:handler}]},{id:'details',title:'Details',x:400,y:0,tests:[{id:'assert',label:'Details',role:'assertion',reference:catalog.references[0]}]}],edges:[{id:'edge',from:'home',to:'details',actionTestId:'trigger',assertionTestId:'assert',responseCondition:'Only explicit handler'}],paths:[{id:'path',name:'Details',edgeIds:['edge']}]};
-  const workspace=await scenarios.save({name:'Scoped outcome',yaml:source,flows,automation,canvas});
-  const result=await scenarios.wait((await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'})).id);
-  assert.equal(result.status,'path-failed');assert.equal(result.canvas?.tests.find(test=>test.id==='trigger')?.status,'skipped');
- }finally{await rm(root,{recursive:true,force:true});}
+test('an unrelated authored subflow label cannot make a skipped checkpoint handler pass its selected route', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-handler-scope-'));
+  try {
+    const source = 'appId: com.example.HybridApp\n---\n- assertVisible: Details\n';
+    const flows = { 'setup.yaml': 'appId: com.example.HybridApp\n---\n- assertVisible: Home\n', 'action.yaml': 'appId: com.example.HybridApp\n---\n- tapOn: Coordinator\n' };
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory }) => {
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+          await writeFile(
+            join(directory, 'commands.json'),
+            JSON.stringify([
+              { command: { launchAppCommand: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT setup' } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT checkpoint 1' } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT handler open checkpoint 1' } }, metadata: { depth: 2, status: 'SKIPPED' } },
+              { command: { runFlowCommand: { label: 'TnT step 1', commands: [{ assertConditionCommand: { condition: { visible: { textRegex: 'Details' } } } }] } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { assertConditionCommand: { condition: { visible: { textRegex: 'Details' } } } }, metadata: { depth: 1, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT handler open checkpoint 1' } }, metadata: { depth: 2, status: 'COMPLETED' } }
+            ])
+          );
+          return { code: 0, log: 'Fixture', cleanup: { verified: true, detail: 'Exited' } };
+        }
+      }
+    });
+    const plain = await scenarios.references({ yaml: source, flows });
+    const automation = { setup: { file: 'setup.yaml', parameters: {} }, actions: [{ id: 'open', name: 'Open', condition: { text: 'Absent' }, file: 'action.yaml', parameters: {}, enabled: true }], checkpoints: [{ beforeStep: 0, fingerprint: plain.references[0].fingerprint, timeoutMs: 0 }] };
+    const catalog = await scenarios.references({ yaml: source, flows, automation });
+    const handler = catalog.references.find(reference => reference.kind === 'handler')!;
+    const canvas = {
+      screens: [
+        { id: 'home', title: 'Home', x: 0, y: 0, tests: [{ id: 'trigger', label: 'Open', role: 'handler', reference: handler }] },
+        { id: 'details', title: 'Details', x: 400, y: 0, tests: [{ id: 'assert', label: 'Details', role: 'assertion', reference: catalog.references[0] }] }
+      ],
+      edges: [{ id: 'edge', from: 'home', to: 'details', actionTestId: 'trigger', assertionTestId: 'assert', responseCondition: 'Only explicit handler' }],
+      paths: [{ id: 'path', name: 'Details', edgeIds: ['edge'] }]
+    };
+    const workspace = await scenarios.save({ name: 'Scoped outcome', yaml: source, flows, automation, canvas });
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'path' })).id);
+    assert.equal(result.status, 'path-failed');
+    assert.equal(result.canvas?.tests.find(test => test.id === 'trigger')?.status, 'skipped');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
-test('a stale auxiliary handler association stays unavailable even when its newly configured action passes',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-auxiliary-'));
- try{
-  const source='appId: com.example.HybridApp\n---\n- tapOn: Coordinator\n- assertVisible: Details\n';
-  const flows={'setup.yaml':'appId: com.example.HybridApp\n---\n- assertVisible: Home\n','action.yaml':'appId: com.example.HybridApp\n---\n- tapOn: ${TARGET}\n'};
-  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
-   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
-   const labels=['TnT setup','TnT checkpoint 1','TnT handler optional checkpoint 1','TnT step 1','TnT step 2'];
-   await writeFile(join(directory,'commands.json'),JSON.stringify([{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},...labels.flatMap<unknown>(label=>label==='TnT step 2'?[{command:{runFlowCommand:{label,commands:[{assertConditionCommand:{condition:{visible:{textRegex:'Details'}}}}]}},metadata:{depth:0,status:'COMPLETED'}},{command:{assertConditionCommand:{condition:{visible:{textRegex:'Details'}}}},metadata:{depth:1,status:'COMPLETED'}}]:[{command:{runFlowCommand:{label}},metadata:{depth:label.includes('handler')?2:0,status:'COMPLETED'}}])]));
-   return{code:0,log:'Fixture',cleanup:{verified:true,detail:'Exited'}};
-  }}});
-  const plain=await scenarios.references({yaml:source,flows});
-  const automation={setup:{file:'setup.yaml',parameters:{}},actions:[{id:'optional',name:'Optional',condition:{text:'Home'},file:'action.yaml',parameters:{TARGET:'Old'},enabled:true}],checkpoints:[{beforeStep:0,fingerprint:plain.references[0].fingerprint,timeoutMs:0}]};
-  const catalog=await scenarios.references({yaml:source,flows,automation});
-  const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'trigger',label:'Tap',role:'action',reference:plain.references[0]},{id:'old-handler',label:'Old handler',role:'handler',reference:catalog.references.find(reference=>reference.kind==='handler')!}]},{id:'details',title:'Details',x:400,y:0,tests:[{id:'assert',label:'Details',role:'assertion',reference:plain.references[1]}]}],edges:[{id:'edge',from:'home',to:'details',actionTestId:'trigger',assertionTestId:'assert',responseCondition:'Authored route'}],paths:[{id:'path',name:'Details',edgeIds:['edge']}]};
-  const workspace=await scenarios.save({name:'Stale auxiliary',yaml:source,flows,canvas,automation:{...automation,actions:automation.actions.map(action=>({...action,parameters:{TARGET:'New'}}))}});
-  assert.ok(workspace.canvasDiagnostics?.some(diagnostic=>diagnostic.ownerId==='old-handler'));
-  const result=await scenarios.wait((await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'})).id);
-  assert.equal(result.status,'passed');assert.equal(result.automation?.actions[0].status,'passed');
-  assert.equal(result.canvas?.tests.find(test=>test.id==='old-handler')?.status,'unavailable');
-  assert.match(result.canvas?.tests.find(test=>test.id==='old-handler')?.detail??'',/stale/);
- }finally{await rm(root,{recursive:true,force:true});}
+test('a stale auxiliary handler association stays unavailable even when its newly configured action passes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-auxiliary-'));
+  try {
+    const source = 'appId: com.example.HybridApp\n---\n- tapOn: Coordinator\n- assertVisible: Details\n';
+    const flows = { 'setup.yaml': 'appId: com.example.HybridApp\n---\n- assertVisible: Home\n', 'action.yaml': 'appId: com.example.HybridApp\n---\n- tapOn: ${TARGET}\n' };
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory }) => {
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+          const labels = ['TnT setup', 'TnT checkpoint 1', 'TnT handler optional checkpoint 1', 'TnT step 1', 'TnT step 2'];
+          await writeFile(
+            join(directory, 'commands.json'),
+            JSON.stringify([
+              { command: { launchAppCommand: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              ...labels.flatMap<unknown>(label =>
+                label === 'TnT step 2'
+                  ? [
+                      { command: { runFlowCommand: { label, commands: [{ assertConditionCommand: { condition: { visible: { textRegex: 'Details' } } } }] } }, metadata: { depth: 0, status: 'COMPLETED' } },
+                      { command: { assertConditionCommand: { condition: { visible: { textRegex: 'Details' } } } }, metadata: { depth: 1, status: 'COMPLETED' } }
+                    ]
+                  : [{ command: { runFlowCommand: { label } }, metadata: { depth: label.includes('handler') ? 2 : 0, status: 'COMPLETED' } }]
+              )
+            ])
+          );
+          return { code: 0, log: 'Fixture', cleanup: { verified: true, detail: 'Exited' } };
+        }
+      }
+    });
+    const plain = await scenarios.references({ yaml: source, flows });
+    const automation = { setup: { file: 'setup.yaml', parameters: {} }, actions: [{ id: 'optional', name: 'Optional', condition: { text: 'Home' }, file: 'action.yaml', parameters: { TARGET: 'Old' }, enabled: true }], checkpoints: [{ beforeStep: 0, fingerprint: plain.references[0].fingerprint, timeoutMs: 0 }] };
+    const catalog = await scenarios.references({ yaml: source, flows, automation });
+    const canvas = {
+      screens: [
+        {
+          id: 'home',
+          title: 'Home',
+          x: 0,
+          y: 0,
+          tests: [
+            { id: 'trigger', label: 'Tap', role: 'action', reference: plain.references[0] },
+            { id: 'old-handler', label: 'Old handler', role: 'handler', reference: catalog.references.find(reference => reference.kind === 'handler')! }
+          ]
+        },
+        { id: 'details', title: 'Details', x: 400, y: 0, tests: [{ id: 'assert', label: 'Details', role: 'assertion', reference: plain.references[1] }] }
+      ],
+      edges: [{ id: 'edge', from: 'home', to: 'details', actionTestId: 'trigger', assertionTestId: 'assert', responseCondition: 'Authored route' }],
+      paths: [{ id: 'path', name: 'Details', edgeIds: ['edge'] }]
+    };
+    const workspace = await scenarios.save({ name: 'Stale auxiliary', yaml: source, flows, canvas, automation: { ...automation, actions: automation.actions.map(action => ({ ...action, parameters: { TARGET: 'New' } })) } });
+    assert.ok(workspace.canvasDiagnostics?.some(diagnostic => diagnostic.ownerId === 'old-handler'));
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'path' })).id);
+    assert.equal(result.status, 'passed');
+    assert.equal(result.automation?.actions[0].status, 'passed');
+    assert.equal(result.canvas?.tests.find(test => test.id === 'old-handler')?.status, 'unavailable');
+    assert.match(result.canvas?.tests.find(test => test.id === 'old-handler')?.detail ?? '', /stale/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
-test('a completed reusable-flow wrapper cannot pass a destination whose nested assertion was skipped',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-nested-skipped-'));
- try{
-  const source='appId: com.example.HybridApp\n---\n- tapOn: Open\n- runFlow: maintenance.yaml\n';
-  const flows={'maintenance.yaml':'appId: com.example.HybridApp\n---\n- assertVisible:\n    text: Maintenance\n    optional: true\n'};
-  const assertion={assertConditionCommand:{condition:{visible:{textRegex:'Maintenance',optional:true}}}};
-  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
-   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
-   await writeFile(join(directory,'commands.json'),JSON.stringify([
-    {command:{tapOnElement:{}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:{runFlowCommand:{commands:[assertion]}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:assertion,metadata:{depth:1,status:'SKIPPED'}},
-   ]));return{code:0,log:'Optional assertion skipped',cleanup:{verified:true,detail:'Exited'}};
-  }}});
-  const catalog=await scenarios.references({yaml:source,flows});
-  const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'trigger',label:'Open',role:'action',reference:catalog.references[0]}]},{id:'maintenance',title:'Maintenance',x:400,y:0,tests:[{id:'assert',label:'Maintenance',role:'assertion',reference:catalog.references[2]}]}],edges:[{id:'edge',from:'home',to:'maintenance',actionTestId:'trigger',assertionTestId:'assert',responseCondition:'Maintenance required'}],paths:[{id:'path',name:'Maintenance',edgeIds:['edge']}]};
-  const workspace=await scenarios.save({name:'Nested assertion skipped',yaml:source,flows,canvas});
-  const result=await scenarios.wait((await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'path'})).id);
-  assert.equal(result.status,'path-failed');assert.equal(result.canvas?.tests.find(test=>test.id==='assert')?.status,'skipped');
- }finally{await rm(root,{recursive:true,force:true});}
-});
-
-test('a single screen reloads YAML edits into checks and blocks incomplete drafts before acquiring a device',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-screen-draft-'));
- try{
-  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async()=>{throw new Error('Draft must not run');}}});
-  const source='appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:welcome\n- assertNotVisible:\n    text: "^Error$"\n';
-  const canvas={screens:[{id:'home',title:'Descriptive title',x:70,y:90,tests:[{id:'welcome',label:'Welcome',role:'assertion',reference:{kind:'step',file:'flow.yaml',index:1,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:'Old'}},{id:'draft',label:'Draft',role:'assertion',reference:{kind:'step',file:'flow.yaml',index:2,fingerprint:'draft'},check:{visibility:'visible',target:'id',match:'exact',value:''}}]}],edges:[],paths:[{id:'single',name:'Home checks',edgeIds:[],screenId:'home'}]};
-  const saved=await scenarios.save({name:'Screen draft',yaml:source,canvas});
-  const loaded=await scenarios.workspace(saved.id);
-  assert.deepEqual(loaded.canvas!.screens[0].tests[0].check,{visibility:'absent',target:'text',match:'exact',value:'Error'});
-  assert.equal(loaded.yaml,source);assert.equal(loaded.canvas!.screens[0].x,70);
-  assert.match(loaded.canvasDiagnostics!.find(item=>item.ownerId==='draft')!.detail,/selector/i);
-  await assert.rejects(scenarios.start({workspaceId:loaded.id,deviceId,pathId:'single'}),/selector/i);
-  const invalid=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,yaml:'appId: ['});assert.equal((await scenarios.workspace(invalid.id)).yaml,'appId: [');assert.ok(invalid.canvasDiagnostics!.some(item=>item.ownerId==='yaml'));await assert.rejects(scenarios.start({workspaceId:invalid.id,deviceId,pathId:'single'}),/YAML/i);
- }finally{await rm(root,{recursive:true,force:true});}
-});
-
-for(const outcome of ['COMPLETED','FAILED','SKIPPED'] as const)test(`single-screen checks run after setup with saved inputs and report ${outcome}`,async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-single-screen-'));let execution='';
- try{
-  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
-   const {readFile}=await import('node:fs/promises');execution=await readFile(join(directory,'.tnt-execution.yaml'),'utf8');
-   const assertion={assertConditionCommand:{condition:{visible:{textRegex:'^Home$'}}}};
-   const absent={assertConditionCommand:{condition:{notVisible:{textRegex:'^Error$'}}}};
-   await writeFile(join(directory,'report.xml'),`<testsuites><testsuite tests="1" failures="${outcome==='FAILED'?1:0}"/></testsuites>`);
-   await writeFile(join(directory,'commands.json'),JSON.stringify([
-    {command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:{runFlowCommand:{label:'TnT setup'}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:{runFlowCommand:{label:'TnT step 1',commands:[assertion]}},metadata:{depth:0,status:'COMPLETED'}},
-    {command:assertion,metadata:{depth:1,status:'COMPLETED'}},
-    {command:{runFlowCommand:{label:'TnT step 2',commands:[absent]}},metadata:{depth:0,status:outcome==='FAILED'?'FAILED':'COMPLETED'}},
-    {command:absent,metadata:{depth:1,status:outcome,error:{message:'Error banner unexpectedly visible'}}},
-   ]));return{code:outcome==='FAILED'?1:0,log:'Fixture screen check evidence',cleanup:{verified:true,detail:'Exited'}};
-  }}});
-  const source='appId: com.example.HybridApp\n---\n# tnt-check:welcome\n- assertVisible:\n    text: "^Home$"\n# tnt-check:no-error\n- assertNotVisible:\n    text: "^Error$"\n';
-  const flows={'setup.yaml':'appId: com.example.HybridApp\n---\n- inputText: ${USER}\n'};
-  const catalog=await scenarios.references({yaml:source,flows});
-  const canvas={screens:[{id:'home',title:'Not an assertion',x:10,y:20,tests:catalog.references.filter(ref=>ref.kind==='step').map((ref,index)=>({id:index===0?'welcome':'no-error',label:index===0?'Welcome':'No error',role:'assertion',reference:ref,check:{visibility:index===0?'visible':'absent',target:'text',match:'exact',value:index===0?'Home':'Error'}}))}],edges:[],paths:[{id:'single',name:'Home',screenId:'home',edgeIds:[]}]};
-  const definitions=[{id:'home-test',name:'Home test',steps:catalog.references.filter(ref=>ref.kind==='step'),pathId:'single',inputs:{USER:'Example'},parameters:{USER:{type:'text',required:true}},setup:{file:'setup.yaml',parameters:{}},enabledHandlerIds:[]}];
-  const saved=await scenarios.save({name:'Home',yaml:source,flows,canvas,scenarios:definitions});
-  const loaded=await scenarios.workspace(saved.id);
-  const result=await scenarios.wait((await scenarios.start({workspaceId:loaded.id,deviceId,scenarioId:'home-test'})).id);
-  assert.equal(result.snapshot.resetApp,false);assert.equal(result.snapshot.scenario!.inputs.USER,'Example');
-  assert.ok(execution.indexOf('TnT setup')<execution.indexOf('assertVisible'));assert.match(execution,/clearState: false/);
-  assert.equal(result.canvas!.tests[0].status,'passed');assert.equal(result.canvas!.tests[1].status,outcome==='COMPLETED'?'passed':outcome==='FAILED'?'failed':'skipped');
-  assert.equal(result.status,outcome==='COMPLETED'?'passed':outcome==='FAILED'?'assertion-failed':'path-failed');
- }finally{await rm(root,{recursive:true,force:true});}
-});
-
-test('canvas-authored Home tap and Coordinator check reload and execute their connected route',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-canvas-tap-'));
- try{
-  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
-   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
-   await writeFile(join(directory,'commands.json'),JSON.stringify([{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{tapOnElement:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{assertConditionCommand:{}},metadata:{depth:0,status:'COMPLETED'}}]));return{code:0,log:'Fixture Home → Coordinator',cleanup:{verified:true,detail:'Exited'}};
-  }}});
-  const source='appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:tap\n# tnt-match:exact\n- tapOn:\n    text: "^Coordinator$"\n# tnt-check:destination\n# tnt-match:exact\n- assertVisible:\n    text: "^Coordinator$"\n';
-  const reference={kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'};
-  const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'tap',label:'Tap',role:'action',reference,tap:{target:'text',match:'exact',value:'Coordinator'}}]},{id:'coordinator',title:'Coordinator',x:400,y:0,tests:[{id:'destination',label:'Coordinator',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Coordinator'}}]}],edges:[{id:'navigate',from:'home',to:'coordinator',actionTestId:'tap',assertionTestId:'destination',responseCondition:'Tap Coordinator'}],paths:[{id:'route',name:'Home → Coordinator',edgeIds:['navigate']}]};
-  const saved=await scenarios.save({name:'Canvas navigation',yaml:source,canvas});const loaded=await scenarios.workspace(saved.id);assert.deepEqual(loaded.canvas!.screens[0].tests[0].tap,{target:'text',match:'exact',value:'Coordinator'});assert.equal(loaded.canvasDiagnostics!.length,0);
-  const result=await scenarios.wait((await scenarios.start({workspaceId:loaded.id,deviceId,pathId:'route'})).id);assert.equal(result.status,'passed');assert.equal(result.canvas!.edges[0].status,'passed');assert.deepEqual(result.canvas!.tests.map(test=>test.status),['passed','passed']);
-  const pending=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,yaml:source.slice(0,source.indexOf('# tnt-check:destination')),canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>screen.id==='coordinator'?{...screen,tests:[]}:screen),edges:loaded.canvas!.edges.map(edge=>({...edge,assertionTestId:'pending:'+edge.id}))}});assert.equal((await scenarios.workspace(pending.id)).canvas!.edges[0].to,'coordinator');const unchecked=await scenarios.preview({...pending,pathId:'route'});assert.match(unchecked.executionYaml,/tapOn/);assert.doesNotMatch(unchecked.executionYaml,/assertVisible/);
-  const completed=await scenarios.save({...pending,yaml:source,canvas:{...pending.canvas!,screens:loaded.canvas!.screens}});assert.equal(completed.canvas!.edges[0].assertionTestId,'destination');
-  const unlinked=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,canvas:{...loaded.canvas!,edges:[],paths:[{id:'route',name:'Draft action',screenId:'home',edgeIds:[]}]}});await assert.rejects(scenarios.start({workspaceId:unlinked.id,deviceId,pathId:'route'}),/destination/i);
-  const invalidDestination=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,yaml:source.replace('- assertVisible:', '- tapOn:'),canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.check?{...test,check:undefined,tap:{target:test.check.target,match:test.check.match,value:test.check.value},role:'action'}:test)}))}});const unused=await scenarios.preview({...invalidDestination,pathId:'route'});assert.equal((unused.executionYaml.match(/tapOn/g)??[]).length,1);
-  const draft=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,yaml:source.replace(/# tnt-check:tap\n# tnt-match:exact\n- tapOn:\n    text: "\^Coordinator\$"\n/,''),canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.tap?{...test,tap:{...test.tap,value:''}}:test)}))}});await assert.rejects(scenarios.start({workspaceId:draft.id,deviceId,pathId:'route'}),/selector/);
- }finally{await rm(root,{recursive:true,force:true});}
-});
-
-test('a node destination requires evidence for every authored check, even when the first check passed',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-destination-checks-'));
- try{
-  const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
-   await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
-   await writeFile(join(directory,'commands.json'),JSON.stringify([{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{tapOnElement:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{assertConditionCommand:{condition:{visible:{textRegex:'^Coordinator$'}}}},metadata:{depth:0,status:'COMPLETED'}},{command:{assertConditionCommand:{condition:{notVisible:{textRegex:'^Error$'}}}},metadata:{depth:0,status:'SKIPPED'}}]));return{code:0,log:'Second check skipped',cleanup:{verified:true,detail:'Exited'}};
-  }}});
-  const source='appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:tap\n- tapOn:\n    text: "^Coordinator$"\n# tnt-check:heading\n- assertVisible:\n    text: "^Coordinator$"\n# tnt-check:error\n- assertNotVisible:\n    text: "^Error$"\n';const reference={kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'};
-  const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'tap',label:'Tap',role:'action',reference,tap:{target:'text',match:'exact',value:'Coordinator'}}]},{id:'coordinator',title:'Coordinator',x:400,y:0,tests:[{id:'heading',label:'Heading',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Coordinator'}},{id:'error',label:'No error',role:'assertion',reference,check:{visibility:'absent',target:'text',match:'exact',value:'Error'}}]}],edges:[{id:'navigate',from:'home',to:'coordinator',actionTestId:'tap',assertionTestId:'heading',responseCondition:'Go to Coordinator'}],paths:[{id:'route',name:'Navigation',edgeIds:['navigate']}]};
-  const saved=await scenarios.save({name:'All destination checks',yaml:source,canvas});const result=await scenarios.wait((await scenarios.start({workspaceId:saved.id,deviceId,pathId:'route'})).id);
-  assert.equal(result.canvas!.tests.find(test=>test.id==='error')!.status,'skipped');assert.equal(result.status,'path-failed');assert.notEqual(result.canvas!.edges[0].status,'passed');
-  const errorStart=source.indexOf('# tnt-check:error');const late=source.slice(0,errorStart)+'# tnt-check:next\n- tapOn:\n    text: "^Other$"\n# tnt-check:other\n- assertVisible:\n    text: "^Other$"\n'+source.slice(errorStart);
-  const lateCanvas={...canvas,screens:[...canvas.screens.map(screen=>screen.id==='coordinator'?{...screen,tests:[...screen.tests,{id:'next',label:'Next',role:'action',reference,tap:{target:'text',match:'exact',value:'Other'}}]}:screen),{id:'other-screen',title:'Other',x:800,y:0,tests:[{id:'other',label:'Other check',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Other'}}]}],edges:[...canvas.edges,{id:'next-edge',from:'coordinator',to:'other-screen',actionTestId:'next',assertionTestId:'other',responseCondition:'Go to Other'}],paths:[{id:'route',name:'Wrong check order',edgeIds:['navigate','next-edge']}]};
-  const reordered=await scenarios.save({name:'Late destination check',yaml:late,canvas:lateCanvas});const preview=await scenarios.preview({...reordered,pathId:'route'});assert.deepEqual(parseAllDocuments(preview.executionYaml)[1].toJSON().map((command:Record<string,unknown>|string)=>typeof command==='string'?command:Object.keys(command)[0]),['launchApp','tapOn','assertVisible','tapOn','assertNotVisible','assertVisible']);
- }finally{await rm(root,{recursive:true,force:true});}
-});
-
-test('a saved multi-action branch executes only its explicit route, retains other commands, and maps each outcome',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-ordered-route-'));
- const source='appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:home-check\n- assertVisible: Home\n# tnt-check:tap\n- tapOn: Field\n# tnt-check:input\n- inputText: hello\n- evalScript: ${output.keep = true} # keep\n# tnt-check:back\n- back\n# tnt-check:destination\n- assertVisible: Done\n# tnt-check:branch-tap\n- tapOn: Other\n# tnt-check:branch-check\n- assertVisible: Other\n';
- const reference:YAMLReference={kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'};
- const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'home-check',label:'Home',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Home'}},{id:'tap',label:'Tap',role:'action',reference,tap:{target:'text',match:'regex',value:'Field'}},{id:'input',label:'Input',role:'action',reference,input:'hello'},{id:'back',label:'Back',role:'action',reference,back:true},{id:'branch-tap',label:'Other',role:'action',reference,tap:{target:'text',match:'regex',value:'Other'}},{id:'unselected-draft',label:'Draft',role:'action',reference,tap:{target:'text',match:'exact',value:''}}]},{id:'done',title:'Done',x:400,y:0,tests:[{id:'destination',label:'Done',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Done'}}]},{id:'other',title:'Other',x:400,y:300,tests:[{id:'branch-check',label:'Other',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Other'}}]}],edges:[{id:'edge',from:'home',to:'done',actionTestId:'tap',actionTestIds:['tap','input','back'],assertionTestId:'destination',responseCondition:'Success'},{id:'branch',from:'home',to:'other',actionTestId:'branch-tap',actionTestIds:['branch-tap'],assertionTestId:'branch-check',responseCondition:'Other'}],paths:[{id:'route',name:'Chosen',screenId:'home',edgeIds:['edge']},{id:'other-route',name:'Other',screenId:'home',edgeIds:['branch']}]};
- let executed='';
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
-  const {readFile}=await import('node:fs/promises');executed=await readFile(flow,'utf8');
-  await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
-  const names=['launchAppCommand','assertConditionCommand','tapOnElement','inputTextCommand','evalScriptCommand','tapOnElement','assertConditionCommand'];
-  await writeFile(join(directory,'commands.json'),JSON.stringify(names.map(name=>({command:{[name]:{}},metadata:{depth:0,status:'COMPLETED'}}))));
-  return {code:0,log:'Ordered fixture',cleanup:{verified:true,detail:'Exited'}};
- }}});
- const catalog=await scenarios.references({yaml:source});
- canvas.screens[0].tests.push({id:'launch-setup',label:'Launch setup',role:'setup',reference:{...reference,fingerprint:catalog.references[0].fingerprint}});
- const saved=await scenarios.save({name:'Explicit branch',yaml:source,canvas});const loaded=await scenarios.workspace(saved.id);
- assert.deepEqual(loaded.canvas!.edges[0].actionTestIds,['tap','input','back']);
- const previewInput={...loaded,pathId:'route'};const preview=await scenarios.preview(previewInput);assert.doesNotMatch(preview.executionYaml,/Other/);
- const result=await scenarios.wait((await scenarios.start({workspaceId:loaded.id,deviceId,pathId:'route'})).id);
- assert.match(executed,/launchApp[\s\S]*assertVisible: Home[\s\S]*tapOn: Field[\s\S]*inputText: hello[\s\S]*evalScript:[\s\S]*tapOn:[\s\S]*Back[\s\S]*assertVisible: Done/);
- assert.doesNotMatch(executed,/Other/);assert.match(executed,/# keep/);
- assert.equal(result.status,'passed');assert.deepEqual(result.canvas!.tests.filter(test=>['home-check','tap','input','back','destination'].includes(test.id)).map(test=>test.status),['passed','passed','passed','passed','passed']);
- assert.equal(result.canvas!.edges.find(edge=>edge.id==='branch')!.status,'unavailable');assert.equal(result.snapshot.authoredYaml,source);
- const missing=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.filter(test=>test.id!=='input')}))}});
- await assert.rejects(scenarios.start({workspaceId:missing.id,deviceId,pathId:'route'}),/removed action|ordered actions/i);
- }finally{await rm(root,{recursive:true,force:true});}
-});
-
-for(const failure of ['initial-skipped','action-failed'] as const)test('multi-action routes do not pass after '+failure,async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-route-stop-'));
- const source='appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:initial\n- assertVisible: Home\n# tnt-check:tap\n- tapOn: Field\n# tnt-check:input\n- inputText: hello\n# tnt-check:destination\n- assertVisible: Done\n';
- const reference={kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'};
- const canvas={screens:[{id:'home',title:'A descriptive label',x:0,y:0,tests:[{id:'initial',label:'Initial',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Home'}},{id:'tap',label:'Tap',role:'action',reference,tap:{target:'text',match:'regex',value:'Field'}},{id:'input',label:'Input',role:'action',reference,input:'hello'}]},{id:'done',title:'Done',x:400,y:0,tests:[{id:'destination',label:'Done',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Done'}}]}],edges:[{id:'edge',from:'home',to:'done',actionTestId:'tap',actionTestIds:['tap','input'],assertionTestId:'destination',responseCondition:'Always successful label'}],paths:[{id:'route',name:'Route',edgeIds:['edge']}]};
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
-  await writeFile(join(directory,'report.xml'),`<testsuites><testsuite tests="1" failures="${failure==='action-failed'?1:0}"/></testsuites>`);
-  const names=failure==='action-failed'?['launchAppCommand','assertConditionCommand','tapOnElement','inputTextCommand']:['launchAppCommand','assertConditionCommand','tapOnElement','inputTextCommand','assertConditionCommand'];
-  await writeFile(join(directory,'commands.json'),JSON.stringify(names.map((name,index)=>({command:{[name]:{}},metadata:{depth:0,status:failure==='action-failed'&&index===3?'FAILED':failure==='initial-skipped'&&index===1?'SKIPPED':'COMPLETED'}}))));
-  return {code:failure==='action-failed'?1:0,log:'Stopped fixture',cleanup:{verified:true,detail:'Exited'}};
- }}});
- const saved=await scenarios.save({name:'Failure stopping',yaml:source,canvas});const result=await scenarios.wait((await scenarios.start({workspaceId:saved.id,deviceId,pathId:'route'})).id);
- assert.equal(result.status,failure==='action-failed'?'tool-error':'path-failed');
- if(failure==='action-failed'){assert.equal(result.canvas!.tests.find(test=>test.id==='input')!.status,'failed');assert.equal(result.canvas!.tests.find(test=>test.id==='destination')!.status,'skipped');assert.equal(result.canvas!.edges[0].status,'failed');}
- else assert.equal(result.canvas!.tests.find(test=>test.id==='initial')!.status,'skipped');
- }finally{await rm(root,{recursive:true,force:true});}
-});
-
-test('an existing checkpoint handler followed by an ordered edge preserves each destination command',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-mixed-handler-route-'));
- const source='appId: com.example.HybridApp\n---\n- assertVisible: Middle\n# tnt-check:tap-done\n- tapOn: Done\n# tnt-check:done-check\n- assertVisible: Done\n';
- const flows={'setup.yaml':'appId: com.example.HybridApp\n---\n- assertVisible: Home\n','open.yaml':'appId: com.example.HybridApp\n---\n- tapOn: Middle\n'};
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
-  await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
-  await writeFile(join(directory,'commands.json'),JSON.stringify([
-   {command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},
-   {command:{runFlowCommand:{label:'TnT setup'}},metadata:{depth:0,status:'COMPLETED'}},
-   {command:{runFlowCommand:{label:'TnT checkpoint 1'}},metadata:{depth:0,status:'COMPLETED'}},
-   {command:{runFlowCommand:{label:'TnT handler open checkpoint 1'}},metadata:{depth:2,status:'COMPLETED'}},
-   {command:{runFlowCommand:{label:'TnT step 1',commands:[{assertConditionCommand:{condition:{visible:{textRegex:'Middle'}}}}]}},metadata:{depth:0,status:'COMPLETED'}},
-   {command:{assertConditionCommand:{condition:{visible:{textRegex:'Middle'}}}},metadata:{depth:1,status:'COMPLETED'}},
-   {command:{runFlowCommand:{label:'TnT step 2'}},metadata:{depth:0,status:'COMPLETED'}},
-   {command:{tapOnElement:{}},metadata:{depth:1,status:'COMPLETED'}},
-   {command:{runFlowCommand:{label:'TnT step 3',commands:[{assertConditionCommand:{condition:{visible:{textRegex:'Done'}}}}]}},metadata:{depth:0,status:'COMPLETED'}},
-   {command:{assertConditionCommand:{condition:{visible:{textRegex:'Done'}}}},metadata:{depth:1,status:'COMPLETED'}}]));
-  return {code:0,log:'Mixed route fixture',cleanup:{verified:true,detail:'Exited'}};
- }}});
- const plain=await scenarios.references({yaml:source,flows});
- const automation={setup:{file:'setup.yaml',parameters:{}},actions:[{id:'open',name:'Open Middle',condition:{text:'Home'},file:'open.yaml',parameters:{},enabled:true}],checkpoints:[{beforeStep:0,fingerprint:plain.references[0].fingerprint,timeoutMs:0}]};
- const catalog=await scenarios.references({yaml:source,flows,automation});const handler=catalog.references.find(ref=>ref.kind==='handler')!;
- const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'handler',label:'Open Middle',role:'handler',reference:handler}]},{id:'middle',title:'Middle',x:400,y:0,tests:[{id:'middle-check',label:'Middle',role:'assertion',reference:plain.references[0]},{id:'tap-done',label:'Done',role:'action',reference:plain.references[1],tap:{target:'text',match:'regex',value:'Done'}}]},{id:'done',title:'Done',x:800,y:0,tests:[{id:'done-check',label:'Done',role:'assertion',reference:plain.references[2],check:{visibility:'visible',target:'text',match:'regex',value:'Done'}}]}],edges:[{id:'handler-edge',from:'home',to:'middle',actionTestId:'handler',assertionTestId:'middle-check',responseCondition:'Handler opens Middle'},{id:'ordered-edge',from:'middle',to:'done',actionTestId:'tap-done',actionTestIds:['tap-done'],assertionTestId:'done-check',responseCondition:'Tap Done'}],paths:[{id:'route',name:'Mixed route',edgeIds:['handler-edge','ordered-edge']}]};
- const workspace=await scenarios.save({name:'Mixed handler route',yaml:source,flows,automation,canvas});
- const previewInput={...workspace,pathId:'route'};const preview=await scenarios.preview(previewInput);
- assert.match(preview.authoredYaml,/assertVisible: Middle[\s\S]*tapOn: Done[\s\S]*assertVisible: Done/);
- const result=await scenarios.wait((await scenarios.start({workspaceId:workspace.id,deviceId,pathId:'route'})).id);
- assert.equal(result.status,'passed');assert.deepEqual(result.steps.map(step=>step.command),['assertVisible','tapOn','assertVisible']);assert.equal(result.canvas!.tests.find(test=>test.id==='handler')!.status,'passed');assert.ok(result.canvas!.edges.every(edge=>edge.status==='passed'));
- }finally{await rm(root,{recursive:true,force:true});}
+test('a completed reusable-flow wrapper cannot pass a destination whose nested assertion was skipped', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-nested-skipped-'));
+  try {
+    const source = 'appId: com.example.HybridApp\n---\n- tapOn: Open\n- runFlow: maintenance.yaml\n';
+    const flows = { 'maintenance.yaml': 'appId: com.example.HybridApp\n---\n- assertVisible:\n    text: Maintenance\n    optional: true\n' };
+    const assertion = { assertConditionCommand: { condition: { visible: { textRegex: 'Maintenance', optional: true } } } };
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory }) => {
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+          await writeFile(
+            join(directory, 'commands.json'),
+            JSON.stringify([
+              { command: { tapOnElement: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { commands: [assertion] } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: assertion, metadata: { depth: 1, status: 'SKIPPED' } }
+            ])
+          );
+          return { code: 0, log: 'Optional assertion skipped', cleanup: { verified: true, detail: 'Exited' } };
+        }
+      }
+    });
+    const catalog = await scenarios.references({ yaml: source, flows });
+    const canvas = {
+      screens: [
+        { id: 'home', title: 'Home', x: 0, y: 0, tests: [{ id: 'trigger', label: 'Open', role: 'action', reference: catalog.references[0] }] },
+        { id: 'maintenance', title: 'Maintenance', x: 400, y: 0, tests: [{ id: 'assert', label: 'Maintenance', role: 'assertion', reference: catalog.references[2] }] }
+      ],
+      edges: [{ id: 'edge', from: 'home', to: 'maintenance', actionTestId: 'trigger', assertionTestId: 'assert', responseCondition: 'Maintenance required' }],
+      paths: [{ id: 'path', name: 'Maintenance', edgeIds: ['edge'] }]
+    };
+    const workspace = await scenarios.save({ name: 'Nested assertion skipped', yaml: source, flows, canvas });
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'path' })).id);
+    assert.equal(result.status, 'path-failed');
+    assert.equal(result.canvas?.tests.find(test => test.id === 'assert')?.status, 'skipped');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-function repeatedVisitFixture(){
- const reference:YAMLReference={kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'};
- const source='appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:home-check\n- assertVisible: Home\n# tnt-check:open\n- tapOn: Coordinator\n# tnt-check:identifier\n- assertVisible:\n    id: "^coordinator.fixed$"\n# tnt-check:back\n- back\n';
- const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'home-check',label:'Home',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'regex',value:'Home'}},{id:'open',label:'Open',role:'action',reference,tap:{target:'text',match:'regex',value:'Coordinator'}}]},{id:'coordinator',title:'Coordinator',x:400,y:0,tests:[{id:'identifier',label:'Fixed identifier',role:'assertion',reference,check:{visibility:'visible',target:'id',match:'regex',value:'^coordinator.fixed$'}},{id:'back',label:'Back',role:'action',reference,back:true}]}],edges:[{id:'go',from:'home',to:'coordinator',actionTestId:'open',actionTestIds:['open'],assertionTestId:'identifier',responseCondition:'Open Coordinator'},{id:'return',from:'coordinator',to:'home',actionTestId:'back',actionTestIds:['back'],assertionTestId:'home-check',responseCondition:'Back Home'}],paths:[{id:'route',name:'Repeated route',screenId:'home',edgeIds:['go','return','go']}]};
- return {source,canvas};
+test('a single screen reloads YAML edits into checks and blocks incomplete drafts before acquiring a device', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-screen-draft-'));
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async () => {
+          throw new Error('Draft must not run');
+        }
+      }
+    });
+    const source = 'appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:welcome\n- assertNotVisible:\n    text: "^Error$"\n';
+    const canvas = {
+      screens: [
+        {
+          id: 'home',
+          title: 'Descriptive title',
+          x: 70,
+          y: 90,
+          tests: [
+            { id: 'welcome', label: 'Welcome', role: 'assertion', reference: { kind: 'step', file: 'flow.yaml', index: 1, fingerprint: 'draft' }, check: { visibility: 'visible', target: 'text', match: 'exact', value: 'Old' } },
+            { id: 'draft', label: 'Draft', role: 'assertion', reference: { kind: 'step', file: 'flow.yaml', index: 2, fingerprint: 'draft' }, check: { visibility: 'visible', target: 'id', match: 'exact', value: '' } }
+          ]
+        }
+      ],
+      edges: [],
+      paths: [{ id: 'single', name: 'Home checks', edgeIds: [], screenId: 'home' }]
+    };
+    const saved = await scenarios.save({ name: 'Screen draft', yaml: source, canvas });
+    const loaded = await scenarios.workspace(saved.id);
+    assert.deepEqual(loaded.canvas!.screens[0].tests[0].check, { visibility: 'absent', target: 'text', match: 'exact', value: 'Error' });
+    assert.equal(loaded.yaml, source);
+    assert.equal(loaded.canvas!.screens[0].x, 70);
+    assert.match(loaded.canvasDiagnostics!.find(item => item.ownerId === 'draft')!.detail, /selector/i);
+    await assert.rejects(scenarios.start({ workspaceId: loaded.id, deviceId, pathId: 'single' }), /selector/i);
+    const invalid = await scenarios.save({ ...loaded, metadata: (await scenarios.workspace(loaded.id)).metadata, yaml: 'appId: [' });
+    assert.equal((await scenarios.workspace(invalid.id)).yaml, 'appId: [');
+    assert.ok(invalid.canvasDiagnostics!.some(item => item.ownerId === 'yaml'));
+    await assert.rejects(scenarios.start({ workspaceId: invalid.id, deviceId, pathId: 'single' }), /YAML/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+for (const outcome of ['COMPLETED', 'FAILED', 'SKIPPED'] as const)
+  test(`single-screen checks run after setup with saved inputs and report ${outcome}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tnt-single-screen-'));
+    let execution = '';
+    try {
+      const scenarios = createScenarios({
+        root,
+        runner: device(root),
+        maestro: {
+          version: async () => '2.11.0',
+          run: async ({ directory }) => {
+            const { readFile } = await import('node:fs/promises');
+            execution = await readFile(join(directory, '.tnt-execution.yaml'), 'utf8');
+            const assertion = { assertConditionCommand: { condition: { visible: { textRegex: '^Home$' } } } };
+            const absent = { assertConditionCommand: { condition: { notVisible: { textRegex: '^Error$' } } } };
+            await writeFile(join(directory, 'report.xml'), `<testsuites><testsuite tests="1" failures="${outcome === 'FAILED' ? 1 : 0}"/></testsuites>`);
+            await writeFile(
+              join(directory, 'commands.json'),
+              JSON.stringify([
+                { command: { launchAppCommand: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+                { command: { runFlowCommand: { label: 'TnT setup' } }, metadata: { depth: 0, status: 'COMPLETED' } },
+                { command: { runFlowCommand: { label: 'TnT step 1', commands: [assertion] } }, metadata: { depth: 0, status: 'COMPLETED' } },
+                { command: assertion, metadata: { depth: 1, status: 'COMPLETED' } },
+                { command: { runFlowCommand: { label: 'TnT step 2', commands: [absent] } }, metadata: { depth: 0, status: outcome === 'FAILED' ? 'FAILED' : 'COMPLETED' } },
+                { command: absent, metadata: { depth: 1, status: outcome, error: { message: 'Error banner unexpectedly visible' } } }
+              ])
+            );
+            return { code: outcome === 'FAILED' ? 1 : 0, log: 'Fixture screen check evidence', cleanup: { verified: true, detail: 'Exited' } };
+          }
+        }
+      });
+      const source = 'appId: com.example.HybridApp\n---\n# tnt-check:welcome\n- assertVisible:\n    text: "^Home$"\n# tnt-check:no-error\n- assertNotVisible:\n    text: "^Error$"\n';
+      const flows = { 'setup.yaml': 'appId: com.example.HybridApp\n---\n- inputText: ${USER}\n' };
+      const catalog = await scenarios.references({ yaml: source, flows });
+      const canvas = { screens: [{ id: 'home', title: 'Not an assertion', x: 10, y: 20, tests: catalog.references.filter(ref => ref.kind === 'step').map((ref, index) => ({ id: index === 0 ? 'welcome' : 'no-error', label: index === 0 ? 'Welcome' : 'No error', role: 'assertion', reference: ref, check: { visibility: index === 0 ? 'visible' : 'absent', target: 'text', match: 'exact', value: index === 0 ? 'Home' : 'Error' } })) }], edges: [], paths: [{ id: 'single', name: 'Home', screenId: 'home', edgeIds: [] }] };
+      const definitions = [{ id: 'home-test', name: 'Home test', steps: catalog.references.filter(ref => ref.kind === 'step'), pathId: 'single', inputs: { USER: 'Example' }, parameters: { USER: { type: 'text', required: true } }, setup: { file: 'setup.yaml', parameters: {} }, enabledHandlerIds: [] }];
+      const saved = await scenarios.save({ name: 'Home', yaml: source, flows, canvas, scenarios: definitions });
+      const loaded = await scenarios.workspace(saved.id);
+      const result = await scenarios.wait((await scenarios.start({ workspaceId: loaded.id, deviceId, scenarioId: 'home-test' })).id);
+      assert.equal(result.snapshot.resetApp, false);
+      assert.equal(result.snapshot.scenario!.inputs.USER, 'Example');
+      assert.ok(execution.indexOf('TnT setup') < execution.indexOf('assertVisible'));
+      assert.match(execution, /clearState: false/);
+      assert.equal(result.canvas!.tests[0].status, 'passed');
+      assert.equal(result.canvas!.tests[1].status, outcome === 'COMPLETED' ? 'passed' : outcome === 'FAILED' ? 'failed' : 'skipped');
+      assert.equal(result.status, outcome === 'COMPLETED' ? 'passed' : outcome === 'FAILED' ? 'assertion-failed' : 'path-failed');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test('canvas-authored Home tap and Coordinator check reload and execute their connected route', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-canvas-tap-'));
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory }) => {
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+          await writeFile(
+            join(directory, 'commands.json'),
+            JSON.stringify([
+              { command: { launchAppCommand: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { tapOnElement: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { assertConditionCommand: {} }, metadata: { depth: 0, status: 'COMPLETED' } }
+            ])
+          );
+          return { code: 0, log: 'Fixture Home → Coordinator', cleanup: { verified: true, detail: 'Exited' } };
+        }
+      }
+    });
+    const source = 'appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:tap\n# tnt-match:exact\n- tapOn:\n    text: "^Coordinator$"\n# tnt-check:destination\n# tnt-match:exact\n- assertVisible:\n    text: "^Coordinator$"\n';
+    const reference = { kind: 'step', file: 'flow.yaml', index: 0, fingerprint: 'draft' };
+    const canvas = {
+      screens: [
+        { id: 'home', title: 'Home', x: 0, y: 0, tests: [{ id: 'tap', label: 'Tap', role: 'action', reference, tap: { target: 'text', match: 'exact', value: 'Coordinator' } }] },
+        { id: 'coordinator', title: 'Coordinator', x: 400, y: 0, tests: [{ id: 'destination', label: 'Coordinator', role: 'assertion', reference, check: { visibility: 'visible', target: 'text', match: 'exact', value: 'Coordinator' } }] }
+      ],
+      edges: [{ id: 'navigate', from: 'home', to: 'coordinator', actionTestId: 'tap', assertionTestId: 'destination', responseCondition: 'Tap Coordinator' }],
+      paths: [{ id: 'route', name: 'Home → Coordinator', edgeIds: ['navigate'] }]
+    };
+    const saved = await scenarios.save({ name: 'Canvas navigation', yaml: source, canvas });
+    const loaded = await scenarios.workspace(saved.id);
+    assert.deepEqual(loaded.canvas!.screens[0].tests[0].tap, { target: 'text', match: 'exact', value: 'Coordinator' });
+    assert.equal(loaded.canvasDiagnostics!.length, 0);
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: loaded.id, deviceId, pathId: 'route' })).id);
+    assert.equal(result.status, 'passed');
+    assert.equal(result.canvas!.edges[0].status, 'passed');
+    assert.deepEqual(
+      result.canvas!.tests.map(test => test.status),
+      ['passed', 'passed']
+    );
+    const pending = await scenarios.save({ ...loaded, metadata: (await scenarios.workspace(loaded.id)).metadata, yaml: source.slice(0, source.indexOf('# tnt-check:destination')), canvas: { ...loaded.canvas!, screens: loaded.canvas!.screens.map(screen => (screen.id === 'coordinator' ? { ...screen, tests: [] } : screen)), edges: loaded.canvas!.edges.map(edge => ({ ...edge, assertionTestId: 'pending:' + edge.id })) } });
+    assert.equal((await scenarios.workspace(pending.id)).canvas!.edges[0].to, 'coordinator');
+    const unchecked = await scenarios.preview({ ...pending, pathId: 'route' });
+    assert.match(unchecked.executionYaml, /tapOn/);
+    assert.doesNotMatch(unchecked.executionYaml, /assertVisible/);
+    const completed = await scenarios.save({ ...pending, yaml: source, canvas: { ...pending.canvas!, screens: loaded.canvas!.screens } });
+    assert.equal(completed.canvas!.edges[0].assertionTestId, 'destination');
+    const unlinked = await scenarios.save({ ...loaded, metadata: (await scenarios.workspace(loaded.id)).metadata, canvas: { ...loaded.canvas!, edges: [], paths: [{ id: 'route', name: 'Draft action', screenId: 'home', edgeIds: [] }] } });
+    await assert.rejects(scenarios.start({ workspaceId: unlinked.id, deviceId, pathId: 'route' }), /destination/i);
+    const invalidDestination = await scenarios.save({ ...loaded, metadata: (await scenarios.workspace(loaded.id)).metadata, yaml: source.replace('- assertVisible:', '- tapOn:'), canvas: { ...loaded.canvas!, screens: loaded.canvas!.screens.map(screen => ({ ...screen, tests: screen.tests.map(test => (test.check ? { ...test, check: undefined, tap: { target: test.check.target, match: test.check.match, value: test.check.value }, role: 'action' } : test)) })) } });
+    const unused = await scenarios.preview({ ...invalidDestination, pathId: 'route' });
+    assert.equal((unused.executionYaml.match(/tapOn/g) ?? []).length, 1);
+    const draft = await scenarios.save({ ...loaded, metadata: (await scenarios.workspace(loaded.id)).metadata, yaml: source.replace(/# tnt-check:tap\n# tnt-match:exact\n- tapOn:\n    text: "\^Coordinator\$"\n/, ''), canvas: { ...loaded.canvas!, screens: loaded.canvas!.screens.map(screen => ({ ...screen, tests: screen.tests.map(test => (test.tap ? { ...test, tap: { ...test.tap, value: '' } } : test)) })) } });
+    await assert.rejects(scenarios.start({ workspaceId: draft.id, deviceId, pathId: 'route' }), /selector/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a node destination requires evidence for every authored check, even when the first check passed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-destination-checks-'));
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory }) => {
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+          await writeFile(
+            join(directory, 'commands.json'),
+            JSON.stringify([
+              { command: { launchAppCommand: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { tapOnElement: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { assertConditionCommand: { condition: { visible: { textRegex: '^Coordinator$' } } } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { assertConditionCommand: { condition: { notVisible: { textRegex: '^Error$' } } } }, metadata: { depth: 0, status: 'SKIPPED' } }
+            ])
+          );
+          return { code: 0, log: 'Second check skipped', cleanup: { verified: true, detail: 'Exited' } };
+        }
+      }
+    });
+    const source = 'appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:tap\n- tapOn:\n    text: "^Coordinator$"\n# tnt-check:heading\n- assertVisible:\n    text: "^Coordinator$"\n# tnt-check:error\n- assertNotVisible:\n    text: "^Error$"\n';
+    const reference = { kind: 'step', file: 'flow.yaml', index: 0, fingerprint: 'draft' };
+    const canvas = {
+      screens: [
+        { id: 'home', title: 'Home', x: 0, y: 0, tests: [{ id: 'tap', label: 'Tap', role: 'action', reference, tap: { target: 'text', match: 'exact', value: 'Coordinator' } }] },
+        {
+          id: 'coordinator',
+          title: 'Coordinator',
+          x: 400,
+          y: 0,
+          tests: [
+            { id: 'heading', label: 'Heading', role: 'assertion', reference, check: { visibility: 'visible', target: 'text', match: 'exact', value: 'Coordinator' } },
+            { id: 'error', label: 'No error', role: 'assertion', reference, check: { visibility: 'absent', target: 'text', match: 'exact', value: 'Error' } }
+          ]
+        }
+      ],
+      edges: [{ id: 'navigate', from: 'home', to: 'coordinator', actionTestId: 'tap', assertionTestId: 'heading', responseCondition: 'Go to Coordinator' }],
+      paths: [{ id: 'route', name: 'Navigation', edgeIds: ['navigate'] }]
+    };
+    const saved = await scenarios.save({ name: 'All destination checks', yaml: source, canvas });
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: saved.id, deviceId, pathId: 'route' })).id);
+    assert.equal(result.canvas!.tests.find(test => test.id === 'error')!.status, 'skipped');
+    assert.equal(result.status, 'path-failed');
+    assert.notEqual(result.canvas!.edges[0].status, 'passed');
+    const errorStart = source.indexOf('# tnt-check:error');
+    const late = source.slice(0, errorStart) + '# tnt-check:next\n- tapOn:\n    text: "^Other$"\n# tnt-check:other\n- assertVisible:\n    text: "^Other$"\n' + source.slice(errorStart);
+    const lateCanvas = { ...canvas, screens: [...canvas.screens.map(screen => (screen.id === 'coordinator' ? { ...screen, tests: [...screen.tests, { id: 'next', label: 'Next', role: 'action', reference, tap: { target: 'text', match: 'exact', value: 'Other' } }] } : screen)), { id: 'other-screen', title: 'Other', x: 800, y: 0, tests: [{ id: 'other', label: 'Other check', role: 'assertion', reference, check: { visibility: 'visible', target: 'text', match: 'exact', value: 'Other' } }] }], edges: [...canvas.edges, { id: 'next-edge', from: 'coordinator', to: 'other-screen', actionTestId: 'next', assertionTestId: 'other', responseCondition: 'Go to Other' }], paths: [{ id: 'route', name: 'Wrong check order', edgeIds: ['navigate', 'next-edge'] }] };
+    const reordered = await scenarios.save({ name: 'Late destination check', yaml: late, canvas: lateCanvas });
+    const preview = await scenarios.preview({ ...reordered, pathId: 'route' });
+    assert.deepEqual(
+      parseAllDocuments(preview.executionYaml)[1]
+        .toJSON()
+        .map((command: Record<string, unknown> | string) => (typeof command === 'string' ? command : Object.keys(command)[0])),
+      ['launchApp', 'tapOn', 'assertVisible', 'tapOn', 'assertNotVisible', 'assertVisible']
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a saved multi-action branch executes only its explicit route, retains other commands, and maps each outcome', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-ordered-route-'));
+  const source = 'appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:home-check\n- assertVisible: Home\n# tnt-check:tap\n- tapOn: Field\n# tnt-check:input\n- inputText: hello\n- evalScript: ${output.keep = true} # keep\n# tnt-check:back\n- back\n# tnt-check:destination\n- assertVisible: Done\n# tnt-check:branch-tap\n- tapOn: Other\n# tnt-check:branch-check\n- assertVisible: Other\n';
+  const reference: YAMLReference = { kind: 'step', file: 'flow.yaml', index: 0, fingerprint: 'draft' };
+  const canvas: CanvasGraph = {
+    screens: [
+      {
+        id: 'home',
+        title: 'Home',
+        x: 0,
+        y: 0,
+        tests: [
+          { id: 'home-check', label: 'Home', role: 'assertion', reference, check: { visibility: 'visible', target: 'text', match: 'regex', value: 'Home' } },
+          { id: 'tap', label: 'Tap', role: 'action', reference, tap: { target: 'text', match: 'regex', value: 'Field' } },
+          { id: 'input', label: 'Input', role: 'action', reference, input: 'hello' },
+          { id: 'back', label: 'Back', role: 'action', reference, back: true },
+          { id: 'branch-tap', label: 'Other', role: 'action', reference, tap: { target: 'text', match: 'regex', value: 'Other' } },
+          { id: 'unselected-draft', label: 'Draft', role: 'action', reference, tap: { target: 'text', match: 'exact', value: '' } }
+        ]
+      },
+      { id: 'done', title: 'Done', x: 400, y: 0, tests: [{ id: 'destination', label: 'Done', role: 'assertion', reference, check: { visibility: 'visible', target: 'text', match: 'regex', value: 'Done' } }] },
+      { id: 'other', title: 'Other', x: 400, y: 300, tests: [{ id: 'branch-check', label: 'Other', role: 'assertion', reference, check: { visibility: 'visible', target: 'text', match: 'regex', value: 'Other' } }] }
+    ],
+    edges: [
+      { id: 'edge', from: 'home', to: 'done', actionTestId: 'tap', actionTestIds: ['tap', 'input', 'back'], assertionTestId: 'destination', responseCondition: 'Success' },
+      { id: 'branch', from: 'home', to: 'other', actionTestId: 'branch-tap', actionTestIds: ['branch-tap'], assertionTestId: 'branch-check', responseCondition: 'Other' }
+    ],
+    paths: [
+      { id: 'route', name: 'Chosen', screenId: 'home', edgeIds: ['edge'] },
+      { id: 'other-route', name: 'Other', screenId: 'home', edgeIds: ['branch'] }
+    ]
+  };
+  let executed = '';
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory, flow }) => {
+          const { readFile } = await import('node:fs/promises');
+          executed = await readFile(flow, 'utf8');
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+          const names = ['launchAppCommand', 'assertConditionCommand', 'tapOnElement', 'inputTextCommand', 'evalScriptCommand', 'tapOnElement', 'assertConditionCommand'];
+          await writeFile(join(directory, 'commands.json'), JSON.stringify(names.map(name => ({ command: { [name]: {} }, metadata: { depth: 0, status: 'COMPLETED' } }))));
+          return { code: 0, log: 'Ordered fixture', cleanup: { verified: true, detail: 'Exited' } };
+        }
+      }
+    });
+    const catalog = await scenarios.references({ yaml: source });
+    canvas.screens[0].tests.push({ id: 'launch-setup', label: 'Launch setup', role: 'setup', reference: { ...reference, fingerprint: catalog.references[0].fingerprint } });
+    const saved = await scenarios.save({ name: 'Explicit branch', yaml: source, canvas });
+    const loaded = await scenarios.workspace(saved.id);
+    assert.deepEqual(loaded.canvas!.edges[0].actionTestIds, ['tap', 'input', 'back']);
+    const previewInput = { ...loaded, pathId: 'route' };
+    const preview = await scenarios.preview(previewInput);
+    assert.doesNotMatch(preview.executionYaml, /Other/);
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: loaded.id, deviceId, pathId: 'route' })).id);
+    assert.match(executed, /launchApp[\s\S]*assertVisible: Home[\s\S]*tapOn: Field[\s\S]*inputText: hello[\s\S]*evalScript:[\s\S]*tapOn:[\s\S]*Back[\s\S]*assertVisible: Done/);
+    assert.doesNotMatch(executed, /Other/);
+    assert.match(executed, /# keep/);
+    assert.equal(result.status, 'passed');
+    assert.deepEqual(
+      result.canvas!.tests.filter(test => ['home-check', 'tap', 'input', 'back', 'destination'].includes(test.id)).map(test => test.status),
+      ['passed', 'passed', 'passed', 'passed', 'passed']
+    );
+    assert.equal(result.canvas!.edges.find(edge => edge.id === 'branch')!.status, 'unavailable');
+    assert.equal(result.snapshot.authoredYaml, source);
+    const missing = await scenarios.save({ ...loaded, metadata: (await scenarios.workspace(loaded.id)).metadata, canvas: { ...loaded.canvas!, screens: loaded.canvas!.screens.map(screen => ({ ...screen, tests: screen.tests.filter(test => test.id !== 'input') })) } });
+    await assert.rejects(scenarios.start({ workspaceId: missing.id, deviceId, pathId: 'route' }), /removed action|ordered actions/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+for (const failure of ['initial-skipped', 'action-failed'] as const)
+  test('multi-action routes do not pass after ' + failure, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tnt-route-stop-'));
+    const source = 'appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:initial\n- assertVisible: Home\n# tnt-check:tap\n- tapOn: Field\n# tnt-check:input\n- inputText: hello\n# tnt-check:destination\n- assertVisible: Done\n';
+    const reference = { kind: 'step', file: 'flow.yaml', index: 0, fingerprint: 'draft' };
+    const canvas = {
+      screens: [
+        {
+          id: 'home',
+          title: 'A descriptive label',
+          x: 0,
+          y: 0,
+          tests: [
+            { id: 'initial', label: 'Initial', role: 'assertion', reference, check: { visibility: 'visible', target: 'text', match: 'regex', value: 'Home' } },
+            { id: 'tap', label: 'Tap', role: 'action', reference, tap: { target: 'text', match: 'regex', value: 'Field' } },
+            { id: 'input', label: 'Input', role: 'action', reference, input: 'hello' }
+          ]
+        },
+        { id: 'done', title: 'Done', x: 400, y: 0, tests: [{ id: 'destination', label: 'Done', role: 'assertion', reference, check: { visibility: 'visible', target: 'text', match: 'regex', value: 'Done' } }] }
+      ],
+      edges: [{ id: 'edge', from: 'home', to: 'done', actionTestId: 'tap', actionTestIds: ['tap', 'input'], assertionTestId: 'destination', responseCondition: 'Always successful label' }],
+      paths: [{ id: 'route', name: 'Route', edgeIds: ['edge'] }]
+    };
+    try {
+      const scenarios = createScenarios({
+        root,
+        runner: device(root),
+        maestro: {
+          version: async () => '2.11.0',
+          run: async ({ directory }) => {
+            await writeFile(join(directory, 'report.xml'), `<testsuites><testsuite tests="1" failures="${failure === 'action-failed' ? 1 : 0}"/></testsuites>`);
+            const names = failure === 'action-failed' ? ['launchAppCommand', 'assertConditionCommand', 'tapOnElement', 'inputTextCommand'] : ['launchAppCommand', 'assertConditionCommand', 'tapOnElement', 'inputTextCommand', 'assertConditionCommand'];
+            await writeFile(join(directory, 'commands.json'), JSON.stringify(names.map((name, index) => ({ command: { [name]: {} }, metadata: { depth: 0, status: failure === 'action-failed' && index === 3 ? 'FAILED' : failure === 'initial-skipped' && index === 1 ? 'SKIPPED' : 'COMPLETED' } }))));
+            return { code: failure === 'action-failed' ? 1 : 0, log: 'Stopped fixture', cleanup: { verified: true, detail: 'Exited' } };
+          }
+        }
+      });
+      const saved = await scenarios.save({ name: 'Failure stopping', yaml: source, canvas });
+      const result = await scenarios.wait((await scenarios.start({ workspaceId: saved.id, deviceId, pathId: 'route' })).id);
+      assert.equal(result.status, failure === 'action-failed' ? 'tool-error' : 'path-failed');
+      if (failure === 'action-failed') {
+        assert.equal(result.canvas!.tests.find(test => test.id === 'input')!.status, 'failed');
+        assert.equal(result.canvas!.tests.find(test => test.id === 'destination')!.status, 'skipped');
+        assert.equal(result.canvas!.edges[0].status, 'failed');
+      } else assert.equal(result.canvas!.tests.find(test => test.id === 'initial')!.status, 'skipped');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test('an existing checkpoint handler followed by an ordered edge preserves each destination command', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-mixed-handler-route-'));
+  const source = 'appId: com.example.HybridApp\n---\n- assertVisible: Middle\n# tnt-check:tap-done\n- tapOn: Done\n# tnt-check:done-check\n- assertVisible: Done\n';
+  const flows = { 'setup.yaml': 'appId: com.example.HybridApp\n---\n- assertVisible: Home\n', 'open.yaml': 'appId: com.example.HybridApp\n---\n- tapOn: Middle\n' };
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory }) => {
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+          await writeFile(
+            join(directory, 'commands.json'),
+            JSON.stringify([
+              { command: { launchAppCommand: {} }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT setup' } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT checkpoint 1' } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT handler open checkpoint 1' } }, metadata: { depth: 2, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT step 1', commands: [{ assertConditionCommand: { condition: { visible: { textRegex: 'Middle' } } } }] } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { assertConditionCommand: { condition: { visible: { textRegex: 'Middle' } } } }, metadata: { depth: 1, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT step 2' } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { tapOnElement: {} }, metadata: { depth: 1, status: 'COMPLETED' } },
+              { command: { runFlowCommand: { label: 'TnT step 3', commands: [{ assertConditionCommand: { condition: { visible: { textRegex: 'Done' } } } }] } }, metadata: { depth: 0, status: 'COMPLETED' } },
+              { command: { assertConditionCommand: { condition: { visible: { textRegex: 'Done' } } } }, metadata: { depth: 1, status: 'COMPLETED' } }
+            ])
+          );
+          return { code: 0, log: 'Mixed route fixture', cleanup: { verified: true, detail: 'Exited' } };
+        }
+      }
+    });
+    const plain = await scenarios.references({ yaml: source, flows });
+    const automation = { setup: { file: 'setup.yaml', parameters: {} }, actions: [{ id: 'open', name: 'Open Middle', condition: { text: 'Home' }, file: 'open.yaml', parameters: {}, enabled: true }], checkpoints: [{ beforeStep: 0, fingerprint: plain.references[0].fingerprint, timeoutMs: 0 }] };
+    const catalog = await scenarios.references({ yaml: source, flows, automation });
+    const handler = catalog.references.find(ref => ref.kind === 'handler')!;
+    const canvas: CanvasGraph = {
+      screens: [
+        { id: 'home', title: 'Home', x: 0, y: 0, tests: [{ id: 'handler', label: 'Open Middle', role: 'handler', reference: handler }] },
+        {
+          id: 'middle',
+          title: 'Middle',
+          x: 400,
+          y: 0,
+          tests: [
+            { id: 'middle-check', label: 'Middle', role: 'assertion', reference: plain.references[0] },
+            { id: 'tap-done', label: 'Done', role: 'action', reference: plain.references[1], tap: { target: 'text', match: 'regex', value: 'Done' } }
+          ]
+        },
+        { id: 'done', title: 'Done', x: 800, y: 0, tests: [{ id: 'done-check', label: 'Done', role: 'assertion', reference: plain.references[2], check: { visibility: 'visible', target: 'text', match: 'regex', value: 'Done' } }] }
+      ],
+      edges: [
+        { id: 'handler-edge', from: 'home', to: 'middle', actionTestId: 'handler', assertionTestId: 'middle-check', responseCondition: 'Handler opens Middle' },
+        { id: 'ordered-edge', from: 'middle', to: 'done', actionTestId: 'tap-done', actionTestIds: ['tap-done'], assertionTestId: 'done-check', responseCondition: 'Tap Done' }
+      ],
+      paths: [{ id: 'route', name: 'Mixed route', edgeIds: ['handler-edge', 'ordered-edge'] }]
+    };
+    const workspace = await scenarios.save({ name: 'Mixed handler route', yaml: source, flows, automation, canvas });
+    const previewInput = { ...workspace, pathId: 'route' };
+    const preview = await scenarios.preview(previewInput);
+    assert.match(preview.authoredYaml, /assertVisible: Middle[\s\S]*tapOn: Done[\s\S]*assertVisible: Done/);
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: workspace.id, deviceId, pathId: 'route' })).id);
+    assert.equal(result.status, 'passed');
+    assert.deepEqual(
+      result.steps.map(step => step.command),
+      ['assertVisible', 'tapOn', 'assertVisible']
+    );
+    assert.equal(result.canvas!.tests.find(test => test.id === 'handler')!.status, 'passed');
+    assert.ok(result.canvas!.edges.every(edge => edge.status === 'passed'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+function repeatedVisitFixture() {
+  const reference: YAMLReference = { kind: 'step', file: 'flow.yaml', index: 0, fingerprint: 'draft' };
+  const source = 'appId: com.example.HybridApp\n---\n- launchApp\n# tnt-check:home-check\n- assertVisible: Home\n# tnt-check:open\n- tapOn: Coordinator\n# tnt-check:identifier\n- assertVisible:\n    id: "^coordinator.fixed$"\n# tnt-check:back\n- back\n';
+  const canvas: CanvasGraph = {
+    screens: [
+      {
+        id: 'home',
+        title: 'Home',
+        x: 0,
+        y: 0,
+        tests: [
+          { id: 'home-check', label: 'Home', role: 'assertion', reference, check: { visibility: 'visible', target: 'text', match: 'regex', value: 'Home' } },
+          { id: 'open', label: 'Open', role: 'action', reference, tap: { target: 'text', match: 'regex', value: 'Coordinator' } }
+        ]
+      },
+      {
+        id: 'coordinator',
+        title: 'Coordinator',
+        x: 400,
+        y: 0,
+        tests: [
+          { id: 'identifier', label: 'Fixed identifier', role: 'assertion', reference, check: { visibility: 'visible', target: 'id', match: 'regex', value: '^coordinator.fixed$' } },
+          { id: 'back', label: 'Back', role: 'action', reference, back: true }
+        ]
+      }
+    ],
+    edges: [
+      { id: 'go', from: 'home', to: 'coordinator', actionTestId: 'open', actionTestIds: ['open'], assertionTestId: 'identifier', responseCondition: 'Open Coordinator' },
+      { id: 'return', from: 'coordinator', to: 'home', actionTestId: 'back', actionTestIds: ['back'], assertionTestId: 'home-check', responseCondition: 'Back Home' }
+    ],
+    paths: [{ id: 'route', name: 'Repeated route', screenId: 'home', edgeIds: ['go', 'return', 'go'] }]
+  };
+  return { source, canvas };
 }
 
-test('a failed return visit retains its own detail and screenshot and later occurrences cannot pass',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-return-evidence-'));const {source,canvas}=repeatedVisitFixture();
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
-  await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="1"/></testsuites>');
-  await writeFile(join(directory,'step-008-assertCondition.png'),'controlled screenshot fixture');
-  await writeFile(join(directory,'commands.json'),JSON.stringify(['launchAppCommand','assertConditionCommand','tapOnElement','assertConditionCommand','tapOnElement','assertConditionCommand','tapOnElement','assertConditionCommand'].map((name,index)=>({command:{[name]:{}},metadata:{depth:0,sequenceNumber:index+2,status:index===5?'FAILED':'COMPLETED',error:index===5?{message:'Home return check failed'}:undefined,evaluatedCommand:index===5?{assertConditionCommand:{condition:{visible:{textRegex:'Home'}}}}:undefined}}))));
-  return {code:1,log:'Controlled failure log',cleanup:{verified:true,detail:'Exited'}};
- }}});
- const saved=await scenarios.save({name:'Return failure',yaml:source,canvas});const result=await scenarios.wait((await scenarios.start({workspaceId:saved.id,deviceId,pathId:'route'})).id);
- const home=result.canvas!.occurrences!.filter(item=>item.testId==='home-check');assert.deepEqual(home.map(item=>item.status),['passed','failed']);
- const failed=result.steps.find(step=>step.id===home[1].stepId)!;
- assert.equal(failed.detail,'Home return check failed');assert.deepEqual(failed.artifacts,['step-008-assertCondition.png']);assert.deepEqual(failed.actual,{assertConditionCommand:{condition:{visible:{textRegex:'Home'}}}});
- assert.deepEqual(result.canvas!.occurrences!.slice(-2).map(item=>item.status),['skipped','skipped']);
- await scenarios.save({...saved,canvas:{...canvas,screens:canvas.screens.map(screen=>({...screen,title:'Later edit'}))}});
- assert.equal((await scenarios.result(result.id)).snapshot.canvas!.screens[0].title,'Home');
- }finally{await rm(root,{recursive:true,force:true});}
+test('a failed return visit retains its own detail and screenshot and later occurrences cannot pass', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-return-evidence-'));
+  const { source, canvas } = repeatedVisitFixture();
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory }) => {
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="1"/></testsuites>');
+          await writeFile(join(directory, 'step-008-assertCondition.png'), 'controlled screenshot fixture');
+          await writeFile(join(directory, 'commands.json'), JSON.stringify(['launchAppCommand', 'assertConditionCommand', 'tapOnElement', 'assertConditionCommand', 'tapOnElement', 'assertConditionCommand', 'tapOnElement', 'assertConditionCommand'].map((name, index) => ({ command: { [name]: {} }, metadata: { depth: 0, sequenceNumber: index + 2, status: index === 5 ? 'FAILED' : 'COMPLETED', error: index === 5 ? { message: 'Home return check failed' } : undefined, evaluatedCommand: index === 5 ? { assertConditionCommand: { condition: { visible: { textRegex: 'Home' } } } } : undefined } }))));
+          return { code: 1, log: 'Controlled failure log', cleanup: { verified: true, detail: 'Exited' } };
+        }
+      }
+    });
+    const saved = await scenarios.save({ name: 'Return failure', yaml: source, canvas });
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: saved.id, deviceId, pathId: 'route' })).id);
+    const home = result.canvas!.occurrences!.filter(item => item.testId === 'home-check');
+    assert.deepEqual(
+      home.map(item => item.status),
+      ['passed', 'failed']
+    );
+    const failed = result.steps.find(step => step.id === home[1].stepId)!;
+    assert.equal(failed.detail, 'Home return check failed');
+    assert.deepEqual(failed.artifacts, ['step-008-assertCondition.png']);
+    assert.deepEqual(failed.actual, { assertConditionCommand: { condition: { visible: { textRegex: 'Home' } } } });
+    assert.deepEqual(
+      result.canvas!.occurrences!.slice(-2).map(item => item.status),
+      ['skipped', 'skipped']
+    );
+    await scenarios.save({ ...saved, canvas: { ...canvas, screens: canvas.screens.map(screen => ({ ...screen, title: 'Later edit' })) } });
+    assert.equal((await scenarios.result(result.id)).snapshot.canvas!.screens[0].title, 'Home');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test('a finite saved route repeats shared screens and edges with distinct execution evidence',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-visits-'));
- const {source,canvas}=repeatedVisitFixture();
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
-  const {readFile}=await import('node:fs/promises');const executed=await readFile(flow,'utf8');
-  assert.equal((executed.match(/tapOn:/g)??[]).length,3);assert.equal((executed.match(/assertVisible: Home/g)??[]).length,2);
-  await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
-  await writeFile(join(directory,'commands.json'),JSON.stringify(['launchAppCommand','assertConditionCommand','tapOnElement','assertConditionCommand','tapOnElement','assertConditionCommand','tapOnElement','assertConditionCommand'].map((name,index)=>({command:{[name]:{}},metadata:{depth:0,status:index===7?'FAILED':'COMPLETED'}}))));
-  return {code:0,log:'Occurrence fixture',cleanup:{verified:true,detail:'Exited'}};
- }}});
- const saved=await scenarios.save({name:'Repeated route',yaml:source,canvas});const loaded=await scenarios.workspace(saved.id);
- const result=await scenarios.wait((await scenarios.start({workspaceId:loaded.id,deviceId,pathId:'route'})).id);
- assert.equal(result.status,'path-failed');assert.equal(result.canvas!.screens.find(screen=>screen.id==='coordinator')!.status,'failed');
- assert.deepEqual(result.canvas!.visits!.map(visit=>visit.screenId),['home','coordinator','home','coordinator']);
- assert.deepEqual(result.canvas!.transitions!.map(edge=>edge.status),['passed','passed','failed']);
- const checks=result.canvas!.occurrences!.filter(item=>item.testId==='identifier');assert.deepEqual(checks.map(check=>check.status),['passed','failed']);assert.notEqual(checks[0].id,checks[1].id);assert.notEqual(checks[0].stepId,checks[1].stepId);
- assert.deepEqual((await scenarios.workspace(saved.id)).canvas!.paths,loaded.canvas!.paths);
- }finally{await rm(root,{recursive:true,force:true});}
+test('a finite saved route repeats shared screens and edges with distinct execution evidence', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-visits-'));
+  const { source, canvas } = repeatedVisitFixture();
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory, flow }) => {
+          const { readFile } = await import('node:fs/promises');
+          const executed = await readFile(flow, 'utf8');
+          assert.equal((executed.match(/tapOn:/g) ?? []).length, 3);
+          assert.equal((executed.match(/assertVisible: Home/g) ?? []).length, 2);
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+          await writeFile(join(directory, 'commands.json'), JSON.stringify(['launchAppCommand', 'assertConditionCommand', 'tapOnElement', 'assertConditionCommand', 'tapOnElement', 'assertConditionCommand', 'tapOnElement', 'assertConditionCommand'].map((name, index) => ({ command: { [name]: {} }, metadata: { depth: 0, status: index === 7 ? 'FAILED' : 'COMPLETED' } }))));
+          return { code: 0, log: 'Occurrence fixture', cleanup: { verified: true, detail: 'Exited' } };
+        }
+      }
+    });
+    const saved = await scenarios.save({ name: 'Repeated route', yaml: source, canvas });
+    const loaded = await scenarios.workspace(saved.id);
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: loaded.id, deviceId, pathId: 'route' })).id);
+    assert.equal(result.status, 'path-failed');
+    assert.equal(result.canvas!.screens.find(screen => screen.id === 'coordinator')!.status, 'failed');
+    assert.deepEqual(
+      result.canvas!.visits!.map(visit => visit.screenId),
+      ['home', 'coordinator', 'home', 'coordinator']
+    );
+    assert.deepEqual(
+      result.canvas!.transitions!.map(edge => edge.status),
+      ['passed', 'passed', 'failed']
+    );
+    const checks = result.canvas!.occurrences!.filter(item => item.testId === 'identifier');
+    assert.deepEqual(
+      checks.map(check => check.status),
+      ['passed', 'failed']
+    );
+    assert.notEqual(checks[0].id, checks[1].id);
+    assert.notEqual(checks[0].stepId, checks[1].stepId);
+    assert.deepEqual((await scenarios.workspace(saved.id)).canvas!.paths, loaded.canvas!.paths);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test('per-visit check subsets reload, share edits, and reject deleted selections without substitution',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-visit-subsets-'));const {source,canvas}=repeatedVisitFixture();
- const returned={...canvas.screens[0].tests[0],id:'returned',label:'Returned Home',check:{visibility:'visible' as const,target:'id' as const,match:'regex' as const,value:'home.returned'}};
- canvas.screens[0].tests.push(returned);
- canvas.paths[0].edgeIds=['go','return'];canvas.paths[0].visits=[{id:'first',checkIds:['home-check']},{id:'details'},{id:'returned-visit',checkIds:['returned']}];
- const yaml=source+'# tnt-check:returned\n- assertVisible:\n    id: home.returned\n';
- try{
- const scenarios=createScenarios({root,runner:device(root),maestro:{version:async()=> '2.11.0',run:async({directory})=>{
-  await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
-  // Returned Home has no command evidence, despite a successful report.
-  await writeFile(join(directory,'commands.json'),JSON.stringify(['launchAppCommand','assertConditionCommand','tapOnElement','assertConditionCommand','tapOnElement'].map(name=>({command:{[name]:{}},metadata:{depth:0,status:'COMPLETED'}}))));
-  return {code:0,log:'Subset fixture',cleanup:{verified:true,detail:'Exited'}};
- }}});
- const saved=await scenarios.save({name:'Home return subsets',yaml,canvas});const loaded=await scenarios.workspace(saved.id);
- assert.deepEqual(loaded.canvas!.paths[0].visits,canvas.paths[0].visits);
- const preview=await scenarios.preview({...loaded,pathId:'route'});assert.equal((preview.executionYaml.match(/assertVisible: Home/g)??[]).length,1);assert.equal((preview.executionYaml.match(/home.returned/g)??[]).length,1);
- const result=await scenarios.wait((await scenarios.start({workspaceId:loaded.id,deviceId,pathId:'route'})).id);
- assert.equal(result.status,'path-failed');assert.deepEqual(result.canvas!.visits!.map(visit=>visit.status),['passed','passed','unavailable']);assert.equal(result.canvas!.screens.find(screen=>screen.id==='home')!.status,'unavailable');
- const repaired=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,canvas:{...loaded.canvas!,edges:loaded.canvas!.edges.map(edge=>edge.id==='return'?{...edge,assertionTestId:'deleted-original'}:edge)}});assert.match((await scenarios.preview({...repaired,pathId:'route'})).executionYaml,/home.returned/);
- const edited=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,yaml:yaml.replace('home.returned','home.updated')});assert.match((await scenarios.preview({...edited,pathId:'route'})).executionYaml,/home.updated/);assert.deepEqual(edited.canvas!.paths[0].visits,canvas.paths[0].visits);
- const removed=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,canvas:{...loaded.canvas!,screens:loaded.canvas!.screens.map(screen=>({...screen,tests:screen.tests.filter(test=>test.id!=='returned')}))}});
- assert.match(removed.canvasDiagnostics!.map(item=>item.detail).join(' '),/deleted or stale check selections/);await assert.rejects(scenarios.start({workspaceId:removed.id,deviceId,pathId:'route'}),/deleted or stale/);
- }finally{await rm(root,{recursive:true,force:true});}
+test('per-visit check subsets reload, share edits, and reject deleted selections without substitution', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tnt-visit-subsets-'));
+  const { source, canvas } = repeatedVisitFixture();
+  const returned = { ...canvas.screens[0].tests[0], id: 'returned', label: 'Returned Home', check: { visibility: 'visible' as const, target: 'id' as const, match: 'regex' as const, value: 'home.returned' } };
+  canvas.screens[0].tests.push(returned);
+  canvas.paths[0].edgeIds = ['go', 'return'];
+  canvas.paths[0].visits = [{ id: 'first', checkIds: ['home-check'] }, { id: 'details' }, { id: 'returned-visit', checkIds: ['returned'] }];
+  const yaml = source + '# tnt-check:returned\n- assertVisible:\n    id: home.returned\n';
+  try {
+    const scenarios = createScenarios({
+      root,
+      runner: device(root),
+      maestro: {
+        version: async () => '2.11.0',
+        run: async ({ directory }) => {
+          await writeFile(join(directory, 'report.xml'), '<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+          // Returned Home has no command evidence, despite a successful report.
+          await writeFile(join(directory, 'commands.json'), JSON.stringify(['launchAppCommand', 'assertConditionCommand', 'tapOnElement', 'assertConditionCommand', 'tapOnElement'].map(name => ({ command: { [name]: {} }, metadata: { depth: 0, status: 'COMPLETED' } }))));
+          return { code: 0, log: 'Subset fixture', cleanup: { verified: true, detail: 'Exited' } };
+        }
+      }
+    });
+    const saved = await scenarios.save({ name: 'Home return subsets', yaml, canvas });
+    const loaded = await scenarios.workspace(saved.id);
+    assert.deepEqual(loaded.canvas!.paths[0].visits, canvas.paths[0].visits);
+    const preview = await scenarios.preview({ ...loaded, pathId: 'route' });
+    assert.equal((preview.executionYaml.match(/assertVisible: Home/g) ?? []).length, 1);
+    assert.equal((preview.executionYaml.match(/home.returned/g) ?? []).length, 1);
+    const result = await scenarios.wait((await scenarios.start({ workspaceId: loaded.id, deviceId, pathId: 'route' })).id);
+    assert.equal(result.status, 'path-failed');
+    assert.deepEqual(
+      result.canvas!.visits!.map(visit => visit.status),
+      ['passed', 'passed', 'unavailable']
+    );
+    assert.equal(result.canvas!.screens.find(screen => screen.id === 'home')!.status, 'unavailable');
+    const repaired = await scenarios.save({ ...loaded, metadata: (await scenarios.workspace(loaded.id)).metadata, canvas: { ...loaded.canvas!, edges: loaded.canvas!.edges.map(edge => (edge.id === 'return' ? { ...edge, assertionTestId: 'deleted-original' } : edge)) } });
+    assert.match((await scenarios.preview({ ...repaired, pathId: 'route' })).executionYaml, /home.returned/);
+    const edited = await scenarios.save({ ...loaded, metadata: (await scenarios.workspace(loaded.id)).metadata, yaml: yaml.replace('home.returned', 'home.updated') });
+    assert.match((await scenarios.preview({ ...edited, pathId: 'route' })).executionYaml, /home.updated/);
+    assert.deepEqual(edited.canvas!.paths[0].visits, canvas.paths[0].visits);
+    const removed = await scenarios.save({ ...loaded, metadata: (await scenarios.workspace(loaded.id)).metadata, canvas: { ...loaded.canvas!, screens: loaded.canvas!.screens.map(screen => ({ ...screen, tests: screen.tests.filter(test => test.id !== 'returned') })) } });
+    assert.match(removed.canvasDiagnostics!.map(item => item.detail).join(' '), /deleted or stale check selections/);
+    await assert.rejects(scenarios.start({ workspaceId: removed.id, deviceId, pathId: 'route' }), /deleted or stale/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -27,7 +27,6 @@ Review corrections preserve surviving check positions across intervening YAML ac
 
 Final independent reviews against the implementation baseline, including review corrections: Standards — no remaining actionable documented-standard violations or baseline smells. Spec — no remaining actionable findings and no scope creep.
 
-
 ## Follow-up: direct taps and reachable deletion — 2026-10-09
 
 The user reported that nodes had no tapOn authoring and that added checks could not be deleted. The GUI regression initially failed with “Add tap to Home” missing and “Delete must be visible without expanding the check.” Nodes now author tap selectors directly, using the same YAML synchronization and draft validation boundary as checks. A tap added on Home after Coordinator's check exists is inserted before that destination's check. Taps appear as triggering actions; both the destination picker and server validation reject using a tap as the destination assertion.

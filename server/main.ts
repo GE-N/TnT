@@ -10,8 +10,9 @@ import { createMaestro } from './maestro.js';
 
 const exec = promisify(execFile);
 const execute: Execute = async (file, args) => {
-  try { return await exec(file, args, { timeout: 30_000, maxBuffer: 2 * 1024 * 1024, encoding: 'utf8' }); }
-  catch (error) {
+  try {
+    return await exec(file, args, { timeout: 30_000, maxBuffer: 2 * 1024 * 1024, encoding: 'utf8' });
+  } catch (error) {
     const failure = error as NodeJS.ErrnoException & { stderr?: string; stdout?: string; killed?: boolean };
     if (failure.code === 'ENOENT') throw new Error('Xcode command-line tools are missing. Install/select Xcode and refresh.');
     if (failure.killed) throw new Error('Simulator command timed out after 30 seconds. Check the simulator and try again.');
@@ -36,10 +37,17 @@ if (production) {
     try {
       const pathname = decodeURIComponent(new URL(request.url ?? '/', 'http://localhost').pathname);
       const file = resolve(dist, '.' + (pathname === '/' ? '/index.html' : pathname));
-      if (!file.startsWith(dist + sep)) { response.writeHead(403); response.end(); return; }
+      if (!file.startsWith(dist + sep)) {
+        response.writeHead(403);
+        response.end();
+        return;
+      }
       response.setHeader('Content-Type', types[extname(file)] ?? 'application/octet-stream');
       response.end(await readFile(file));
-    } catch { response.writeHead(404); response.end('Not found. Run npm run build before npm start.'); }
+    } catch {
+      response.writeHead(404);
+      response.end('Not found. Run npm run build before npm start.');
+    }
   };
 } else {
   const { createServer: createViteServer } = await import('vite');
@@ -47,5 +55,8 @@ if (production) {
   serve = (request, response) => vite.middlewares(request, response);
 }
 server.on('request', createApiHandler(runner, artifactDirectory, serve, scenarios));
-server.on('error', error => { console.error('Unable to start workbench:', error.message); process.exitCode = 1; });
+server.on('error', error => {
+  console.error('Unable to start workbench:', error.message);
+  process.exitCode = 1;
+});
 server.listen(port, '127.0.0.1', () => console.log(`TnT workbench: http://127.0.0.1:${port} (${production ? 'production' : 'development'})`));
