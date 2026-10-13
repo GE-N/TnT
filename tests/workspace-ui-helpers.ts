@@ -18,7 +18,11 @@ export async function workspaceCommand(document:Document,command:'save'|'open',s
 
   // Event-loop turns do not acknowledge filesystem/network work under load.
   await press(await waitFor(()=>document.querySelector<HTMLButtonElement>('.workspace-library button:not(:disabled)')??undefined,'the workspace library'));
-  await waitFor(()=>document.querySelector('.workspace-management-surface')?undefined:true,'the workspace to finish opening');
+  await waitFor(()=>{
+   const surface=document.querySelector('.workspace-management-surface');
+   // A blocked switch is also complete; its caller asserts retained edits/error.
+   return !surface||[...surface.querySelectorAll('button')].some(button=>button.textContent==='Discard changes and switch')?true:undefined;
+  },'the workspace open result');
  }
 }
 /** Step controls live in the floating inspector, which only exists for the selected screen. */
