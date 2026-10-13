@@ -907,5 +907,23 @@ test("floating controls reserve inspector bounds and an open popover moves the c
     page.document.getElementById("root")!.append(controls);
     await act(async()=>{controls.open=true;controls.dispatchEvent(new page.window.Event("toggle"));});
     assert.equal(page.placement().side,"left", "An open simulator popover must not cover the inspector");
+    controls.remove();
+    const notice=page.document.createElement("aside");
+    notice.className="notice error";
+    notice.dataset.layout="canvas-notice";
+    page.rects.set("canvas-notice",{left:24,top:156,width:600,height:60});
+    page.rects.set("home",{left:100,top:160,width:250,height:180});
+    page.document.querySelector(".canvas-editor")!.append(notice);
+    await page.relayout();
+    assert.ok(page.placement().left >= 624, "A short error notice must also stay clear of the inspector");
+    notice.remove();
+    const toast=page.document.createElement("aside");
+    toast.className="run-error-toast";
+    toast.dataset.layout="run-error";
+    page.rects.set("run-error",{left:800,top:560,width:400,height:100});
+    page.rects.set("home",{left:650,top:400,width:250,height:180});
+    page.document.getElementById("root")!.append(toast);
+    await page.relayout();
+    assert.ok(page.placement().left + 300 <= 800, "A run failure must not cover inspector actions");
   } finally { await page.close(); }
 });

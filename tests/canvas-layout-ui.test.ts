@@ -54,5 +54,10 @@ test('opening a floating control closes the previous floating popover',async()=>
   await act(async()=>{device.open=true;device.dispatchEvent(new dom.window.Event('toggle'));});
   assert.ok(device.open);
   assert.equal(scenarios.open,false,'The old floating popover closes so controls cannot crowd the inspector');
+  const launch=device.querySelector<HTMLDetailsElement>('.launch-tools')!;
+  assert.ok(launch,'Advanced launch controls remain reachable inside Simulator & app');
+  await act(async()=>{launch.open=true;launch.dispatchEvent(new dom.window.Event('toggle'));});
+  assert.ok(device.open,'Opening nested launch tools must keep its simulator popover open');
+  assert.ok(launch.open);
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });

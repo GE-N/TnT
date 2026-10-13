@@ -22,8 +22,8 @@ export function App() {
     const workbench=document.querySelector('.workbench');
     const toggle=(event:Event)=>{
       const opened=event.target as HTMLDetailsElement;
-      if(!workbench?.contains(opened)||!opened.open||!opened.matches('.device-toolbar,.scenario-controls,.workspace-advanced,.report-tools,.launch-tools'))return;
-      workbench.querySelectorAll<HTMLDetailsElement>('.device-toolbar,.scenario-controls,.workspace-advanced,.report-tools,.launch-tools').forEach(panel=>{if(panel!==opened)panel.open=false;});
+      if(!workbench?.contains(opened)||!opened.open||!opened.matches('.device-toolbar,.scenario-controls,.workspace-advanced,.report-tools'))return;
+      workbench.querySelectorAll<HTMLDetailsElement>('.device-toolbar,.scenario-controls,.workspace-advanced,.report-tools').forEach(panel=>{if(panel!==opened)panel.open=false;});
     };
     document.addEventListener('toggle',toggle,true);
     return()=>document.removeEventListener('toggle',toggle,true);
@@ -81,10 +81,10 @@ export function App() {
         <label htmlFor="device">Simulator</label><select id="device" value={deviceId} disabled={busy||scenarioBusy} onChange={event=>setDeviceId(event.target.value)}><option value="">Design offline</option>{status?.devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select>
         <button className="text-button" disabled={busy||scenarioBusy} onClick={()=>void refresh()}>Refresh devices</button>
         <AppPicker key={deviceId+status?.token} deviceId={deviceId} token={status?.token??''} value={bundleId} onChange={setBundleId} onReady={setPickerReady} disabled={busy||scenarioBusy}/>
-      </div></details>
+      </div><details className="launch-tools"><summary>Advanced launch tools</summary><form onSubmit={launch}><button className="confirm" disabled={!ready||!pickerReady||busy||scenarioBusy}>Launch app</button></form>{result&&<><p>{result.bundleId} · {result.status}</p>{result.status==='awaiting-confirmation'&&<button onClick={()=>void confirm()} disabled={busy||!screen}>I can see the app</button>}<pre>{result.log}</pre></>}</details></details>
       {(error||status?.error)&&<div className="notice error" role="alert">{error||status?.error}</div>}
       <Scenarios token={devNoRunner?'':status?.token??''} deviceId={deviceId} bundleId={bundleId} launchBusy={busy} onRunning={setScenarioBusy} recoverSession simulatorConnected={!!ready}/>
-      <details className="launch-tools"><summary>Advanced launch tools</summary><form onSubmit={launch}><button className="confirm" disabled={!ready||!pickerReady||busy||scenarioBusy}>Launch app</button></form>{result&&<><p>{result.bundleId} · {result.status}</p>{result.status==='awaiting-confirmation'&&<button onClick={()=>void confirm()} disabled={busy||!screen}>I can see the app</button>}<pre>{result.log}</pre></>}</details>
+
       <footer hidden><span>iOS first · Local execution</span><span>Pick reviewed steps from the simulator · Isolated mock scenarios and reusable assertions.</span></footer>
     </main>
   </div>;
