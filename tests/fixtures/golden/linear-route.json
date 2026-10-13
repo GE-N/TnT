@@ -1,0 +1,155 @@
+{
+  "canvas": {
+    "edges": [
+      {
+        "actionTestId": "open-detail",
+        "assertionTestId": "detail-ready",
+        "from": "home",
+        "id": "home-detail",
+        "responseCondition": "Home → Detail",
+        "to": "detail"
+      }
+    ],
+    "paths": [
+      {
+        "edgeIds": [
+          "home-detail"
+        ],
+        "id": "route",
+        "name": "Home → Detail",
+        "screenId": "home"
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Home",
+              "visibility": "visible"
+            },
+            "id": "home-ready",
+            "label": "Home",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "assertion"
+          },
+          {
+            "id": "open-detail",
+            "label": "Detail",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "action",
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Detail"
+            }
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "detail",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Detail",
+              "visibility": "visible"
+            },
+            "id": "detail-ready",
+            "label": "Detail",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 3,
+              "kind": "step"
+            },
+            "role": "assertion"
+          },
+          {
+            "id": "continue-settings",
+            "label": "Settings",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 4,
+              "kind": "step"
+            },
+            "role": "action",
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Settings"
+            }
+          }
+        ],
+        "title": "Detail",
+        "x": 420,
+        "y": 40
+      },
+      {
+        "id": "settings",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Settings",
+              "visibility": "visible"
+            },
+            "id": "settings-ready",
+            "label": "Settings",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 5,
+              "kind": "step"
+            },
+            "role": "assertion"
+          }
+        ],
+        "title": "Settings",
+        "x": 800,
+        "y": 40
+      }
+    ]
+  },
+  "description": "A linear Home → Detail route. An unconnected tail action can connect to the existing Settings screen, then its destination can be cleared and undone.",
+  "id": "linear-route",
+  "pathId": "route",
+  "scenarioMode": false,
+  "scenarios": [],
+  "scripts": [
+    {
+      "actionId": "continue-settings",
+      "op": "connect",
+      "screenId": "detail",
+      "to": "settings"
+    },
+    {
+      "actionId": "continue-settings",
+      "op": "clear-destination",
+      "screenId": "detail"
+    },
+    {
+      "op": "undo"
+    }
+  ],
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:continue-settings\n# tnt-match:exact\n- tapOn:\n    text: ^Settings$\n# tnt-check:settings-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Settings$\n"
+}

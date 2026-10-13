@@ -1,0 +1,221 @@
+{
+  "baseline": {
+    "canvas": {
+      "edges": [
+        {
+          "actionTestId": "open-detail",
+          "actionTestIds": [
+            "open-detail"
+          ],
+          "from": "home",
+          "id": "go",
+          "to": "detail"
+        },
+        {
+          "actionTestId": "back-home",
+          "actionTestIds": [
+            "back-home"
+          ],
+          "from": "detail",
+          "id": "return",
+          "to": "home"
+        }
+      ],
+      "paths": [
+        {
+          "edgeIds": [
+            "go",
+            "return"
+          ],
+          "id": "route",
+          "scenarioId": "scenario-a",
+          "screenId": "home"
+        }
+      ],
+      "screens": [
+        {
+          "id": "home",
+          "tests": [
+            "home-ready",
+            "open-detail"
+          ],
+          "title": "Home"
+        },
+        {
+          "id": "detail",
+          "tests": [
+            "detail-ready",
+            "back-home"
+          ],
+          "title": "Detail"
+        }
+      ]
+    },
+    "routes": [
+      {
+        "checkpoints": null,
+        "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:back-home\n# tnt-back\n# tnt-match:exact\n- tapOn:\n    text: ^Back$\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n",
+        "pathId": "route",
+        "projectedVisits": [
+          {
+            "checkIds": [
+              "home-ready"
+            ],
+            "id": "visit-1",
+            "screenId": "home"
+          },
+          {
+            "checkIds": [
+              "detail-ready"
+            ],
+            "id": "visit-2",
+            "screenId": "detail"
+          },
+          {
+            "checkIds": [
+              "home-ready"
+            ],
+            "id": "visit-3",
+            "screenId": "home"
+          }
+        ],
+        "setup": null,
+        "steps": [
+          {
+            "assertion": true,
+            "edgeId": null,
+            "id": "occurrence:[\"visit-1\",\"home-ready\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "c24a05499ed936126d12b849f52191d9564ddbcfd86a3940e9b6963698fdbc0d",
+              "index": 1,
+              "kind": "step"
+            },
+            "testId": "home-ready",
+            "visitId": "visit-1"
+          },
+          {
+            "assertion": false,
+            "edgeId": "go",
+            "id": "occurrence:[\"visit-1\",\"open-detail\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "6e01cf19c1552aa52a4346bb523a37c35ac19c39aa174e43bdf6fba56bcf6d06",
+              "index": 2,
+              "kind": "step"
+            },
+            "testId": "open-detail",
+            "visitId": "visit-1"
+          },
+          {
+            "assertion": true,
+            "edgeId": null,
+            "id": "occurrence:[\"visit-2\",\"detail-ready\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "36df73ba9b7886f3382d61d0da3d12ef4b3b37866ae79eb5e8f9af14a9597deb",
+              "index": 3,
+              "kind": "step"
+            },
+            "testId": "detail-ready",
+            "visitId": "visit-2"
+          },
+          {
+            "assertion": false,
+            "edgeId": "return",
+            "id": "occurrence:[\"visit-2\",\"back-home\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "18b68de7b546fa4261cf2aa44a1da3556fc8417fcb86c4b0485a71a14c0d3303",
+              "index": 4,
+              "kind": "step"
+            },
+            "testId": "back-home",
+            "visitId": "visit-2"
+          },
+          {
+            "assertion": true,
+            "edgeId": null,
+            "id": "occurrence:[\"visit-3\",\"home-ready\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "c24a05499ed936126d12b849f52191d9564ddbcfd86a3940e9b6963698fdbc0d",
+              "index": 5,
+              "kind": "step"
+            },
+            "testId": "home-ready",
+            "visitId": "visit-3"
+          }
+        ],
+        "transitions": [
+          {
+            "destinationVisitId": "visit-2",
+            "edgeId": "go",
+            "id": "visit-2:transition",
+            "visitId": "visit-1"
+          },
+          {
+            "destinationVisitId": "visit-3",
+            "edgeId": "return",
+            "id": "visit-3:transition",
+            "visitId": "visit-2"
+          }
+        ]
+      }
+    ],
+    "visits": [
+      {
+        "checkIds": null,
+        "index": 0,
+        "operationIds": [
+          "home-ready",
+          "open-detail"
+        ],
+        "pathId": "route",
+        "screenId": "home",
+        "storedOperationIds": [
+          "home-ready",
+          "open-detail"
+        ],
+        "visitId": "visit-1"
+      },
+      {
+        "checkIds": null,
+        "index": 1,
+        "operationIds": [
+          "detail-ready",
+          "back-home"
+        ],
+        "pathId": "route",
+        "screenId": "detail",
+        "storedOperationIds": [
+          "detail-ready",
+          "back-home"
+        ],
+        "visitId": "visit-2"
+      },
+      {
+        "checkIds": null,
+        "index": 2,
+        "operationIds": [
+          "home-ready"
+        ],
+        "pathId": "route",
+        "screenId": "home",
+        "storedOperationIds": [
+          "home-ready"
+        ],
+        "visitId": "visit-3"
+      }
+    ],
+    "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:back-home\n# tnt-back\n# tnt-match:exact\n- tapOn:\n    text: ^Back$\n"
+  },
+  "description": "Home → Detail → Home reuses the Home check on the return visit.",
+  "fixture": "repeated-visit",
+  "operations": []
+}

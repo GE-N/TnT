@@ -1,0 +1,166 @@
+{
+  "canvas": {
+    "edges": [
+      {
+        "actionTestId": "tap-field",
+        "actionTestIds": [
+          "tap-field",
+          "input-name"
+        ],
+        "assertionTestId": "done-ready",
+        "from": "home",
+        "id": "home-done",
+        "responseCondition": "Home → Done",
+        "to": "done"
+      }
+    ],
+    "paths": [
+      {
+        "edgeIds": [
+          "home-done"
+        ],
+        "id": "route",
+        "name": "Multi-action",
+        "scenarioId": "scenario-a",
+        "screenId": "home",
+        "visits": [
+          {
+            "id": "visit-home",
+            "operationIds": [
+              "tap-field",
+              "input-name"
+            ]
+          },
+          {
+            "id": "visit-done",
+            "operationIds": [
+              "done-ready"
+            ]
+          }
+        ]
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "id": "tap-field",
+            "label": "Field",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "action",
+            "scenarioIds": [
+              "scenario-a"
+            ],
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Field"
+            }
+          },
+          {
+            "id": "input-name",
+            "input": "Ada",
+            "label": "Ada",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "action",
+            "scenarioIds": [
+              "scenario-a"
+            ]
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "done",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Done",
+              "visibility": "visible"
+            },
+            "id": "done-ready",
+            "label": "Done",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 3,
+              "kind": "step"
+            },
+            "role": "assertion",
+            "scenarioIds": [
+              "scenario-a"
+            ]
+          }
+        ],
+        "title": "Done",
+        "x": 420,
+        "y": 40
+      },
+      {
+        "id": "other",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Other",
+              "visibility": "visible"
+            },
+            "id": "other-ready",
+            "label": "Other",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 4,
+              "kind": "step"
+            },
+            "role": "assertion",
+            "scenarioIds": [
+              "scenario-a"
+            ]
+          }
+        ],
+        "title": "Other",
+        "x": 420,
+        "y": 320
+      }
+    ]
+  },
+  "description": "One edge carries a tap and an input. Retargeting the input splits that edge.",
+  "id": "multi-action-edge",
+  "pathId": "route",
+  "scenarioId": "scenario-a",
+  "scenarioMode": true,
+  "scenarios": [
+    {
+      "id": "scenario-a",
+      "name": "Multi-action",
+      "pathId": "route"
+    }
+  ],
+  "scripts": [
+    {
+      "actionId": "input-name",
+      "op": "retarget",
+      "screenId": "home",
+      "to": "other",
+      "visitId": "visit-home"
+    }
+  ],
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-field\n# tnt-match:exact\n- tapOn:\n    text: ^Field$\n# tnt-check:input-name\n- inputText: Ada\n# tnt-check:done-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Done$\n# tnt-check:other-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Other$\n"
+}

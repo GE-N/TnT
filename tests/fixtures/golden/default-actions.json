@@ -1,0 +1,164 @@
+{
+  "automation": {
+    "actions": [
+      {
+        "condition": {
+          "text": "Home"
+        },
+        "enabled": true,
+        "file": "open.yaml",
+        "id": "open",
+        "name": "Open Middle",
+        "parameters": {}
+      }
+    ],
+    "checkpoints": [
+      {
+        "beforeStep": 0,
+        "fingerprint": "a9994dbe86a4ccd76ee8477ef508396fdbf3b0382b328ee57993fecd428d6d49",
+        "timeoutMs": 0
+      }
+    ],
+    "setup": {
+      "file": "setup.yaml",
+      "parameters": {}
+    }
+  },
+  "canvas": {
+    "edges": [
+      {
+        "actionTestId": "handler",
+        "assertionTestId": "middle-ready",
+        "from": "home",
+        "id": "handler-edge",
+        "responseCondition": "Handler opens Middle",
+        "to": "middle"
+      },
+      {
+        "actionTestId": "tap-done",
+        "actionTestIds": [
+          "tap-done"
+        ],
+        "assertionTestId": "done-ready",
+        "from": "middle",
+        "id": "ordered-edge",
+        "responseCondition": "Tap Done",
+        "to": "done"
+      }
+    ],
+    "paths": [
+      {
+        "edgeIds": [
+          "handler-edge",
+          "ordered-edge"
+        ],
+        "id": "route",
+        "name": "Setup and handler",
+        "screenId": "home"
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "id": "setup",
+            "label": "Independent setup",
+            "reference": {
+              "file": "setup.yaml",
+              "fingerprint": "c583351dca15890ca70ea051690723c1150ce1701aadcdf4aee32f502ca087bf",
+              "kind": "setup"
+            },
+            "role": "setup"
+          },
+          {
+            "id": "handler",
+            "label": "Open Middle",
+            "reference": {
+              "actionId": "open",
+              "file": "open.yaml",
+              "fingerprint": "b0a93842d55782105094e22ad0933aac6fc96bbb2ca92d3498ec59103c854f52",
+              "index": 0,
+              "kind": "handler"
+            },
+            "role": "handler"
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "middle",
+        "tests": [
+          {
+            "id": "middle-ready",
+            "label": "Middle",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "a9994dbe86a4ccd76ee8477ef508396fdbf3b0382b328ee57993fecd428d6d49",
+              "index": 0,
+              "kind": "step"
+            },
+            "role": "assertion"
+          },
+          {
+            "id": "tap-done",
+            "label": "Done",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "action",
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Done"
+            }
+          }
+        ],
+        "title": "Middle",
+        "x": 420,
+        "y": 40
+      },
+      {
+        "id": "done",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Done",
+              "visibility": "visible"
+            },
+            "id": "done-ready",
+            "label": "Done",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "assertion"
+          }
+        ],
+        "title": "Done",
+        "x": 800,
+        "y": 40
+      }
+    ]
+  },
+  "description": "A setup reference and a handler checkpoint stay attached to the ordered route.",
+  "flows": {
+    "open.yaml": "appId: com.example.App\n---\n- tapOn: Middle\n",
+    "setup.yaml": "appId: com.example.App\n---\n- assertVisible: Home\n"
+  },
+  "id": "default-actions",
+  "pathId": "route",
+  "scenarioMode": false,
+  "scenarios": [],
+  "scripts": [],
+  "yaml": "appId: com.example.App\n---\n- assertVisible: Middle\n# tnt-check:tap-done\n# tnt-match:exact\n- tapOn:\n    text: \"^Done$\"\n# tnt-check:done-ready\n# tnt-match:exact\n- assertVisible:\n    text: \"^Done$\"\n"
+}

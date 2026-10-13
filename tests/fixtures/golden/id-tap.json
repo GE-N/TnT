@@ -1,0 +1,96 @@
+{
+  "canvas": {
+    "edges": [
+      {
+        "actionTestId": "tap-gear",
+        "assertionTestId": "detail-ready",
+        "from": "home",
+        "id": "open",
+        "responseCondition": "Tap gear.button",
+        "to": "detail"
+      }
+    ],
+    "paths": [
+      {
+        "edgeIds": [
+          "open"
+        ],
+        "id": "route",
+        "name": "Id tap",
+        "screenId": "home",
+        "visits": [
+          {
+            "id": "visit-home",
+            "operationIds": [
+              "tap-gear"
+            ]
+          },
+          {
+            "id": "visit-detail",
+            "operationIds": [
+              "detail-ready"
+            ]
+          }
+        ]
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "id": "tap-gear",
+            "label": "gear.button",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "action",
+            "tap": {
+              "match": "exact",
+              "target": "id",
+              "value": "gear.button"
+            }
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "detail",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "id",
+              "value": "detail.ready",
+              "visibility": "visible"
+            },
+            "id": "detail-ready",
+            "label": "detail.ready",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "assertion"
+          }
+        ],
+        "title": "Detail",
+        "x": 420,
+        "y": 40
+      }
+    ]
+  },
+  "description": "tapOn matches by element id.",
+  "id": "id-tap",
+  "pathId": "route",
+  "scenarioMode": false,
+  "scenarios": [],
+  "scripts": [],
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    id: ^gear\\.button$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^detail\\.ready$\n"
+}

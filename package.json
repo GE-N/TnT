@@ -11,7 +11,8 @@
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/main.ts --production",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "check:canvas-contract": "bash scripts/check-canvas-contract.sh"
   },
   "dependencies": {
     "@mockoon/cli": "9.9.0",
