@@ -20,16 +20,10 @@
         "screenId": "home",
         "visits": [
           {
-            "id": "visit-home",
-            "operationIds": [
-              "tap-gear"
-            ]
+            "id": "visit-home"
           },
           {
-            "id": "visit-detail",
-            "operationIds": [
-              "detail-ready"
-            ]
+            "id": "visit-detail"
           }
         ]
       }
@@ -83,10 +77,35 @@
         "title": "Detail",
         "x": 420,
         "y": 40
+      },
+      {
+        "id": "more",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "id",
+              "value": "more.ready",
+              "visibility": "visible"
+            },
+            "id": "more-ready",
+            "label": "more.ready",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 3,
+              "kind": "step"
+            },
+            "role": "assertion"
+          }
+        ],
+        "title": "More",
+        "x": 420,
+        "y": 320
       }
     ]
   },
-  "description": "tapOn matches by element id. Editing the selector rewrites the command, then the tap is retargeted.",
+  "description": "tapOn matches by element id. Editing the selector rewrites the command, then the tap is retargeted from Detail onto More. Visits stay unfrozen so the destination check follows More.",
   "id": "id-tap",
   "pathId": "route",
   "scenarioMode": false,
@@ -101,8 +120,8 @@
       "actionId": "tap-gear",
       "op": "retarget",
       "screenId": "home",
-      "to": "detail"
+      "to": "more"
     }
   ],
-  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    id: ^gear\\.button$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^detail\\.ready$\n"
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    id: ^gear\\.button$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^detail\\.ready$\n# tnt-check:more-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^more\\.ready$\n"
 }

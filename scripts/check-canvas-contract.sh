@@ -3,13 +3,14 @@
 #
 # CI must clone with fetch-depth: 0. A shallow history cannot compute merge-base
 # against the base branch, and this script fails rather than reporting a vacuous pass.
-# A push to the default branch has nothing to compare, so the script skips.
+# A CI push to the default branch has nothing to compare, so the script skips.
+# Local checkouts of that branch are still checked.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 branch="$(git rev-parse --abbrev-ref HEAD)"
 ref="${GITHUB_REF:-}"
-if [[ "$branch" == "main" || "$branch" == "master" || "$ref" == "refs/heads/main" || "$ref" == "refs/heads/master" ]]; then
+if [[ -n "${CI:-}" && ( "$branch" == "main" || "$branch" == "master" || "$ref" == "refs/heads/main" || "$ref" == "refs/heads/master" ) ]]; then
   echo "Canvas authoring contract skipped: a push to the default branch has nothing to compare."
   exit 0
 fi

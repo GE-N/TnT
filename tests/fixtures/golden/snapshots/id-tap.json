@@ -34,6 +34,13 @@
             "detail-ready"
           ],
           "title": "Detail"
+        },
+        {
+          "id": "more",
+          "tests": [
+            "more-ready"
+          ],
+          "title": "More"
         }
       ]
     },
@@ -106,9 +113,7 @@
         ],
         "pathId": "route",
         "screenId": "home",
-        "storedOperationIds": [
-          "tap-gear"
-        ],
+        "storedOperationIds": null,
         "visitId": "visit-home"
       },
       {
@@ -119,15 +124,13 @@
         ],
         "pathId": "route",
         "screenId": "detail",
-        "storedOperationIds": [
-          "detail-ready"
-        ],
+        "storedOperationIds": null,
         "visitId": "visit-detail"
       }
     ],
-    "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    id: ^gear\\.button$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^detail\\.ready$\n"
+    "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    id: ^gear\\.button$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^detail\\.ready$\n# tnt-check:more-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^more\\.ready$\n"
   },
-  "description": "tapOn matches by element id. Editing the selector rewrites the command, then the tap is retargeted.",
+  "description": "tapOn matches by element id. Editing the selector rewrites the command, then the tap is retargeted from Detail onto More. Visits stay unfrozen so the destination check follows More.",
   "fixture": "id-tap",
   "operations": [
     {
@@ -172,6 +175,13 @@
                 "detail-ready"
               ],
               "title": "Detail"
+            },
+            {
+              "id": "more",
+              "tests": [
+                "more-ready"
+              ],
+              "title": "More"
             }
           ]
         },
@@ -244,9 +254,7 @@
             ],
             "pathId": "route",
             "screenId": "home",
-            "storedOperationIds": [
-              "tap-gear"
-            ],
+            "storedOperationIds": null,
             "visitId": "visit-home"
           },
           {
@@ -257,13 +265,11 @@
             ],
             "pathId": "route",
             "screenId": "detail",
-            "storedOperationIds": [
-              "detail-ready"
-            ],
+            "storedOperationIds": null,
             "visitId": "visit-detail"
           }
         ],
-        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    id: ^gear\\.button\\.primary$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^detail\\.ready$\n"
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    id: ^gear\\.button\\.primary$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^detail\\.ready$\n# tnt-check:more-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^more\\.ready$\n"
       }
     },
     {
@@ -271,7 +277,7 @@
         "actionId": "tap-gear",
         "op": "retarget",
         "screenId": "home",
-        "to": "detail"
+        "to": "more"
       },
       "op": "retarget",
       "result": {
@@ -282,7 +288,7 @@
               "actionTestIds": null,
               "from": "home",
               "id": "open",
-              "to": "detail"
+              "to": "more"
             }
           ],
           "paths": [
@@ -309,13 +315,20 @@
                 "detail-ready"
               ],
               "title": "Detail"
+            },
+            {
+              "id": "more",
+              "tests": [
+                "more-ready"
+              ],
+              "title": "More"
             }
           ]
         },
         "routes": [
           {
             "checkpoints": null,
-            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    id: ^gear\\.button\\.primary$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^detail\\.ready$\n",
+            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    id: ^gear\\.button\\.primary$\n# tnt-check:more-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^more\\.ready$\n",
             "pathId": "route",
             "projectedVisits": [
               {
@@ -325,10 +338,10 @@
               },
               {
                 "checkIds": [
-                  "detail-ready"
+                  "more-ready"
                 ],
                 "id": "visit-detail",
-                "screenId": "detail"
+                "screenId": "more"
               }
             ],
             "setup": null,
@@ -350,15 +363,15 @@
               {
                 "assertion": true,
                 "edgeId": null,
-                "id": "occurrence:[\"visit-detail\",\"detail-ready\"]",
+                "id": "occurrence:[\"visit-detail\",\"more-ready\"]",
                 "reference": {
                   "actionId": null,
                   "file": "flow.yaml",
-                  "fingerprint": "1128fe941037f50d5ab1d9e7e41da7c33db59568a08c6f53b8adbf76403aa79b",
+                  "fingerprint": "0c2b596e5b952035bd6f2ef4e4bc4d61eaba52270425e3bf184c32efed2cd050",
                   "index": 2,
                   "kind": "step"
                 },
-                "testId": "detail-ready",
+                "testId": "more-ready",
                 "visitId": "visit-detail"
               }
             ],
@@ -381,26 +394,22 @@
             ],
             "pathId": "route",
             "screenId": "home",
-            "storedOperationIds": [
-              "tap-gear"
-            ],
+            "storedOperationIds": null,
             "visitId": "visit-home"
           },
           {
             "checkIds": null,
             "index": 1,
             "operationIds": [
-              "detail-ready"
+              "more-ready"
             ],
             "pathId": "route",
-            "screenId": "detail",
-            "storedOperationIds": [
-              "detail-ready"
-            ],
+            "screenId": "more",
+            "storedOperationIds": null,
             "visitId": "visit-detail"
           }
         ],
-        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    id: ^gear\\.button\\.primary$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^detail\\.ready$\n"
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    id: ^gear\\.button\\.primary$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^detail\\.ready$\n# tnt-check:more-ready\n# tnt-match:exact\n- assertVisible:\n    id: ^more\\.ready$\n"
       }
     }
   ]

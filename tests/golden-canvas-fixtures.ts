@@ -52,13 +52,14 @@ function textTap():GoldenFixture{
     screens:[
       screen('home','Home',40,40,[tap('tap-gear','Gear','text')]),
       screen('detail','Detail',420,40,[check('detail-ready','Detail')]),
+      screen('more','More',420,320,[check('more-ready','More')]),
     ],
     edges:[edge('open','home','detail','tap-gear','detail-ready','Tap Gear')],
-    paths:[{id:'route',name:'Text tap',screenId:'home',edgeIds:['open'],visits:[{id:'visit-home',operationIds:['tap-gear']},{id:'visit-detail',operationIds:['detail-ready']}]}],
+    paths:[{id:'route',name:'Text tap',screenId:'home',edgeIds:['open'],visits:[{id:'visit-home'},{id:'visit-detail'}]}],
   };
-  return {id:'text-tap',description:'tapOn matches by text. Editing the selector rewrites the command, then the tap is retargeted.',scenarioMode:false,pathId:'route',scenarios:[],...materialize(canvas),scripts:[
+  return {id:'text-tap',description:'tapOn matches by text. Editing the selector rewrites the command, then the tap is retargeted from Detail onto More. Visits stay unfrozen so the destination check follows More.',scenarioMode:false,pathId:'route',scenarios:[],...materialize(canvas),scripts:[
     {op:'edit',actionId:'tap-gear',value:'Open settings'},
-    {op:'retarget',screenId:'home',actionId:'tap-gear',to:'detail'},
+    {op:'retarget',screenId:'home',actionId:'tap-gear',to:'more'},
   ]};
 }
 
@@ -67,14 +68,29 @@ function idTap():GoldenFixture{
     screens:[
       screen('home','Home',40,40,[tap('tap-gear','gear.button','id')]),
       screen('detail','Detail',420,40,[check('detail-ready','detail.ready','id')]),
+      screen('more','More',420,320,[check('more-ready','more.ready','id')]),
     ],
     edges:[edge('open','home','detail','tap-gear','detail-ready','Tap gear.button')],
-    paths:[{id:'route',name:'Id tap',screenId:'home',edgeIds:['open'],visits:[{id:'visit-home',operationIds:['tap-gear']},{id:'visit-detail',operationIds:['detail-ready']}]}],
+    paths:[{id:'route',name:'Id tap',screenId:'home',edgeIds:['open'],visits:[{id:'visit-home'},{id:'visit-detail'}]}],
   };
-  return {id:'id-tap',description:'tapOn matches by element id. Editing the selector rewrites the command, then the tap is retargeted.',scenarioMode:false,pathId:'route',scenarios:[],...materialize(canvas),scripts:[
+  return {id:'id-tap',description:'tapOn matches by element id. Editing the selector rewrites the command, then the tap is retargeted from Detail onto More. Visits stay unfrozen so the destination check follows More.',scenarioMode:false,pathId:'route',scenarios:[],...materialize(canvas),scripts:[
     {op:'edit',actionId:'tap-gear',value:'gear.button.primary'},
-    {op:'retarget',screenId:'home',actionId:'tap-gear',to:'detail'},
+    {op:'retarget',screenId:'home',actionId:'tap-gear',to:'more'},
   ]};
+}
+
+function literalBack():GoldenFixture{
+  const step=(index:number):YAMLReference=>({kind:'step',file:'flow.yaml',index,fingerprint:'draft'});
+  const yaml='appId: com.example.App\n---\n- launchApp\n# tnt-check:go-back\n- back\n# tnt-check:previous-ready\n# tnt-match:exact\n- assertVisible:\n    text: "^Previous$"\n';
+  const canvas:CanvasGraph={
+    screens:[
+      screen('home','Home',40,40,[{id:'go-back',label:'Back',role:'action',reference:step(1),back:true,backSelector:{target:'id',match:'exact',value:'nav.back'}}]),
+      screen('previous','Previous',420,40,[{id:'previous-ready',label:'Previous',role:'assertion',reference:step(2),check:{visibility:'visible',target:'text',match:'exact',value:'Previous'}}]),
+    ],
+    edges:[edge('back-edge','home','previous','go-back','previous-ready','Back')],
+    paths:[{id:'route',name:'Literal back',screenId:'home',edgeIds:['back-edge'],visits:[{id:'visit-home',operationIds:['go-back']},{id:'visit-previous',operationIds:['previous-ready']}]}],
+  };
+  return {id:'literal-back',description:'A literal - back command is linked to a Back action whose backSelector matches an element id. Route projection rewrites that command as tapOn by id. Saving and opening refresh the canvas, and the page then projects the default Back text.',scenarioMode:false,pathId:'route',scenarios:[],yaml,canvas,scripts:[]};
 }
 
 function backControlFixture():GoldenFixture{
@@ -149,6 +165,21 @@ function multiActionEdge():GoldenFixture{
     {op:'delete-step',actionId:'tap-field',visitId:'visit-home'},
     {op:'delete-step',actionId:'done-ready',visitId:'visit-done'},
     {op:'retarget',screenId:'home',actionId:'input-name',to:'other',visitId:'visit-home'},
+  ]};
+}
+
+function unfrozenVisits():GoldenFixture{
+  const scenarios=['scenario-a'];
+  const canvas:CanvasGraph={
+    screens:[
+      screen('home','Home',40,40,[check('home-ready','Home','text',scenarios),tap('open-detail','Detail','text',scenarios)]),
+      screen('detail','Detail',420,40,[check('detail-ready','Detail','text',scenarios)]),
+    ],
+    edges:[edge('go','home','detail','open-detail','detail-ready','Home → Detail',['open-detail'])],
+    paths:[{id:'route',name:'Unfrozen',scenarioId:'scenario-a',screenId:'home',edgeIds:['go'],visits:[{id:'visit-1'},{id:'visit-2'}]}],
+  };
+  return {id:'unfrozen-visits',description:'A scenario route whose visits have no operationIds. Editing Visit 1 by visitId freezes those visits.',scenarioMode:true,pathId:'route',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Unfrozen',pathId:'route'}],...materialize(canvas),scripts:[
+    {op:'edit',actionId:'home-ready',visitId:'visit-1',value:'Home ready'},
   ]};
 }
 
@@ -234,5 +265,5 @@ function defaultActions():GoldenFixture{
 }
 
 export function buildGoldenFixtures():GoldenFixture[]{
-  return [linearRoute(),textTap(),idTap(),backControlFixture(),repeatedVisit(),sharedStep(),multiActionEdge(),legacyVisits(),deletionCut(),defaultActions()];
+  return [linearRoute(),textTap(),idTap(),literalBack(),backControlFixture(),repeatedVisit(),sharedStep(),multiActionEdge(),unfrozenVisits(),legacyVisits(),deletionCut(),defaultActions()];
 }

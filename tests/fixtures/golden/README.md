@@ -4,7 +4,7 @@ These fixtures lock the canvas linking and YAML behaviour from before the floati
 
 `shared/`, `server/canvas.ts`, `server/canvas-route.ts` and `server/default-actions.ts` are not part of this change. `npm run check:canvas-contract` runs `scripts/check-canvas-contract.sh`, which checks that their diff against the task base is empty. It is not part of `npm test`.
 
-CI must check out the repository with `fetch-depth: 0`. A shallow clone cannot compute the merge-base, and the script fails with that requirement instead of comparing a commit to itself. On a push to `main` there is no feature branch to compare, so the script prints a skip message and exits 0.
+CI must check out the repository with `fetch-depth: 0`. A shallow clone cannot compute the merge-base, and the script fails with that requirement instead of comparing a commit to itself. On a push to `main` in CI there is no feature branch to compare, so the script prints a skip message and exits 0. That skip runs only when `CI` is set. A local checkout of `main` is still checked.
 
 ```bash
 npm run check:canvas-contract
@@ -16,12 +16,14 @@ bash scripts/check-canvas-contract.sh origin/main
 | File | What it locks |
 | --- | --- |
 | `linear-route.json` | Home → Detail, then connect to an existing screen, clear that destination, and undo |
-| `text-tap.json` | `tapOn` by text, rewritten when its selector is edited, then retargeted |
-| `id-tap.json` | `tapOn` by element id, rewritten when its selector is edited, then retargeted |
+| `text-tap.json` | `tapOn` by text, rewritten when its selector is edited, then retargeted from Detail onto More |
+| `id-tap.json` | `tapOn` by element id, rewritten when its selector is edited, then retargeted from Detail onto More |
+| `literal-back.json` | A literal `- back` command linked to an id `backSelector`. Projection rewrites it as `tapOn` by id; the opened page projects the default Back text |
 | `back.json` | Back by element id; editing the selector rewrites the `tnt-back` tap |
 | `repeated-visit.json` | Home → Detail → Home. Editing Visit 3 by `visitId` copies the shared Home check |
 | `shared-step.json` | One tap shared by two scenario routes. An edit in scenario A leaves scenario B unchanged |
 | `multi-action-edge.json` | A tap and an input on one edge. After the sibling and destination check are removed, retargeting leaves a route whose execution YAML is projected |
+| `unfrozen-visits.json` | A scenario route whose visits have no `operationIds`. Editing Visit 1 by `visitId` freezes them |
 | `legacy-visits.json` | Saved visits with no `operationIds`. Deleting the return connection runs the visit freeze, then stores the surviving visits without `operationIds` |
 | `deletion-cut.json` | Delete a step, a connection, and a screen, each cutting the route suffix, with undo |
 | `default-actions.json` | Setup plus a handler checkpoint on an ordered route. Editing the authored tap keeps the checkpoint |

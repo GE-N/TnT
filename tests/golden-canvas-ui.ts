@@ -119,11 +119,15 @@ export async function runUi(fixture:GoldenFixture):Promise<GoldenSnapshot>{
     const document=dom.window.document;
     const installed=installDom(dom);
     let latest:{yaml:string;canvas:CanvasGraph}|undefined;
+    let saveEpoch=0;
+    let refsAtSave=0;
     const request=async(path:string,options?:{body?:string})=>{
       try{
         const body=options?.body?JSON.parse(options.body):undefined;
-        if(path==='/api/canvas/references'&&body?.canvas&&typeof body.yaml==='string')latest={yaml:body.yaml,canvas:body.canvas};
+        const workspaceSave=path==='/api/workspaces';
+        if(path==='/api/canvas/references'&&body?.canvas&&typeof body.yaml==='string'){latest={yaml:body.yaml,canvas:body.canvas};refsAtSave=saveEpoch;}
         const result=path==='/api/workspaces'?await service.save(body):path.startsWith('/api/workspaces?q=')?await service.listWorkspaces():path.endsWith('/open')?await service.openWorkspace(path.split('/')[3]):path==='/api/canvas/references'?await service.references(body):path.startsWith('/api/workspaces/')&&path.endsWith('/view')?await service.saveView(path.split('/')[3],body):path.startsWith('/api/workspaces/')?await service.workspace(path.split('/')[3]):{ok:true};
+        if(workspaceSave)saveEpoch+=1;
         return Response.json(result??{ok:true});
       }catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}
     };
@@ -133,11 +137,20 @@ export async function runUi(fixture:GoldenFixture):Promise<GoldenSnapshot>{
     const {Scenarios}=await import('../src/scenarios.js');
     const root=createRoot(document.getElementById('root')!);
     const settle=async()=>{do{await Promise.all(installed.pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(installed.pending.length);};
-    const published=async()=>{
-      await act(async()=>{await new Promise(resolve=>setTimeout(resolve,400));});
-      await settle();
-      if(!latest)throw new Error('The workspace page did not publish its canvas.');
-      return latest;
+    const report=console.error;
+    // The save wait polls real timers, so React's act warning is not a snapshot failure.
+    console.error=(...args:unknown[])=>{if(args.map(String).join(' ').includes('not wrapped in act'))return;report.apply(console,args);};
+    const published=async(savesAtStart?:number)=>{
+      const deadline=Date.now()+8000;
+      while(Date.now()<deadline){
+        await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20));});
+        await settle();
+        const status=document.querySelector('.workspace-save-status')?.getAttribute('aria-label');
+        const saveLanded=savesAtStart===undefined||(saveEpoch>savesAtStart&&refsAtSave===saveEpoch);
+        if(status==='Saved locally'&&latest&&saveLanded)return latest;
+      }
+      const status=document.querySelector('.workspace-save-status')?.getAttribute('aria-label')??'missing';
+      throw new Error('The workspace page did not acknowledge a save ('+status+').');
     };
     try{
       await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));
@@ -147,12 +160,14 @@ export async function runUi(fixture:GoldenFixture):Promise<GoldenSnapshot>{
       const operations:GoldenSnapshot['operations']=[];
       for(const script of fixture.scripts){
         latest=undefined;
+        const savesAtStart=saveEpoch;
         await perform(document,script,()=>current.canvas);
-        current=await published();
+        current=await published(savesAtStart);
         operations.push({op:script.op,detail:script,result:captureState({graph:current.canvas,yaml:current.yaml},fixture)});
       }
       return {fixture:fixture.id,description:fixture.description,baseline,operations};
     }finally{
+      console.error=report;
       await act(async()=>root.unmount());
       dom.window.close();
       installed.restore();
