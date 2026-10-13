@@ -88,6 +88,7 @@ export function placeInspector({
   const fallback = candidates[0];
   return {
     left: clamp(fallback.left, minLeft, Math.max(minLeft, maxLeft)),
+    // Already clamped by the per-side clamp on anchor.top; kept as a guard.
     top: clamp(fallback.top, minTop, Math.max(minTop, maxTop)),
     maxHeight,
     side: "right",

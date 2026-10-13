@@ -177,6 +177,7 @@ textarea:focus{outline:1px solid var(--accent)}
 .canvas-lines{position:absolute;inset:0;pointer-events:none}
 .transition-label{font:12px/1.5 system-ui;background:var(--surface);color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:5px;text-align:center;overflow-wrap:anywhere;max-height:48px;overflow:auto}
 .transition-label small{display:block;color:var(--accent)}
+.transition-label small{font-size:12px}
 .screen-node{width:250px;background:var(--surface);position:absolute;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);overflow:hidden}
 .screen-node.selected-screen{border-color:var(--accent);box-shadow:0 0 0 3px var(--selected),var(--shadow)}
 .screen-node-heading{width:100%;padding:16px 12px;display:flex;align-items:center;gap:10px;text-align:left;background:var(--surface);border:0;border-bottom:1px solid var(--border);color:var(--text);font-weight:600;touch-action:none;cursor:grab}
