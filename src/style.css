@@ -681,3 +681,6 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 
 .workbench .workspace-advanced[open]{left:24px;width:min(600px,45vw)}
 .report-tools[open],.launch-tools[open]{right:24px;width:min(600px,45vw)}
+.workbench{--accent:#0a63d1;--accent-hover:#084fa8}
+.workbench button:focus-visible,.workbench input:focus-visible,.workbench select:focus-visible,.workbench textarea:focus-visible{outline-color:#0a84ff}
+.workbench .device-toolbar .field-hint,.workbench .scenario-controls small,.workbench .workspace-manager small{font-size:12px}
