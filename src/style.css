@@ -400,6 +400,7 @@ textarea:focus{outline:1px solid var(--accent)}
 .floating-inspector :focus-visible{outline:3px solid var(--inspector-highlight);outline-offset:2px}
 .floating-inspector button,.floating-inspector select,.floating-inspector input:not([type=checkbox]),.floating-inspector summary{min-height:44px;font-size:13px}
 .floating-inspector .field-hint,.floating-inspector small,.floating-inspector .unused-operations,.floating-inspector .operation-scenarios label,.floating-inspector .canvas-navigation-actions>input,.floating-inspector .canvas-delete-operation,.floating-inspector legend,.floating-inspector .outcome{font-size:12px}
+.floating-inspector li,.floating-inspector details{font-size:12px}
 .floating-inspector summary{display:flex;align-items:center}
 .floating-inspector .checkbox-label{min-height:44px}
 .floating-inspector .canvas-checks>button,.floating-inspector .visit-start-button,.floating-inspector .unused-operations>button{width:100%}
