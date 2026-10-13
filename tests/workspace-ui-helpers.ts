@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import {act} from 'react';
-export async function workspaceCommand(document:Document,command:'save'|'open',settle:()=>Promise<void>=async()=>{}){
- async function waitFor<T>(read:()=>T|undefined,description:string):Promise<T>{
-  const deadline=Date.now()+8000;
-  while(Date.now()<deadline){
-   await act(async()=>{await new Promise(resolve=>setImmediate(resolve));await settle();});
-   const result=read();if(result!==undefined)return result;
-  }
-  assert.fail('Timed out waiting for '+description+'. '+(document.querySelector('.workspace-management-surface')?.textContent??''));
+/** Wait for a UI signal after later-tick effects (search fetch starts in useEffect) have issued and settled. */
+export async function waitForUi<T>(document:Document,read:()=>T|undefined,description:string,settle:()=>Promise<void>=async()=>{}){
+ const deadline=Date.now()+8000;
+ while(Date.now()<deadline){
+  await act(async()=>{await new Promise(resolve=>setImmediate(resolve));await settle();});
+  const result=read();if(result!==undefined)return result;
  }
+ assert.fail('Timed out waiting for '+description+'. '+(document.querySelector('.workspace-management-surface')?.textContent??''));
+}
+export async function workspaceCommand(document:Document,command:'save'|'open',settle:()=>Promise<void>=async()=>{}){
  async function press(button:HTMLButtonElement|undefined){assert.ok(button);await act(async()=>{button.click();await settle();});}
  if(command==='save'){
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await settle();});
@@ -17,12 +18,12 @@ export async function workspaceCommand(document:Document,command:'save'|'open',s
   if(!document.querySelector('[aria-label="Workspace manager"]'))await press(document.querySelector<HTMLButtonElement>('[aria-label="Manage workspace"]')??undefined);
 
   // Event-loop turns do not acknowledge filesystem/network work under load.
-  await press(await waitFor(()=>document.querySelector<HTMLButtonElement>('.workspace-library button:not(:disabled)')??undefined,'the workspace library'));
-  await waitFor(()=>{
+  await press(await waitForUi(document,()=>document.querySelector<HTMLButtonElement>('.workspace-library button:not(:disabled)')??undefined,'the workspace library',settle));
+  await waitForUi(document,()=>{
    const surface=document.querySelector('.workspace-management-surface');
    // A blocked switch is also complete; its caller asserts retained edits/error.
    return !surface||[...surface.querySelectorAll('button')].some(button=>button.textContent==='Discard changes and switch')?true:undefined;
-  },'the workspace open result');
+  },'the workspace open result',settle);
  }
 }
 /** Step controls live in the floating inspector, which only exists for the selected screen. */
