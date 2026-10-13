@@ -156,7 +156,7 @@
       }
     ]
   },
-  "description": "Home → Detail → Home reuses the Home check on the return visit.",
+  "description": "Home → Detail → Home reuses the Home check on the return visit. Editing Visit 3 copies that shared check.",
   "id": "repeated-visit",
   "pathId": "route",
   "scenarioId": "scenario-a",
@@ -168,6 +168,13 @@
       "pathId": "route"
     }
   ],
-  "scripts": [],
+  "scripts": [
+    {
+      "actionId": "home-ready",
+      "op": "edit",
+      "value": "Home again",
+      "visitId": "visit-3"
+    }
+  ],
   "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:back-home\n# tnt-back\n# tnt-match:exact\n- tapOn:\n    text: ^Back$\n"
 }

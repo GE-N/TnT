@@ -146,11 +146,16 @@
       }
     ]
   },
-  "description": "Saved visits have no operationIds. The return visit selects one check and the others stay derived.",
+  "description": "Saved visits have no operationIds. Deleting the return connection freezes visits and then stores them again without operationIds.",
   "id": "legacy-visits",
   "pathId": "route",
   "scenarioMode": false,
   "scenarios": [],
-  "scripts": [],
+  "scripts": [
+    {
+      "edgeId": "return",
+      "op": "delete-connection"
+    }
+  ],
   "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:home-returned\n# tnt-match:exact\n- assertVisible:\n    text: ^Returned$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:back-home\n# tnt-back\n# tnt-match:exact\n- tapOn:\n    text: ^Back$\n"
 }

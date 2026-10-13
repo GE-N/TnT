@@ -204,7 +204,221 @@
     ],
     "workspaceYaml": "appId: com.example.App\n---\n- assertVisible: Middle\n# tnt-check:tap-done\n# tnt-match:exact\n- tapOn:\n    text: \"^Done$\"\n# tnt-check:done-ready\n# tnt-match:exact\n- assertVisible:\n    text: \"^Done$\"\n"
   },
-  "description": "A setup reference and a handler checkpoint stay attached to the ordered route.",
+  "description": "A setup reference and a handler checkpoint stay attached to the ordered route. Editing the authored tap keeps that checkpoint.",
   "fixture": "default-actions",
-  "operations": []
+  "operations": [
+    {
+      "detail": {
+        "actionId": "tap-done",
+        "op": "edit",
+        "value": "Finished"
+      },
+      "op": "edit",
+      "result": {
+        "canvas": {
+          "edges": [
+            {
+              "actionTestId": "handler",
+              "actionTestIds": null,
+              "from": "home",
+              "id": "handler-edge",
+              "to": "middle"
+            },
+            {
+              "actionTestId": "tap-done",
+              "actionTestIds": [
+                "tap-done"
+              ],
+              "from": "middle",
+              "id": "ordered-edge",
+              "to": "done"
+            }
+          ],
+          "paths": [
+            {
+              "edgeIds": [
+                "handler-edge",
+                "ordered-edge"
+              ],
+              "id": "route",
+              "scenarioId": null,
+              "screenId": "home"
+            }
+          ],
+          "screens": [
+            {
+              "id": "home",
+              "tests": [
+                "setup",
+                "handler"
+              ],
+              "title": "Home"
+            },
+            {
+              "id": "middle",
+              "tests": [
+                "middle-ready",
+                "tap-done"
+              ],
+              "title": "Middle"
+            },
+            {
+              "id": "done",
+              "tests": [
+                "done-ready"
+              ],
+              "title": "Done"
+            }
+          ]
+        },
+        "routes": [
+          {
+            "checkpoints": [
+              {
+                "beforeStep": 0,
+                "fingerprint": "a9994dbe86a4ccd76ee8477ef508396fdbf3b0382b328ee57993fecd428d6d49",
+                "timeoutMs": 0
+              }
+            ],
+            "executionYaml": "appId: com.example.App\n---\n- assertVisible: Middle\n# tnt-check:tap-done\n# tnt-match:exact\n- tapOn:\n    text: ^Finished$\n# tnt-check:done-ready\n# tnt-match:exact\n- assertVisible:\n    text: \"^Done$\"\n",
+            "pathId": "route",
+            "projectedVisits": [
+              {
+                "checkIds": [],
+                "id": "route:visit:0",
+                "screenId": "home"
+              },
+              {
+                "checkIds": [
+                  "middle-ready"
+                ],
+                "id": "route:visit:1",
+                "screenId": "middle"
+              },
+              {
+                "checkIds": [
+                  "done-ready"
+                ],
+                "id": "route:visit:2",
+                "screenId": "done"
+              }
+            ],
+            "setup": {
+              "file": "setup.yaml",
+              "parameters": {}
+            },
+            "steps": [
+              {
+                "assertion": false,
+                "edgeId": "handler-edge",
+                "id": "occurrence:[\"route:visit:0\",\"handler\"]",
+                "reference": {
+                  "actionId": "open",
+                  "file": "open.yaml",
+                  "fingerprint": "b0a93842d55782105094e22ad0933aac6fc96bbb2ca92d3498ec59103c854f52",
+                  "index": 0,
+                  "kind": "handler"
+                },
+                "testId": "handler",
+                "visitId": "route:visit:0"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"route:visit:1\",\"middle-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "a9994dbe86a4ccd76ee8477ef508396fdbf3b0382b328ee57993fecd428d6d49",
+                  "index": 0,
+                  "kind": "step"
+                },
+                "testId": "middle-ready",
+                "visitId": "route:visit:1"
+              },
+              {
+                "assertion": false,
+                "edgeId": "ordered-edge",
+                "id": "occurrence:[\"route:visit:1\",\"tap-done\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "8f9b14ecb38823ad15e0896fa2347d9f6b90f921ea55d02d5f3757b007ae16ce",
+                  "index": 1,
+                  "kind": "step"
+                },
+                "testId": "tap-done",
+                "visitId": "route:visit:1"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"route:visit:2\",\"done-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "5fc0fa6cbc2292bb309037cb18fbeac8954a869d79fba79c965655f8fb7d8f0d",
+                  "index": 2,
+                  "kind": "step"
+                },
+                "testId": "done-ready",
+                "visitId": "route:visit:2"
+              }
+            ],
+            "transitions": [
+              {
+                "destinationVisitId": "route:visit:1",
+                "edgeId": "handler-edge",
+                "id": "route:visit:1:transition",
+                "visitId": "route:visit:0"
+              },
+              {
+                "destinationVisitId": "route:visit:2",
+                "edgeId": "ordered-edge",
+                "id": "route:visit:2:transition",
+                "visitId": "route:visit:1"
+              }
+            ]
+          }
+        ],
+        "visits": [
+          {
+            "checkIds": null,
+            "index": 0,
+            "operationIds": [
+              "handler"
+            ],
+            "pathId": "route",
+            "screenId": "home",
+            "storedOperationIds": null,
+            "visitId": "route:visit:0"
+          },
+          {
+            "checkIds": null,
+            "index": 1,
+            "operationIds": [
+              "middle-ready",
+              "tap-done"
+            ],
+            "pathId": "route",
+            "screenId": "middle",
+            "storedOperationIds": null,
+            "visitId": "route:visit:1"
+          },
+          {
+            "checkIds": null,
+            "index": 2,
+            "operationIds": [
+              "done-ready"
+            ],
+            "pathId": "route",
+            "screenId": "done",
+            "storedOperationIds": null,
+            "visitId": "route:visit:2"
+          }
+        ],
+        "workspaceYaml": "appId: com.example.App\n---\n- assertVisible: Middle\n# tnt-check:tap-done\n# tnt-match:exact\n- tapOn:\n    text: ^Finished$\n# tnt-check:done-ready\n# tnt-match:exact\n- assertVisible:\n    text: \"^Done$\"\n"
+      }
+    }
+  ]
 }

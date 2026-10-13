@@ -1,11 +1,12 @@
 import {projectCanvasRoute} from '../server/canvas-route.js';
 import type {Automation} from '../server/default-actions.js';
 import type {CanvasGraph} from '../server/canvas.js';
-import {connectCanvasAction,connectVisitAction,planCanvasDeletion,privateVisitOperation,refreshChecks,routeVisits,visitOperations,visitScreenId,writeChecks} from '../shared/canvas-authoring.js';
+import {backControl,connectCanvasAction,connectVisitAction,planCanvasDeletion,privateVisitOperation,refreshChecks,routeVisits,visitOperations,visitScreenId,writeChecks} from '../shared/canvas-authoring.js';
 
 export type GoldenScenario={id:string;name:string;pathId?:string};
 export type GoldenScript=
   | {op:'connect'|'retarget'|'clear-destination';screenId:string;actionId:string;to?:string;visitId?:string}
+  | {op:'edit';actionId:string;visitId?:string;value:string}
   | {op:'delete-step';actionId:string;visitId?:string}
   | {op:'delete-connection';edgeId:string;visitId?:string}
   | {op:'delete-screen';screenId:string}
@@ -26,6 +27,8 @@ export type GoldenFixture={
 type UndoState={graph:CanvasGraph;yaml:string;after:CanvasGraph;afterYaml:string};
 type RunnerState={graph:CanvasGraph;yaml:string;undo?:UndoState};
 
+// RFC 4122 UUID text (versions 1–8), including ids seeded by this runner.
+// Fingerprints are 64 hex characters with no hyphens, so this pattern leaves them untouched.
 const uuidPattern=/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi;
 
 function installSeed(){
@@ -89,10 +92,24 @@ function apply(state:RunnerState,fixture:GoldenFixture,next:CanvasGraph,deletion
 
 function activePath(fixture:GoldenFixture){return fixture.pathId;}
 
-/** Mirrors CanvasEditor destination, deletion and undo without rendering. */
+/** Copy of the canvas editor's destination, selector, deletion and undo behavior.
+ *  It must stay in sync with CanvasEditor in src/canvas.tsx (changeChecks, destinationChange, updateCheck, deleteOperation).
+ */
 export function applyScript(state:RunnerState,fixture:GoldenFixture,script:GoldenScript):RunnerState{
   const graph=presented(state,fixture);
   const pathId=activePath(fixture);
+  if(script.op==='edit'){
+    const owned=script.visitId?privateVisitOperation(graph,pathId,script.visitId,script.actionId):{graph,testId:script.actionId};
+    const next={...owned.graph,screens:owned.graph.screens.map(screen=>({...screen,tests:screen.tests.map(test=>{
+      if(test.id!==owned.testId)return test;
+      if(test.back)return {...test,backSelector:{...backControl(test)!,value:script.value}};
+      if(test.tap)return {...test,tap:{...test.tap,value:script.value}};
+      if(test.check)return {...test,check:{...test.check!,value:script.value}};
+      if(test.input!==undefined)return {...test,input:script.value};
+      return test;
+    })}))};
+    return apply(state,fixture,next,false);
+  }
   if(script.op==='connect'||script.op==='retarget'){
     if(!script.to)throw new Error(script.op+' requires a destination screen.');
     const owned=script.visitId?privateVisitOperation(graph,pathId,script.visitId,script.actionId):{graph,testId:script.actionId};

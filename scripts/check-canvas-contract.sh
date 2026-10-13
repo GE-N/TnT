@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 # T1 contract: canvas authoring and route projection stay byte-for-byte at the task base.
+#
+# CI must clone with fetch-depth: 0. A shallow history cannot compute merge-base
+# against the base branch, and this script fails rather than reporting a vacuous pass.
+# A push to the default branch has nothing to compare, so the script skips.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
+
+branch="$(git rev-parse --abbrev-ref HEAD)"
+ref="${GITHUB_REF:-}"
+if [[ "$branch" == "main" || "$branch" == "master" || "$ref" == "refs/heads/main" || "$ref" == "refs/heads/master" ]]; then
+  echo "Canvas authoring contract skipped: a push to the default branch has nothing to compare."
+  exit 0
+fi
 
 base_ref="${1:-}"
 if [[ -z "$base_ref" ]]; then
@@ -12,11 +23,13 @@ if [[ -z "$base_ref" ]]; then
   fi
 fi
 if ! git rev-parse --verify --quiet "$base_ref" >/dev/null; then
-  echo "Canvas authoring contract base not found: $base_ref" >&2
+  echo "Canvas authoring contract failed: base $base_ref is not available. CI must fetch the full history (fetch-depth: 0)." >&2
   exit 1
 fi
-
-base="$(git merge-base HEAD "$base_ref")"
+if ! base="$(git merge-base HEAD "$base_ref" 2>/dev/null)"; then
+  echo "Canvas authoring contract failed: merge-base with $base_ref is unavailable. CI must fetch the full history (fetch-depth: 0)." >&2
+  exit 1
+fi
 paths=(shared server/canvas.ts server/canvas-route.ts server/default-actions.ts)
 
 if ! git diff --exit-code --stat "$base" -- "${paths[@]}"; then

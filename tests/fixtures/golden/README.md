@@ -2,10 +2,12 @@
 
 These fixtures lock the canvas linking and YAML behaviour from before the floating inspector. Later tasks re-run the same scripts and require the same bytes.
 
-`shared/`, `server/canvas.ts`, `server/canvas-route.ts` and `server/default-actions.ts` are not part of this change. `scripts/check-canvas-contract.sh` checks that their diff against the task base is empty. `npm test` runs that check, and CI can call the script directly:
+`shared/`, `server/canvas.ts`, `server/canvas-route.ts` and `server/default-actions.ts` are not part of this change. `npm run check:canvas-contract` runs `scripts/check-canvas-contract.sh`, which checks that their diff against the task base is empty. It is not part of `npm test`.
+
+CI must check out the repository with `fetch-depth: 0`. A shallow clone cannot compute the merge-base, and the script fails with that requirement instead of comparing a commit to itself. On a push to `main` there is no feature branch to compare, so the script prints a skip message and exits 0.
 
 ```bash
-bash scripts/check-canvas-contract.sh
+npm run check:canvas-contract
 bash scripts/check-canvas-contract.sh origin/main
 ```
 
@@ -14,14 +16,15 @@ bash scripts/check-canvas-contract.sh origin/main
 | File | What it locks |
 | --- | --- |
 | `linear-route.json` | Home → Detail, then connect to an existing screen, clear that destination, and undo |
-| `text-tap.json` | `tapOn` by text |
-| `id-tap.json` | `tapOn` by element id |
-| `repeated-visit.json` | Home → Detail → Home, with the Home check reused on the return visit |
-| `shared-step.json` | One tap shared by two scenario routes |
-| `multi-action-edge.json` | A tap and an input on one edge, then retarget splits the edge |
-| `legacy-visits.json` | Saved visits with no `operationIds`; the return visit keeps a check subset |
+| `text-tap.json` | `tapOn` by text, rewritten when its selector is edited, then retargeted |
+| `id-tap.json` | `tapOn` by element id, rewritten when its selector is edited, then retargeted |
+| `back.json` | Back by element id; editing the selector rewrites the `tnt-back` tap |
+| `repeated-visit.json` | Home → Detail → Home. Editing Visit 3 by `visitId` copies the shared Home check |
+| `shared-step.json` | One tap shared by two scenario routes. An edit in scenario A leaves scenario B unchanged |
+| `multi-action-edge.json` | A tap and an input on one edge. After the sibling and destination check are removed, retargeting leaves a route whose execution YAML is projected |
+| `legacy-visits.json` | Saved visits with no `operationIds`. Deleting the return connection runs the visit freeze, then stores the surviving visits without `operationIds` |
 | `deletion-cut.json` | Delete a step, a connection, and a screen, each cutting the route suffix, with undo |
-| `default-actions.json` | Setup plus a handler checkpoint on an ordered route |
+| `default-actions.json` | Setup plus a handler checkpoint on an ordered route. Editing the authored tap keeps the checkpoint |
 
 Each snapshot records, for the baseline and after every script:
 
@@ -36,8 +39,8 @@ Generated ids are seeded from `crypto.randomUUID` and then rewritten as `id:1`, 
 
 `tests/golden-canvas.test.ts` runs every fixture twice:
 
-- the pure-function runner calls the `shared/` helpers directly
-- the UI runner mounts today's canvas in jsdom and sends workspace save/open through `tests/workspace-ui-helpers.ts`
+- the pure-function runner calls the `shared/` helpers directly. Its editor copy must stay in sync with `CanvasEditor` in `src/canvas.tsx`
+- the UI runner opens the saved workspace on the real scenarios page (`src/scenarios.tsx`) through the service, and drives save/open with `tests/workspace-ui-helpers.ts`
 
 Add-check placement is intentionally not a golden script. A new check landing at the end of a visit is the one later behaviour change and belongs in its own test.
 
@@ -49,4 +52,4 @@ Regenerate the fixture JSON and the snapshots only when the current canvas behav
 GOLDEN_UPDATE=1 node --import tsx --test tests/golden-canvas.test.ts
 ```
 
-Review the diff. Do not update a snapshot to hide an accidental route or YAML change.
+Review the diff. Do not update a snapshot to hide an accidental route or YAML change. Baselines for fixtures whose authored graph did not change must stay byte-identical.

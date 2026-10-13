@@ -86,11 +86,23 @@
       }
     ]
   },
-  "description": "tapOn matches by text.",
+  "description": "tapOn matches by text. Editing the selector rewrites the command, then the tap is retargeted.",
   "id": "text-tap",
   "pathId": "route",
   "scenarioMode": false,
   "scenarios": [],
-  "scripts": [],
+  "scripts": [
+    {
+      "actionId": "tap-gear",
+      "op": "edit",
+      "value": "Open settings"
+    },
+    {
+      "actionId": "tap-gear",
+      "op": "retarget",
+      "screenId": "home",
+      "to": "detail"
+    }
+  ],
   "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    text: ^Gear$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n"
 }

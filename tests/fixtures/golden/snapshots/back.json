@@ -1,0 +1,298 @@
+{
+  "baseline": {
+    "canvas": {
+      "edges": [
+        {
+          "actionTestId": "go-back",
+          "actionTestIds": null,
+          "from": "home",
+          "id": "back-edge",
+          "to": "previous"
+        }
+      ],
+      "paths": [
+        {
+          "edgeIds": [
+            "back-edge"
+          ],
+          "id": "route",
+          "scenarioId": null,
+          "screenId": "home"
+        }
+      ],
+      "screens": [
+        {
+          "id": "home",
+          "tests": [
+            "home-ready",
+            "go-back"
+          ],
+          "title": "Home"
+        },
+        {
+          "id": "previous",
+          "tests": [
+            "previous-ready"
+          ],
+          "title": "Previous"
+        }
+      ]
+    },
+    "routes": [
+      {
+        "checkpoints": null,
+        "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:go-back\n# tnt-back\n# tnt-match:exact\n- tapOn:\n    id: ^nav\\.back$\n# tnt-check:previous-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Previous$\n",
+        "pathId": "route",
+        "projectedVisits": [
+          {
+            "checkIds": [
+              "home-ready"
+            ],
+            "id": "route:visit:0",
+            "screenId": "home"
+          },
+          {
+            "checkIds": [
+              "previous-ready"
+            ],
+            "id": "route:visit:1",
+            "screenId": "previous"
+          }
+        ],
+        "setup": null,
+        "steps": [
+          {
+            "assertion": true,
+            "edgeId": null,
+            "id": "occurrence:[\"route:visit:0\",\"home-ready\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "c24a05499ed936126d12b849f52191d9564ddbcfd86a3940e9b6963698fdbc0d",
+              "index": 1,
+              "kind": "step"
+            },
+            "testId": "home-ready",
+            "visitId": "route:visit:0"
+          },
+          {
+            "assertion": false,
+            "edgeId": "back-edge",
+            "id": "occurrence:[\"route:visit:0\",\"go-back\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "3fc2f3da378c141e2170a324e00cf60e07a891a6e89a7ca0423de8a16cc8c54a",
+              "index": 2,
+              "kind": "step"
+            },
+            "testId": "go-back",
+            "visitId": "route:visit:0"
+          },
+          {
+            "assertion": true,
+            "edgeId": null,
+            "id": "occurrence:[\"route:visit:1\",\"previous-ready\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "c2a2991598b15209c2bfa932539eac8f2fa31b509d4f492652de332cfe3e7d64",
+              "index": 3,
+              "kind": "step"
+            },
+            "testId": "previous-ready",
+            "visitId": "route:visit:1"
+          }
+        ],
+        "transitions": [
+          {
+            "destinationVisitId": "route:visit:1",
+            "edgeId": "back-edge",
+            "id": "route:visit:1:transition",
+            "visitId": "route:visit:0"
+          }
+        ]
+      }
+    ],
+    "visits": [
+      {
+        "checkIds": null,
+        "index": 0,
+        "operationIds": [
+          "home-ready",
+          "go-back"
+        ],
+        "pathId": "route",
+        "screenId": "home",
+        "storedOperationIds": null,
+        "visitId": "route:visit:0"
+      },
+      {
+        "checkIds": null,
+        "index": 1,
+        "operationIds": [
+          "previous-ready"
+        ],
+        "pathId": "route",
+        "screenId": "previous",
+        "storedOperationIds": null,
+        "visitId": "route:visit:1"
+      }
+    ],
+    "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:go-back\n# tnt-back\n# tnt-match:exact\n- tapOn:\n    id: ^nav\\.back$\n# tnt-check:previous-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Previous$\n"
+  },
+  "description": "Back matches an element id. Editing the selector rewrites the tapOn command that carries tnt-back.",
+  "fixture": "back",
+  "operations": [
+    {
+      "detail": {
+        "actionId": "go-back",
+        "op": "edit",
+        "value": "nav.back.button"
+      },
+      "op": "edit",
+      "result": {
+        "canvas": {
+          "edges": [
+            {
+              "actionTestId": "go-back",
+              "actionTestIds": null,
+              "from": "home",
+              "id": "back-edge",
+              "to": "previous"
+            }
+          ],
+          "paths": [
+            {
+              "edgeIds": [
+                "back-edge"
+              ],
+              "id": "route",
+              "scenarioId": null,
+              "screenId": "home"
+            }
+          ],
+          "screens": [
+            {
+              "id": "home",
+              "tests": [
+                "home-ready",
+                "go-back"
+              ],
+              "title": "Home"
+            },
+            {
+              "id": "previous",
+              "tests": [
+                "previous-ready"
+              ],
+              "title": "Previous"
+            }
+          ]
+        },
+        "routes": [
+          {
+            "checkpoints": null,
+            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:go-back\n# tnt-back\n# tnt-match:exact\n- tapOn:\n    id: ^nav\\.back\\.button$\n# tnt-check:previous-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Previous$\n",
+            "pathId": "route",
+            "projectedVisits": [
+              {
+                "checkIds": [
+                  "home-ready"
+                ],
+                "id": "route:visit:0",
+                "screenId": "home"
+              },
+              {
+                "checkIds": [
+                  "previous-ready"
+                ],
+                "id": "route:visit:1",
+                "screenId": "previous"
+              }
+            ],
+            "setup": null,
+            "steps": [
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"route:visit:0\",\"home-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "c24a05499ed936126d12b849f52191d9564ddbcfd86a3940e9b6963698fdbc0d",
+                  "index": 1,
+                  "kind": "step"
+                },
+                "testId": "home-ready",
+                "visitId": "route:visit:0"
+              },
+              {
+                "assertion": false,
+                "edgeId": "back-edge",
+                "id": "occurrence:[\"route:visit:0\",\"go-back\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "e4bd2b755feeb9000138d4b23fe5d8ce40e70f1ee50b796c597a92c53f53e08e",
+                  "index": 2,
+                  "kind": "step"
+                },
+                "testId": "go-back",
+                "visitId": "route:visit:0"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"route:visit:1\",\"previous-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "c2a2991598b15209c2bfa932539eac8f2fa31b509d4f492652de332cfe3e7d64",
+                  "index": 3,
+                  "kind": "step"
+                },
+                "testId": "previous-ready",
+                "visitId": "route:visit:1"
+              }
+            ],
+            "transitions": [
+              {
+                "destinationVisitId": "route:visit:1",
+                "edgeId": "back-edge",
+                "id": "route:visit:1:transition",
+                "visitId": "route:visit:0"
+              }
+            ]
+          }
+        ],
+        "visits": [
+          {
+            "checkIds": null,
+            "index": 0,
+            "operationIds": [
+              "home-ready",
+              "go-back"
+            ],
+            "pathId": "route",
+            "screenId": "home",
+            "storedOperationIds": null,
+            "visitId": "route:visit:0"
+          },
+          {
+            "checkIds": null,
+            "index": 1,
+            "operationIds": [
+              "previous-ready"
+            ],
+            "pathId": "route",
+            "screenId": "previous",
+            "storedOperationIds": null,
+            "visitId": "route:visit:1"
+          }
+        ],
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:go-back\n# tnt-back\n# tnt-match:exact\n- tapOn:\n    id: ^nav\\.back\\.button$\n# tnt-check:previous-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Previous$\n"
+      }
+    }
+  ]
+}

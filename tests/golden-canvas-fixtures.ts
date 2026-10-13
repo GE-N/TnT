@@ -56,7 +56,10 @@ function textTap():GoldenFixture{
     edges:[edge('open','home','detail','tap-gear','detail-ready','Tap Gear')],
     paths:[{id:'route',name:'Text tap',screenId:'home',edgeIds:['open'],visits:[{id:'visit-home',operationIds:['tap-gear']},{id:'visit-detail',operationIds:['detail-ready']}]}],
   };
-  return {id:'text-tap',description:'tapOn matches by text.',scenarioMode:false,pathId:'route',scenarios:[],...materialize(canvas),scripts:[]};
+  return {id:'text-tap',description:'tapOn matches by text. Editing the selector rewrites the command, then the tap is retargeted.',scenarioMode:false,pathId:'route',scenarios:[],...materialize(canvas),scripts:[
+    {op:'edit',actionId:'tap-gear',value:'Open settings'},
+    {op:'retarget',screenId:'home',actionId:'tap-gear',to:'detail'},
+  ]};
 }
 
 function idTap():GoldenFixture{
@@ -68,7 +71,24 @@ function idTap():GoldenFixture{
     edges:[edge('open','home','detail','tap-gear','detail-ready','Tap gear.button')],
     paths:[{id:'route',name:'Id tap',screenId:'home',edgeIds:['open'],visits:[{id:'visit-home',operationIds:['tap-gear']},{id:'visit-detail',operationIds:['detail-ready']}]}],
   };
-  return {id:'id-tap',description:'tapOn matches by element id.',scenarioMode:false,pathId:'route',scenarios:[],...materialize(canvas),scripts:[]};
+  return {id:'id-tap',description:'tapOn matches by element id. Editing the selector rewrites the command, then the tap is retargeted.',scenarioMode:false,pathId:'route',scenarios:[],...materialize(canvas),scripts:[
+    {op:'edit',actionId:'tap-gear',value:'gear.button.primary'},
+    {op:'retarget',screenId:'home',actionId:'tap-gear',to:'detail'},
+  ]};
+}
+
+function backControlFixture():GoldenFixture{
+  const canvas:CanvasGraph={
+    screens:[
+      screen('home','Home',40,40,[check('home-ready','Home'),{id:'go-back',label:'Back',role:'action',reference:{...draft},back:true,backSelector:{target:'id',match:'exact',value:'nav.back'}}]),
+      screen('previous','Previous',420,40,[check('previous-ready','Previous')]),
+    ],
+    edges:[edge('back-edge','home','previous','go-back','previous-ready','Back')],
+    paths:[{id:'route',name:'Back',screenId:'home',edgeIds:['back-edge']}],
+  };
+  return {id:'back',description:'Back matches an element id. Editing the selector rewrites the tapOn command that carries tnt-back.',scenarioMode:false,pathId:'route',scenarios:[],...materialize(canvas),scripts:[
+    {op:'edit',actionId:'go-back',value:'nav.back.button'},
+  ]};
 }
 
 function repeatedVisit():GoldenFixture{
@@ -88,7 +108,9 @@ function repeatedVisit():GoldenFixture{
       {id:'visit-3',operationIds:['home-ready']},
     ]}],
   };
-  return {id:'repeated-visit',description:'Home → Detail → Home reuses the Home check on the return visit.',scenarioMode:true,pathId:'route',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Return',pathId:'route'}],...materialize(canvas),scripts:[]};
+  return {id:'repeated-visit',description:'Home → Detail → Home reuses the Home check on the return visit. Editing Visit 3 copies that shared check.',scenarioMode:true,pathId:'route',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Return',pathId:'route'}],...materialize(canvas),scripts:[
+    {op:'edit',actionId:'home-ready',visitId:'visit-3',value:'Home again'},
+  ]};
 }
 
 function sharedStep():GoldenFixture{
@@ -104,7 +126,9 @@ function sharedStep():GoldenFixture{
       {id:'path-b',name:'Scenario B',scenarioId:'scenario-b',screenId:'home',edgeIds:['go'],visits:[{id:'b-home',operationIds:['shared-tap']},{id:'b-detail',operationIds:['detail-ready']}]},
     ],
   };
-  return {id:'shared-step',description:'One tap is shared by two scenario routes.',scenarioMode:true,pathId:'path-a',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Scenario A',pathId:'path-a'},{id:'scenario-b',name:'Scenario B',pathId:'path-b'}],...materialize(canvas),scripts:[]};
+  return {id:'shared-step',description:'One tap is shared by two scenario routes. Editing it in scenario A copies the step and leaves scenario B unchanged.',scenarioMode:true,pathId:'path-a',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Scenario A',pathId:'path-a'},{id:'scenario-b',name:'Scenario B',pathId:'path-b'}],...materialize(canvas),scripts:[
+    {op:'edit',actionId:'shared-tap',visitId:'a-home',value:'Gears'},
+  ]};
 }
 
 function multiActionEdge():GoldenFixture{
@@ -121,7 +145,9 @@ function multiActionEdge():GoldenFixture{
       {id:'visit-done',operationIds:['done-ready']},
     ]}],
   };
-  return {id:'multi-action-edge',description:'One edge carries a tap and an input. Retargeting the input splits that edge.',scenarioMode:true,pathId:'route',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Multi-action',pathId:'route'}],...materialize(canvas),scripts:[
+  return {id:'multi-action-edge',description:'One edge carries a tap and an input. Removing the sibling action and the destination check lets a retarget onto Other keep a projectable route.',scenarioMode:true,pathId:'route',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Multi-action',pathId:'route'}],...materialize(canvas),scripts:[
+    {op:'delete-step',actionId:'tap-field',visitId:'visit-home'},
+    {op:'delete-step',actionId:'done-ready',visitId:'visit-done'},
     {op:'retarget',screenId:'home',actionId:'input-name',to:'other',visitId:'visit-home'},
   ]};
 }
@@ -142,7 +168,9 @@ function legacyVisits():GoldenFixture{
       {id:'legacy-3',checkIds:['home-returned']},
     ]}],
   };
-  return {id:'legacy-visits',description:'Saved visits have no operationIds. The return visit selects one check and the others stay derived.',scenarioMode:false,pathId:'route',scenarios:[],...materialize(canvas),scripts:[]};
+  return {id:'legacy-visits',description:'Saved visits have no operationIds. Deleting the return connection freezes visits and then stores them again without operationIds.',scenarioMode:false,pathId:'route',scenarios:[],...materialize(canvas),scripts:[
+    {op:'delete-connection',edgeId:'return'},
+  ]};
 }
 
 function deletionCut():GoldenFixture{
@@ -200,9 +228,11 @@ function defaultActions():GoldenFixture{
     ],
     paths:[{id:'route',name:'Setup and handler',screenId:'home',edgeIds:['handler-edge','ordered-edge']}],
   };
-  return {id:'default-actions',description:'A setup reference and a handler checkpoint stay attached to the ordered route.',scenarioMode:false,pathId:'route',scenarios:[],yaml,flows,automation,canvas:refreshChecks(canvas,yaml),scripts:[]};
+  return {id:'default-actions',description:'A setup reference and a handler checkpoint stay attached to the ordered route. Editing the authored tap keeps that checkpoint.',scenarioMode:false,pathId:'route',scenarios:[],yaml,flows,automation,canvas:refreshChecks(canvas,yaml),scripts:[
+    {op:'edit',actionId:'tap-done',value:'Finished'},
+  ]};
 }
 
 export function buildGoldenFixtures():GoldenFixture[]{
-  return [linearRoute(),textTap(),idTap(),repeatedVisit(),sharedStep(),multiActionEdge(),legacyVisits(),deletionCut(),defaultActions()];
+  return [linearRoute(),textTap(),idTap(),backControlFixture(),repeatedVisit(),sharedStep(),multiActionEdge(),legacyVisits(),deletionCut(),defaultActions()];
 }

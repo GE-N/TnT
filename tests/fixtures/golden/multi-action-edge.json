@@ -141,7 +141,7 @@
       }
     ]
   },
-  "description": "One edge carries a tap and an input. Retargeting the input splits that edge.",
+  "description": "One edge carries a tap and an input. Removing the sibling action and the destination check lets a retarget onto Other keep a projectable route.",
   "id": "multi-action-edge",
   "pathId": "route",
   "scenarioId": "scenario-a",
@@ -154,6 +154,16 @@
     }
   ],
   "scripts": [
+    {
+      "actionId": "tap-field",
+      "op": "delete-step",
+      "visitId": "visit-home"
+    },
+    {
+      "actionId": "done-ready",
+      "op": "delete-step",
+      "visitId": "visit-done"
+    },
     {
       "actionId": "input-name",
       "op": "retarget",

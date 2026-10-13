@@ -154,42 +154,33 @@
     ],
     "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-field\n# tnt-match:exact\n- tapOn:\n    text: ^Field$\n# tnt-check:input-name\n- inputText: Ada\n# tnt-check:done-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Done$\n# tnt-check:other-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Other$\n"
   },
-  "description": "One edge carries a tap and an input. Retargeting the input splits that edge.",
+  "description": "One edge carries a tap and an input. Removing the sibling action and the destination check lets a retarget onto Other keep a projectable route.",
   "fixture": "multi-action-edge",
   "operations": [
     {
       "detail": {
-        "actionId": "input-name",
-        "op": "retarget",
-        "screenId": "home",
-        "to": "other",
+        "actionId": "tap-field",
+        "op": "delete-step",
         "visitId": "visit-home"
       },
-      "op": "retarget",
+      "op": "delete-step",
       "result": {
         "canvas": {
           "edges": [
             {
-              "actionTestId": "tap-field",
+              "actionTestId": "input-name",
               "actionTestIds": [
-                "tap-field"
+                "input-name"
               ],
               "from": "home",
               "id": "home-done",
               "to": "done"
-            },
-            {
-              "actionTestId": "input-name",
-              "actionTestIds": null,
-              "from": "home",
-              "id": "action-link:input-name",
-              "to": "other"
             }
           ],
           "paths": [
             {
               "edgeIds": [
-                "action-link:input-name"
+                "home-done"
               ],
               "id": "route",
               "scenarioId": "scenario-a",
@@ -200,7 +191,6 @@
             {
               "id": "home",
               "tests": [
-                "tap-field",
                 "input-name"
               ],
               "title": "Home"
@@ -223,8 +213,62 @@
         },
         "routes": [
           {
-            "error": "Choose a destination for each action in Visit 1 that continues its sequence. Visit 2 contains missing actions or checks. Restore them or remove them from this visit.",
-            "pathId": "route"
+            "checkpoints": null,
+            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:input-name\n- inputText: Ada\n# tnt-check:done-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Done$\n",
+            "pathId": "route",
+            "projectedVisits": [
+              {
+                "checkIds": [],
+                "id": "visit-home",
+                "screenId": "home"
+              },
+              {
+                "checkIds": [
+                  "done-ready"
+                ],
+                "id": "visit-done",
+                "screenId": "done"
+              }
+            ],
+            "setup": null,
+            "steps": [
+              {
+                "assertion": false,
+                "edgeId": "home-done",
+                "id": "occurrence:[\"visit-home\",\"input-name\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "8372d4f1d45c11b3669b8002a8b474b5c8a72268b6999a136524e676026873f8",
+                  "index": 1,
+                  "kind": "step"
+                },
+                "testId": "input-name",
+                "visitId": "visit-home"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"visit-done\",\"done-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "5fc0fa6cbc2292bb309037cb18fbeac8954a869d79fba79c965655f8fb7d8f0d",
+                  "index": 2,
+                  "kind": "step"
+                },
+                "testId": "done-ready",
+                "visitId": "visit-done"
+              }
+            ],
+            "transitions": [
+              {
+                "destinationVisitId": "visit-done",
+                "edgeId": "home-done",
+                "id": "visit-done:transition",
+                "visitId": "visit-home"
+              }
+            ]
           }
         ],
         "visits": [
@@ -232,13 +276,11 @@
             "checkIds": null,
             "index": 0,
             "operationIds": [
-              "tap-field",
               "input-name"
             ],
             "pathId": "route",
             "screenId": "home",
             "storedOperationIds": [
-              "tap-field",
               "input-name"
             ],
             "visitId": "visit-home"
@@ -250,14 +292,262 @@
               "done-ready"
             ],
             "pathId": "route",
-            "screenId": "other",
+            "screenId": "done",
             "storedOperationIds": [
               "done-ready"
             ],
             "visitId": "visit-done"
           }
         ],
-        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-field\n# tnt-match:exact\n- tapOn:\n    text: ^Field$\n# tnt-check:input-name\n- inputText: Ada\n# tnt-check:done-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Done$\n# tnt-check:other-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Other$\n"
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:input-name\n- inputText: Ada\n# tnt-check:done-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Done$\n# tnt-check:other-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Other$\n"
+      }
+    },
+    {
+      "detail": {
+        "actionId": "done-ready",
+        "op": "delete-step",
+        "visitId": "visit-done"
+      },
+      "op": "delete-step",
+      "result": {
+        "canvas": {
+          "edges": [
+            {
+              "actionTestId": "input-name",
+              "actionTestIds": [
+                "input-name"
+              ],
+              "from": "home",
+              "id": "home-done",
+              "to": "done"
+            }
+          ],
+          "paths": [
+            {
+              "edgeIds": [
+                "home-done"
+              ],
+              "id": "route",
+              "scenarioId": "scenario-a",
+              "screenId": "home"
+            }
+          ],
+          "screens": [
+            {
+              "id": "home",
+              "tests": [
+                "input-name"
+              ],
+              "title": "Home"
+            },
+            {
+              "id": "done",
+              "tests": [],
+              "title": "Done"
+            },
+            {
+              "id": "other",
+              "tests": [
+                "other-ready"
+              ],
+              "title": "Other"
+            }
+          ]
+        },
+        "routes": [
+          {
+            "checkpoints": null,
+            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:input-name\n- inputText: Ada\n",
+            "pathId": "route",
+            "projectedVisits": [
+              {
+                "checkIds": [],
+                "id": "visit-home",
+                "screenId": "home"
+              },
+              {
+                "checkIds": [],
+                "id": "visit-done",
+                "screenId": "done"
+              }
+            ],
+            "setup": null,
+            "steps": [
+              {
+                "assertion": false,
+                "edgeId": "home-done",
+                "id": "occurrence:[\"visit-home\",\"input-name\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "8372d4f1d45c11b3669b8002a8b474b5c8a72268b6999a136524e676026873f8",
+                  "index": 1,
+                  "kind": "step"
+                },
+                "testId": "input-name",
+                "visitId": "visit-home"
+              }
+            ],
+            "transitions": [
+              {
+                "destinationVisitId": "visit-done",
+                "edgeId": "home-done",
+                "id": "visit-done:transition",
+                "visitId": "visit-home"
+              }
+            ]
+          }
+        ],
+        "visits": [
+          {
+            "checkIds": null,
+            "index": 0,
+            "operationIds": [
+              "input-name"
+            ],
+            "pathId": "route",
+            "screenId": "home",
+            "storedOperationIds": [
+              "input-name"
+            ],
+            "visitId": "visit-home"
+          },
+          {
+            "checkIds": null,
+            "index": 1,
+            "operationIds": [],
+            "pathId": "route",
+            "screenId": "done",
+            "storedOperationIds": [],
+            "visitId": "visit-done"
+          }
+        ],
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:input-name\n- inputText: Ada\n# tnt-check:other-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Other$\n"
+      }
+    },
+    {
+      "detail": {
+        "actionId": "input-name",
+        "op": "retarget",
+        "screenId": "home",
+        "to": "other",
+        "visitId": "visit-home"
+      },
+      "op": "retarget",
+      "result": {
+        "canvas": {
+          "edges": [
+            {
+              "actionTestId": "input-name",
+              "actionTestIds": [
+                "input-name"
+              ],
+              "from": "home",
+              "id": "home-done",
+              "to": "other"
+            }
+          ],
+          "paths": [
+            {
+              "edgeIds": [
+                "home-done"
+              ],
+              "id": "route",
+              "scenarioId": "scenario-a",
+              "screenId": "home"
+            }
+          ],
+          "screens": [
+            {
+              "id": "home",
+              "tests": [
+                "input-name"
+              ],
+              "title": "Home"
+            },
+            {
+              "id": "done",
+              "tests": [],
+              "title": "Done"
+            },
+            {
+              "id": "other",
+              "tests": [
+                "other-ready"
+              ],
+              "title": "Other"
+            }
+          ]
+        },
+        "routes": [
+          {
+            "checkpoints": null,
+            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:input-name\n- inputText: Ada\n",
+            "pathId": "route",
+            "projectedVisits": [
+              {
+                "checkIds": [],
+                "id": "visit-home",
+                "screenId": "home"
+              },
+              {
+                "checkIds": [],
+                "id": "visit-done",
+                "screenId": "other"
+              }
+            ],
+            "setup": null,
+            "steps": [
+              {
+                "assertion": false,
+                "edgeId": "home-done",
+                "id": "occurrence:[\"visit-home\",\"input-name\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "8372d4f1d45c11b3669b8002a8b474b5c8a72268b6999a136524e676026873f8",
+                  "index": 1,
+                  "kind": "step"
+                },
+                "testId": "input-name",
+                "visitId": "visit-home"
+              }
+            ],
+            "transitions": [
+              {
+                "destinationVisitId": "visit-done",
+                "edgeId": "home-done",
+                "id": "visit-done:transition",
+                "visitId": "visit-home"
+              }
+            ]
+          }
+        ],
+        "visits": [
+          {
+            "checkIds": null,
+            "index": 0,
+            "operationIds": [
+              "input-name"
+            ],
+            "pathId": "route",
+            "screenId": "home",
+            "storedOperationIds": [
+              "input-name"
+            ],
+            "visitId": "visit-home"
+          },
+          {
+            "checkIds": null,
+            "index": 1,
+            "operationIds": [],
+            "pathId": "route",
+            "screenId": "other",
+            "storedOperationIds": [],
+            "visitId": "visit-done"
+          }
+        ],
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:input-name\n- inputText: Ada\n# tnt-check:other-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Other$\n"
       }
     }
   ]

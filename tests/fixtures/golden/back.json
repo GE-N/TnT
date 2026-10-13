@@ -1,0 +1,106 @@
+{
+  "canvas": {
+    "edges": [
+      {
+        "actionTestId": "go-back",
+        "assertionTestId": "previous-ready",
+        "from": "home",
+        "id": "back-edge",
+        "responseCondition": "Back",
+        "to": "previous"
+      }
+    ],
+    "paths": [
+      {
+        "edgeIds": [
+          "back-edge"
+        ],
+        "id": "route",
+        "name": "Back",
+        "screenId": "home"
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Home",
+              "visibility": "visible"
+            },
+            "id": "home-ready",
+            "label": "Home",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "assertion"
+          },
+          {
+            "back": true,
+            "backSelector": {
+              "match": "exact",
+              "target": "id",
+              "value": "nav.back"
+            },
+            "id": "go-back",
+            "label": "Back",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "action"
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "previous",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Previous",
+              "visibility": "visible"
+            },
+            "id": "previous-ready",
+            "label": "Previous",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 3,
+              "kind": "step"
+            },
+            "role": "assertion"
+          }
+        ],
+        "title": "Previous",
+        "x": 420,
+        "y": 40
+      }
+    ]
+  },
+  "description": "Back matches an element id. Editing the selector rewrites the tapOn command that carries tnt-back.",
+  "id": "back",
+  "pathId": "route",
+  "scenarioMode": false,
+  "scenarios": [],
+  "scripts": [
+    {
+      "actionId": "go-back",
+      "op": "edit",
+      "value": "nav.back.button"
+    }
+  ],
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:go-back\n# tnt-back\n# tnt-match:exact\n- tapOn:\n    id: ^nav\\.back$\n# tnt-check:previous-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Previous$\n"
+}

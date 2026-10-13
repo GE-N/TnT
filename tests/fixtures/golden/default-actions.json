@@ -150,7 +150,7 @@
       }
     ]
   },
-  "description": "A setup reference and a handler checkpoint stay attached to the ordered route.",
+  "description": "A setup reference and a handler checkpoint stay attached to the ordered route. Editing the authored tap keeps that checkpoint.",
   "flows": {
     "open.yaml": "appId: com.example.App\n---\n- tapOn: Middle\n",
     "setup.yaml": "appId: com.example.App\n---\n- assertVisible: Home\n"
@@ -159,6 +159,12 @@
   "pathId": "route",
   "scenarioMode": false,
   "scenarios": [],
-  "scripts": [],
+  "scripts": [
+    {
+      "actionId": "tap-done",
+      "op": "edit",
+      "value": "Finished"
+    }
+  ],
   "yaml": "appId: com.example.App\n---\n- assertVisible: Middle\n# tnt-check:tap-done\n# tnt-match:exact\n- tapOn:\n    text: \"^Done$\"\n# tnt-check:done-ready\n# tnt-match:exact\n- assertVisible:\n    text: \"^Done$\"\n"
 }
