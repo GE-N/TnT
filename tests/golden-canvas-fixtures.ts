@@ -79,6 +79,7 @@ function idTap():GoldenFixture{
   ]};
 }
 
+// Reopen baseline (`text: ^Back$`) records a known bug on main: `refreshChecks` drops the id backSelector on a literal `- back`. The fix will update this snapshot on purpose.
 function literalBack():GoldenFixture{
   const step=(index:number):YAMLReference=>({kind:'step',file:'flow.yaml',index,fingerprint:'draft'});
   const yaml='appId: com.example.App\n---\n- launchApp\n# tnt-check:go-back\n- back\n# tnt-check:previous-ready\n# tnt-match:exact\n- assertVisible:\n    text: "^Previous$"\n';
