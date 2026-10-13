@@ -14,4 +14,24 @@ export async function workspaceCommand(document:Document,command:'save'|'open',s
   if(document.querySelector('[aria-label="Workspace manager"]')?.textContent?.includes('Save changes'))await press([...document.querySelectorAll<HTMLButtonElement>('[aria-label="Workspace manager"] button')].find(button=>button.textContent==='Save and continue'));
  }
 }
+/** Step controls live in the floating inspector, which only exists for the selected screen. */
+export function inspectorCard(document:Document){return document.querySelector<HTMLElement>('.floating-inspector');}
+export async function inspectScreen(document:Document,screen:{id?:string;title?:string},visit?:{id?:string;number?:number}){
+ const node=[...document.querySelectorAll<HTMLElement>('[data-screen-id]')].find(item=>screen.id?item.dataset.screenId===screen.id:item.getAttribute('aria-label')==='Screen '+screen.title);
+ assert.ok(node,'Missing screen '+(screen.id??screen.title));
+ if(!node.classList.contains('selected-screen')||!inspectorCard(document))await act(async()=>node.querySelector<HTMLButtonElement>('.screen-node-heading')!.click());
+ const card=inspectorCard(document);assert.ok(card,'The inspector did not open for '+(screen.id??screen.title));
+ if(visit){
+  const section=[...card.querySelectorAll<HTMLElement>('[data-visit-id]')].find(item=>visit.id?item.dataset.visitId===visit.id:item.getAttribute('aria-label')?.startsWith('Visit '+visit.number+' · '));
+  assert.ok(section,'Missing visit '+(visit.id??visit.number));
+  const heading=section.querySelector<HTMLButtonElement>('.visit-section-heading')!;
+  if(heading.getAttribute('aria-expanded')!=='true')await act(async()=>heading.click());
+  return section;
+ }
+ return card;
+}
+/** Opens a screen's inspector (and visit) and returns the document, so existing selectors keep working. */
+export async function inspected(document:Document,title:string,visit?:number){await inspectScreen(document,{title},visit===undefined?undefined:{number:visit});return document;}
+/** Names the screen whose inspector holds a screen-specific button, such as "Add check to Home". */
+export function inspectorOwner(label:string){return /^Use (.+) as scenario start$/.exec(label)?.[1]??/^Add (?:action|check) to (?!connection )(.+)$/.exec(label)?.[1];}
 export function singleWorkspaceLibrary(workspace:{id:string;name:string}){return {items:[{id:workspace.id,name:workspace.name,createdAt:'2026-10-12T00:00:00.000Z',updatedAt:'2026-10-12T00:00:00.000Z',openedAt:'2026-10-12T00:00:00.000Z',screens:1,scenarios:1,revision:1}],unreadable:0};}

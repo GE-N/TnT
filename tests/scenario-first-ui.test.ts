@@ -1,4 +1,4 @@
-import {workspaceCommand} from './workspace-ui-helpers.js';
+import {inspectorCard,inspectorOwner,inspectScreen,workspaceCommand} from './workspace-ui-helpers.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
@@ -34,7 +34,7 @@ test('an offline author creates a draft, adds ordered contextual checks, reopens
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetch:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);const document=dom.window.document;
  const render=async(device='')=>act(async()=>root.render(createElement(Scenarios,{token:'local',deviceId:device,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));
- const click=async(label:string)=>{if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',async()=>{do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});return act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);})};
+ const click=async(label:string)=>{const owner=inspectorOwner(label);if(owner)await inspectScreen(document,{title:owner});if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',async()=>{do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});return act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);})};
  const field=(label:string)=>document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');
  const fill=async(label:string,value:string)=>act(async()=>{const node=field(label) as HTMLInputElement;assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const select=async(label:string,value:string)=>act(async()=>{const node=field(label) as HTMLSelectElement;assert.ok(node,label);node.value=value;node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
@@ -45,9 +45,9 @@ test('an offline author creates a draft, adds ordered contextual checks, reopens
   assert.ok(![...document.querySelectorAll('legend')].some(node=>node.textContent==='Screen inspector'));
   await act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));await click('Add node');
   await fill('Screen title for New screen','Welcome');await act(async()=>field('Screen title for New screen')!.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));
-  const node=document.querySelector('[aria-label="Screen Welcome"]')!;
-  assert.ok(node.querySelector('[aria-label="Add action to Welcome"]'),'Actions are authored within their node');
-  assert.ok(node.querySelector('[aria-label="Add check to Welcome"]'),'Checks are authored within their node');
+  const node=document.querySelector('[aria-label="Screen Welcome"]')!;const inspector=await inspectScreen(document,{title:'Welcome'});
+  assert.ok(inspector.querySelector('[aria-label="Add action to Welcome"]'),'Actions are authored within their node inspector');
+  assert.ok(inspector.querySelector('[aria-label="Add check to Welcome"]'),'Checks are authored within their node inspector');
   await click('Use Welcome as scenario start');
   await click('Add check to Welcome');await fill('Check 1 selector','Home');
   await click('Add check to Welcome');await select('Check 2 visibility','absent');await fill('Check 2 selector','Error');
