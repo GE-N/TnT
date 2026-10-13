@@ -65,7 +65,7 @@ export function refreshChecks(graph:CanvasGraph,yaml:string):CanvasGraph{
   const tests=screen.tests.map(test=>{
    if(!isAuthored(test))return test;
    const matches=checks.filter(item=>item.id===test.id);const found=matches.length===1?matches[0]:undefined;
-   return found&&isAuthored(found)?{...test,check:found.check,tap:found.tap,input:found.input,back:found.back,backSelector:found.backSelector,role:!found.check?'action' as const:'assertion' as const,reference:{...test.reference,index:found.index}}:test;
+   return found&&isAuthored(found)?{...test,check:found.check,tap:found.tap,input:found.input,back:found.back,backSelector:found.back?(found.backSelector??test.backSelector):undefined,role:!found.check?'action' as const:'assertion' as const,reference:{...test.reference,index:found.index}}:test;
   });
   const executable=tests.filter(test=>isAuthored(test)&&checks.some(item=>item.id===test.id&&isAuthored(item))).sort((a,b)=>a.reference.index!-b.reference.index!);
   let cursor=0;return {...screen,tests:tests.map(test=>executable.some(item=>item.id===test.id)?executable[cursor++]:test)};

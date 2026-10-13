@@ -30,9 +30,9 @@ function assertOpenedLiteralBack(pure:GoldenSnapshot,ui:GoldenSnapshot){
   const opened=ui.baseline.routes[0];
   const openedYaml='executionYaml' in opened?opened.executionYaml:undefined;
   if(typeof openedYaml!=='string')assert.fail('The opened literal-back route did not project.');
-  assert.match(openedYaml,/text: "\^Back\$"/);
+  assert.match(openedYaml,/id: "\^nav\\\\\.back\$"/);
   assert.match(ui.baseline.workspaceYaml,/(?:^|\n)- back(?:\n|$)/);
-  assert.notEqual(snapshotText(ui),snapshotText(pure));
+  assert.equal(snapshotText(ui),snapshotText(pure));
 }
 
 function assertMutations(pure:GoldenSnapshot){
@@ -125,8 +125,7 @@ describe('golden canvas routes',{concurrency:1},()=>{
       const ui=await runUi(fixture);
       const expected=snapshotText(pure);
       if(fixture.id==='literal-back'){
-        // refreshChecks drops an id backSelector beside a literal `- back`, and open always refreshes.
-        // The pure snapshot locks the conversion at canvas-route.ts. The page locks the opened graph.
+        // Saving and opening must preserve the authored id selector on a literal `- back`.
         assertOpenedLiteralBack(pure,ui);
         assert.equal(snapshotText(await runUi(fixture)),snapshotText(ui),fixture.id+' changed between two UI runs');
       }else{

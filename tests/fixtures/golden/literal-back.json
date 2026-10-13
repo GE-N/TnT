@@ -87,7 +87,7 @@
       }
     ]
   },
-  "description": "A literal - back command is linked to a Back action whose backSelector matches an element id. Route projection rewrites that command as tapOn by id. Saving and opening refresh the canvas, and the page then projects the default Back text.",
+  "description": "A literal - back command is linked to a Back action whose backSelector matches an element id. Route projection rewrites that command as tapOn by id. Saving and opening refresh the canvas, and the page keeps projecting the authored Back element id.",
   "id": "literal-back",
   "pathId": "route",
   "scenarioMode": false,
