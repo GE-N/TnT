@@ -13,7 +13,7 @@ export type CanvasOccurrence={id:string;visitId:string;testId:string;edgeId?:str
 export type CanvasExecution={pathId:string;visits:{id:string;screenId:string;checkIds:string[]}[];transitions:{id:string;edgeId:string;visitId:string;destinationVisitId:string}[];occurrences:CanvasOccurrence[]};
 export type CanvasGraph={screens:ScreenNode[];edges:Transition[];paths:{scenarioId?:string;id:string;name:string;edgeIds:string[];screenId?:string;finished?:boolean;visits?:CanvasVisit[]}[];execution?:CanvasExecution};
 export type CatalogEntry=YAMLReference & {label:string;command:string;assertion:boolean;preview:string};
-export type CanvasDiagnostic={ownerId:string;visitId?:string;detail:string};
+export type CanvasDiagnostic={ownerId:string;visitId?:string;detail:string;code?:'missing-destination';actionId?:string};
 export type OccurrenceResult={id:string;visitId:string;testId:string;edgeId?:string;status:Step['status'];stepId?:string;detail:string};
 export type CanvasResult={occurrences?:OccurrenceResult[];visits?:{id:string;screenId:string;status:Step['status'];checkIds:string[]}[];transitions?:{id:string;edgeId:string;status:Step['status']}[];pathId:string;note:string;tests:{id:string;status:Step['status'];stepId?:string;detail:string}[];screens:{id:string;status:Step['status']}[];edges:{id:string;status:Step['status']}[]};
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -127,6 +127,7 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
  }
  for(const path of graph.paths){
   if(path.screenId&&!screens.has(path.screenId))diagnostics.push({ownerId:path.id,detail:'Restore or select the initial screen for this scenario.'});
+  if(!path.scenarioId&&path.screenId&&!path.edgeIds.length)for(const test of screens.get(path.screenId)?.tests??[])if(isAuthored(test)&&!test.check&&!routeVisits(graph,path)[0]?.operationIds?.includes(test.id)&&!graph.edges.some(edge=>edgeActions(edge).includes(test.id))&&!diagnostics.some(item=>item.code==='missing-destination'&&item.actionId===test.id))diagnostics.push({ownerId:test.id,code:'missing-destination',actionId:test.id,detail:'Choose a destination screen for this action, or set it to Stays on this screen.'});
   for(const [index,visit] of routeVisits(graph,path).entries()){
    const screenId=visitScreenId(graph,path,index);
    if(visit.operationIds?.some(id=>!graph.screens.find(screen=>screen.id===screenId)?.tests.some(test=>test.id===id&&isAuthored(test))))diagnostics.push({ownerId:path.id,visitId:visit.id,detail:'Visit '+(index+1)+' contains missing actions or checks. Restore them or remove them from this visit.'});
