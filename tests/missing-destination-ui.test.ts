@@ -35,6 +35,7 @@ async function mount(scenarioMode:boolean){
  }
  await act(async()=>root.render(createElement(Host)));
  const document=dom.window.document;
+ await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Select screen Home"]')!.click());
  const row=(id:string)=>document.querySelector<HTMLElement>(`[data-operation-id="${id}"]`)!;
  return {
   document,state,row,
