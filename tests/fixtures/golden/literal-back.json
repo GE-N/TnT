@@ -1,0 +1,97 @@
+{
+  "canvas": {
+    "edges": [
+      {
+        "actionTestId": "go-back",
+        "assertionTestId": "previous-ready",
+        "from": "home",
+        "id": "back-edge",
+        "responseCondition": "Back",
+        "to": "previous"
+      }
+    ],
+    "paths": [
+      {
+        "edgeIds": [
+          "back-edge"
+        ],
+        "id": "route",
+        "name": "Literal back",
+        "screenId": "home",
+        "visits": [
+          {
+            "id": "visit-home",
+            "operationIds": [
+              "go-back"
+            ]
+          },
+          {
+            "id": "visit-previous",
+            "operationIds": [
+              "previous-ready"
+            ]
+          }
+        ]
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "back": true,
+            "backSelector": {
+              "match": "exact",
+              "target": "id",
+              "value": "nav.back"
+            },
+            "id": "go-back",
+            "label": "Back",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "action"
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "previous",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Previous",
+              "visibility": "visible"
+            },
+            "id": "previous-ready",
+            "label": "Previous",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "assertion"
+          }
+        ],
+        "title": "Previous",
+        "x": 420,
+        "y": 40
+      }
+    ]
+  },
+  "description": "A literal - back command is linked to a Back action whose backSelector matches an element id. Route projection rewrites that command as tapOn by id. Saving and opening refresh the canvas, and the page then projects the default Back text.",
+  "id": "literal-back",
+  "pathId": "route",
+  "scenarioMode": false,
+  "scenarios": [],
+  "scripts": [],
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:go-back\n- back\n# tnt-check:previous-ready\n# tnt-match:exact\n- assertVisible:\n    text: \"^Previous$\"\n"
+}

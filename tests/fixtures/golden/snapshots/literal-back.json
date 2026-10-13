@@ -1,0 +1,133 @@
+{
+  "baseline": {
+    "canvas": {
+      "edges": [
+        {
+          "actionTestId": "go-back",
+          "actionTestIds": null,
+          "from": "home",
+          "id": "back-edge",
+          "to": "previous"
+        }
+      ],
+      "paths": [
+        {
+          "edgeIds": [
+            "back-edge"
+          ],
+          "id": "route",
+          "scenarioId": null,
+          "screenId": "home"
+        }
+      ],
+      "screens": [
+        {
+          "id": "home",
+          "tests": [
+            "go-back"
+          ],
+          "title": "Home"
+        },
+        {
+          "id": "previous",
+          "tests": [
+            "previous-ready"
+          ],
+          "title": "Previous"
+        }
+      ]
+    },
+    "routes": [
+      {
+        "checkpoints": null,
+        "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:go-back\n- tapOn:\n    id: \"^nav\\\\.back$\"\n# tnt-check:previous-ready\n# tnt-match:exact\n- assertVisible:\n    text: \"^Previous$\"\n",
+        "pathId": "route",
+        "projectedVisits": [
+          {
+            "checkIds": [],
+            "id": "visit-home",
+            "screenId": "home"
+          },
+          {
+            "checkIds": [
+              "previous-ready"
+            ],
+            "id": "visit-previous",
+            "screenId": "previous"
+          }
+        ],
+        "setup": null,
+        "steps": [
+          {
+            "assertion": false,
+            "edgeId": "back-edge",
+            "id": "occurrence:[\"visit-home\",\"go-back\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "3fc2f3da378c141e2170a324e00cf60e07a891a6e89a7ca0423de8a16cc8c54a",
+              "index": 1,
+              "kind": "step"
+            },
+            "testId": "go-back",
+            "visitId": "visit-home"
+          },
+          {
+            "assertion": true,
+            "edgeId": null,
+            "id": "occurrence:[\"visit-previous\",\"previous-ready\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "c2a2991598b15209c2bfa932539eac8f2fa31b509d4f492652de332cfe3e7d64",
+              "index": 2,
+              "kind": "step"
+            },
+            "testId": "previous-ready",
+            "visitId": "visit-previous"
+          }
+        ],
+        "transitions": [
+          {
+            "destinationVisitId": "visit-previous",
+            "edgeId": "back-edge",
+            "id": "visit-previous:transition",
+            "visitId": "visit-home"
+          }
+        ]
+      }
+    ],
+    "visits": [
+      {
+        "checkIds": null,
+        "index": 0,
+        "operationIds": [
+          "go-back"
+        ],
+        "pathId": "route",
+        "screenId": "home",
+        "storedOperationIds": [
+          "go-back"
+        ],
+        "visitId": "visit-home"
+      },
+      {
+        "checkIds": null,
+        "index": 1,
+        "operationIds": [
+          "previous-ready"
+        ],
+        "pathId": "route",
+        "screenId": "previous",
+        "storedOperationIds": [
+          "previous-ready"
+        ],
+        "visitId": "visit-previous"
+      }
+    ],
+    "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:go-back\n- back\n# tnt-check:previous-ready\n# tnt-match:exact\n- assertVisible:\n    text: \"^Previous$\"\n"
+  },
+  "description": "A literal - back command is linked to a Back action whose backSelector matches an element id. Route projection rewrites that command as tapOn by id. Saving and opening refresh the canvas, and the page then projects the default Back text.",
+  "fixture": "literal-back",
+  "operations": []
+}

@@ -1,0 +1,180 @@
+{
+  "canvas": {
+    "edges": [
+      {
+        "actionTestId": "open-detail",
+        "actionTestIds": [
+          "open-detail"
+        ],
+        "assertionTestId": "detail-ready",
+        "from": "home",
+        "id": "go",
+        "responseCondition": "Home → Detail",
+        "to": "detail"
+      },
+      {
+        "actionTestId": "back-home",
+        "actionTestIds": [
+          "back-home"
+        ],
+        "assertionTestId": "home-ready",
+        "from": "detail",
+        "id": "return",
+        "responseCondition": "Detail → Home",
+        "to": "home"
+      }
+    ],
+    "paths": [
+      {
+        "edgeIds": [
+          "go",
+          "return"
+        ],
+        "id": "route",
+        "name": "Home → Detail → Home",
+        "scenarioId": "scenario-a",
+        "screenId": "home",
+        "visits": [
+          {
+            "id": "visit-1",
+            "operationIds": [
+              "home-ready",
+              "open-detail"
+            ]
+          },
+          {
+            "id": "visit-2",
+            "operationIds": [
+              "detail-ready",
+              "back-home"
+            ]
+          },
+          {
+            "id": "visit-3",
+            "operationIds": [
+              "home-ready"
+            ]
+          }
+        ]
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Home",
+              "visibility": "visible"
+            },
+            "id": "home-ready",
+            "label": "Home",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "assertion",
+            "scenarioIds": [
+              "scenario-a"
+            ]
+          },
+          {
+            "id": "open-detail",
+            "label": "Detail",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "action",
+            "scenarioIds": [
+              "scenario-a"
+            ],
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Detail"
+            }
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "detail",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Detail",
+              "visibility": "visible"
+            },
+            "id": "detail-ready",
+            "label": "Detail",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 3,
+              "kind": "step"
+            },
+            "role": "assertion",
+            "scenarioIds": [
+              "scenario-a"
+            ]
+          },
+          {
+            "back": true,
+            "backSelector": {
+              "match": "exact",
+              "target": "text",
+              "value": "Back"
+            },
+            "id": "back-home",
+            "label": "Back",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 4,
+              "kind": "step"
+            },
+            "role": "action",
+            "scenarioIds": [
+              "scenario-a"
+            ]
+          }
+        ],
+        "title": "Detail",
+        "x": 420,
+        "y": 40
+      }
+    ]
+  },
+  "description": "Home → Detail → Home reuses the Home check on the return visit. Editing Visit 3 copies that shared check.",
+  "id": "repeated-visit",
+  "pathId": "route",
+  "scenarioId": "scenario-a",
+  "scenarioMode": true,
+  "scenarios": [
+    {
+      "id": "scenario-a",
+      "name": "Return",
+      "pathId": "route"
+    }
+  ],
+  "scripts": [
+    {
+      "actionId": "home-ready",
+      "op": "edit",
+      "value": "Home again",
+      "visitId": "visit-3"
+    }
+  ],
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:back-home\n# tnt-back\n# tnt-match:exact\n- tapOn:\n    text: ^Back$\n"
+}

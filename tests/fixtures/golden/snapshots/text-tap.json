@@ -1,0 +1,416 @@
+{
+  "baseline": {
+    "canvas": {
+      "edges": [
+        {
+          "actionTestId": "tap-gear",
+          "actionTestIds": null,
+          "from": "home",
+          "id": "open",
+          "to": "detail"
+        }
+      ],
+      "paths": [
+        {
+          "edgeIds": [
+            "open"
+          ],
+          "id": "route",
+          "scenarioId": null,
+          "screenId": "home"
+        }
+      ],
+      "screens": [
+        {
+          "id": "home",
+          "tests": [
+            "tap-gear"
+          ],
+          "title": "Home"
+        },
+        {
+          "id": "detail",
+          "tests": [
+            "detail-ready"
+          ],
+          "title": "Detail"
+        },
+        {
+          "id": "more",
+          "tests": [
+            "more-ready"
+          ],
+          "title": "More"
+        }
+      ]
+    },
+    "routes": [
+      {
+        "checkpoints": null,
+        "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    text: ^Gear$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n",
+        "pathId": "route",
+        "projectedVisits": [
+          {
+            "checkIds": [],
+            "id": "visit-home",
+            "screenId": "home"
+          },
+          {
+            "checkIds": [
+              "detail-ready"
+            ],
+            "id": "visit-detail",
+            "screenId": "detail"
+          }
+        ],
+        "setup": null,
+        "steps": [
+          {
+            "assertion": false,
+            "edgeId": "open",
+            "id": "occurrence:[\"visit-home\",\"tap-gear\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "f72493ea81e9da824ef288314e5729a9ae5fa7c1489843431ae428fd90746ffb",
+              "index": 1,
+              "kind": "step"
+            },
+            "testId": "tap-gear",
+            "visitId": "visit-home"
+          },
+          {
+            "assertion": true,
+            "edgeId": null,
+            "id": "occurrence:[\"visit-detail\",\"detail-ready\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "36df73ba9b7886f3382d61d0da3d12ef4b3b37866ae79eb5e8f9af14a9597deb",
+              "index": 2,
+              "kind": "step"
+            },
+            "testId": "detail-ready",
+            "visitId": "visit-detail"
+          }
+        ],
+        "transitions": [
+          {
+            "destinationVisitId": "visit-detail",
+            "edgeId": "open",
+            "id": "visit-detail:transition",
+            "visitId": "visit-home"
+          }
+        ]
+      }
+    ],
+    "visits": [
+      {
+        "checkIds": null,
+        "index": 0,
+        "operationIds": [
+          "tap-gear"
+        ],
+        "pathId": "route",
+        "screenId": "home",
+        "storedOperationIds": null,
+        "visitId": "visit-home"
+      },
+      {
+        "checkIds": null,
+        "index": 1,
+        "operationIds": [
+          "detail-ready"
+        ],
+        "pathId": "route",
+        "screenId": "detail",
+        "storedOperationIds": null,
+        "visitId": "visit-detail"
+      }
+    ],
+    "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    text: ^Gear$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:more-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^More$\n"
+  },
+  "description": "tapOn matches by text. Editing the selector rewrites the command, then the tap is retargeted from Detail onto More. Visits stay unfrozen so the destination check follows More.",
+  "fixture": "text-tap",
+  "operations": [
+    {
+      "detail": {
+        "actionId": "tap-gear",
+        "op": "edit",
+        "value": "Open settings"
+      },
+      "op": "edit",
+      "result": {
+        "canvas": {
+          "edges": [
+            {
+              "actionTestId": "tap-gear",
+              "actionTestIds": null,
+              "from": "home",
+              "id": "open",
+              "to": "detail"
+            }
+          ],
+          "paths": [
+            {
+              "edgeIds": [
+                "open"
+              ],
+              "id": "route",
+              "scenarioId": null,
+              "screenId": "home"
+            }
+          ],
+          "screens": [
+            {
+              "id": "home",
+              "tests": [
+                "tap-gear"
+              ],
+              "title": "Home"
+            },
+            {
+              "id": "detail",
+              "tests": [
+                "detail-ready"
+              ],
+              "title": "Detail"
+            },
+            {
+              "id": "more",
+              "tests": [
+                "more-ready"
+              ],
+              "title": "More"
+            }
+          ]
+        },
+        "routes": [
+          {
+            "checkpoints": null,
+            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    text: ^Open settings$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n",
+            "pathId": "route",
+            "projectedVisits": [
+              {
+                "checkIds": [],
+                "id": "visit-home",
+                "screenId": "home"
+              },
+              {
+                "checkIds": [
+                  "detail-ready"
+                ],
+                "id": "visit-detail",
+                "screenId": "detail"
+              }
+            ],
+            "setup": null,
+            "steps": [
+              {
+                "assertion": false,
+                "edgeId": "open",
+                "id": "occurrence:[\"visit-home\",\"tap-gear\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "c7e6444d298bf68639acb01e6ce1d3aa6f83bfeabba9ac03c03bd7ca1c622696",
+                  "index": 1,
+                  "kind": "step"
+                },
+                "testId": "tap-gear",
+                "visitId": "visit-home"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"visit-detail\",\"detail-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "36df73ba9b7886f3382d61d0da3d12ef4b3b37866ae79eb5e8f9af14a9597deb",
+                  "index": 2,
+                  "kind": "step"
+                },
+                "testId": "detail-ready",
+                "visitId": "visit-detail"
+              }
+            ],
+            "transitions": [
+              {
+                "destinationVisitId": "visit-detail",
+                "edgeId": "open",
+                "id": "visit-detail:transition",
+                "visitId": "visit-home"
+              }
+            ]
+          }
+        ],
+        "visits": [
+          {
+            "checkIds": null,
+            "index": 0,
+            "operationIds": [
+              "tap-gear"
+            ],
+            "pathId": "route",
+            "screenId": "home",
+            "storedOperationIds": null,
+            "visitId": "visit-home"
+          },
+          {
+            "checkIds": null,
+            "index": 1,
+            "operationIds": [
+              "detail-ready"
+            ],
+            "pathId": "route",
+            "screenId": "detail",
+            "storedOperationIds": null,
+            "visitId": "visit-detail"
+          }
+        ],
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    text: ^Open settings$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:more-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^More$\n"
+      }
+    },
+    {
+      "detail": {
+        "actionId": "tap-gear",
+        "op": "retarget",
+        "screenId": "home",
+        "to": "more"
+      },
+      "op": "retarget",
+      "result": {
+        "canvas": {
+          "edges": [
+            {
+              "actionTestId": "tap-gear",
+              "actionTestIds": null,
+              "from": "home",
+              "id": "open",
+              "to": "more"
+            }
+          ],
+          "paths": [
+            {
+              "edgeIds": [
+                "open"
+              ],
+              "id": "route",
+              "scenarioId": null,
+              "screenId": "home"
+            }
+          ],
+          "screens": [
+            {
+              "id": "home",
+              "tests": [
+                "tap-gear"
+              ],
+              "title": "Home"
+            },
+            {
+              "id": "detail",
+              "tests": [
+                "detail-ready"
+              ],
+              "title": "Detail"
+            },
+            {
+              "id": "more",
+              "tests": [
+                "more-ready"
+              ],
+              "title": "More"
+            }
+          ]
+        },
+        "routes": [
+          {
+            "checkpoints": null,
+            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    text: ^Open settings$\n# tnt-check:more-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^More$\n",
+            "pathId": "route",
+            "projectedVisits": [
+              {
+                "checkIds": [],
+                "id": "visit-home",
+                "screenId": "home"
+              },
+              {
+                "checkIds": [
+                  "more-ready"
+                ],
+                "id": "visit-detail",
+                "screenId": "more"
+              }
+            ],
+            "setup": null,
+            "steps": [
+              {
+                "assertion": false,
+                "edgeId": "open",
+                "id": "occurrence:[\"visit-home\",\"tap-gear\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "c7e6444d298bf68639acb01e6ce1d3aa6f83bfeabba9ac03c03bd7ca1c622696",
+                  "index": 1,
+                  "kind": "step"
+                },
+                "testId": "tap-gear",
+                "visitId": "visit-home"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"visit-detail\",\"more-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "d5dd06a2051f7bf3bcc8f5871885ca80984de7071c747199763f3b21ce69b4d3",
+                  "index": 2,
+                  "kind": "step"
+                },
+                "testId": "more-ready",
+                "visitId": "visit-detail"
+              }
+            ],
+            "transitions": [
+              {
+                "destinationVisitId": "visit-detail",
+                "edgeId": "open",
+                "id": "visit-detail:transition",
+                "visitId": "visit-home"
+              }
+            ]
+          }
+        ],
+        "visits": [
+          {
+            "checkIds": null,
+            "index": 0,
+            "operationIds": [
+              "tap-gear"
+            ],
+            "pathId": "route",
+            "screenId": "home",
+            "storedOperationIds": null,
+            "visitId": "visit-home"
+          },
+          {
+            "checkIds": null,
+            "index": 1,
+            "operationIds": [
+              "more-ready"
+            ],
+            "pathId": "route",
+            "screenId": "more",
+            "storedOperationIds": null,
+            "visitId": "visit-detail"
+          }
+        ],
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    text: ^Open settings$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:more-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^More$\n"
+      }
+    }
+  ]
+}

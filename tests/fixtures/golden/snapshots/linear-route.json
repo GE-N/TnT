@@ -1,0 +1,749 @@
+{
+  "baseline": {
+    "canvas": {
+      "edges": [
+        {
+          "actionTestId": "open-detail",
+          "actionTestIds": null,
+          "from": "home",
+          "id": "home-detail",
+          "to": "detail"
+        }
+      ],
+      "paths": [
+        {
+          "edgeIds": [
+            "home-detail"
+          ],
+          "id": "route",
+          "scenarioId": null,
+          "screenId": "home"
+        }
+      ],
+      "screens": [
+        {
+          "id": "home",
+          "tests": [
+            "home-ready",
+            "open-detail"
+          ],
+          "title": "Home"
+        },
+        {
+          "id": "detail",
+          "tests": [
+            "detail-ready",
+            "continue-settings"
+          ],
+          "title": "Detail"
+        },
+        {
+          "id": "settings",
+          "tests": [
+            "settings-ready"
+          ],
+          "title": "Settings"
+        }
+      ]
+    },
+    "routes": [
+      {
+        "checkpoints": null,
+        "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n",
+        "pathId": "route",
+        "projectedVisits": [
+          {
+            "checkIds": [
+              "home-ready"
+            ],
+            "id": "route:visit:0",
+            "screenId": "home"
+          },
+          {
+            "checkIds": [
+              "detail-ready"
+            ],
+            "id": "route:visit:1",
+            "screenId": "detail"
+          }
+        ],
+        "setup": null,
+        "steps": [
+          {
+            "assertion": true,
+            "edgeId": null,
+            "id": "occurrence:[\"route:visit:0\",\"home-ready\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "c24a05499ed936126d12b849f52191d9564ddbcfd86a3940e9b6963698fdbc0d",
+              "index": 1,
+              "kind": "step"
+            },
+            "testId": "home-ready",
+            "visitId": "route:visit:0"
+          },
+          {
+            "assertion": false,
+            "edgeId": "home-detail",
+            "id": "occurrence:[\"route:visit:0\",\"open-detail\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "6e01cf19c1552aa52a4346bb523a37c35ac19c39aa174e43bdf6fba56bcf6d06",
+              "index": 2,
+              "kind": "step"
+            },
+            "testId": "open-detail",
+            "visitId": "route:visit:0"
+          },
+          {
+            "assertion": true,
+            "edgeId": null,
+            "id": "occurrence:[\"route:visit:1\",\"detail-ready\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "36df73ba9b7886f3382d61d0da3d12ef4b3b37866ae79eb5e8f9af14a9597deb",
+              "index": 3,
+              "kind": "step"
+            },
+            "testId": "detail-ready",
+            "visitId": "route:visit:1"
+          }
+        ],
+        "transitions": [
+          {
+            "destinationVisitId": "route:visit:1",
+            "edgeId": "home-detail",
+            "id": "route:visit:1:transition",
+            "visitId": "route:visit:0"
+          }
+        ]
+      }
+    ],
+    "visits": [
+      {
+        "checkIds": null,
+        "index": 0,
+        "operationIds": [
+          "home-ready",
+          "open-detail"
+        ],
+        "pathId": "route",
+        "screenId": "home",
+        "storedOperationIds": null,
+        "visitId": "route:visit:0"
+      },
+      {
+        "checkIds": null,
+        "index": 1,
+        "operationIds": [
+          "detail-ready"
+        ],
+        "pathId": "route",
+        "screenId": "detail",
+        "storedOperationIds": null,
+        "visitId": "route:visit:1"
+      }
+    ],
+    "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:continue-settings\n# tnt-match:exact\n- tapOn:\n    text: ^Settings$\n# tnt-check:settings-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Settings$\n"
+  },
+  "description": "A linear Home → Detail route. An unconnected tail action can connect to the existing Settings screen, then its destination can be cleared and undone.",
+  "fixture": "linear-route",
+  "operations": [
+    {
+      "detail": {
+        "actionId": "continue-settings",
+        "op": "connect",
+        "screenId": "detail",
+        "to": "settings"
+      },
+      "op": "connect",
+      "result": {
+        "canvas": {
+          "edges": [
+            {
+              "actionTestId": "open-detail",
+              "actionTestIds": null,
+              "from": "home",
+              "id": "home-detail",
+              "to": "detail"
+            },
+            {
+              "actionTestId": "continue-settings",
+              "actionTestIds": null,
+              "from": "detail",
+              "id": "action-link:continue-settings",
+              "to": "settings"
+            }
+          ],
+          "paths": [
+            {
+              "edgeIds": [
+                "home-detail",
+                "action-link:continue-settings"
+              ],
+              "id": "route",
+              "scenarioId": null,
+              "screenId": "home"
+            }
+          ],
+          "screens": [
+            {
+              "id": "home",
+              "tests": [
+                "home-ready",
+                "open-detail"
+              ],
+              "title": "Home"
+            },
+            {
+              "id": "detail",
+              "tests": [
+                "detail-ready",
+                "continue-settings"
+              ],
+              "title": "Detail"
+            },
+            {
+              "id": "settings",
+              "tests": [
+                "settings-ready"
+              ],
+              "title": "Settings"
+            }
+          ]
+        },
+        "routes": [
+          {
+            "checkpoints": null,
+            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:continue-settings\n# tnt-match:exact\n- tapOn:\n    text: ^Settings$\n# tnt-check:settings-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Settings$\n",
+            "pathId": "route",
+            "projectedVisits": [
+              {
+                "checkIds": [
+                  "home-ready"
+                ],
+                "id": "route:visit:0",
+                "screenId": "home"
+              },
+              {
+                "checkIds": [
+                  "detail-ready"
+                ],
+                "id": "route:visit:1",
+                "screenId": "detail"
+              },
+              {
+                "checkIds": [
+                  "settings-ready"
+                ],
+                "id": "id:1",
+                "screenId": "settings"
+              }
+            ],
+            "setup": null,
+            "steps": [
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"route:visit:0\",\"home-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "c24a05499ed936126d12b849f52191d9564ddbcfd86a3940e9b6963698fdbc0d",
+                  "index": 1,
+                  "kind": "step"
+                },
+                "testId": "home-ready",
+                "visitId": "route:visit:0"
+              },
+              {
+                "assertion": false,
+                "edgeId": "home-detail",
+                "id": "occurrence:[\"route:visit:0\",\"open-detail\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "6e01cf19c1552aa52a4346bb523a37c35ac19c39aa174e43bdf6fba56bcf6d06",
+                  "index": 2,
+                  "kind": "step"
+                },
+                "testId": "open-detail",
+                "visitId": "route:visit:0"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"route:visit:1\",\"detail-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "36df73ba9b7886f3382d61d0da3d12ef4b3b37866ae79eb5e8f9af14a9597deb",
+                  "index": 3,
+                  "kind": "step"
+                },
+                "testId": "detail-ready",
+                "visitId": "route:visit:1"
+              },
+              {
+                "assertion": false,
+                "edgeId": "action-link:continue-settings",
+                "id": "occurrence:[\"route:visit:1\",\"continue-settings\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "350b0c1d515279e4fc691910afcea25c272df7737a692fa8fbe0cf9e8fb6f1cd",
+                  "index": 4,
+                  "kind": "step"
+                },
+                "testId": "continue-settings",
+                "visitId": "route:visit:1"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"id:1\",\"settings-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "08266d0c862b248eb639b6b80151c876d0c2ef5704d2c1c648a54a829acdb859",
+                  "index": 5,
+                  "kind": "step"
+                },
+                "testId": "settings-ready",
+                "visitId": "id:1"
+              }
+            ],
+            "transitions": [
+              {
+                "destinationVisitId": "route:visit:1",
+                "edgeId": "home-detail",
+                "id": "route:visit:1:transition",
+                "visitId": "route:visit:0"
+              },
+              {
+                "destinationVisitId": "id:1",
+                "edgeId": "action-link:continue-settings",
+                "id": "id:1:transition",
+                "visitId": "route:visit:1"
+              }
+            ]
+          }
+        ],
+        "visits": [
+          {
+            "checkIds": null,
+            "index": 0,
+            "operationIds": [
+              "home-ready",
+              "open-detail"
+            ],
+            "pathId": "route",
+            "screenId": "home",
+            "storedOperationIds": null,
+            "visitId": "route:visit:0"
+          },
+          {
+            "checkIds": null,
+            "index": 1,
+            "operationIds": [
+              "detail-ready",
+              "continue-settings"
+            ],
+            "pathId": "route",
+            "screenId": "detail",
+            "storedOperationIds": null,
+            "visitId": "route:visit:1"
+          },
+          {
+            "checkIds": null,
+            "index": 2,
+            "operationIds": [
+              "settings-ready"
+            ],
+            "pathId": "route",
+            "screenId": "settings",
+            "storedOperationIds": null,
+            "visitId": "id:1"
+          }
+        ],
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:continue-settings\n# tnt-match:exact\n- tapOn:\n    text: ^Settings$\n# tnt-check:settings-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Settings$\n"
+      }
+    },
+    {
+      "detail": {
+        "actionId": "continue-settings",
+        "op": "clear-destination",
+        "screenId": "detail"
+      },
+      "op": "clear-destination",
+      "result": {
+        "canvas": {
+          "edges": [
+            {
+              "actionTestId": "open-detail",
+              "actionTestIds": null,
+              "from": "home",
+              "id": "home-detail",
+              "to": "detail"
+            }
+          ],
+          "paths": [
+            {
+              "edgeIds": [
+                "home-detail"
+              ],
+              "id": "route",
+              "scenarioId": null,
+              "screenId": "home"
+            }
+          ],
+          "screens": [
+            {
+              "id": "home",
+              "tests": [
+                "home-ready",
+                "open-detail"
+              ],
+              "title": "Home"
+            },
+            {
+              "id": "detail",
+              "tests": [
+                "detail-ready",
+                "continue-settings"
+              ],
+              "title": "Detail"
+            },
+            {
+              "id": "settings",
+              "tests": [],
+              "title": "Settings"
+            }
+          ]
+        },
+        "routes": [
+          {
+            "checkpoints": null,
+            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n",
+            "pathId": "route",
+            "projectedVisits": [
+              {
+                "checkIds": [
+                  "home-ready"
+                ],
+                "id": "route:visit:0",
+                "screenId": "home"
+              },
+              {
+                "checkIds": [
+                  "detail-ready"
+                ],
+                "id": "route:visit:1",
+                "screenId": "detail"
+              }
+            ],
+            "setup": null,
+            "steps": [
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"route:visit:0\",\"home-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "c24a05499ed936126d12b849f52191d9564ddbcfd86a3940e9b6963698fdbc0d",
+                  "index": 1,
+                  "kind": "step"
+                },
+                "testId": "home-ready",
+                "visitId": "route:visit:0"
+              },
+              {
+                "assertion": false,
+                "edgeId": "home-detail",
+                "id": "occurrence:[\"route:visit:0\",\"open-detail\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "6e01cf19c1552aa52a4346bb523a37c35ac19c39aa174e43bdf6fba56bcf6d06",
+                  "index": 2,
+                  "kind": "step"
+                },
+                "testId": "open-detail",
+                "visitId": "route:visit:0"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"route:visit:1\",\"detail-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "36df73ba9b7886f3382d61d0da3d12ef4b3b37866ae79eb5e8f9af14a9597deb",
+                  "index": 3,
+                  "kind": "step"
+                },
+                "testId": "detail-ready",
+                "visitId": "route:visit:1"
+              }
+            ],
+            "transitions": [
+              {
+                "destinationVisitId": "route:visit:1",
+                "edgeId": "home-detail",
+                "id": "route:visit:1:transition",
+                "visitId": "route:visit:0"
+              }
+            ]
+          }
+        ],
+        "visits": [
+          {
+            "checkIds": null,
+            "index": 0,
+            "operationIds": [
+              "home-ready",
+              "open-detail"
+            ],
+            "pathId": "route",
+            "screenId": "home",
+            "storedOperationIds": null,
+            "visitId": "route:visit:0"
+          },
+          {
+            "checkIds": null,
+            "index": 1,
+            "operationIds": [
+              "detail-ready"
+            ],
+            "pathId": "route",
+            "screenId": "detail",
+            "storedOperationIds": null,
+            "visitId": "route:visit:1"
+          }
+        ],
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:continue-settings\n# tnt-match:exact\n- tapOn:\n    text: ^Settings$\n"
+      }
+    },
+    {
+      "detail": {
+        "op": "undo"
+      },
+      "op": "undo",
+      "result": {
+        "canvas": {
+          "edges": [
+            {
+              "actionTestId": "open-detail",
+              "actionTestIds": null,
+              "from": "home",
+              "id": "home-detail",
+              "to": "detail"
+            },
+            {
+              "actionTestId": "continue-settings",
+              "actionTestIds": null,
+              "from": "detail",
+              "id": "action-link:continue-settings",
+              "to": "settings"
+            }
+          ],
+          "paths": [
+            {
+              "edgeIds": [
+                "home-detail",
+                "action-link:continue-settings"
+              ],
+              "id": "route",
+              "scenarioId": null,
+              "screenId": "home"
+            }
+          ],
+          "screens": [
+            {
+              "id": "home",
+              "tests": [
+                "home-ready",
+                "open-detail"
+              ],
+              "title": "Home"
+            },
+            {
+              "id": "detail",
+              "tests": [
+                "detail-ready",
+                "continue-settings"
+              ],
+              "title": "Detail"
+            },
+            {
+              "id": "settings",
+              "tests": [
+                "settings-ready"
+              ],
+              "title": "Settings"
+            }
+          ]
+        },
+        "routes": [
+          {
+            "checkpoints": null,
+            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:continue-settings\n# tnt-match:exact\n- tapOn:\n    text: ^Settings$\n# tnt-check:settings-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Settings$\n",
+            "pathId": "route",
+            "projectedVisits": [
+              {
+                "checkIds": [
+                  "home-ready"
+                ],
+                "id": "route:visit:0",
+                "screenId": "home"
+              },
+              {
+                "checkIds": [
+                  "detail-ready"
+                ],
+                "id": "route:visit:1",
+                "screenId": "detail"
+              },
+              {
+                "checkIds": [
+                  "settings-ready"
+                ],
+                "id": "id:1",
+                "screenId": "settings"
+              }
+            ],
+            "setup": null,
+            "steps": [
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"route:visit:0\",\"home-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "c24a05499ed936126d12b849f52191d9564ddbcfd86a3940e9b6963698fdbc0d",
+                  "index": 1,
+                  "kind": "step"
+                },
+                "testId": "home-ready",
+                "visitId": "route:visit:0"
+              },
+              {
+                "assertion": false,
+                "edgeId": "home-detail",
+                "id": "occurrence:[\"route:visit:0\",\"open-detail\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "6e01cf19c1552aa52a4346bb523a37c35ac19c39aa174e43bdf6fba56bcf6d06",
+                  "index": 2,
+                  "kind": "step"
+                },
+                "testId": "open-detail",
+                "visitId": "route:visit:0"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"route:visit:1\",\"detail-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "36df73ba9b7886f3382d61d0da3d12ef4b3b37866ae79eb5e8f9af14a9597deb",
+                  "index": 3,
+                  "kind": "step"
+                },
+                "testId": "detail-ready",
+                "visitId": "route:visit:1"
+              },
+              {
+                "assertion": false,
+                "edgeId": "action-link:continue-settings",
+                "id": "occurrence:[\"route:visit:1\",\"continue-settings\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "350b0c1d515279e4fc691910afcea25c272df7737a692fa8fbe0cf9e8fb6f1cd",
+                  "index": 4,
+                  "kind": "step"
+                },
+                "testId": "continue-settings",
+                "visitId": "route:visit:1"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"id:1\",\"settings-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "08266d0c862b248eb639b6b80151c876d0c2ef5704d2c1c648a54a829acdb859",
+                  "index": 5,
+                  "kind": "step"
+                },
+                "testId": "settings-ready",
+                "visitId": "id:1"
+              }
+            ],
+            "transitions": [
+              {
+                "destinationVisitId": "route:visit:1",
+                "edgeId": "home-detail",
+                "id": "route:visit:1:transition",
+                "visitId": "route:visit:0"
+              },
+              {
+                "destinationVisitId": "id:1",
+                "edgeId": "action-link:continue-settings",
+                "id": "id:1:transition",
+                "visitId": "route:visit:1"
+              }
+            ]
+          }
+        ],
+        "visits": [
+          {
+            "checkIds": null,
+            "index": 0,
+            "operationIds": [
+              "home-ready",
+              "open-detail"
+            ],
+            "pathId": "route",
+            "screenId": "home",
+            "storedOperationIds": null,
+            "visitId": "route:visit:0"
+          },
+          {
+            "checkIds": null,
+            "index": 1,
+            "operationIds": [
+              "detail-ready",
+              "continue-settings"
+            ],
+            "pathId": "route",
+            "screenId": "detail",
+            "storedOperationIds": null,
+            "visitId": "route:visit:1"
+          },
+          {
+            "checkIds": null,
+            "index": 2,
+            "operationIds": [
+              "settings-ready"
+            ],
+            "pathId": "route",
+            "screenId": "settings",
+            "storedOperationIds": null,
+            "visitId": "id:1"
+          }
+        ],
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:continue-settings\n# tnt-match:exact\n- tapOn:\n    text: ^Settings$\n# tnt-check:settings-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Settings$\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,127 @@
+{
+  "canvas": {
+    "edges": [
+      {
+        "actionTestId": "tap-gear",
+        "assertionTestId": "detail-ready",
+        "from": "home",
+        "id": "open",
+        "responseCondition": "Tap Gear",
+        "to": "detail"
+      }
+    ],
+    "paths": [
+      {
+        "edgeIds": [
+          "open"
+        ],
+        "id": "route",
+        "name": "Text tap",
+        "screenId": "home",
+        "visits": [
+          {
+            "id": "visit-home"
+          },
+          {
+            "id": "visit-detail"
+          }
+        ]
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "id": "tap-gear",
+            "label": "Gear",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "action",
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Gear"
+            }
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "detail",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Detail",
+              "visibility": "visible"
+            },
+            "id": "detail-ready",
+            "label": "Detail",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "assertion"
+          }
+        ],
+        "title": "Detail",
+        "x": 420,
+        "y": 40
+      },
+      {
+        "id": "more",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "More",
+              "visibility": "visible"
+            },
+            "id": "more-ready",
+            "label": "More",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 3,
+              "kind": "step"
+            },
+            "role": "assertion"
+          }
+        ],
+        "title": "More",
+        "x": 420,
+        "y": 320
+      }
+    ]
+  },
+  "description": "tapOn matches by text. Editing the selector rewrites the command, then the tap is retargeted from Detail onto More. Visits stay unfrozen so the destination check follows More.",
+  "id": "text-tap",
+  "pathId": "route",
+  "scenarioMode": false,
+  "scenarios": [],
+  "scripts": [
+    {
+      "actionId": "tap-gear",
+      "op": "edit",
+      "value": "Open settings"
+    },
+    {
+      "actionId": "tap-gear",
+      "op": "retarget",
+      "screenId": "home",
+      "to": "more"
+    }
+  ],
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:tap-gear\n# tnt-match:exact\n- tapOn:\n    text: ^Gear$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:more-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^More$\n"
+}

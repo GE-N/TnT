@@ -1,0 +1,150 @@
+{
+  "canvas": {
+    "edges": [
+      {
+        "actionTestId": "shared-tap",
+        "actionTestIds": [
+          "shared-tap"
+        ],
+        "assertionTestId": "detail-ready",
+        "from": "home",
+        "id": "go",
+        "responseCondition": "Home → Detail",
+        "to": "detail"
+      }
+    ],
+    "paths": [
+      {
+        "edgeIds": [
+          "go"
+        ],
+        "id": "path-a",
+        "name": "Scenario A",
+        "scenarioId": "scenario-a",
+        "screenId": "home",
+        "visits": [
+          {
+            "id": "a-home",
+            "operationIds": [
+              "shared-tap"
+            ]
+          },
+          {
+            "id": "a-detail",
+            "operationIds": [
+              "detail-ready"
+            ]
+          }
+        ]
+      },
+      {
+        "edgeIds": [
+          "go"
+        ],
+        "id": "path-b",
+        "name": "Scenario B",
+        "scenarioId": "scenario-b",
+        "screenId": "home",
+        "visits": [
+          {
+            "id": "b-home",
+            "operationIds": [
+              "shared-tap"
+            ]
+          },
+          {
+            "id": "b-detail",
+            "operationIds": [
+              "detail-ready"
+            ]
+          }
+        ]
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "id": "shared-tap",
+            "label": "Gear",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "action",
+            "scenarioIds": [
+              "scenario-a",
+              "scenario-b"
+            ],
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Gear"
+            }
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "detail",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Detail",
+              "visibility": "visible"
+            },
+            "id": "detail-ready",
+            "label": "Detail",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "assertion",
+            "scenarioIds": [
+              "scenario-a",
+              "scenario-b"
+            ]
+          }
+        ],
+        "title": "Detail",
+        "x": 420,
+        "y": 40
+      }
+    ]
+  },
+  "description": "One tap is shared by two scenario routes. Editing it in scenario A copies the step and leaves scenario B unchanged.",
+  "id": "shared-step",
+  "pathId": "path-a",
+  "scenarioId": "scenario-a",
+  "scenarioMode": true,
+  "scenarios": [
+    {
+      "id": "scenario-a",
+      "name": "Scenario A",
+      "pathId": "path-a"
+    },
+    {
+      "id": "scenario-b",
+      "name": "Scenario B",
+      "pathId": "path-b"
+    }
+  ],
+  "scripts": [
+    {
+      "actionId": "shared-tap",
+      "op": "edit",
+      "value": "Gears",
+      "visitId": "a-home"
+    }
+  ],
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:shared-tap\n# tnt-match:exact\n- tapOn:\n    text: ^Gear$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n"
+}

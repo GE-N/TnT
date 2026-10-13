@@ -1,0 +1,161 @@
+{
+  "canvas": {
+    "edges": [
+      {
+        "actionTestId": "open-detail",
+        "assertionTestId": "detail-ready",
+        "from": "home",
+        "id": "go",
+        "responseCondition": "Home → Detail",
+        "to": "detail"
+      },
+      {
+        "actionTestId": "back-home",
+        "assertionTestId": "home-ready",
+        "from": "detail",
+        "id": "return",
+        "responseCondition": "Detail → Home",
+        "to": "home"
+      }
+    ],
+    "paths": [
+      {
+        "edgeIds": [
+          "go",
+          "return"
+        ],
+        "id": "route",
+        "name": "Legacy return",
+        "screenId": "home",
+        "visits": [
+          {
+            "id": "legacy-1"
+          },
+          {
+            "id": "legacy-2"
+          },
+          {
+            "checkIds": [
+              "home-returned"
+            ],
+            "id": "legacy-3"
+          }
+        ]
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Home",
+              "visibility": "visible"
+            },
+            "id": "home-ready",
+            "label": "Home",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "assertion"
+          },
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Returned",
+              "visibility": "visible"
+            },
+            "id": "home-returned",
+            "label": "Returned",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "assertion"
+          },
+          {
+            "id": "open-detail",
+            "label": "Detail",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 3,
+              "kind": "step"
+            },
+            "role": "action",
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Detail"
+            }
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "detail",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Detail",
+              "visibility": "visible"
+            },
+            "id": "detail-ready",
+            "label": "Detail",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 4,
+              "kind": "step"
+            },
+            "role": "assertion"
+          },
+          {
+            "back": true,
+            "backSelector": {
+              "match": "exact",
+              "target": "text",
+              "value": "Back"
+            },
+            "id": "back-home",
+            "label": "Back",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 5,
+              "kind": "step"
+            },
+            "role": "action"
+          }
+        ],
+        "title": "Detail",
+        "x": 420,
+        "y": 40
+      }
+    ]
+  },
+  "description": "Saved visits have no operationIds. Deleting the return connection freezes visits and then stores them again without operationIds.",
+  "id": "legacy-visits",
+  "pathId": "route",
+  "scenarioMode": false,
+  "scenarios": [],
+  "scripts": [
+    {
+      "edgeId": "return",
+      "op": "delete-connection"
+    }
+  ],
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:home-returned\n# tnt-match:exact\n- assertVisible:\n    text: ^Returned$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:back-home\n# tnt-back\n# tnt-match:exact\n- tapOn:\n    text: ^Back$\n"
+}

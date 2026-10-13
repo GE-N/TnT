@@ -1,0 +1,199 @@
+{
+  "canvas": {
+    "edges": [
+      {
+        "actionTestId": "open-detail",
+        "actionTestIds": [
+          "open-detail"
+        ],
+        "assertionTestId": "detail-ready",
+        "from": "home",
+        "id": "home-detail",
+        "responseCondition": "Home → Detail",
+        "to": "detail"
+      },
+      {
+        "actionTestId": "open-done",
+        "actionTestIds": [
+          "open-done"
+        ],
+        "assertionTestId": "done-ready",
+        "from": "detail",
+        "id": "detail-done",
+        "responseCondition": "Detail → Done",
+        "to": "done"
+      }
+    ],
+    "paths": [
+      {
+        "edgeIds": [
+          "home-detail",
+          "detail-done"
+        ],
+        "id": "route",
+        "name": "Home Detail Done",
+        "screenId": "home",
+        "visits": [
+          {
+            "id": "visit-1",
+            "operationIds": [
+              "home-ready",
+              "open-detail"
+            ]
+          },
+          {
+            "id": "visit-2",
+            "operationIds": [
+              "detail-ready",
+              "open-done"
+            ]
+          },
+          {
+            "id": "visit-3",
+            "operationIds": [
+              "done-ready"
+            ]
+          }
+        ]
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Home",
+              "visibility": "visible"
+            },
+            "id": "home-ready",
+            "label": "Home",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "assertion"
+          },
+          {
+            "id": "open-detail",
+            "label": "Detail",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "action",
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Detail"
+            }
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "detail",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Detail",
+              "visibility": "visible"
+            },
+            "id": "detail-ready",
+            "label": "Detail",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 3,
+              "kind": "step"
+            },
+            "role": "assertion"
+          },
+          {
+            "id": "open-done",
+            "label": "Done",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 4,
+              "kind": "step"
+            },
+            "role": "action",
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Done"
+            }
+          }
+        ],
+        "title": "Detail",
+        "x": 420,
+        "y": 40
+      },
+      {
+        "id": "done",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Done",
+              "visibility": "visible"
+            },
+            "id": "done-ready",
+            "label": "Done",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 5,
+              "kind": "step"
+            },
+            "role": "assertion"
+          }
+        ],
+        "title": "Done",
+        "x": 800,
+        "y": 40
+      }
+    ]
+  },
+  "description": "Deleting the only outgoing action, its connection, or the destination screen cuts the route suffix. Undo restores it.",
+  "id": "deletion-cut",
+  "pathId": "route",
+  "scenarioMode": false,
+  "scenarios": [],
+  "scripts": [
+    {
+      "actionId": "open-done",
+      "op": "delete-step"
+    },
+    {
+      "op": "undo"
+    },
+    {
+      "edgeId": "detail-done",
+      "op": "delete-connection"
+    },
+    {
+      "op": "undo"
+    },
+    {
+      "op": "delete-screen",
+      "screenId": "done"
+    },
+    {
+      "op": "undo"
+    }
+  ],
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:open-done\n# tnt-match:exact\n- tapOn:\n    text: ^Done$\n# tnt-check:done-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Done$\n"
+}
