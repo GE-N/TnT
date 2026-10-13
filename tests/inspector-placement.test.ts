@@ -179,51 +179,60 @@ test("any overlap with the highlighted edge rules a side out before labels and s
   assert.equal(placement.clamped, false);
 });
 
-test("the inspector-flip-left screenshot: the card avoids every edge label and lines up with Profile", () => {
-  // Measured at 1440×1000 with the Home → Profile → Settings → Profile seed,
-  // Profile selected on Visit 2, whose Profile → Settings edge is highlighted.
-  const window = { width: 1440, height: 1000 };
+test("the inspector-flip-left layout: the card flips left only because the highlighted edge blocks the right and a label blocks below", () => {
+  // The flip-left seed (Home → Profile → Settings → Profile, Visit 2 selected,
+  // Profile → Settings highlighted) at 1440×1000, page scrolled so the canvas
+  // is fully visible, with Profile moved so each rule blocks a different side.
   const placementBounds = visibleBounds(
-    { left: 329, top: 617, width: 1062, height: 540 },
-    window,
+    { left: 329, top: 217, width: 1062, height: 540 },
+    { width: 1440, height: 1000 },
   );
-  const profile: Rect = { left: 1090, top: 677, width: 250, height: 123 };
-  const screens: Rect[] = [
-    { left: 370, top: 677, width: 250, height: 123 },
-    { left: 370, top: 1037, width: 250, height: 123 },
-  ];
-  const tapAvatar: Rect = { left: 775, top: 663, width: 160, height: 48 };
-  const tapGear: Rect = { left: 775, top: 843, width: 160, height: 48 };
-  const tapClose: Rect = { left: 775, top: 907, width: 160, height: 48 };
-  const placement = placeInspector({
-    anchor: profile,
-    size: { width: inspectorWidth, height: 488 },
-    bounds: placementBounds,
-    screens,
-    labels: [tapAvatar, tapClose],
-    highlighted: [tapGear],
-  });
-  const card: Rect = {
-    left: placement.left,
-    top: placement.top,
-    width: inspectorWidth,
-    height: placement.maxHeight,
-  };
-  for (const label of [tapAvatar, tapGear, tapClose])
-    assert.ok(
-      card.left >= label.left + label.width ||
-        card.top >= label.top + label.height ||
-        card.top + card.height <= label.top,
-      "card covers an edge label",
-    );
-  assert.deepEqual(placement, {
-    left: 1391 - inspectorMargin - inspectorWidth,
-    top: 677 + 123 + inspectorGap,
-    maxHeight: 1000 - inspectorMargin - (677 + 123 + inspectorGap),
-    side: "below",
-    clamped: false,
-  });
+  const profile: Rect = { left: 700, top: 277, width: 250, height: 123 };
+  const home: Rect = { left: 370, top: 277, width: 250, height: 123 };
+  const tapGear: Rect = { left: 1000, top: 450, width: 160, height: 48 };
+  const tapAvatar: Rect = { left: 760, top: 600, width: 160, height: 48 };
+  assert.deepEqual(
+    placeInspector({
+      anchor: profile,
+      size: { width: inspectorWidth, height: 488 },
+      bounds: placementBounds,
+      screens: [home],
+      labels: [tapAvatar],
+      highlighted: [tapGear],
+    }),
+    {
+      left: 700 - inspectorGap - inspectorWidth,
+      top: 277,
+      maxHeight: 217 + 540 - inspectorMargin - 277,
+      side: "left",
+      clamped: false,
+    },
+  );
 });
+
+test("a card flipped to a clear left side lines up with its screen's top", () => {
+  const anchor = node(700, 300);
+  const placement = placeInspector({
+    anchor,
+    size: { width: inspectorWidth, height: 300 },
+    bounds,
+    labels: [{ left: 1000, top: 350, width: 160, height: 48 }],
+    screens: [node(700, 560)],
+  });
+  assert.equal(placement.side, "left");
+  assert.equal(placement.clamped, false);
+  assert.equal(placement.top, anchor.top);
+});
+
+test("ties go right, then left, then below", () =>
+  assert.equal(
+    placeInspector({
+      anchor: node(150, -3000),
+      size,
+      bounds: { left: 100, top: 50, width: 400, height: 600 },
+    }).side,
+    "right",
+  ));
 
 test("beside its screen, a card taller than the space below lines up with the screen's top and scrolls", () => {
   const placement = placeInspector({
