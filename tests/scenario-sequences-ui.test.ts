@@ -133,11 +133,10 @@ test('a node action keeps its destination picker in the default canvas',()=>jour
  await click('Save workspace');const graph=(await saved()).canvas!;assert.equal(graph.edges.length,1);assert.equal(graph.edges[0].to,'2');assert.equal(graph.edges[0].actionTestId,graph.screens[0].tests[0].id);assert.deepEqual(graph.paths[0].edgeIds,[graph.edges[0].id]);
 },true));
 
-test('blocking authoring diagnostics name the scenario and focus the affected check for repair',()=>journey(async({document,click,fill})=>{
+test('a new blank check stays local, exposes its inline error and blocks execution until valid',()=>journey(async({document,click,fill})=>{
  await click('New scenario');await fill('Scenario name','Repair journey');await click('Use Home as scenario start');await click('Add check to Home');
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
- const notice=[...document.querySelectorAll('[role="alert"]')].find(node=>node.textContent?.includes('Before running'));assert.ok(notice);assert.match(notice.textContent!,/Repair journey/);
- await click('Repair Screen check');assert.equal(document.activeElement?.getAttribute('aria-label'),'Check 1 selector');
+ await click('Run scenario');const input=document.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;assert.equal(input.getAttribute('aria-invalid'),'true');assert.match(input.closest('.visit-step')!.textContent!,/Enter text to look for/);assert.match(document.body.textContent!,/Apply or cancel incomplete authoring drafts/);assert.equal(document.querySelector('.result-tag'),null);
  await fill('Check 1 selector','Home');await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
 },true));
 

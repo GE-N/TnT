@@ -753,6 +753,7 @@ test('inline rows commit Enter and blur, cancel Escape, and move above navigatio
   await page.click(summary);input=await type('Saved on blur');await act(async()=>page.heading(1,'Home').focus());assert.match(summary.textContent!,/Saved on blur/);same(page.document.activeElement,page.heading(1,'Home'),'Successful blur retains the chosen focus');
   const trigger=page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!;await page.click(trigger);const combo=page.document.querySelector('[role=combobox]')!;await page.press(combo,'ArrowDown');await page.press(combo,'ArrowDown');await page.press(combo,'ArrowDown');await page.press(combo,'Enter');
   const added=[...page.card()!.querySelectorAll<HTMLElement>('.visit-step')].at(-1)!;
+  const pendingInput=added.querySelector<HTMLInputElement>('input[aria-label$=" selector"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(pendingInput,'Later check');pendingInput.dispatchEvent(new page.window.Event('input',{bubbles:true}));});await page.press(pendingInput,'Enter');
   const move=[...added.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='↑ Move above actions')!;assert.ok(move);await page.click(move);
   assert.deepEqual([...page.card()!.querySelectorAll('.visit-step-summary')].map(node=>node.textContent?.trim().split(' ')[0]),['1','2','3']);assert.equal(added.querySelector('.navigation-hint'),null);
   assert.match(page.card()!.querySelector('[role=status]')!.textContent!,/position 2/);
@@ -822,7 +823,7 @@ test('Escape discards a new blank selector and leaves existing Undo history unch
 test('blank tap blur alone is blocked without refocusing, and Escape removes the new draft without Undo',async()=>{
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
-  const before=page.saved();await page.click(page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!);await page.press(page.document.querySelector('[role=combobox]')!,'Enter');const input=page.document.activeElement as HTMLInputElement;const row=input.closest('.visit-step')!;const afterAdd=page.saved();
+  const before=page.saved();await page.click(page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!);await page.press(page.document.querySelector('[role=combobox]')!,'Enter');const input=page.document.activeElement as HTMLInputElement;const row=input.closest('.visit-step')!;const afterAdd=page.saved();assert.deepEqual(afterAdd,before,'Add keeps the blank step outside saved graph/source');assert.equal(page.changes.length,0);
   await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,' \t ');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));page.heading(1,'Home').focus();});assert.equal(input.getAttribute('aria-invalid'),'true');assert.equal(page.document.getElementById(input.getAttribute('aria-describedby')!)!.textContent,'✕ Enter an element to tap.');same(page.document.activeElement,page.heading(1,'Home'));assert.deepEqual(page.saved(),afterAdd);assert.equal(input.value,' \t ');
   await page.press(input,'Escape');assert.equal(row.isConnected,false);assert.deepEqual(page.saved(),before);assert.equal([...page.document.querySelectorAll('button')].some(button=>button.textContent==='Undo canvas deletion'),false);
  }finally{await page.close();}
@@ -865,4 +866,25 @@ test('a saved new Back step remains saved when a later blank edit is cancelled',
   const input=page.document.activeElement as HTMLInputElement;const row=input.closest('.visit-step')!;await page.press(input,'Enter');const saved=page.saved();
   await page.click(row.querySelector<HTMLButtonElement>('.visit-step-summary')!);await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,'');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});await page.press(input,'Escape');assert.equal(row.isConnected,true);assert.deepEqual(page.saved(),saved);
  }finally{await page.close();}
+});
+
+
+test('first valid new step and destination commit once and Undo restores exact graph/source',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const before=page.saved();await page.click(page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!);await page.press(page.document.querySelector('[role=combobox]')!,'Enter');const input=page.document.activeElement as HTMLInputElement;const row=input.closest('.visit-step')!;
+  assert.equal(page.changes.length,0);await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,' Next ');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));const to=row.querySelector<HTMLSelectElement>('[aria-label$=" destination"]')!;to.value='settings';to.dispatchEvent(new page.window.Event('change',{bubbles:true}));});await page.press(input,'Enter');
+  assert.equal(page.changes.length,1,'first valid commit publishes one graph change');const added=page.saved();const id=row.getAttribute('data-operation-id')!;assert.equal(added.graph.screens[0].tests.find(test=>test.id===id)!.tap!.value,' Next ');assert.equal(added.graph.edges.find(edge=>edge.actionTestId===id||edge.actionTestIds?.includes(id))!.to,'settings');
+  const undo=[...page.document.querySelectorAll<HTMLButtonElement>('button')].filter(button=>button.textContent==='Undo canvas deletion');assert.equal(undo.length,1);await page.click(undo[0]);assert.deepEqual(page.saved(),before);assert.equal([...page.document.querySelectorAll('button')].some(button=>button.textContent==='Undo canvas deletion'),false);
+ }finally{await page.close();}
+});
+
+test('visit review styles retain minimum hit targets and accessible validation colours',()=>{
+ const css=readFileSync(new URL('../src/style.css',import.meta.url),'utf8');const rules=[...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([,selector,body])=>({selector:selector.trim(),body}));
+ const rule=(selector:string)=>rules.find(item=>item.selector===selector)!.body;
+ for(const selector of ['.floating-inspector .visit-step-summary','.visit-step-actions summary','.visit-step-actions button','.navigation-hint button,.visit-yaml-link'])assert.match(rule(selector),/min-height:44px/);
+ assert.match(rule('.visit-step-actions summary'),/min-width:44px/);assert.match(rule('.navigation-hint button,.visit-yaml-link'),/font-size:12px/);
+ assert.match(rule('.visit-selector-error'),/color:#b3261e/);assert.match(rule('.visit-selector-error'),/font-size:12px/);assert.match(rule('.visit-inline-fields input[aria-invalid=true]'),/border:2px solid #b3261e/);
+ assert.match(css,/--warning: #8a4b00/);assert.match(css,/--warning-surface: #fff4e5/);assert.match(rule('.navigation-hint'),/color:var\(--warning\)/);assert.match(rule('.navigation-hint'),/background:var\(--warning-surface\)/);
+ assert.match(rule('.floating-inspector .selected-visit>.visit-section-heading'),/width:calc\(100% \+ 16px\)/);
 });

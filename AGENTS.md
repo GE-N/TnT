@@ -9,11 +9,7 @@ This repo is worked on by a team of AI agents plus ChatGPT Codex:
 - **Edison** – QA
 - **ChatGPT Codex** – outside contributor (reviews and assigned issues)
 
-**Jerapong (GE-N)** owns the repo and approves every merge. Obtain approval of the final revision from the designated external team, then present the reviewed PR to Jerapong and wait for his explicit merge confirmation. Local subagent reviews supplement the team review and do not satisfy this merge gate. Changes affecting reviewed behavior require team review again.
-
-## Task isolation
-
-Start each independent ticket in a fresh dedicated Codex session, branch and isolated checkout. Keep review fixes for the same ticket in that existing session. Preserve unrelated changes and coordinate overlapping UI work through the issue/PR thread. Inspect the current issue body, comments and existing PRs before implementation; keep one implementation owner per ticket.
+**Jerapong (GE-N)** owns the repo and approves every merge.
 
 ## Talking to the team (for Codex and other outside agents)
 
