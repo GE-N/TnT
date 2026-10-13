@@ -1,0 +1,182 @@
+{
+  "canvas": {
+    "edges": [
+      {
+        "actionTestId": "open-detail",
+        "actionTestIds": [
+          "open-detail"
+        ],
+        "assertionTestId": "detail-ready",
+        "from": "home",
+        "id": "go",
+        "responseCondition": "Home → Detail",
+        "to": "detail"
+      }
+    ],
+    "paths": [
+      {
+        "edgeIds": [
+          "go"
+        ],
+        "id": "route",
+        "name": "Same-screen last visit",
+        "scenarioId": "scenario-a",
+        "screenId": "home",
+        "visits": [
+          {
+            "id": "visit-1",
+            "operationIds": [
+              "home-ready",
+              "open-detail"
+            ]
+          },
+          {
+            "id": "visit-2",
+            "operationIds": [
+              "detail-ready",
+              "dismiss",
+              "detail-dismissed"
+            ]
+          }
+        ]
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Home",
+              "visibility": "visible"
+            },
+            "id": "home-ready",
+            "label": "Home",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "assertion",
+            "scenarioIds": [
+              "scenario-a"
+            ]
+          },
+          {
+            "id": "open-detail",
+            "label": "Detail",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "action",
+            "scenarioIds": [
+              "scenario-a"
+            ],
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Detail"
+            }
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "detail",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Detail",
+              "visibility": "visible"
+            },
+            "id": "detail-ready",
+            "label": "Detail",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 3,
+              "kind": "step"
+            },
+            "role": "assertion",
+            "scenarioIds": [
+              "scenario-a"
+            ]
+          },
+          {
+            "id": "dismiss",
+            "label": "Dismiss",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 4,
+              "kind": "step"
+            },
+            "role": "action",
+            "scenarioIds": [
+              "scenario-a"
+            ],
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Dismiss"
+            }
+          },
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Dismissed",
+              "visibility": "visible"
+            },
+            "id": "detail-dismissed",
+            "label": "Dismissed",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 5,
+              "kind": "step"
+            },
+            "role": "assertion",
+            "scenarioIds": [
+              "scenario-a"
+            ]
+          }
+        ],
+        "title": "Detail",
+        "x": 420,
+        "y": 40
+      }
+    ]
+  },
+  "description": "The last visit has no outgoing connection and holds a same-screen tap between two checks. It runs in place.",
+  "id": "same-screen-last-visit",
+  "pathId": "route",
+  "scenarioId": "scenario-a",
+  "scenarioMode": true,
+  "scenarios": [
+    {
+      "id": "scenario-a",
+      "name": "Same-screen last visit",
+      "pathId": "route"
+    }
+  ],
+  "scripts": [
+    {
+      "actionId": "dismiss",
+      "op": "edit",
+      "value": "Close",
+      "visitId": "visit-2"
+    }
+  ],
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n# tnt-check:dismiss\n# tnt-match:exact\n- tapOn:\n    text: ^Dismiss$\n# tnt-check:detail-dismissed\n# tnt-match:exact\n- assertVisible:\n    text: ^Dismissed$\n"
+}

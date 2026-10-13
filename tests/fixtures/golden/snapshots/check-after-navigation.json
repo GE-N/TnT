@@ -1,0 +1,313 @@
+{
+  "baseline": {
+    "canvas": {
+      "edges": [
+        {
+          "actionTestId": "open-detail",
+          "actionTestIds": [
+            "open-detail"
+          ],
+          "from": "home",
+          "id": "go",
+          "to": "detail"
+        }
+      ],
+      "paths": [
+        {
+          "edgeIds": [
+            "go"
+          ],
+          "id": "route",
+          "scenarioId": "scenario-a",
+          "screenId": "home"
+        }
+      ],
+      "screens": [
+        {
+          "id": "home",
+          "tests": [
+            "open-detail",
+            "detail-title"
+          ],
+          "title": "Home"
+        },
+        {
+          "id": "detail",
+          "tests": [
+            "detail-ready"
+          ],
+          "title": "Detail"
+        }
+      ]
+    },
+    "routes": [
+      {
+        "checkpoints": null,
+        "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-title\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail title$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n",
+        "pathId": "route",
+        "projectedVisits": [
+          {
+            "checkIds": [
+              "detail-title"
+            ],
+            "id": "visit-1",
+            "screenId": "home"
+          },
+          {
+            "checkIds": [
+              "detail-ready"
+            ],
+            "id": "visit-2",
+            "screenId": "detail"
+          }
+        ],
+        "setup": null,
+        "steps": [
+          {
+            "assertion": false,
+            "edgeId": "go",
+            "id": "occurrence:[\"visit-1\",\"open-detail\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "6e01cf19c1552aa52a4346bb523a37c35ac19c39aa174e43bdf6fba56bcf6d06",
+              "index": 1,
+              "kind": "step"
+            },
+            "testId": "open-detail",
+            "visitId": "visit-1"
+          },
+          {
+            "assertion": true,
+            "edgeId": null,
+            "id": "occurrence:[\"visit-1\",\"detail-title\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "5411ec96869d0c9632b0addaaae302951798eb51bb8d929991d02666675650f5",
+              "index": 2,
+              "kind": "step"
+            },
+            "testId": "detail-title",
+            "visitId": "visit-1"
+          },
+          {
+            "assertion": true,
+            "edgeId": null,
+            "id": "occurrence:[\"visit-2\",\"detail-ready\"]",
+            "reference": {
+              "actionId": null,
+              "file": "flow.yaml",
+              "fingerprint": "36df73ba9b7886f3382d61d0da3d12ef4b3b37866ae79eb5e8f9af14a9597deb",
+              "index": 3,
+              "kind": "step"
+            },
+            "testId": "detail-ready",
+            "visitId": "visit-2"
+          }
+        ],
+        "transitions": [
+          {
+            "destinationVisitId": "visit-2",
+            "edgeId": "go",
+            "id": "visit-2:transition",
+            "visitId": "visit-1"
+          }
+        ]
+      }
+    ],
+    "visits": [
+      {
+        "checkIds": null,
+        "index": 0,
+        "operationIds": [
+          "open-detail",
+          "detail-title"
+        ],
+        "pathId": "route",
+        "screenId": "home",
+        "storedOperationIds": [
+          "open-detail",
+          "detail-title"
+        ],
+        "visitId": "visit-1"
+      },
+      {
+        "checkIds": null,
+        "index": 1,
+        "operationIds": [
+          "detail-ready"
+        ],
+        "pathId": "route",
+        "screenId": "detail",
+        "storedOperationIds": [
+          "detail-ready"
+        ],
+        "visitId": "visit-2"
+      }
+    ],
+    "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-title\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail title$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n"
+  },
+  "description": "A check placed after the navigating tap in the same visit runs after that tap, with no diagnostic.",
+  "fixture": "check-after-navigation",
+  "operations": [
+    {
+      "detail": {
+        "actionId": "detail-title",
+        "op": "edit",
+        "value": "Detail heading",
+        "visitId": "visit-1"
+      },
+      "op": "edit",
+      "result": {
+        "canvas": {
+          "edges": [
+            {
+              "actionTestId": "open-detail",
+              "actionTestIds": [
+                "open-detail"
+              ],
+              "from": "home",
+              "id": "go",
+              "to": "detail"
+            }
+          ],
+          "paths": [
+            {
+              "edgeIds": [
+                "go"
+              ],
+              "id": "route",
+              "scenarioId": "scenario-a",
+              "screenId": "home"
+            }
+          ],
+          "screens": [
+            {
+              "id": "home",
+              "tests": [
+                "open-detail",
+                "detail-title"
+              ],
+              "title": "Home"
+            },
+            {
+              "id": "detail",
+              "tests": [
+                "detail-ready"
+              ],
+              "title": "Detail"
+            }
+          ]
+        },
+        "routes": [
+          {
+            "checkpoints": null,
+            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-title\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail heading$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n",
+            "pathId": "route",
+            "projectedVisits": [
+              {
+                "checkIds": [
+                  "detail-title"
+                ],
+                "id": "visit-1",
+                "screenId": "home"
+              },
+              {
+                "checkIds": [
+                  "detail-ready"
+                ],
+                "id": "visit-2",
+                "screenId": "detail"
+              }
+            ],
+            "setup": null,
+            "steps": [
+              {
+                "assertion": false,
+                "edgeId": "go",
+                "id": "occurrence:[\"visit-1\",\"open-detail\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "6e01cf19c1552aa52a4346bb523a37c35ac19c39aa174e43bdf6fba56bcf6d06",
+                  "index": 1,
+                  "kind": "step"
+                },
+                "testId": "open-detail",
+                "visitId": "visit-1"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"visit-1\",\"detail-title\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "ee5be091e08b9549884f6f91976a8833af2fd719decd827dee54269afe1fcdc1",
+                  "index": 2,
+                  "kind": "step"
+                },
+                "testId": "detail-title",
+                "visitId": "visit-1"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"visit-2\",\"detail-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "36df73ba9b7886f3382d61d0da3d12ef4b3b37866ae79eb5e8f9af14a9597deb",
+                  "index": 3,
+                  "kind": "step"
+                },
+                "testId": "detail-ready",
+                "visitId": "visit-2"
+              }
+            ],
+            "transitions": [
+              {
+                "destinationVisitId": "visit-2",
+                "edgeId": "go",
+                "id": "visit-2:transition",
+                "visitId": "visit-1"
+              }
+            ]
+          }
+        ],
+        "visits": [
+          {
+            "checkIds": null,
+            "index": 0,
+            "operationIds": [
+              "open-detail",
+              "detail-title"
+            ],
+            "pathId": "route",
+            "screenId": "home",
+            "storedOperationIds": [
+              "open-detail",
+              "detail-title"
+            ],
+            "visitId": "visit-1"
+          },
+          {
+            "checkIds": null,
+            "index": 1,
+            "operationIds": [
+              "detail-ready"
+            ],
+            "pathId": "route",
+            "screenId": "detail",
+            "storedOperationIds": [
+              "detail-ready"
+            ],
+            "visitId": "visit-2"
+          }
+        ],
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:open-detail\n# tnt-match:exact\n- tapOn:\n    text: ^Detail$\n# tnt-check:detail-title\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail heading$\n# tnt-check:detail-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Detail$\n"
+      }
+    }
+  ]
+}

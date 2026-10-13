@@ -79,6 +79,35 @@ function assertMutations(pure:GoldenSnapshot){
     assert.match(edited,/tnt-back/);
     assert.match(edited,/id: \^nav\\\.back\\\.button\$/);
   }
+  const steps=(state:GoldenSnapshot['baseline'])=>{
+    const route=state.routes[0];
+    const projected='steps' in route?route.steps:undefined;
+    if(!projected)assert.fail(pure.fixture+' route did not project: '+('error' in route?route.error:'no steps'));
+    return projected.map(step=>[step.testId,step.edgeId]);
+  };
+  if(pure.fixture==='same-screen-steps'){
+    assert.deepEqual(steps(pure.baseline),[['home-ready',null],['show-error',null],['type-name',null],['open-detail','go'],['detail-ready',null]]);
+    assert.deepEqual(steps(after!),steps(pure.baseline));
+  }
+  if(pure.fixture==='stays-on-screen'){
+    const cleared=pure.operations.find(item=>item.op==='clear-destination')!.result;
+    assert.deepEqual(cleared.canvas.paths[0].edgeIds,[]);
+    assert.equal(cleared.canvas.screens.find(screen=>screen.id==='home')?.tests.includes('open-detail'),true);
+    assert.deepEqual(steps(cleared),[['home-ready',null],['open-detail',null]]);
+  }
+  if(pure.fixture==='check-after-navigation'){
+    assert.deepEqual(steps(pure.baseline),[['open-detail','go'],['detail-title',null],['detail-ready',null]]);
+    assert.deepEqual(steps(after!),steps(pure.baseline));
+  }
+  if(pure.fixture==='same-screen-last-visit'){
+    assert.deepEqual(steps(pure.baseline),[['home-ready',null],['open-detail','go'],['detail-ready',null],['dismiss',null],['detail-dismissed',null]]);
+    assert.deepEqual(steps(after!),steps(pure.baseline));
+  }
+  if(pure.fixture==='retarget-frozen-visit'){
+    assert.deepEqual(after!.canvas.edges,[{id:'go',from:'home',to:'more',actionTestId:'open-detail',actionTestIds:['open-detail']}]);
+    assert.deepEqual(steps(after!),[['home-ready',null],['show-error',null],['open-detail','go']]);
+  }
+  if(pure.fixture==='retarget-same-screen')assert.deepEqual(after,pure.baseline);
   if(pure.fixture==='default-actions'&&after){
     const baseline=pure.baseline.routes[0];
     const edited=after.routes[0];

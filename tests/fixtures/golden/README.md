@@ -2,13 +2,14 @@
 
 These fixtures lock the canvas linking and YAML behaviour from before the floating inspector. Later tasks re-run the same scripts and require the same bytes.
 
-`shared/`, `server/canvas.ts`, `server/canvas-route.ts` and `server/default-actions.ts` are not part of this change. `npm run check:canvas-contract` runs `scripts/check-canvas-contract.sh`, which checks that their diff against the task base is empty. It is not part of `npm test`.
+`shared/`, `server/canvas.ts`, `server/canvas-route.ts` and `server/default-actions.ts` are protected. `npm run check:canvas-contract` runs `scripts/check-canvas-contract.sh`, which compares them with the contract base `2ca8cc3` (the #41 golden snapshots). It is not part of `npm test`.
 
-CI must check out the repository with `fetch-depth: 0`. A shallow clone cannot compute the merge-base, and the script fails with that requirement instead of comparing a commit to itself. On a push to `main` in CI there is no feature branch to compare, so the script prints a skip message and exits 0. That skip runs only when `CI` is set. A local checkout of `main` is still checked.
+The diff against that base must equal the named exceptions exactly. The only exception is #44 (optional destination, same-screen actions), recorded byte for byte in `scripts/canvas-contract-exceptions/44-optional-destination.patch`. Any other change to the protected files fails the check. Once #44 merges, the base moves to that merge commit and the exception is removed.
+
+CI must check out the repository with `fetch-depth: 0`. A shallow clone may not contain the contract base, and the script fails with that requirement instead of reporting a vacuous pass. On a push to `main` in CI there is no feature branch to compare, so the script prints a skip message and exits 0. That skip runs only when `CI` is set. A local checkout of `main` is still checked.
 
 ```bash
 npm run check:canvas-contract
-bash scripts/check-canvas-contract.sh origin/main
 ```
 
 ## Fixtures
@@ -27,6 +28,12 @@ bash scripts/check-canvas-contract.sh origin/main
 | `legacy-visits.json` | Saved visits with no `operationIds`. Deleting the return connection runs the visit freeze, then stores the surviving visits without `operationIds` |
 | `deletion-cut.json` | Delete a step, a connection, and a screen, each cutting the route suffix, with undo |
 | `default-actions.json` | Setup plus a handler checkpoint on an ordered route. Editing the authored tap keeps the checkpoint |
+| `same-screen-steps.json` | A same-screen tap and a same-screen input run in place before the navigating tap. Only the navigating tap carries the `edgeId` (#44) |
+| `stays-on-screen.json` | Clearing the destination of a navigating tap cuts the route, keeps the tap as a same-screen step, and the route still projects. Undo restores it (#44) |
+| `check-after-navigation.json` | A check after the navigating tap in the same visit runs after it, with no diagnostic (#44) |
+| `same-screen-last-visit.json` | A same-screen tap in the last visit, which has no outgoing connection, runs in place (#44) |
+| `retarget-frozen-visit.json` | Retargeting the navigating tap of a frozen visit onto another screen keeps the same-screen tap off the connection, and the route still projects (#44) |
+| `retarget-same-screen.json` | Retargeting a navigating tap to its current destination is a no-op (#44) |
 
 Each snapshot records, for the baseline and after every script:
 

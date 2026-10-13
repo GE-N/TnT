@@ -110,7 +110,7 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
  const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,{test,screen}] as const)));
  let authored:ReturnType<typeof authoredChecks>=[];try{authored=authoredChecks(yaml);}catch{ /* YAML catalog reports parse diagnostics. */ }
  for(const {test} of tests.values()){
-  if(isAuthored(test)){if(!test.check&&!graph.edges.some(edge=>edgeActions(edge).includes(test.id)))diagnostics.push({ownerId:test.id,detail:'Choose a destination screen for this action before running.'});const matches=authored.filter(item=>item.id===test.id);const issue=operationProblem(test);if(issue||matches.length!==1||!isAuthored(matches[0]))diagnostics.push({ownerId:test.id,detail:issue??'Check YAML is missing, unsupported or ambiguous. Repair its command or selector before running.'});continue;}
+  if(isAuthored(test)){const matches=authored.filter(item=>item.id===test.id);const issue=operationProblem(test);if(issue||matches.length!==1||!isAuthored(matches[0]))diagnostics.push({ownerId:test.id,detail:issue??'Check YAML is missing, unsupported or ambiguous. Repair its command or selector before running.'});continue;}
   if(!resolveReference(test.reference,catalog.references)){
    const alternatives=catalog.references.filter(entry=>entry.kind===test.reference.kind&&entry.file===test.reference.file&&entry.fingerprint===test.reference.fingerprint);
    diagnostics.push({ownerId:test.id,detail:alternatives.length>1?'Ambiguous moved YAML reference. Explicitly choose its intended command again.':'Broken or stale YAML reference. Explicitly relink to the intended command; references are never retargeted automatically.'});
@@ -131,7 +131,7 @@ export function inspectCanvas(graph:CanvasGraph,yaml:string,flows:Record<string,
    const screenId=visitScreenId(graph,path,index);
    if(visit.operationIds?.some(id=>!graph.screens.find(screen=>screen.id===screenId)?.tests.some(test=>test.id===id&&isAuthored(test))))diagnostics.push({ownerId:path.id,visitId:visit.id,detail:'Visit '+(index+1)+' contains missing actions or checks. Restore them or remove them from this visit.'});
    const outgoing=graph.edges.find(edge=>edge.id===path.edgeIds[index]);const actionIds=outgoing?edgeActions(outgoing):[];
-   if(visit.operationIds?.some(id=>{const test=tests.get(id)?.test;return test&&!test.check&&!actionIds.includes(id);}))diagnostics.push({ownerId:path.id,visitId:visit.id,detail:'Choose a destination for each action in Visit '+(index+1)+' that continues its sequence.'});
+   if(visit.operationIds?.some(id=>{const test=tests.get(id)?.test;return test&&!test.check&&!actionIds.includes(id)&&graph.edges.some(edge=>edge.from===screenId&&edgeActions(edge).includes(id));}))diagnostics.push({ownerId:path.id,visitId:visit.id,detail:'Choose a destination for each action in Visit '+(index+1)+' that continues its sequence.'});
    if(visit.operationIds===undefined&&visit.checkIds?.some(id=>!screenChecks(graph,screenId).some(check=>check.id===id)))diagnostics.push({ownerId:path.id,visitId:visit.id,detail:'Visit '+visit.id+' contains deleted or stale check selections. Restore them or explicitly select checks; no replacement is inferred.'});
   }
   const edges=path.edgeIds.map(id=>graph.edges.find(edge=>edge.id===id));

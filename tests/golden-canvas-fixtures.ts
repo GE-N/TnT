@@ -265,6 +265,122 @@ function defaultActions():GoldenFixture{
   ]};
 }
 
+function sameScreenSteps():GoldenFixture{
+  const scenarios=['scenario-a'];
+  const canvas:CanvasGraph={
+    screens:[
+      screen('home','Home',40,40,[check('home-ready','Home','text',scenarios),tap('show-error','Submit','text',scenarios),typed('type-name','Ada',scenarios),tap('open-detail','Detail','text',scenarios)]),
+      screen('detail','Detail',420,40,[check('detail-ready','Detail','text',scenarios)]),
+    ],
+    edges:[edge('go','home','detail','open-detail','detail-ready','Home → Detail',['open-detail'])],
+    paths:[{id:'route',name:'Same-screen steps',scenarioId:'scenario-a',screenId:'home',edgeIds:['go'],visits:[
+      {id:'visit-1',operationIds:['home-ready','show-error','type-name','open-detail']},
+      {id:'visit-2',operationIds:['detail-ready']},
+    ]}],
+  };
+  return {id:'same-screen-steps',description:'A same-screen tap and a same-screen input run in place before the navigating tap. Only the navigating tap carries the connection. Editing the same-screen input rewrites it in place.',scenarioMode:true,pathId:'route',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Same-screen steps',pathId:'route'}],...materialize(canvas),scripts:[
+    {op:'edit',actionId:'type-name',visitId:'visit-1',value:'Grace'},
+  ]};
+}
+
+function staysOnScreen():GoldenFixture{
+  const scenarios=['scenario-a'];
+  const canvas:CanvasGraph={
+    screens:[
+      screen('home','Home',40,40,[check('home-ready','Home','text',scenarios),tap('open-detail','Detail','text',scenarios)]),
+      screen('detail','Detail',420,40,[check('detail-ready','Detail','text',scenarios),tap('open-done','Done','text',scenarios)]),
+      screen('done','Done',800,40,[check('done-ready','Done','text',scenarios)]),
+    ],
+    edges:[
+      edge('home-detail','home','detail','open-detail','detail-ready','Home → Detail',['open-detail']),
+      edge('detail-done','detail','done','open-done','done-ready','Detail → Done',['open-done']),
+    ],
+    paths:[{id:'route',name:'Stays on this screen',scenarioId:'scenario-a',screenId:'home',edgeIds:['home-detail','detail-done'],visits:[
+      {id:'visit-1',operationIds:['home-ready','open-detail']},
+      {id:'visit-2',operationIds:['detail-ready','open-done']},
+      {id:'visit-3',operationIds:['done-ready']},
+    ]}],
+  };
+  return {id:'stays-on-screen',description:'Clearing the destination of the navigating tap in Visit 1 cuts the route after Visit 1. The tap stays in Visit 1 as a same-screen step and the route still projects. Undo restores the route.',scenarioMode:true,pathId:'route',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Stays on this screen',pathId:'route'}],...materialize(canvas),scripts:[
+    {op:'clear-destination',screenId:'home',actionId:'open-detail',visitId:'visit-1'},
+    {op:'undo'},
+  ]};
+}
+
+function checkAfterNavigation():GoldenFixture{
+  const scenarios=['scenario-a'];
+  const canvas:CanvasGraph={
+    screens:[
+      screen('home','Home',40,40,[tap('open-detail','Detail','text',scenarios),check('detail-title','Detail title','text',scenarios)]),
+      screen('detail','Detail',420,40,[check('detail-ready','Detail','text',scenarios)]),
+    ],
+    edges:[edge('go','home','detail','open-detail','detail-ready','Home → Detail',['open-detail'])],
+    paths:[{id:'route',name:'Check after navigation',scenarioId:'scenario-a',screenId:'home',edgeIds:['go'],visits:[
+      {id:'visit-1',operationIds:['open-detail','detail-title']},
+      {id:'visit-2',operationIds:['detail-ready']},
+    ]}],
+  };
+  return {id:'check-after-navigation',description:'A check placed after the navigating tap in the same visit runs after that tap, with no diagnostic.',scenarioMode:true,pathId:'route',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Check after navigation',pathId:'route'}],...materialize(canvas),scripts:[
+    {op:'edit',actionId:'detail-title',visitId:'visit-1',value:'Detail heading'},
+  ]};
+}
+
+function sameScreenLastVisit():GoldenFixture{
+  const scenarios=['scenario-a'];
+  const canvas:CanvasGraph={
+    screens:[
+      screen('home','Home',40,40,[check('home-ready','Home','text',scenarios),tap('open-detail','Detail','text',scenarios)]),
+      screen('detail','Detail',420,40,[check('detail-ready','Detail','text',scenarios),tap('dismiss','Dismiss','text',scenarios),check('detail-dismissed','Dismissed','text',scenarios)]),
+    ],
+    edges:[edge('go','home','detail','open-detail','detail-ready','Home → Detail',['open-detail'])],
+    paths:[{id:'route',name:'Same-screen last visit',scenarioId:'scenario-a',screenId:'home',edgeIds:['go'],visits:[
+      {id:'visit-1',operationIds:['home-ready','open-detail']},
+      {id:'visit-2',operationIds:['detail-ready','dismiss','detail-dismissed']},
+    ]}],
+  };
+  return {id:'same-screen-last-visit',description:'The last visit has no outgoing connection and holds a same-screen tap between two checks. It runs in place.',scenarioMode:true,pathId:'route',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Same-screen last visit',pathId:'route'}],...materialize(canvas),scripts:[
+    {op:'edit',actionId:'dismiss',visitId:'visit-2',value:'Close'},
+  ]};
+}
+
+function retargetFrozenVisit():GoldenFixture{
+  const scenarios=['scenario-a'];
+  const canvas:CanvasGraph={
+    screens:[
+      screen('home','Home',40,40,[check('home-ready','Home','text',scenarios),tap('show-error','Submit','text',scenarios),tap('open-detail','Detail','text',scenarios)]),
+      screen('detail','Detail',420,40,[check('detail-ready','Detail','text',scenarios)]),
+      screen('more','More',420,320,[check('more-ready','More','text',scenarios)]),
+    ],
+    edges:[edge('go','home','detail','open-detail','detail-ready','Home → Detail',['open-detail'])],
+    paths:[{id:'route',name:'Retarget frozen visit',scenarioId:'scenario-a',screenId:'home',edgeIds:['go'],visits:[
+      {id:'visit-1',operationIds:['home-ready','show-error','open-detail']},
+      {id:'visit-2',operationIds:['detail-ready']},
+    ]}],
+  };
+  return {id:'retarget-frozen-visit',description:'Visit 1 holds a same-screen tap before the navigating tap. After the Detail check is removed from Visit 2, retargeting the navigating tap onto More keeps the route id, keeps the same-screen tap in place and off the connection, and the route still projects.',scenarioMode:true,pathId:'route',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Retarget frozen visit',pathId:'route'}],...materialize(canvas),scripts:[
+    {op:'delete-step',actionId:'detail-ready',visitId:'visit-2'},
+    {op:'retarget',screenId:'home',actionId:'open-detail',to:'more',visitId:'visit-1'},
+  ]};
+}
+
+function retargetSameScreen():GoldenFixture{
+  const scenarios=['scenario-a'];
+  const canvas:CanvasGraph={
+    screens:[
+      screen('home','Home',40,40,[check('home-ready','Home','text',scenarios),tap('show-error','Submit','text',scenarios),tap('open-detail','Detail','text',scenarios)]),
+      screen('detail','Detail',420,40,[check('detail-ready','Detail','text',scenarios)]),
+    ],
+    edges:[edge('go','home','detail','open-detail','detail-ready','Home → Detail',['open-detail'])],
+    paths:[{id:'route',name:'Retarget to same screen',scenarioId:'scenario-a',screenId:'home',edgeIds:['go'],visits:[
+      {id:'visit-1',operationIds:['home-ready','show-error','open-detail']},
+      {id:'visit-2',operationIds:['detail-ready']},
+    ]}],
+  };
+  return {id:'retarget-same-screen',description:'Choosing the current destination again for the navigating tap is a no-op. The graph, YAML and route projection stay as they were.',scenarioMode:true,pathId:'route',scenarioId:'scenario-a',scenarios:[{id:'scenario-a',name:'Retarget to same screen',pathId:'route'}],...materialize(canvas),scripts:[
+    {op:'retarget',screenId:'home',actionId:'open-detail',to:'detail',visitId:'visit-1'},
+  ]};
+}
+
 export function buildGoldenFixtures():GoldenFixture[]{
-  return [linearRoute(),textTap(),idTap(),literalBack(),backControlFixture(),repeatedVisit(),sharedStep(),multiActionEdge(),unfrozenVisits(),legacyVisits(),deletionCut(),defaultActions()];
+  return [linearRoute(),textTap(),idTap(),literalBack(),backControlFixture(),repeatedVisit(),sharedStep(),multiActionEdge(),unfrozenVisits(),legacyVisits(),deletionCut(),defaultActions(),sameScreenSteps(),staysOnScreen(),checkAfterNavigation(),sameScreenLastVisit(),retargetFrozenVisit(),retargetSameScreen()];
 }
