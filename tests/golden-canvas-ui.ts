@@ -117,7 +117,7 @@ function installDom(dom:JSDOM){
   }};
 }
 
-export async function runUi(fixture:GoldenFixture):Promise<GoldenSnapshot>{
+export async function runUi(fixture:GoldenFixture,hooks:{beforeRequest?:(path:string)=>Promise<void>}={}):Promise<GoldenSnapshot>{
   return withSeededIdsAsync(async()=>{
     const {mkdtemp,rm}=await import('node:fs/promises');
     const {join}=await import('node:path');
@@ -137,10 +137,13 @@ export async function runUi(fixture:GoldenFixture):Promise<GoldenSnapshot>{
     let refsAtSave=0;
     const request=async(path:string,options?:{body?:string})=>{
       try{
+        if(hooks.beforeRequest)await hooks.beforeRequest(path);
         const body=options?.body?JSON.parse(options.body):undefined;
         const workspaceSave=path==='/api/workspaces';
         if(path==='/api/canvas/references'&&body?.canvas&&typeof body.yaml==='string'){latest={yaml:body.yaml,canvas:body.canvas};refsAtSave=saveEpoch;}
         const result=path==='/api/workspaces'?await service.save(body):path.startsWith('/api/workspaces?q=')?await service.listWorkspaces():path.endsWith('/open')?await service.openWorkspace(path.split('/')[3]):path==='/api/canvas/references'?await service.references(body):path.startsWith('/api/workspaces/')&&path.endsWith('/view')?await service.saveView(path.split('/')[3],body):path.startsWith('/api/workspaces/')?await service.workspace(path.split('/')[3]):{ok:true};
+        // References requested by the previous editor cannot acknowledge this open.
+        if(path.endsWith('/open'))latest=undefined;
         if(workspaceSave)saveEpoch+=1;
         return Response.json(result??{ok:true});
       }catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}

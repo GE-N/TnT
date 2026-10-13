@@ -61,8 +61,11 @@ test('opening a saved workspace replaces the canvas editor without duplicating i
  const dom=new JSDOM('<div id="root"></div>');
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
+ // Force the reference debounce to run while Open is pending, as it does under load.
+ let referencesRequested!:()=>void;
+ const initialReferences=new Promise<void>(resolve=>{referencesRequested=resolve;});
  const workspace={id:'saved',name:'Saved home',yaml:'appId: com.example.App\n---\n- launchApp\n',canvas:{screens:[{id:'home',title:'Reloaded',x:60,y:70,tests:[]}],edges:[],paths:[]}};
- for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?async(path:string)=>Response.json(path.startsWith('/api/workspaces?q=')?singleWorkspaceLibrary(workspace):workspace):key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?async(path:string)=>{if(path==='/api/canvas/references')referencesRequested();if(path.endsWith('/open')){await initialReferences;await new Promise(resolve=>setImmediate(resolve));}return Response.json(path==='/api/canvas/references'?{references:[],diagnostics:[]}:path.startsWith('/api/workspaces?q=')?singleWorkspaceLibrary(workspace):workspace);}:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {Scenarios}=await import('../src/scenarios.js');const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);
  try{
   await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId:'',bundleId:'',launchBusy:false,onRunning:()=>{}})));
