@@ -10,8 +10,8 @@
   --accent-hover: #284f90;
   --selected: #eaf0fc;
   --success: #256747;
-  --warning: #865c16;
-  --warning-surface: #fff6e5;
+  --warning: #8a4b00;
+  --warning-surface: #fff4e5;
   --warning-border: #d9bc7d;
   --danger: #a33439;
   --danger-surface: #fff0f1;
@@ -596,23 +596,27 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .floating-inspector .canvas-visit-section.selected-visit{border-color:var(--border)}
 .floating-inspector-note{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .visit-step{position:relative;padding:2px 0;border-bottom:1px solid var(--border)}
-.floating-inspector .visit-step-summary{display:block;width:100%;text-align:left;border:0;background:transparent;padding:4px 36px 4px 0;color:var(--text);line-height:1.5}
+.floating-inspector .visit-step-summary{display:block;width:100%;text-align:left;border:0;background:transparent;min-height:44px;padding:4px 44px 4px 0;color:var(--text);line-height:1.5}
 .step-command{color:var(--muted)}
 .visit-inline-fields{display:grid;gap:6px;padding:8px 0}
 .visit-inline-fields input,.visit-inline-fields select{width:100%;box-sizing:border-box}
 .visit-step-actions{position:absolute;right:0;top:2px;background:var(--surface);z-index:2}
 .visit-step-actions[open]{box-shadow:0 4px 12px #25304129;max-width:180px}
-.visit-step-actions button{display:block;width:100%}
+.visit-step-actions summary{display:grid;place-items:center;min-width:44px;min-height:44px}
+.visit-step-actions button{display:block;width:100%;min-height:44px}
 .floating-inspector .add-visit-step{width:100%;min-height:48px;border:1px dashed var(--inspector-highlight);color:var(--inspector-primary);background:transparent;margin-top:8px}
 .add-step-dialog{position:fixed;inset:20% auto auto 50%;transform:translateX(-50%);width:300px;max-height:70vh;overflow:auto;z-index:60;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 12px 32px #25304140;font-size:13px}
 .add-step-dialog input,.add-step-dialog [role=option]{width:100%;box-sizing:border-box}
 .add-step-dialog [role=option]{text-align:left;margin:2px 0;background:transparent;color:var(--text)}
 .add-step-dialog [aria-selected=true]{background:var(--inspector-selected);color:var(--inspector-primary)}
 .add-step-dialog strong{display:block;margin:10px 0 4px}
-.navigation-hint{font-size:12px;color:var(--text)}
-.navigation-hint p{white-space:nowrap;text-overflow:ellipsis;overflow:hidden;margin:4px 0}
-.navigation-hint button,.visit-yaml-link{color:var(--inspector-primary)}
+.navigation-hint{font-size:12px;color:var(--warning);background:var(--warning-surface);border-radius:6px;padding:6px}
+.navigation-hint p{white-space:normal;overflow-wrap:anywhere;margin:4px 0}
+.navigation-hint button,.visit-yaml-link{color:var(--inspector-primary);min-height:44px;font-size:12px}
 .inspector-bottom-fade{position:sticky;bottom:-14px;height:28px;margin:-28px -14px -14px;pointer-events:none;background:linear-gradient(transparent,var(--surface));z-index:3}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
 .visit-inline-fields[hidden]{display:none}
+
+.visit-selector-error{color:#b3261e;font-size:12px;white-space:nowrap;margin:0}
+.visit-inline-fields input[aria-invalid=true]{border:2px solid #b3261e}

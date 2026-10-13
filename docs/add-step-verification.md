@@ -2,9 +2,9 @@
 
 Visits now append actions and checks to their explicit operation list. The canvas's legacy Add check path remains unchanged. New visit actions have no destination until the author chooses one. Only visible/absent checks are supported by the current canvas selector contract; swipe and scroll are omitted.
 
-The inspector uses one summary button per step, a grouped searchable Add step dialog, and local inline drafts. Enter, Done or leaving a row saves; Escape or Cancel discards. An unchanged edit does not copy a shared operation. Destination cleanup uses the existing confirmation and preserves Undo. The navigation hint names the last preceding destination; Move above actions crosses the first navigating action in one graph change and announces its new position.
+The inspector uses one summary button per step, a grouped searchable Add step dialog, and local inline drafts. Enter, Done or leaving a row saves; Escape or Cancel discards. An unchanged edit does not copy a shared operation. Destination cleanup and step deletion apply immediately and preserve one Undo. The navigation hint names the last preceding destination; Move above actions crosses the first navigating action in one graph change and announces its new position.
 
-## Verification
+## Initial PR #63 verification
 
 - Typecheck clean; final full suite: 283/283 passing, including save/reopen journeys, the fade regression and the golden UI comparisons.
 - Focused regressions: 17/17 passing, including keyboard filtering/selection/Escape focus, Enter/blur/cancel, one Undo after Move above actions, and overflow-only fade.

@@ -178,6 +178,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
 export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,onRun,onRepairSource,scenarioMode=false,scenarioId,scenarios=[],initialView,onViewChange}:{onRepairSource?:(ownerId:string)=>void;scenarioId?:string;scenarios?:{id:string;name:string;pathId?:string}[];scenarioMode?:boolean;onRun?:()=>void;yaml?:string;onYamlChange?:(yaml:string)=>void;graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string};onViewChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number;selectedScreenId:string;selectedVisitId:string})=>void}){
  const [pending,setPending]=useState<{graph:CanvasGraph;source?:string;warnings:string[]}>();
  const [undo,setUndo]=useState<{graph:CanvasGraph;yaml?:string;after:CanvasGraph;afterYaml?:string}>();
+ const newSteps=useRef(new Map<string,{before:{graph:CanvasGraph;yaml:string};after:{graph:CanvasGraph;yaml:string}}>());
  const [expandedRow,setExpandedRow]=useState('');const [announcement,setAnnouncement]=useState('');
  const [nodeInfoId,setNodeInfoId]=useState('');
  let displayGraph=graph;try{if(graph&&yaml)displayGraph=refreshChecks(graph,yaml);}catch{ /* Retain graph while invalid YAML is repaired. */ }
@@ -226,12 +227,13 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   if(next.screens.some(screen=>screen.tests.length>600)||next.edges.some(edge=>edgeActions(edge).length>600))throw new Error('This node has reached its stored step limit. Remove unused steps before adding more.');
   const nextYaml=writeChecks(yaml,graph,next);next=refreshChecks(next,nextYaml);
   if(deletion)setUndo({graph,yaml,after:next,afterYaml:nextYaml});
-  onYamlChange(nextYaml);onChange(next);
+  onYamlChange(nextYaml);onChange(next);return {graph:next,yaml:nextYaml};
  }
- function editOperation(testId:string,visitId:string|undefined,edit:(canvas:CanvasGraph,id:string)=>CanvasGraph){
-  perform(()=>{const privateOperation=visitId?privateVisitOperation(graph!,pathId,visitId,testId):{graph:graph!,testId};if(privateOperation.graph.screens.some(screen=>screen.tests.length>600))throw new Error('This node has reached its stored step limit. Remove unused steps before copying more.');changeChecks(edit(privateOperation.graph,privateOperation.testId));});
+ function editOperation(testId:string,visitId:string|undefined,edit:(canvas:CanvasGraph,id:string)=>CanvasGraph,undoChange=false){
+  perform(()=>{const privateOperation=visitId?privateVisitOperation(graph!,pathId,visitId,testId):{graph:graph!,testId};if(privateOperation.graph.screens.some(screen=>screen.tests.length>600))throw new Error('This node has reached its stored step limit. Remove unused steps before copying more.');changeChecks(edit(privateOperation.graph,privateOperation.testId),undoChange);});
  }
  function updateOperation(testId:string,visitId:string|undefined,edit:(test:CanvasTest)=>CanvasTest){editOperation(testId,visitId,(canvas,id)=>({...canvas,screens:canvas.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.id===id?edit(test):test)}))}));}
+ // This legacy path edits screen/connection operations only; visits commit their local drafts through saveVisitStep.
  function updateCheck(screenId:string,id:string,patch:Partial<ScreenCheck>,visitId?:string){updateOperation(id,visitId,test=>test.back?{...test,backSelector:{...backControl(test)!,...patch}}:test.tap?{...test,tap:{...test.tap,...patch}}:{...test,check:{...test.check!,...patch}});}
  function moveOperation(screenId:string,id:string,neighbor:string,visitId?:string){
   perform(()=>{if(visitId&&path){const next=freezeVisitOperations(graph!);const index=routeVisits(next,path).findIndex(visit=>visit.id===visitId);const ids=[...visitOperations(next,next.paths.find(item=>item.id===pathId)!,index)];const at=ids.indexOf(id);const other=ids.indexOf(neighbor);[ids[at],ids[other]]=[ids[other],ids[at]];changeChecks(updateVisitOperations(next,pathId,visitId,ids));}
@@ -246,11 +248,14 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  function requestDeletion(deletion:CanvasDeletion){
   const plan=planCanvasDeletion(graph!,deletion);setPending({...plan,source:yaml});
  }
+ function commitRemoval(next:CanvasGraph){
+  if(yaml!==undefined&&onYamlChange)changeChecks(next,true);else{setUndo({graph:graph!,after:next});onChange(next);}
+ }
  function deleteOperation(test:CanvasTest,visitId?:string){
-  requestDeletion({kind:'operation',id:test.id,...(visitId?{pathId,visitId}: {})});
+  perform(()=>commitRemoval(planCanvasDeletion(graph!,{kind:'operation',id:test.id,...(visitId?{pathId,visitId}: {})}).graph));
  }
  function destinationChange(screenId:string,test:CanvasTest,visitId:string|undefined,to:string){
-  if(!to){const privateOperation=visitId?privateVisitOperation(graph!,pathId,visitId,test.id):{graph:graph!,testId:test.id};const plan=planCanvasDeletion(privateOperation.graph,{kind:'operation',id:privateOperation.testId,clearDestination:true,...(visitId?{pathId,visitId}: {})});setPending({...plan,source:yaml});return;}
+  if(!to){const privateOperation=visitId?privateVisitOperation(graph!,pathId,visitId,test.id):{graph:graph!,testId:test.id};const plan=planCanvasDeletion(privateOperation.graph,{kind:'operation',id:privateOperation.testId,clearDestination:true,...(visitId?{pathId,visitId}: {})});commitRemoval(plan.graph);return;}
   editOperation(test.id,visitId,(canvas,id)=>visitId?connectVisitAction(canvas,pathId,visitId,id,to):connectCanvasAction(canvas,screenId,id,to,pathId).graph);
  }
  function assignedScenarios(test:CanvasTest){
@@ -318,26 +323,32 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   if(command==='inputText'){test.tap=undefined;test.input='';}
   if(command==='back'){test.tap=undefined;test.back=true;test.backSelector={target:'text',match:'exact',value:'Back'};}
   if(command.startsWith('assert')){test.tap=undefined;test.role='assertion';test.label='Screen check';test.check={target:'text',match:'exact',value:'',visibility:command==='assertVisible'?'visible':'absent'};}
-  changeChecks(appendVisitStep(graph!,pathId,visitId,test));setExpandedRow(test.id);
+  const before={graph:graph!,yaml:yaml!};const after=changeChecks(appendVisitStep(graph!,pathId,visitId,test));newSteps.current.set(test.id,{before,after});setExpandedRow(test.id);
+ }
+ function discardVisitStep(test:CanvasTest,visitId:string){
+  const added=newSteps.current.get(test.id);newSteps.current.delete(test.id);
+  if(added&&JSON.stringify(graph)===JSON.stringify(added.after.graph)&&yaml===added.after.yaml){onYamlChange?.(added.before.yaml);onChange(added.before.graph);}
+  else changeChecks(planCanvasDeletion(graph!,{kind:'operation',id:test.id,pathId,visitId}).graph);
+  Array.from(document.querySelectorAll<HTMLElement>('[data-visit-id]')).find(element=>element.dataset.visitId===visitId)?.querySelector<HTMLButtonElement>('.add-visit-step')?.focus();
  }
  function saveVisitStep(screenId:string,visitId:string,test:CanvasTest,to:string,connectionName?:string){
   const current=graph!.screens.find(screen=>screen.id===screenId)!.tests.find(item=>item.id===test.id)!;
   const connection=graph!.edges.find(edge=>edge.from===screenId&&edgeActions(edge).includes(test.id));
   const unchanged=(['tap','check','input','back','backSelector'] as const).every(key=>JSON.stringify(current[key])===JSON.stringify(test[key]))&&connectionName===connection?.responseCondition;
-  if(unchanged&&to===(connection?.to??''))return;
+  if(unchanged&&to===(connection?.to??'')){newSteps.current.delete(test.id);return;}
   if(unchanged&&!to&&connection){destinationChange(screenId,current,visitId,to);return;}
   editOperation(test.id,visitId,(canvas,id)=>{
    let next={...canvas,screens:canvas.screens.map(screen=>({...screen,tests:screen.tests.map(item=>item.id===id?{...test,id,reference:item.reference}:item)}))};
    const previous=canvas.edges.find(edge=>edge.from===screenId&&edgeActions(edge).includes(id))?.to??'';
    if(connection&&connectionName!==undefined)next={...next,edges:next.edges.map(edge=>edge.id===connection.id?{...edge,responseCondition:connectionName}:edge)};
-   if(to!==previous){if(to)next=connectVisitAction(next,pathId,visitId,id,to);else{const plan=planCanvasDeletion(next,{kind:'operation',id,pathId,visitId,clearDestination:true});setPending({...plan,source:writeChecks(yaml!,graph!,next)});}}
+   if(to!==previous){if(to)next=connectVisitAction(next,pathId,visitId,id,to);else next=planCanvasDeletion(next,{kind:'operation',id,pathId,visitId,clearDestination:true}).graph;}
    return next;
-  });
+  },!!connection&&!to);newSteps.current.delete(test.id);
  }
  function renderChecks(screenId:string,edgeId?:string,visitIndex?:number){const node=graph!.screens.find(screen=>screen.id===screenId);if(!node)return <p>Restore the missing source screen before editing its actions.</p>;const visit=visitIndex!==undefined&&path?routeVisits(graph!,path)[visitIndex]:undefined;const visitIds=visitIndex!==undefined&&path?visitOperations(graph!,path,visitIndex):undefined;const edge=graph!.edges.find(edge=>edge.id===edgeId);const operations=visitIds?visitIds.flatMap(id=>node.tests.filter(test=>test.id===id)):(scenarioMode?node.tests.filter(isAuthored):edge?edgeActions(edge).flatMap(id=>node.tests.filter(test=>test.id===id)):node.tests.filter(test=>isAuthored(test)&&!graph!.edges.some(edge=>edge.actionTestIds?.includes(test.id)))).filter(test=>visitIds!==undefined||visibleOperation(test));const checks=operations.filter(test=>test.check);const taps=operations.filter(test=>!test.check);return <fieldset className={edge?'canvas-checks canvas-navigation-actions':'canvas-checks'} disabled={disabled}>
  {scenarioMode&&!edge&&path?.screenId&&!path.finished&&(visitIndex===undefined||visitIndex===path.edgeIds.length)&&visitScreenId(graph!,path,path.edgeIds.length)===screenId&&graph!.edges.filter(edge=>edge.from===screenId&&!path.edgeIds.includes(edge.id)).map(edge=><button key={edge.id} aria-label={'Append connection '+edge.responseCondition} onClick={()=>perform(()=>appendConnection(edge.id))}>Continue → {graph!.screens.find(screen=>screen.id===edge.to)?.title} · {edge.responseCondition}</button>)}{scenarioMode&&!edge&&(visitIndex===undefined||visitIndex===0)&&<button aria-label={'Use '+node.title+' as scenario start'} disabled={!path||path.screenId===screenId} onClick={()=>perform(()=>setScenarioStart(screenId))}>{path?.screenId===screenId?'Scenario start':'Use as scenario start'}</button>}
  {edge&&!scenarioMode&&<><legend>Actions to reach {graph!.screens.find(screen=>screen.id===edge.to)?.title??'Missing screen'}</legend><input aria-label={'Connection name '+edge.id} value={edge.responseCondition} maxLength={300} onChange={event=>onChange({...graph!,edges:graph!.edges.map(item=>item.id===edge.id?{...item,responseCondition:event.target.value}:item)})}/></>}
- {operations.map((test,index)=>{const selector=test.check??test.tap??backControl(test);const name=edge&&!scenarioMode?edge.responseCondition+' action '+(index+1):(!test.check?'Action '+(taps.indexOf(test)+1):'Check '+(checks.indexOf(test)+1));if(visit)return <VisitStep key={test.id} graph={graph!} pathId={pathId} visitId={visit.id} test={test} index={index} name={name} editing={expandedRow===test.id} onEdit={()=>setExpandedRow(test.id)} onClose={()=>setExpandedRow('')} onSave={(draft,to,name)=>saveVisitStep(screenId,visit.id,draft,to,name)} onMoveAbove={()=>perform(()=>{const next=moveAboveNavigation(graph!,pathId,visit.id,test.id);changeChecks(next,true);setAnnouncement('Step moved to position '+(routeVisits(next,next.paths.find(item=>item.id===pathId)! ).find(item=>item.id===visit.id)!.operationIds!.indexOf(test.id)+1)+', above navigating actions.');})} onMove={direction=>{if(operations[index+direction])moveOperation(screenId,test.id,operations[index+direction].id,visit.id);}} onDelete={()=>deleteOperation(test,visit.id)}/>;return <div key={test.id} className="canvas-operation" data-operation-id={test.id}>
+ {operations.map((test,index)=>{const selector=test.check??test.tap??backControl(test);const name=edge&&!scenarioMode?edge.responseCondition+' action '+(index+1):(!test.check?'Action '+(taps.indexOf(test)+1):'Check '+(checks.indexOf(test)+1));if(visit)return <VisitStep key={test.id} graph={graph!} pathId={pathId} visitId={visit.id} test={test} index={index} name={name} screenId={screenId} last={index===operations.length-1} isNew={newSteps.current.has(test.id)} editing={expandedRow===test.id} onEdit={()=>setExpandedRow(test.id)} onClose={()=>setExpandedRow('')} onSave={(draft,to,name)=>saveVisitStep(screenId,visit.id,draft,to,name)} onMoveAbove={()=>perform(()=>{const next=moveAboveNavigation(graph!,pathId,visit.id,test.id);changeChecks(next,true);setAnnouncement('Step moved to position '+(routeVisits(next,next.paths.find(item=>item.id===pathId)! ).find(item=>item.id===visit.id)!.operationIds!.indexOf(test.id)+1)+', above navigating actions.');})} onMove={direction=>{if(operations[index+direction])moveOperation(screenId,test.id,operations[index+direction].id,visit.id);}} onDelete={()=>deleteOperation(test,visit.id)} onDiscard={()=>perform(()=>discardVisitStep(test,visit.id))}/>;return <div key={test.id} className="canvas-operation" data-operation-id={test.id}>
  {test.check&&!test.check.value&&<p className="field-hint">Screen condition: choose what must be visible or absent when this screen is reached.</p>}
  <details open={expandedRow===test.id?true:undefined} className="canvas-check-row"><summary>{canvasTestLabel(test)}</summary>
  {!test.check&&(!edge||scenarioMode)&&<><p className="field-hint">Destination</p><select aria-label={`${name} destination`} value={graph!.edges.find(edge=>edge.from===screenId&&edgeActions(edge).includes(test.id))?.to??''} onChange={event=>perform(()=>{destinationChange(screenId,test,undefined,event.target.value);})}><option value="">Choose destination screen</option>{graph!.screens.map(screen=><option key={screen.id} value={screen.id}>{screen.title}</option>)}</select></>}
@@ -441,7 +452,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  </fieldset></>}</div>}
  {visibleDiagnostics.length>0&&<div className="notice error" role="alert"><strong>{scenarioMode?'Before running':'References need review'}</strong>{visibleDiagnostics.map((diagnostic,index)=>{const label=graph.screens.flatMap(screen=>screen.tests).find(test=>test.id===diagnostic.ownerId)?.label??graph.screens.find(screen=>screen.id===diagnostic.ownerId)?.title??graph.edges.find(edge=>edge.id===diagnostic.ownerId)?.responseCondition??graph.paths.find(path=>path.id===diagnostic.ownerId)?.name??diagnostic.ownerId;return <p key={index}>{scenarioMode&&(scenarios.find(item=>item.id===scenarioId)?.name??'Selected scenario')+' · '}{label}: {diagnostic.detail} <button className="text-button" disabled={disabled} aria-label={'Repair '+label} onClick={()=>repairDiagnostic(diagnostic)}>Repair</button></p>;})}</div>}
  {pending&&<div role="alertdialog" aria-label="Canvas reference warning" aria-modal="true" className="notice canvas-delete-dialog" onKeyDown={event=>{if(event.key==='Escape')setPending(undefined);}}><p>Confirm cleanup: {pending.warnings.join(', ')}. Shared actions/checks used elsewhere will be kept.</p><button autoFocus disabled={disabled||pending.source!==yaml} onClick={()=>perform(()=>{if(yaml!==undefined&&onYamlChange)changeChecks(pending.graph,true);else{setUndo({graph:graph!,after:pending.graph});onChange(pending.graph);}setPending(undefined);})}>Delete anyway</button><button onClick={()=>setPending(undefined)}>Cancel deletion</button></div>}
- {undo&&<button disabled={disabled||yaml!==undo.afterYaml||JSON.stringify(graph)!==JSON.stringify(undo.after)} onClick={()=>{if(undo.yaml!==undefined)onYamlChange?.(undo.yaml);onChange(undo.graph);setUndo(undefined);}}>Undo canvas deletion</button>}
+ {undo&&<button onPointerDown={()=>setExpandedRow('')} disabled={disabled||yaml!==undo.afterYaml||JSON.stringify(graph)!==JSON.stringify(undo.after)} onClick={()=>{if(undo.yaml!==undefined)onYamlChange?.(undo.yaml);onChange(undo.graph);setUndo(undefined);}}>Undo canvas deletion</button>}
  {infoScreen&&<NodeInfo screen={infoScreen} disabled={disabled} error={error} onImage={file=>void image(infoScreen.id,file)} onRemove={()=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===infoScreen.id?{...screen,referenceScreenshot:undefined}:screen)})} onClose={()=>{setNodeInfoId('');setError('');}}/>}
  {error&&!infoScreen&&<div className="notice error" role="alert">{error}</div>}
  </>}
