@@ -6,6 +6,7 @@ import {inspectorWidth,placeInspector,visibleBounds,type InspectorPlacement,type
 
 export const emptyCanvas=():CanvasGraph=>({screens:[],edges:[],paths:[]});
 const identity=()=>crypto.randomUUID();
+const staysValue=' stays-on-screen';
 function DeleteIcon(){return <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg>;}
 function draftNavigationAction():CanvasTest{return {id:identity(),label:'Tap action',role:'action',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},tap:{target:'text',match:'exact',value:''}};}
 function draftScreenCheck():CanvasTest{return {id:identity(),label:'Screen check',role:'assertion',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:''}};}
@@ -194,6 +195,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  const screen=graph?.screens.find(screen=>screen.id===selected);const path=graph?.paths.find(path=>path.id===pathId);
  const entry=catalog[Number(referenceIndex)];
  const apiId=useId();
+ const liveDiagnostics=graph?diagnostics.filter(item=>item.code!=='missing-destination'||missingDestination(item.actionId!)):diagnostics;
  const seenPath=useRef(pathId);
  useEffect(()=>{if(seenPath.current===pathId)return;seenPath.current=pathId;setSelectedVisit('');setSelected('');setRepairTarget(undefined);},[pathId]);
  useEffect(()=>{
@@ -237,6 +239,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   let next=freezeVisitOperations(graph!);const test={...draftScreenCheck(),scenarioIds:scenarioMode&&scenarioId?[scenarioId]:undefined};
   next={...next,screens:next.screens.map(screen=>screen.id===screenId?{...screen,tests:[...screen.tests,test]}:screen)};
   if(visitIndex!==undefined&&path){const visit=routeVisits(graph!,path)[visitIndex];const current=next.paths.find(item=>item.id===pathId)!;const ids=[...visitOperations(next,current,visitIndex)];const at=ids.findIndex(id=>!next.screens.find(screen=>screen.id===screenId)!.tests.find(test=>test.id===id)?.check);ids.splice(at<0?ids.length:at,0,test.id);next=updateVisitOperations(next,pathId,visit.id,ids);setSelected(screenId);setSelectedVisit(visit.id);}
+  else for(const item of next.paths)if(!item.scenarioId&&item.screenId===screenId&&!item.edgeIds.length&&item.visits?.[0]?.operationIds)next=updateVisitOperations(next,item.id,item.visits[0].id,[...item.visits[0].operationIds,test.id]);
   changeChecks(next);setExpandedRow(test.id);
  }
  function requestDeletion(deletion:CanvasDeletion){
@@ -245,9 +248,35 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  function deleteOperation(test:CanvasTest,visitId?:string){
   requestDeletion({kind:'operation',id:test.id,...(visitId?{pathId,visitId}: {})});
  }
+ // Legacy start-only routes run an unconnected action only when their first visit lists it.
+ function startOnlyPaths(testId:string){return graph?.paths.filter(item=>!item.scenarioId&&item.screenId&&!item.edgeIds.length&&graph!.screens.find(screen=>screen.id===item.screenId)?.tests.some(test=>test.id===testId))??[];}
+ function missingDestination(testId:string){return !graph!.edges.some(edge=>edgeActions(edge).includes(testId))&&startOnlyPaths(testId).some(item=>!routeVisits(graph!,item)[0]?.operationIds?.includes(testId));}
+ function staysOnScreen(testId:string){return !graph!.edges.some(edge=>edgeActions(edge).includes(testId))&&startOnlyPaths(testId).length>0&&!missingDestination(testId);}
+ function destinationWarning(test:CanvasTest){return !test.check&&liveDiagnostics.some(item=>item.code==='missing-destination'&&item.actionId===test.id);}
+ function openDestination(button:HTMLElement,testId:string){
+  setExpandedRow(testId);
+  const row=button.closest<HTMLElement>('.canvas-operation');const details=row?.querySelector('details');if(details)details.open=true;
+  const select=row?.querySelector<HTMLSelectElement>('select[aria-label$=" destination"]');select?.focus();
+  try{select?.showPicker?.();}catch{ /* Focus remains on the destination when the picker cannot open. */ }
+ }
+ function stayOnScreen(test:CanvasTest){
+  let next=graph!;
+  for(const item of startOnlyPaths(test.id)){const visit=routeVisits(next,item)[0];const ids=visitOperations(next,item,0);if(ids.includes(test.id))continue;
+   const operationIds=visit.operationIds?[...ids,test.id]:next.screens.find(screen=>screen.id===item.screenId)!.tests.filter(candidate=>candidate.id===test.id||ids.includes(candidate.id)).map(candidate=>candidate.id);
+   next=updateVisitOperations(next,item.id,visit.id,operationIds);}
+  onChange(next);
+ }
+ // A frozen first visit must list the navigating action. Later visits keep deriving their destination checks.
+ function continueFrozenStart(before:CanvasGraph,after:CanvasGraph,actionId:string):CanvasGraph{
+  return {...after,paths:after.paths.map(item=>{const prior=before.paths.find(candidate=>candidate.id===item.id);
+   if(!prior||prior.scenarioId||prior.edgeIds.length||!item.edgeIds.length||routeVisits(before,prior)[0]?.operationIds===undefined)return item;
+   return {...item,visits:routeVisits(after,item).map((visit,index)=>{if(index===0)return {...visit,operationIds:[...visit.operationIds!.filter(id=>id!==actionId),actionId]};const {operationIds:_derived,...rest}=visit;return rest;})};
+  })};
+ }
  function destinationChange(screenId:string,test:CanvasTest,visitId:string|undefined,to:string){
+  if(to===staysValue){stayOnScreen(test);return;}
   if(!to){const privateOperation=visitId?privateVisitOperation(graph!,pathId,visitId,test.id):{graph:graph!,testId:test.id};const plan=planCanvasDeletion(privateOperation.graph,{kind:'operation',id:privateOperation.testId,clearDestination:true,...(visitId?{pathId,visitId}: {})});setPending({...plan,source:yaml});return;}
-  editOperation(test.id,visitId,(canvas,id)=>visitId?connectVisitAction(canvas,pathId,visitId,id,to):connectCanvasAction(canvas,screenId,id,to,pathId).graph);
+  editOperation(test.id,visitId,(canvas,id)=>visitId?connectVisitAction(canvas,pathId,visitId,id,to):continueFrozenStart(canvas,connectCanvasAction(canvas,screenId,id,to,pathId).graph,id));
  }
  function assignedScenarios(test:CanvasTest){
   if(test.scenarioIds!==undefined)return test.scenarioIds;
@@ -309,24 +338,25 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   changeChecks(next);setExpandedRow(id);setSelectedVisit(visit.id);setSelected(screenId);
  }
  function membershipControl(test:CanvasTest){return <details className="operation-scenarios"><summary>Scenarios</summary>{scenarios.map(item=><label className="checkbox-label" key={item.id}><input type="checkbox" aria-label={'Use '+canvasTestLabel(test)+' in '+item.name} checked={assignedScenarios(test).includes(item.id)} onChange={event=>perform(()=>assignOperation(test,item.id,event.target.checked))}/>{item.name}</label>)}</details>;}
- function renderChecks(screenId:string,edgeId?:string,visitIndex?:number){const node=graph!.screens.find(screen=>screen.id===screenId);if(!node)return <p>Restore the missing source screen before editing its actions.</p>;const visit=visitIndex!==undefined&&path?routeVisits(graph!,path)[visitIndex]:undefined;const visitIds=visitIndex!==undefined&&path?visitOperations(graph!,path,visitIndex):undefined;const edge=graph!.edges.find(edge=>edge.id===edgeId);const operations=visitIds?visitIds.flatMap(id=>node.tests.filter(test=>test.id===id)):(scenarioMode?node.tests.filter(isAuthored):edge?edgeActions(edge).flatMap(id=>node.tests.filter(test=>test.id===id)):node.tests.filter(test=>isAuthored(test)&&!graph!.edges.some(edge=>edge.actionTestIds?.includes(test.id)))).filter(test=>visitIds!==undefined||visibleOperation(test));const checks=operations.filter(test=>test.check);const taps=operations.filter(test=>!test.check);return <fieldset className={edge?'canvas-checks canvas-navigation-actions':'canvas-checks'} disabled={disabled}>
+ function renderChecks(screenId:string,edgeId?:string,visitIndex?:number){const node=graph!.screens.find(screen=>screen.id===screenId);if(!node)return <p>Restore the missing source screen before editing its actions.</p>;const visit=visitIndex!==undefined&&path?routeVisits(graph!,path)[visitIndex]:undefined;const visitIds=visitIndex!==undefined&&path?visitOperations(graph!,path,visitIndex):undefined;const edge=graph!.edges.find(edge=>edge.id===edgeId);const operations=visitIds?visitIds.flatMap(id=>node.tests.filter(test=>test.id===id)):(scenarioMode?node.tests.filter(isAuthored):edge?edgeActions(edge).flatMap(id=>node.tests.filter(test=>test.id===id)):node.tests.filter(test=>isAuthored(test)&&!graph!.edges.some(edge=>edge.actionTestIds?.includes(test.id)))).filter(test=>visitIds!==undefined||visibleOperation(test));if(visitIds&&visitIndex===0)operations.push(...node.tests.filter(test=>!visitIds.includes(test.id)&&destinationWarning(test)));const checks=operations.filter(test=>test.check);const taps=operations.filter(test=>!test.check);return <fieldset className={edge?'canvas-checks canvas-navigation-actions':'canvas-checks'} disabled={disabled}>
  {scenarioMode&&!edge&&path?.screenId&&!path.finished&&(visitIndex===undefined||visitIndex===path.edgeIds.length)&&visitScreenId(graph!,path,path.edgeIds.length)===screenId&&graph!.edges.filter(edge=>edge.from===screenId&&!path.edgeIds.includes(edge.id)).map(edge=><button key={edge.id} aria-label={'Append connection '+edge.responseCondition} onClick={()=>perform(()=>appendConnection(edge.id))}>Continue → {graph!.screens.find(screen=>screen.id===edge.to)?.title} · {edge.responseCondition}</button>)}{scenarioMode&&!edge&&(visitIndex===undefined||visitIndex===0)&&<button aria-label={'Use '+node.title+' as scenario start'} disabled={!path||path.screenId===screenId} onClick={()=>perform(()=>setScenarioStart(screenId))}>{path?.screenId===screenId?'Scenario start':'Use as scenario start'}</button>}
  {edge&&!scenarioMode&&<><legend>Actions to reach {graph!.screens.find(screen=>screen.id===edge.to)?.title??'Missing screen'}</legend><input aria-label={'Connection name '+edge.id} value={edge.responseCondition} maxLength={300} onChange={event=>onChange({...graph!,edges:graph!.edges.map(item=>item.id===edge.id?{...item,responseCondition:event.target.value}:item)})}/></>}
- {operations.map((test,index)=>{const selector=test.check??test.tap??backControl(test);const name=edge&&!scenarioMode?edge.responseCondition+' action '+(index+1):(!test.check?'Action '+(taps.indexOf(test)+1):'Check '+(checks.indexOf(test)+1));return <div key={test.id} className="canvas-operation" data-operation-id={test.id}>
+ {operations.map((test,index)=>{const selector=test.check??test.tap??backControl(test);const name=edge&&!scenarioMode?edge.responseCondition+' action '+(index+1):(!test.check?'Action '+(taps.indexOf(test)+1):'Check '+(checks.indexOf(test)+1));const owner=visitIds?.includes(test.id)?visit:undefined;const stays=!test.check&&staysOnScreen(test.id);return <div key={test.id} className="canvas-operation" data-operation-id={test.id}>
+ {destinationWarning(test)&&<div className="destination-warning" role="status"><p id={apiId+'-missing-'+test.id}>⚠ "{test.label}" has no destination. Choose a screen, or set it to Stays on this screen.</p><button aria-describedby={apiId+'-missing-'+test.id} onClick={event=>openDestination(event.currentTarget,test.id)}>Choose destination</button></div>}
  {test.check&&!test.check.value&&<p className="field-hint">Screen condition: choose what must be visible or absent when this screen is reached.</p>}
  <details open={expandedRow===test.id?true:undefined} className="canvas-check-row"><summary>{canvasTestLabel(test)}</summary>
- {!test.check&&(!edge||scenarioMode)&&<><p className="field-hint">Destination</p><select aria-label={`${name} destination`} value={graph!.edges.find(edge=>edge.from===screenId&&edgeActions(edge).includes(test.id))?.to??''} onChange={event=>perform(()=>{destinationChange(screenId,test,visit?.id,event.target.value);})}><option value="">Choose destination screen</option>{graph!.screens.map(screen=><option key={screen.id} value={screen.id}>{screen.title}</option>)}</select></>}
+ {!test.check&&(!edge||scenarioMode)&&<><p className="field-hint">Destination</p><select aria-label={`${name} destination`} value={graph!.edges.find(edge=>edge.from===screenId&&edgeActions(edge).includes(test.id))?.to??(stays?staysValue:'')} onChange={event=>perform(()=>{destinationChange(screenId,test,owner?.id,event.target.value);})}>{!stays&&<option value="">Choose destination screen</option>}{(stays||missingDestination(test.id))&&<option value={staysValue}>Stays on this screen</option>}{graph!.screens.map(screen=><option key={screen.id} value={screen.id}>{screen.title}</option>)}</select></>}
  {scenarioMode&&!test.check&&graph!.edges.filter(edge=>edge.from===screenId&&edgeActions(edge).includes(test.id)&&edgeActions(edge)[0]===test.id).map(edge=><input key={edge.id} aria-label={'Connection name '+edge.id} value={edge.responseCondition} maxLength={300} onChange={event=>onChange({...graph!,edges:graph!.edges.map(item=>item.id===edge.id?{...item,responseCondition:event.target.value}:item)})}/>)}
- {test.check&&<select aria-label={`${name} visibility`} value={test.check.visibility} onChange={event=>updateCheck(screenId,test.id,{visibility:event.target.value as ScreenCheck['visibility']},visit?.id)}><option value="visible">Visible</option><option value="absent">Absent</option></select>}
- {selector&&<><select aria-label={`${name} target`} value={selector.target} onChange={event=>updateCheck(screenId,test.id,{target:event.target.value as ScreenCheck['target']},visit?.id)}><option value="text">Text</option><option value="id">Element identifier</option></select>
- <input aria-label={`${name} selector`} value={selector.value} maxLength={4000} placeholder="Enter selector" onChange={event=>updateCheck(screenId,test.id,{value:event.target.value},visit?.id)}/>
- <select aria-label={`${name} matching`} value={selector.match} onChange={event=>updateCheck(screenId,test.id,{match:event.target.value as ScreenCheck['match']},visit?.id)}><option value="exact">Exact</option><option value="contains">Contains</option><option value="regex">Regex</option></select></>}
- {!test.check&&<select aria-label={`${name} type`} value={test.tap?'tap':test.input!==undefined?'input':'back'} onChange={event=>{const kind=event.target.value;updateOperation(test.id,visit?.id,item=>({...item,tap:kind==='tap'?{target:'text',match:'exact',value:''}:undefined,input:kind==='input'?'':undefined,back:kind==='back'?true:undefined,backSelector:kind==='back'?{target:'text',match:'exact',value:'Back'}:undefined}));}}><option value="tap">Tap</option><option value="input">Input text</option><option value="back">Back</option></select>}
- {test.input!==undefined&&<input aria-label={`${name} text`} value={test.input} maxLength={4000} onChange={event=>updateOperation(test.id,visit?.id,item=>({...item,input:event.target.value}))}/>}
- <button aria-label={`Move ${name.toLowerCase()} up`} disabled={index===0} onClick={()=>moveOperation(screenId,test.id,operations[index-1].id,visit?.id)}>↑</button>
- <button aria-label={`Move ${name.toLowerCase()} down`} disabled={index===operations.length-1} onClick={()=>moveOperation(screenId,test.id,operations[index+1].id,visit?.id)}>↓</button>
+ {test.check&&<select aria-label={`${name} visibility`} value={test.check.visibility} onChange={event=>updateCheck(screenId,test.id,{visibility:event.target.value as ScreenCheck['visibility']},owner?.id)}><option value="visible">Visible</option><option value="absent">Absent</option></select>}
+ {selector&&<><select aria-label={`${name} target`} value={selector.target} onChange={event=>updateCheck(screenId,test.id,{target:event.target.value as ScreenCheck['target']},owner?.id)}><option value="text">Text</option><option value="id">Element identifier</option></select>
+ <input aria-label={`${name} selector`} value={selector.value} maxLength={4000} placeholder="Enter selector" onChange={event=>updateCheck(screenId,test.id,{value:event.target.value},owner?.id)}/>
+ <select aria-label={`${name} matching`} value={selector.match} onChange={event=>updateCheck(screenId,test.id,{match:event.target.value as ScreenCheck['match']},owner?.id)}><option value="exact">Exact</option><option value="contains">Contains</option><option value="regex">Regex</option></select></>}
+ {!test.check&&<select aria-label={`${name} type`} value={test.tap?'tap':test.input!==undefined?'input':'back'} onChange={event=>{const kind=event.target.value;updateOperation(test.id,owner?.id,item=>({...item,tap:kind==='tap'?{target:'text',match:'exact',value:''}:undefined,input:kind==='input'?'':undefined,back:kind==='back'?true:undefined,backSelector:kind==='back'?{target:'text',match:'exact',value:'Back'}:undefined}));}}><option value="tap">Tap</option><option value="input">Input text</option><option value="back">Back</option></select>}
+ {test.input!==undefined&&<input aria-label={`${name} text`} value={test.input} maxLength={4000} onChange={event=>updateOperation(test.id,owner?.id,item=>({...item,input:event.target.value}))}/>}
+ <button aria-label={`Move ${name.toLowerCase()} up`} disabled={index===0} onClick={()=>moveOperation(screenId,test.id,operations[index-1].id,owner?.id)}>↑</button>
+ <button aria-label={`Move ${name.toLowerCase()} down`} disabled={index===operations.length-1} onClick={()=>moveOperation(screenId,test.id,operations[index+1].id,owner?.id)}>↓</button>
  {scenarioMode&&!visit&&scenarios.length>0&&membershipControl(test)}
- <button className="canvas-delete-operation" title="Delete" aria-label={`Delete ${name.toLowerCase()}`} onClick={()=>deleteOperation(test,visit?.id)}><DeleteIcon/></button>
+ <button className="canvas-delete-operation" title="Delete" aria-label={`Delete ${name.toLowerCase()}`} onClick={()=>deleteOperation(test,owner?.id)}><DeleteIcon/></button>
  </details>
  </div>;})}
  {edge&&<button aria-label={'Add action to connection '+edge.responseCondition} disabled={operations.length>=30||node.tests.length>=600} onClick={()=>perform(()=>addAction(screenId,edge.id))}>Add action</button>}
@@ -375,7 +405,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  async function image(screenId:string,file?:File){if(!graph||!file)return;try{if(!['image/png','image/jpeg'].includes(file.type)||file.size>250_000)throw new Error('Use a PNG/JPEG reference up to 250 KB.');const data=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error('Reference image could not be read.'));reader.readAsDataURL(file);});const latest=currentGraph.current;if(!latest||!latest.screens.some(item=>item.id===screenId))return;onChange({...latest,screens:latest.screens.map(item=>item.id===screenId?{...item,referenceScreenshot:data}:item)});setError('');}catch(error){setError((error as Error).message);}}
  const selectedOperationIds=graph&&path?.screenId?new Set(routeVisits(graph,path).flatMap((_visit,index)=>visitOperations(graph!,path,index))):undefined;
  const boardGraph=graph&&scenarioMode&&scenarioId?{...graph,screens:graph.screens.map(screen=>({...screen,tests:screen.tests.filter(test=>!isAuthored(test)||(selectedOperationIds?selectedOperationIds.has(test.id):visibleOperation(test)))}))}:graph;
- const visibleDiagnostics=diagnostics.filter(item=>!scenarioMode||!scenarioId||['yaml','flows','automation',pathId].includes(item.ownerId)||graph?.screens.some(screen=>screen.id===item.ownerId||screen.tests.some(test=>test.id===item.ownerId&&visibleOperation(test)))||path?.edgeIds.includes(item.ownerId));
+ const visibleDiagnostics=liveDiagnostics.filter(item=>!scenarioMode||!scenarioId||['yaml','flows','automation',pathId].includes(item.ownerId)||graph?.screens.some(screen=>screen.id===item.ownerId||screen.tests.some(test=>test.id===item.ownerId&&visibleOperation(test)))||path?.edgeIds.includes(item.ownerId));
  return <section className="canvas-editor" aria-labelledby="canvas-heading"><div className="label-row"><div><h2 id="canvas-heading">Screen test canvas</h2><p className="field-hint">Add nodes on the canvas. Select a node, or press Enter on it, to edit its actions and checks in the inspector. Right-click a node for info.</p></div>{!scenarioMode&&<button className="confirm" disabled={disabled} onClick={()=>{onChange(graph?undefined:emptyCanvas());onPathChange('');}}>{graph?'Disable canvas':'Create screen canvas'}</button>}</div>
  {graph&&<>
  {Boolean(testLabel||from||to||action||assertion||condition||pathName||nextEdge)&&<button onClick={()=>{setTestLabel('');setFrom('');setTo('');setAction('');setAssertion('');setCondition('');setPathName('');setNextEdge('');}}>Cancel canvas drafts</button>}
