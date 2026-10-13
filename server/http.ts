@@ -1,4 +1,4 @@
-import {DraftConflict,WorkspaceConflict,WorkspacePayloadTooLarge} from './workspace-store.js';
+import { DraftConflict, WorkspaceConflict, WorkspacePayloadTooLarge } from './workspace-store.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -6,9 +6,7 @@ import { join } from 'node:path';
 import type { createRunner } from './runner.js';
 import type { createScenarios } from './scenarios.js';
 
-export function createApiHandler(runner: ReturnType<typeof createRunner>, artifactDirectory: string,
-  fallback?: (request: IncomingMessage, response: ServerResponse) => void,
-  scenarios?: ReturnType<typeof createScenarios>) {
+export function createApiHandler(runner: ReturnType<typeof createRunner>, artifactDirectory: string, fallback?: (request: IncomingMessage, response: ServerResponse) => void, scenarios?: ReturnType<typeof createScenarios>) {
   const token = randomBytes(32).toString('hex');
   let launching = false;
   return async (request: IncomingMessage, response: ServerResponse) => {
@@ -22,16 +20,22 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
     if (request.headers.origin && request.headers.origin !== `http://${host}`) return json(403, { error: 'This origin cannot access the local runner.' });
     if (request.headers['sec-fetch-site'] === 'cross-site') return json(403, { error: 'Cross-site requests are not allowed.' });
     let url: URL;
-    try { url = new URL(request.url ?? '/', `http://${host}`); }
-    catch { return json(400, { error: 'Invalid request URL.' }); }
+    try {
+      url = new URL(request.url ?? '/', `http://${host}`);
+    } catch {
+      return json(400, { error: 'Invalid request URL.' });
+    }
     if (!url.pathname.startsWith('/api/')) {
       if (fallback) return fallback(request, response);
       return json(404, { error: 'Not found.' });
     }
     try {
       if (request.method === 'GET' && url.pathname === '/api/status') {
-        try { return json(200, { ready: true, devices: await runner.devices(), token, tool: 'Xcode simctl', node: process.version }); }
-        catch (error) { return json(200, { ready: false, devices: [], token, tool: 'Xcode simctl', error: message(error) }); }
+        try {
+          return json(200, { ready: true, devices: await runner.devices(), token, tool: 'Xcode simctl', node: process.version });
+        } catch (error) {
+          return json(200, { ready: false, devices: [], token, tool: 'Xcode simctl', error: message(error) });
+        }
       }
       if (request.headers['x-tnt-token'] !== token) return json(403, { error: 'Refresh the workbench to establish a runner session.' });
       if (request.method === 'POST' && request.headers.origin !== `http://${host}`) return json(403, { error: 'A same-origin workbench request is required.' });
@@ -45,7 +49,11 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         const input = await readJson(request);
         const step = runner.picker.buildStep(input);
         const release = await runner.acquireDevice(input.deviceId, input.captureId, step.reviewId);
-        try { return json(200, step); } finally { await release(); }
+        try {
+          return json(200, step);
+        } finally {
+          await release();
+        }
       }
       const capture = /^\/api\/picker\/captures\/([0-9a-f-]{36})\/screen$/.exec(url.pathname);
       if (request.method === 'GET' && capture) {
@@ -57,22 +65,25 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         if (request.method === 'POST' && url.pathname === '/api/canvas/references') return json(200, await scenarios.references(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/automation/preview') return json(200, await scenarios.preview(await readJson(request)));
         if (request.method === 'GET' && url.pathname === '/api/session') return json(200, await scenarios.session());
-        if (request.method === 'POST' && url.pathname === '/api/session') return json(200, await scenarios.setSession((await readJson(request)).lastActiveId??null));
+        if (request.method === 'POST' && url.pathname === '/api/session') return json(200, await scenarios.setSession((await readJson(request)).lastActiveId ?? null));
         if (request.method === 'POST' && url.pathname === '/api/workspaces') return json(200, await scenarios.save(await readJson(request)));
-        if (request.method === 'GET' && url.pathname === '/api/workspaces') return json(200, await scenarios.listWorkspaces(url.searchParams.get('q')??''));
+        if (request.method === 'GET' && url.pathname === '/api/workspaces') return json(200, await scenarios.listWorkspaces(url.searchParams.get('q') ?? ''));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/export') return json(200, await scenarios.exportWorkspace(await readJson(request)));
-        if (request.method === 'POST' && url.pathname === '/api/workspaces/import/review') return json(200, await scenarios.reviewWorkspacePackage(await readJson(request,2_300_000)));
-        if (request.method === 'POST' && url.pathname === '/api/workspaces/import') return json(200, await scenarios.importWorkspace(await readJson(request,2_300_000)));
+        if (request.method === 'POST' && url.pathname === '/api/workspaces/import/review') return json(200, await scenarios.reviewWorkspacePackage(await readJson(request, 2_300_000)));
+        if (request.method === 'POST' && url.pathname === '/api/workspaces/import') return json(200, await scenarios.importWorkspace(await readJson(request, 2_300_000)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/copy') return json(200, await scenarios.copyWorkspace(await readJson(request)));
-        if (request.method === 'POST' && url.pathname === '/api/workspaces/draft') return json(200, await scenarios.createDraftWorkspace(await readJson(request,17_000_000)));
+        if (request.method === 'POST' && url.pathname === '/api/workspaces/draft') return json(200, await scenarios.createDraftWorkspace(await readJson(request, 17_000_000)));
         const draftDiscard = /^\/api\/workspaces\/([0-9a-f-]{36})\/draft\/discard$/.exec(url.pathname);
-        if (request.method === 'POST' && draftDiscard) return json(200, await scenarios.discardDraft(draftDiscard[1],(await readJson(request)).expectedDraftRevision));
+        if (request.method === 'POST' && draftDiscard) return json(200, await scenarios.discardDraft(draftDiscard[1], (await readJson(request)).expectedDraftRevision));
         const draft = /^\/api\/workspaces\/([0-9a-f-]{36})\/draft$/.exec(url.pathname);
-        if (request.method === 'POST' && draft) return json(200, await scenarios.saveDraft(draft[1],await readJson(request,17_000_000)));
+        if (request.method === 'POST' && draft) return json(200, await scenarios.saveDraft(draft[1], await readJson(request, 17_000_000)));
         const view = /^\/api\/workspaces\/([0-9a-f-]{36})\/view$/.exec(url.pathname);
-        if (request.method === 'POST' && view) return json(200, await scenarios.saveView(view[1],await readJson(request,80_000)));
+        if (request.method === 'POST' && view) return json(200, await scenarios.saveView(view[1], await readJson(request, 80_000)));
         const management = /^\/api\/workspaces\/([0-9a-f-]{36})\/(open|rename)$/.exec(url.pathname);
-        if(request.method==='POST' && management){const input=await readJson(request);return json(200,management[2]==='open'?await scenarios.openWorkspace(management[1]):await scenarios.renameWorkspace(management[1],input.name,input.expectedRevision));}
+        if (request.method === 'POST' && management) {
+          const input = await readJson(request);
+          return json(200, management[2] === 'open' ? await scenarios.openWorkspace(management[1]) : await scenarios.renameWorkspace(management[1], input.name, input.expectedRevision));
+        }
         const workspace = /^\/api\/workspaces\/([0-9a-f-]{36})$/.exec(url.pathname);
         if (request.method === 'GET' && workspace) return json(200, await scenarios.workspaceDetail(workspace[1]));
         if (request.method === 'POST' && url.pathname === '/api/batches') return json(202, await scenarios.startBatch(await readJson(request)));
@@ -106,7 +117,9 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
           const input: unknown = JSON.parse(body);
           if (!input || typeof input !== 'object' || !('deviceId' in input) || !('bundleId' in input) || typeof input.deviceId !== 'string' || typeof input.bundleId !== 'string') return json(400, { error: 'Provide a device and valid bundle identifier.' });
           return json(200, await runner.launch({ deviceId: input.deviceId, bundleId: input.bundleId }));
-        } finally { launching = false; }
+        } finally {
+          launching = false;
+        }
       }
       const match = /^\/api\/launches\/([0-9a-f-]{36})(?:\/(screen|confirm))?$/.exec(url.pathname);
       if (match) {
@@ -124,17 +137,22 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       return json(404, { error: 'Unknown runner operation.' });
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      return json(error instanceof WorkspacePayloadTooLarge?413:error instanceof WorkspaceConflict||error instanceof DraftConflict?409:code === 'ENOENT' ? 404 : 400, { error: message(error) });
+      return json(error instanceof WorkspacePayloadTooLarge ? 413 : error instanceof WorkspaceConflict || error instanceof DraftConflict ? 409 : code === 'ENOENT' ? 404 : 400, { error: message(error) });
     }
   };
 }
 
 async function readJson(request: IncomingMessage, limit = 1_100_000) {
   let body = '';
-  for await (const chunk of request) { body += chunk.toString(); if (Buffer.byteLength(body) > limit) throw limit === 1_100_000 ? new Error('Scenario request exceeds 1.1 MB.') : new WorkspacePayloadTooLarge(limit > 1_000_000 ? 'Draft exceeds the supported size.' : 'View preferences exceed the supported size.'); }
+  for await (const chunk of request) {
+    body += chunk.toString();
+    if (Buffer.byteLength(body) > limit) throw limit === 1_100_000 ? new Error('Scenario request exceeds 1.1 MB.') : new WorkspacePayloadTooLarge(limit > 1_000_000 ? 'Draft exceeds the supported size.' : 'View preferences exceed the supported size.');
+  }
   const value = JSON.parse(body);
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Provide a JSON object.');
   return value;
 }
 
-function message(error: unknown) { return error instanceof Error ? error.message : 'Runner operation failed.'; }
+function message(error: unknown) {
+  return error instanceof Error ? error.message : 'Runner operation failed.';
+}

@@ -37,11 +37,11 @@ A separate controlled simulator app, `com.example.TnTCanvasAPIProof`, was compil
 
 Verified on the prepared iPhone 15 / iOS 17 simulator with Maestro 2.11.0:
 
-| Proof | Run | Result |
-| --- | --- | --- |
-| Maintenance, HTTP 500 | `888dcf32-6484-4bea-b148-13c37e1c0fdc` | Setup, notice handler, action, destination assertion and selected edge passed; Success remained unavailable. |
-| Success, HTTP 200 | `f8ea23e7-50b5-4d59-959d-2da4b2ea003c` | Selected Success route passed; Maintenance remained unavailable. |
-| Maintenance selected, HTTP 200 returned | `7c427f71-1bc1-4d7a-9025-d0661e8eacc3` | Destination assertion failed; no switch to the Success branch. |
+| Proof                                   | Run                                    | Result                                                                                                       |
+| --------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Maintenance, HTTP 500                   | `888dcf32-6484-4bea-b148-13c37e1c0fdc` | Setup, notice handler, action, destination assertion and selected edge passed; Success remained unavailable. |
+| Success, HTTP 200                       | `f8ea23e7-50b5-4d59-959d-2da4b2ea003c` | Selected Success route passed; Maintenance remained unavailable.                                             |
+| Maintenance selected, HTTP 200 returned | `7c427f71-1bc1-4d7a-9025-d0661e8eacc3` | Destination assertion failed; no switch to the Success branch.                                               |
 
 Changing the shared maintenance assertion produced a stale-reference diagnostic and rejected execution before launch; restoring the saved definition repaired it. Native process cleanup and owned Mockoon environment/process cleanup were verified for each run. App data was intentionally not restored.
 
