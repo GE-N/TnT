@@ -35,3 +35,21 @@ export async function inspected(document:Document,title:string,visit?:number){aw
 /** Names the screen whose inspector holds a screen-specific button, such as "Add check to Home". */
 export function inspectorOwner(label:string){return /^Use (.+) as scenario start$/.exec(label)?.[1]??/^Add (?:action|check) to (?!connection )(.+)$/.exec(label)?.[1];}
 export function singleWorkspaceLibrary(workspace:{id:string;name:string}){return {items:[{id:workspace.id,name:workspace.name,createdAt:'2026-10-12T00:00:00.000Z',updatedAt:'2026-10-12T00:00:00.000Z',openedAt:'2026-10-12T00:00:00.000Z',screens:1,scenarios:1,revision:1}],unreadable:0};}
+/** Use the visit menu, rather than the removed visit-specific Add action/check buttons. */
+export async function addVisitStep(document:Document,label:string,scope:ParentNode=document){
+ const match=/^Add (action|check) to (?!connection )(.+)$/.exec(label);if(!match)return false;
+ const trigger=scope.querySelector<HTMLButtonElement>('.add-visit-step');if(!trigger)return false;
+ await act(async()=>trigger.click());
+ const command=match[1]==='action'?'Tap':'assertVisible';
+ const option=[...document.querySelectorAll<HTMLButtonElement>('[role=option]')].find(item=>item.textContent===command);assert.ok(option,command);
+ await act(async()=>option.click());return true;
+}
+/** Open a summary before addressing its inline field. */
+export async function editVisitField(document:Document,label:string,scope:ParentNode=document){
+ const field=scope.querySelector<HTMLElement>('[aria-label="'+label+'"]');const row=field?.closest('.visit-step');
+ const summary=row?.querySelector<HTMLButtonElement>('.visit-step-summary');if(summary?.getAttribute('aria-expanded')==='false')await act(async()=>summary.click());
+}
+export async function commitVisitEdits(document:Document){
+ const row=document.querySelector('.visit-step-summary[aria-expanded=true]')?.closest('.visit-step');
+ const done=[...row?.querySelectorAll<HTMLButtonElement>('button')??[]].find(button=>button.textContent==='Done');if(done)await act(async()=>done.click());
+}

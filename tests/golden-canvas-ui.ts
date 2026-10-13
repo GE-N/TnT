@@ -1,3 +1,4 @@
+import {commitVisitEdits} from './workspace-ui-helpers.js';
 import {act,createElement} from 'react';
 import {JSDOM} from 'jsdom';
 import type {CanvasGraph} from '../server/canvas.js';
@@ -21,6 +22,9 @@ async function click(document:Document,label:string){
 }
 
 async function chooseDestination(document:Document,actionId:string,screenId:string,visitId?:string){
+  const scope=visitId?document.querySelector<HTMLElement>(`[data-visit-id="${visitId}"]`):document;
+  const summary=scope?.querySelector<HTMLButtonElement>(`[data-operation-id="${actionId}"] .visit-step-summary`);
+  if(summary?.getAttribute('aria-expanded')==='false')await act(async()=>summary.click());
   await act(async()=>{
     const scope=visitId?document.querySelector<HTMLElement>(`[data-visit-id="${visitId}"]`):document;
     const row=scope?.querySelector<HTMLElement>(`[data-operation-id="${actionId}"]`);
@@ -29,6 +33,7 @@ async function chooseDestination(document:Document,actionId:string,screenId:stri
     Object.getOwnPropertyDescriptor(document.defaultView!.HTMLSelectElement.prototype,'value')!.set!.call(select,screenId);
     select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));
   });
+  await commitVisitEdits(document);
 }
 
 async function confirmDeletion(document:Document){
@@ -37,6 +42,9 @@ async function confirmDeletion(document:Document){
 }
 
 async function editSelector(document:Document,actionId:string,value:string,visitId?:string){
+  const scope=visitId?document.querySelector<HTMLElement>(`[data-visit-id="${visitId}"]`):document;
+  const summary=scope?.querySelector<HTMLButtonElement>(`[data-operation-id="${actionId}"] .visit-step-summary`);
+  if(summary?.getAttribute('aria-expanded')==='false')await act(async()=>summary.click());
   await act(async()=>{
     const scope=visitId?document.querySelector<HTMLElement>(`[data-visit-id="${visitId}"]`):document;
     const input=scope?.querySelector<HTMLInputElement>(`[data-operation-id="${actionId}"] input[aria-label$=" selector"], [data-operation-id="${actionId}"] input[aria-label$=" text"]`);
@@ -45,6 +53,7 @@ async function editSelector(document:Document,actionId:string,value:string,visit
     Object.getOwnPropertyDescriptor(prototype,'value')!.set!.call(input,value);
     input.dispatchEvent(new document.defaultView!.Event('input',{bubbles:true}));
   });
+  await commitVisitEdits(document);
 }
 
 async function perform(document:Document,script:GoldenScript,graph:()=>CanvasGraph){
@@ -164,10 +173,12 @@ export async function runUi(fixture:GoldenFixture):Promise<GoldenSnapshot>{
       const baseline=captureState({graph:current.canvas,yaml:current.yaml},fixture);
       const operations:GoldenSnapshot['operations']=[];
       for(const script of fixture.scripts){
-        latest=undefined;
+        const unchangedDestination=(script.op==='retarget'||script.op==='connect')&&current.canvas.edges.some(edge=>edge.to===script.to&&(edge.actionTestIds??[edge.actionTestId]).includes(script.actionId));
+        if(!unchangedDestination)latest=undefined;
         const savesAtStart=saveEpoch;
         await perform(document,script,()=>current.canvas);
-        current=await published(savesAtStart);
+        current=await published(unchangedDestination?undefined:savesAtStart);
+        if(unchangedDestination&&saveEpoch!==savesAtStart)throw new Error('Unchanged destination unexpectedly saved a graph mutation.');
         operations.push({op:script.op,detail:script,result:captureState({graph:current.canvas,yaml:current.yaml},fixture)});
       }
       return {fixture:fixture.id,description:fixture.description,baseline,operations};
