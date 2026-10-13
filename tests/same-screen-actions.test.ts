@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import type {CanvasGraph,CanvasTest} from '../server/canvas.js';
-import {edgeActions,privateVisitOperation,visitOperations} from '../shared/canvas-authoring.js';
+import {inspectCanvas,type CanvasGraph,type CanvasTest} from '../server/canvas.js';
+import {edgeActions,privateVisitOperation,visitOperations,writeChecks} from '../shared/canvas-authoring.js';
 
 const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
 const scenarioIds=['scenario-a','scenario-b'];
@@ -30,4 +30,15 @@ test('editing a shared navigating action still attaches the copy to the outgoing
  const copied=privateVisitOperation(structuredClone(graph),'path-a','a-home','open-detail');
  assert.deepEqual(edgeActions(copied.graph.edges[0]),['open-detail',copied.testId]);
  assert.deepEqual(visitOperations(copied.graph,copied.graph.paths[0],0),['show-error',copied.testId]);
+});
+
+test('a visit action that navigates through a different connection from the same screen is still rejected',()=>{
+ const sibling:CanvasGraph={...structuredClone(graph),
+  screens:[...structuredClone(graph.screens),{id:'more',title:'More',x:420,y:320,tests:[]}],
+  edges:[...structuredClone(graph.edges),{id:'go-more',from:'home',to:'more',actionTestId:'show-error',actionTestIds:['show-error'],assertionTestId:'pending:go-more',responseCondition:'Home → More'}],
+ };
+ const yaml=writeChecks('appId: com.example.App\n---\n- launchApp\n',{screens:[],edges:[],paths:[]},sibling);
+ const rejected=inspectCanvas(sibling,yaml).diagnostics.filter(item=>item.ownerId==='path-a'&&item.visitId==='a-home');
+ assert.deepEqual(rejected.map(item=>item.detail),['Choose a destination for each action in Visit 1 that continues its sequence.']);
+ assert.equal(inspectCanvas(graph,writeChecks('appId: com.example.App\n---\n- launchApp\n',{screens:[],edges:[],paths:[]},graph)).diagnostics.some(item=>item.visitId==='a-home'),false);
 });
