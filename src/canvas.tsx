@@ -2,7 +2,7 @@ import {appendVisitStep,isCommittableSelector,moveAboveNavigation} from './inspe
 import {AddStepMenu,VisitStep} from './visit-steps.js';
 import {RecoveredFields,useWorkspaceDraft} from './workspace-drafts.js';
 import {planCanvasDeletion,type CanvasDeletion,connectVisitAction,connectionVisitActions,freezeVisitOperations,visitOperations,updateVisitOperations,privateVisitOperation,refreshChecks,writeChecks,backControl,canvasTestLabel,connectCanvasAction,appendCanvasConnection,edgeActions,routeVisits,visitChecks,visitScreenId,screenChecks,appendRouteTransition,isAuthored,type ScreenCheck} from '../shared/canvas-authoring.js';
-import {useContext,useEffect,useId,useLayoutEffect,useRef,useState,type ReactNode,type MouseEvent} from 'react';
+import {useContext,useEffect,useId,useLayoutEffect,useRef,useState,type ReactNode,type MouseEvent,type CSSProperties} from 'react';
 import type {YAMLReference,CanvasGraph,CanvasTest,CanvasDiagnostic,CanvasResult,CatalogEntry,ScreenNode} from '../server/canvas.js';
 import {inspectorWidth,placeInspector,visibleBounds,type InspectorPlacement,type Rect} from './inspector-placement.js';
 
@@ -108,22 +108,24 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  useEffect(()=>{
   if(!inspected)return;
   const update=()=>relayout(value=>value+1);
-  window.addEventListener('resize',update);window.addEventListener('scroll',update,true);
+  window.addEventListener('resize',update);window.addEventListener('scroll',update,true);document.addEventListener('toggle',update,true);
   const observer=typeof ResizeObserver==='undefined'?undefined:new ResizeObserver(update);if(card.current)observer?.observe(card.current);
-  return()=>{window.removeEventListener('resize',update);window.removeEventListener('scroll',update,true);observer?.disconnect();};
+  return()=>{window.removeEventListener('resize',update);window.removeEventListener('scroll',update,true);document.removeEventListener('toggle',update,true);observer?.disconnect();};
  },[inspected?.id]);
  useLayoutEffect(()=>{
   const node=inspected&&screenElement(inspected.id);
   if(!inspected||!node||!card.current||!viewportRef.current){setPlacement(undefined);return;}
   const bounds=visibleBounds(rectOf(viewportRef.current),{width:window.innerWidth,height:window.innerHeight});
+  if(viewportRef.current.closest('.workbench')){const bottom=Math.min(bounds.top+bounds.height,window.innerHeight-88);bounds.top=Math.max(bounds.top,156);bounds.height=Math.max(0,bottom-bounds.top);}
   const rects=(elements:Element[])=>elements.map(rectOf).filter(rect=>rect.width>0&&rect.height>0);
+  const controls=rects(Array.from(document.querySelectorAll('.workbench .device-toolbar[open],.workbench .scenario-controls[open],.workbench .workspace-advanced[open],.workbench .report-tools[open],.workbench .launch-tools[open],.workbench .workspace-management-surface')));
   const edges=Array.from(surface.current!.querySelectorAll<SVGGElement>('[data-edge-id]'));const highlightedEdge=edges.find(edge=>edge.dataset.highlighted==='true');
   const origin=rectOf(surface.current!);const line=highlightedEdge?.querySelector('path');
   const segment=line&&typeof line.getTotalLength==='function'?Array.from({length:17},(_,index)=>line.getPointAtLength(line.getTotalLength()*index/16)).map(point=>({left:origin.left+point.x*zoom-4,top:origin.top+point.y*zoom-4,width:8,height:8})):[];
   const next=placeInspector({anchor:rectOf(node),size:{width:inspectorWidth,height:card.current.scrollHeight},bounds,
    screens:rects(Array.from(surface.current!.querySelectorAll('[data-screen-id]')).filter(item=>item!==node)),
    labels:rects(edges.filter(edge=>edge!==highlightedEdge).flatMap(edge=>Array.from(edge.querySelectorAll('.transition-label')))),
-   highlighted:[...rects(Array.from(highlightedEdge?.querySelectorAll('.transition-label')??[])),...segment]});
+   highlighted:[...controls,...rects(Array.from(highlightedEdge?.querySelectorAll('.transition-label')??[])),...segment]});
   setPlacement(previous=>previous&&previous.left===next.left&&previous.top===next.top&&previous.maxHeight===next.maxHeight&&previous.side===next.side&&previous.clamped===next.clamped?previous:next);
  });
  useEffect(()=>{
@@ -136,8 +138,8 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   onCloseInspector?.();
   (node?.tabIndex===0?node:node?.querySelector<HTMLElement>('.screen-node-heading'))?.focus();
  }
- return <div className="canvas-board-wrap"><div className="canvas-toolbar"><span>Drag screen headers · scroll to pan{onAdd&&' · Right-click for node options'}</span><button onClick={()=>setZoom(value=>Math.max(.4,value-.1))} aria-label="Zoom out">−</button><span>{Math.round(zoom*100)}%</span><button onClick={()=>setZoom(value=>Math.min(1.4,value+.1))} aria-label="Zoom in">+</button><button onClick={()=>setZoom(.85)}>Reset zoom</button></div>
- <div className="canvas-viewport" ref={viewportRef} onScroll={event=>{const node=event.currentTarget;onViewportChange?.({zoom,scrollLeft:node.scrollLeft,scrollTop:node.scrollTop});}} role="region" aria-label={result?'Executed screen canvas':'Screen test canvas'}><div style={{width:2700*zoom,height:boardHeight*zoom}}><div className="canvas-surface" tabIndex={onAdd||onRun?0:undefined} onContextMenu={event=>openMenu(event)} ref={surface} style={{height:boardHeight,transform:`scale(${zoom})`}}>
+ return <div className="canvas-board-wrap"><div className="canvas-toolbar" role="toolbar" aria-label="Canvas zoom"><span>Drag screen headers · scroll to pan{onAdd&&' · Right-click for node options'}</span><button onClick={()=>setZoom(value=>Math.max(.4,value-.1))} aria-label="Zoom out">−</button><span>{Math.round(zoom*100)}%</span><button onClick={()=>setZoom(value=>Math.min(1.4,value+.1))} aria-label="Zoom in">+</button><button onClick={()=>setZoom(.85)}>Reset zoom</button></div>
+ <div className="canvas-viewport" ref={viewportRef} onScroll={event=>{const node=event.currentTarget;onViewportChange?.({zoom,scrollLeft:node.scrollLeft,scrollTop:node.scrollTop});}} role="region" aria-label={result?'Executed screen canvas':'Screen test canvas'}><div style={{width:2700*zoom,height:boardHeight*zoom}}><div className="canvas-surface" tabIndex={onAdd||onRun?0:undefined} onContextMenu={event=>openMenu(event)} ref={surface} style={{height:boardHeight,transform:`scale(${zoom})`,'--canvas-zoom':zoom} as CSSProperties}>
  <svg className="canvas-lines" width="2700" height={boardHeight} aria-label="Screen transitions"><defs><marker id={marker} viewBox="0 0 8 8" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" refX="7" refY="4" orient="auto"><path d="M1,1 L7,4 L1,7" fill="none" stroke="context-stroke" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/></marker></defs>{graph.edges.map(edge=>{
  const from=graph.screens.find(screen=>screen.id===edge.from);const to=graph.screens.find(screen=>screen.id===edge.to);if(!from||!to)return null;
  const parallel=graph.edges.filter(item=>item.from===edge.from&&item.to===edge.to||item.from===edge.to&&item.to===edge.from);const offset=parallel.indexOf(edge)*64;const forward=to.x>=from.x;const start=[from.x+(forward?258:-8),from.y+58+offset];const end=[to.x+(forward?-8:258),to.y+58+offset];const middle=(start[0]+end[0])/2;const status=result?.edges.find(item=>item.id===edge.id)?.status;
@@ -149,10 +151,11 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   if(event.key==='Enter'&&onSelect){event.preventDefault();focusInspector.current=screen.id;onSelect(screen.id);if(selected===screen.id)relayout(value=>value+1);}
   if(event.key==='Escape'&&inspected?.id===screen.id){event.preventDefault();closeInspector();}
  }}>
- <button className="screen-node-heading" aria-label={'Select screen '+screen.title} onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>{if(!onMove||event.button!==0)return;event.currentTarget.setPointerCapture(event.pointerId);drag.current={id:screen.id,x:screen.x,y:screen.y,clientX:event.clientX,clientY:event.clientY};}} onPointerMove={event=>{const current=drag.current;if(!current||current.id!==screen.id)return;onMove?.(screen.id,Math.max(0,Math.min(2400,current.x+(event.clientX-current.clientX)/zoom)),Math.max(0,Math.min(1400,current.y+(event.clientY-current.clientY)/zoom)));}} onPointerUp={()=>{drag.current=undefined;}} onPointerCancel={()=>{drag.current=undefined;}} onKeyDown={event=>{const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const direction=vectors[event.key];if(!direction||!onMove)return;event.preventDefault();const amount=event.shiftKey?40:10;onMove(screen.id,Math.max(0,Math.min(2400,screen.x+direction[0]*amount)),Math.max(0,Math.min(1400,screen.y+direction[1]*amount)));}}><span className="screen-icon">▣</span><span><span className={onRename?'screen-title-placeholder':undefined}>{screen.title}</span><small>{screen.tests.length} {screen.tests.length===1?'step':'steps'}</small></span><span className="node-handle"/></button>
+ <button className="screen-node-heading" aria-label={'Select screen '+screen.title} onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>{if(!onMove||event.button!==0)return;event.currentTarget.setPointerCapture(event.pointerId);drag.current={id:screen.id,x:screen.x,y:screen.y,clientX:event.clientX,clientY:event.clientY};}} onPointerMove={event=>{const current=drag.current;if(!current||current.id!==screen.id)return;onMove?.(screen.id,Math.max(0,Math.min(2400,current.x+(event.clientX-current.clientX)/zoom)),Math.max(0,Math.min(1400,current.y+(event.clientY-current.clientY)/zoom)));}} onPointerUp={()=>{drag.current=undefined;}} onPointerCancel={()=>{drag.current=undefined;}} onKeyDown={event=>{const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const direction=vectors[event.key];if(!direction||!onMove)return;event.preventDefault();const amount=event.shiftKey?40:10;onMove(screen.id,Math.max(0,Math.min(2400,screen.x+direction[0]*amount)),Math.max(0,Math.min(1400,screen.y+direction[1]*amount)));}}><span className="screen-icon">▣</span><span><span className={onRename?'screen-title-placeholder':undefined}>{screen.title}</span></span><span className="node-handle"/></button>
  {onRename&&<NodeTitle screenId={screen.id} title={screen.title} onRename={title=>onRename(screen.id,title)} onSelect={()=>onSelect?.(screen.id)}/>}
  {screen.referenceScreenshot&&<img className="screen-reference" src={screen.referenceScreenshot} alt={'Reference for '+screen.title}/>}
- {result&&!selectedScreens.has(screen.id)&&<p>Outside scenario</p>}<div className="canvas-visit-numbers">{visits.map((visit,index)=>visitScreenId(graph,route!,index)===screen.id?<span key={visit.id}>Visit {index+1}</span>:null)}</div><div className="screen-test-list">{renderChecks?.(screen.id)}{screen.tests.filter(test=>!(renderChecks||renderInspector)||!isAuthored(test)).map(test=><div key={test.id} className="screen-test"><span>{canvasTestLabel(test)}<small>{test.role} · {result?(result.tests.find(item=>item.id===test.id)?.stepId?.replace(/^step-/, 'step ')??'See visit details'):referenceLabel(test.reference)}</small></span><span className={'outcome '+(result?.tests.find(item=>item.id===test.id)?.status??'unavailable')}>{result?.tests.find(item=>item.id===test.id)?.status??'linked'}</span></div>)}{!screen.tests.length&&!renderChecks&&!renderInspector&&<p>Add an action or check to this screen.</p>}</div>
+ <p className="screen-capture-label">{screen.referenceScreenshot?'✓ Captured':'No capture yet'}</p>
+ {outcome&&<p className={'node-outcome outcome '+outcome}>{outcome==='passed'?'✓':outcome==='failed'?'✕':'○'} {outcome}</p>}
  </article>;})}
  {!graph.screens.length&&<div className="canvas-empty"><h3>Build your screen map</h3><p>Add a screen and describe its checks. Screen titles are descriptive.</p></div>}
  </div></div></div>
