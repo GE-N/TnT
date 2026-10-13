@@ -702,4 +702,18 @@ test("inspector styles keep 300px width, 44px targets, 12px text and the #0a63d1
     rules.find((rule) => rule.selector === ".floating-inspector-close")!.body,
     /min-width:44px;min-height:44px/,
   );
+  // Shared 11px rules (e.g. `.canvas-navigation-actions legend`, `.outcome`) also apply inside the card.
+  const minimum = rules.find((rule) =>
+    rule.selector.startsWith(".floating-inspector .field-hint,"),
+  )!;
+  for (const selector of [
+    ".floating-inspector legend",
+    ".floating-inspector .outcome",
+  ])
+    assert.ok(
+      minimum.selector.split(",").includes(selector),
+      `${selector} is raised to 12px`,
+    );
+  assert.match(minimum.body, /font-size:12px/);
+  assert.match(css, /\.transition-label\{font:12px\/1\.5 system-ui;/);
 });

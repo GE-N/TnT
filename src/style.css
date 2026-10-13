@@ -175,7 +175,7 @@ textarea:focus{outline:1px solid var(--accent)}
 .canvas-viewport{height:580px;overflow:auto;border:1px solid var(--border);border-top:0;border-radius:0 0 9px 9px;background:var(--subtle);position:relative}
 .canvas-surface{width:2700px;height:1650px;transform-origin:0 0;position:relative;background-image:radial-gradient(var(--border-strong) 1px,transparent 1px);background-size:22px 22px}
 .canvas-lines{position:absolute;inset:0;pointer-events:none}
-.transition-label{font:11px/1.5 system-ui;background:var(--surface);color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:5px;text-align:center;overflow-wrap:anywhere;max-height:48px;overflow:auto}
+.transition-label{font:12px/1.5 system-ui;background:var(--surface);color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:5px;text-align:center;overflow-wrap:anywhere;max-height:48px;overflow:auto}
 .transition-label small{display:block;color:var(--accent)}
 .screen-node{width:250px;background:var(--surface);position:absolute;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);overflow:hidden}
 .screen-node.selected-screen{border-color:var(--accent);box-shadow:0 0 0 3px var(--selected),var(--shadow)}
@@ -398,7 +398,7 @@ textarea:focus{outline:1px solid var(--accent)}
 .floating-inspector-note{font-size:12px;color:var(--muted);margin:10px 0 0;line-height:1.5}
 .floating-inspector :focus-visible{outline:3px solid var(--inspector-highlight);outline-offset:2px}
 .floating-inspector button,.floating-inspector select,.floating-inspector input:not([type=checkbox]),.floating-inspector summary{min-height:44px;font-size:13px}
-.floating-inspector .field-hint,.floating-inspector small,.floating-inspector .unused-operations,.floating-inspector .operation-scenarios label,.floating-inspector .canvas-navigation-actions>input,.floating-inspector .canvas-delete-operation{font-size:12px}
+.floating-inspector .field-hint,.floating-inspector small,.floating-inspector .unused-operations,.floating-inspector .operation-scenarios label,.floating-inspector .canvas-navigation-actions>input,.floating-inspector .canvas-delete-operation,.floating-inspector legend,.floating-inspector .outcome{font-size:12px}
 .floating-inspector summary{display:flex;align-items:center}
 .floating-inspector .checkbox-label{min-height:44px}
 .floating-inspector .canvas-checks>button,.floating-inspector .visit-start-button,.floating-inspector .unused-operations>button{width:100%}
