@@ -132,6 +132,26 @@ test("the inspector is never wider than a narrow window", () => {
   assert.equal(placement.left, inspectorMargin);
 });
 
+for (const [name, top] of [
+  ["above", -3000],
+  ["below", 5000],
+] as const)
+  test(`with no side fitting, the fallback is clamped vertically when the screen is panned ${name}`, () => {
+    // Too narrow for either side, and the screen is too far away for below.
+    const narrow: Rect = { left: 100, top: 50, width: 400, height: 600 };
+    const placement = placeInspector({
+      anchor: node(150, top),
+      size,
+      bounds: narrow,
+    });
+    assert.equal(placement.clamped, true);
+    assert.equal(placement.left, 100 + 400 - inspectorMargin - inspectorWidth);
+    assert.equal(
+      placement.top,
+      top < 0 ? 50 + inspectorMargin : 50 + 600 - inspectorMargin - 400,
+    );
+  });
+
 test("bounds are the visible canvas, or the window when little canvas is visible", () => {
   const window = { width: 1200, height: 800 };
   assert.deepEqual(
