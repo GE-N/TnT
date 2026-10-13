@@ -697,3 +697,5 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .device-toolbar .launch-tools,.device-toolbar .launch-tools[open]{position:static;inset:auto;width:auto;max-height:none;margin:0;padding:0;border:0;border-top:1px solid var(--border);border-radius:0;box-shadow:none}
 
 .workbench .canvas-undo{position:fixed;top:156px;left:24px;z-index:8;min-height:44px;margin:0}
+
+.workbench:has(.draft-banner) .canvas-inspectors{top:320px;max-height:calc(100dvh - 408px)}
