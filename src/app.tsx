@@ -18,6 +18,16 @@ export function App() {
   const [error, setError] = useState('');
   const [result, setResult] = useState<LaunchResult>();
   const [screen, setScreen] = useState('');
+  useEffect(()=>{
+    const workbench=document.querySelector('.workbench');
+    const toggle=(event:Event)=>{
+      const opened=event.target as HTMLDetailsElement;
+      if(!workbench?.contains(opened)||!opened.open||!opened.matches('.device-toolbar,.scenario-controls,.workspace-advanced,.report-tools,.launch-tools'))return;
+      workbench.querySelectorAll<HTMLDetailsElement>('.device-toolbar,.scenario-controls,.workspace-advanced,.report-tools,.launch-tools').forEach(panel=>{if(panel!==opened)panel.open=false;});
+    };
+    document.addEventListener('toggle',toggle,true);
+    return()=>document.removeEventListener('toggle',toggle,true);
+  },[]);
 
   async function refresh() {
     setError('');

@@ -119,6 +119,12 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   if(viewportRef.current.closest('.workbench')){const bottom=Math.min(bounds.top+bounds.height,window.innerHeight-88);bounds.top=Math.max(bounds.top,156);bounds.height=Math.max(0,bottom-bounds.top);}
   const rects=(elements:Element[])=>elements.map(rectOf).filter(rect=>rect.width>0&&rect.height>0);
   const controls=rects(Array.from(document.querySelectorAll('.workbench .device-toolbar[open],.workbench .scenario-controls[open],.workbench .workspace-advanced[open],.workbench .report-tools[open],.workbench .launch-tools[open],.workbench .workspace-management-surface')));
+  for(const control of controls){
+   if(control.width<260||control.height<120||control.left+control.width<=bounds.left||control.left>=bounds.left+bounds.width)continue;
+   const leftSpace=control.left-bounds.left-12;const rightSpace=bounds.left+bounds.width-control.left-control.width-12;
+   if(rightSpace>=leftSpace&&rightSpace>=inspectorWidth+16){bounds.left=control.left+control.width+12;bounds.width=rightSpace;}
+   else if(leftSpace>=inspectorWidth+16)bounds.width=leftSpace;
+  }
   const edges=Array.from(surface.current!.querySelectorAll<SVGGElement>('[data-edge-id]'));const highlightedEdge=edges.find(edge=>edge.dataset.highlighted==='true');
   const origin=rectOf(surface.current!);const line=highlightedEdge?.querySelector('path');
   const segment=line&&typeof line.getTotalLength==='function'?Array.from({length:17},(_,index)=>line.getPointAtLength(line.getTotalLength()*index/16)).map(point=>({left:origin.left+point.x*zoom-4,top:origin.top+point.y*zoom-4,width:8,height:8})):[];

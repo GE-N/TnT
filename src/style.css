@@ -678,3 +678,6 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .workbench .transition-label,.workbench .transition-label small{font-size:calc(12px / var(--canvas-zoom,1));color:var(--muted)}
 .workbench .transition-label small{color:#0a63d1}
 .workbench .workspace-save-icon{display:inline-flex;margin-right:4px}
+
+.workbench .workspace-advanced[open]{left:24px;width:min(600px,45vw)}
+.report-tools[open],.launch-tools[open]{right:24px;width:min(600px,45vw)}
