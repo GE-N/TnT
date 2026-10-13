@@ -481,8 +481,11 @@ test("Enter on a focused screen moves focus into the card and Esc returns it to 
     const selector = page
       .card()!
       .querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;
+    await page.click(selector.closest('.visit-step')!.querySelector<HTMLButtonElement>('.visit-step-summary')!);
     selector.focus();
     assert.equal(await page.press(selector, "Escape"), true);
+    assert.ok(page.card(), "First Esc cancels inline editing");
+    assert.equal(await page.press(page.card()!, "Escape"), true);
     absent(page.card(), "Esc closes the inspector");
     same(
       page.document.activeElement,
@@ -716,4 +719,48 @@ test("inspector styles keep 300px width, 44px targets, 12px text and the #0a63d1
     );
   assert.match(minimum.body, /font-size:12px/);
   assert.match(css, /\.transition-label\{font:12px\/1\.5 system-ui;/);
+});
+
+test('visit menu filters groups, adds with arrows/Enter and restores focus on Escape',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const trigger=page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!;await page.click(trigger);
+  const input=page.document.querySelector<HTMLInputElement>('[role=combobox]')!;
+  same(page.document.activeElement,input);
+  await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,'ass');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});
+  absent(page.document.querySelector('[role=group][aria-label=Actions]'));assert.equal(page.document.querySelectorAll('[role=option]').length,2);
+  await page.press(input,'ArrowDown');await page.press(input,'Enter');
+  absent(page.document.querySelector('[role=dialog]'));const rows=page.section(1,'Home')!.querySelectorAll('.visit-step');assert.equal(rows.length,3);
+  assert.match(rows[2].querySelector('.visit-step-summary')!.textContent!,/3 assertNotVisible/);assert.match(rows[2].textContent!,/after navigation, on Profile/);
+  assert.equal(page.document.activeElement?.getAttribute('aria-label'),'Check 2 selector');
+  await page.press(page.document.activeElement!,'Escape');await page.click(trigger);await page.press(page.document.querySelector('[role=combobox]')!,'Escape');same(page.document.activeElement,trigger);assert.ok(page.card());
+ }finally{await page.close();}
+});
+
+test('inline rows commit Enter and blur, cancel Escape, and move above navigation with one Undo',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const row=page.card()!.querySelector<HTMLElement>('[data-operation-id="home-ready"]')!;
+  const summary=row.querySelector<HTMLButtonElement>('.visit-step-summary')!;
+  async function type(value:string){const input=row.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});return input;}
+  await page.click(summary);let input=await type('Saved on Enter');await page.press(input,'Enter');assert.match(summary.textContent!,/Saved on Enter/);assert.equal(summary.getAttribute('aria-expanded'),'false');
+  await page.click(summary);input=await type('Cancelled');await page.press(input,'Escape');assert.match(summary.textContent!,/Saved on Enter/);assert.doesNotMatch(summary.textContent!,/Cancelled/);
+  await page.click(summary);input=await type('Saved on blur');await act(async()=>page.heading(1,'Home').focus());assert.match(summary.textContent!,/Saved on blur/);
+  const trigger=page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!;await page.click(trigger);const combo=page.document.querySelector('[role=combobox]')!;await page.press(combo,'ArrowDown');await page.press(combo,'ArrowDown');await page.press(combo,'ArrowDown');await page.press(combo,'Enter');
+  const added=[...page.card()!.querySelectorAll<HTMLElement>('.visit-step')].at(-1)!;
+  const move=[...added.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='↑ Move above actions')!;assert.ok(move);await page.click(move);
+  assert.deepEqual([...page.card()!.querySelectorAll('.visit-step-summary')].map(node=>node.textContent?.trim().split(' ')[0]),['1','2','3']);assert.equal(added.querySelector('.navigation-hint'),null);
+  assert.match(page.card()!.querySelector('[role=status]')!.textContent!,/position 2/);
+  const undo=[...page.document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Undo canvas deletion')!;assert.ok(undo);await page.click(undo);assert.ok(added.querySelector('.navigation-hint'));
+ }finally{await page.close();}
+});
+
+test('bottom fade is shown only when the inspector content overflows',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  assert.ok(page.card()!.querySelector('.inspector-bottom-fade'));
+  Object.defineProperty(page.card()!,'clientHeight',{value:400,configurable:true});
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!);
+  absent(page.card()!.querySelector('.inspector-bottom-fade'),'Equal content/client height must not show a fade');
+ }finally{await page.close();}
 });
