@@ -1,4 +1,4 @@
-import {mkdir,open,readFile,readdir,realpath,rename,rm,stat} from 'node:fs/promises';
+import {lstat,mkdir,open,readFile,readdir,realpath,rename,rm,stat} from 'node:fs/promises';
 import type {FileHandle} from 'node:fs/promises';
 import {dirname,join,resolve,sep} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -117,8 +117,8 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   try{const dir=await open(dirname(path),'r');try{await dir.sync();}catch{/* Directory fsync is best effort, including on macOS. */}finally{await dir.close();}}catch{/* Directory fsync is best effort. */}
  }
  async function readJson(path:string,limit:number){const dates=await stat(path);if(dates.size>limit)throw new WorkspacePayloadTooLarge('Record exceeds the supported size.');return JSON.parse(await readFile(path,'utf8'));}
- async function read(id:string):Promise<Workspace>{
-  const path=await file(id);const dates=await stat(path);if(dates.size>recordLimit)throw new Error('Workspace record exceeds the supported size.');const raw=JSON.parse(await readFile(path,'utf8'));
+ async function read(id:string,recordPath?:string):Promise<Workspace>{
+  const path=recordPath??await file(id);const dates=await stat(path);if(dates.size>recordLimit)throw new Error('Workspace record exceeds the supported size.');const raw=JSON.parse(await readFile(path,'utf8'));
   if(!raw||raw.id!==id)throw new Error('Unreadable workspace identity.');
   if(raw.metadata?.revision!==undefined&&(!Number.isSafeInteger(raw.metadata.revision)||raw.metadata.revision<0))throw new Error('Unreadable workspace revision.');
   const content=readContent(raw);
@@ -230,6 +230,24 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   await rm(await contained(await workspaceDirectory(id),'draft.json',false),{force:true});
   return true;
  }
+ function summary(value:Workspace):WorkspaceSummary{return {id:value.id,name:value.name,...value.metadata!,screens:value.canvas?.screens.length??0,scenarios:value.scenarios?.length??0};}
+ async function trashBase(){
+  const path=resolve(root,'trash');await mkdir(path,{recursive:true});
+  if(!(await realpath(path)).startsWith((await realpath(root))+sep))throw new Error('Trash path escapes its root.');return path;
+ }
+ async function trashFile(id:string){
+  const parent=await trashBase();const directory=join(parent,validId(id));
+  if(!(await realpath(directory)).startsWith((await realpath(parent))+sep))throw new Error('Trash path escapes its root.');
+  return contained(directory,'workspace.json',false);
+ }
+ async function moveBundle(source:string,destination:string){
+  await rename(source,destination);
+  for(const parent of [dirname(source),dirname(destination)]){try{const handle=await open(parent,'r');try{await handle.sync();}finally{await handle.close();}}catch{/* Directory fsync is best effort on supported platforms. */}}
+ }
+ async function assertAbsent(path:string){
+  try{await lstat(path);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return;throw error;}
+  throw new Error('A workspace with this identity already exists. Keep both records intact and resolve the local identity collision before retrying.');
+ }
  return {
   read:(id:string)=>serialize(()=>read(id)),
   readDraft:(id:string)=>serialize(()=>readDraftOnce(id)),
@@ -304,25 +322,36 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
      if(!value.name.toLocaleLowerCase().includes(query.toLocaleLowerCase().trim()))continue;
      let hasDraft=false;
      try{const directory=await workspaceDirectory(entry.name);await contained(directory,'draft.json',false);hasDraft=true;}catch{/* A missing or unreadable draft does not make the workspace unreadable. */}
-     items.push({id:value.id,name:value.name,...value.metadata!,screens:value.canvas?.screens.length??0,scenarios:value.scenarios?.length??0,hasDraft});
+     items.push({...summary(value),hasDraft});
     }catch{unreadable++;}
    }
    items.sort((a,b)=>b.openedAt.localeCompare(a.openedAt)||a.id.localeCompare(b.id));return {items,unreadable};
   }),
+  listTrash:():Promise<WorkspaceLibrary>=>serialize(async()=>{
+   const items:WorkspaceSummary[]=[];let unreadable=0;const parent=await trashBase();
+   for(const entry of await readdir(parent,{withFileTypes:true})){
+    if(!/^[0-9a-f-]{36}$/.test(entry.name))continue;
+    try{const value=await read(entry.name,await trashFile(entry.name));items.push(summary(value));}catch{unreadable++;}
+   }
+   items.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)||a.id.localeCompare(b.id));return {items,unreadable};
+  }),
   trash:(id:string)=>serialize(async()=>{
-   const parent=await base();const source=join(parent,validId(id));
-   if(!(await realpath(source)).startsWith((await realpath(parent))+sep))throw new Error('Workspace path escapes its root.');
-   const trashRoot=resolve(root,'trash');await mkdir(trashRoot,{recursive:true});
-   if(!(await realpath(trashRoot)).startsWith((await realpath(root))+sep))throw new Error('Trash path escapes its root.');
-   await rename(source,join(trashRoot,validId(id)));
-   const current=await readSession();
-   if(current?.lastActiveId===id)await writeSession({lastActiveId:null,updatedAt:now(),unavailable:true});
+   const value=await read(id);const source=await workspaceDirectory(id);const destination=join(await trashBase(),validId(id));
+   await assertAbsent(destination);
+   // Advance the lifecycle revision before moving the entire recoverable bundle.
+   await write({...value,metadata:{...value.metadata!,revision:value.metadata!.revision+1}});
+   await moveBundle(source,destination);
+   try{const current=await readSession();if(current?.lastActiveId===id)await writeSession({lastActiveId:null,updatedAt:now(),unavailable:true});}catch(error){console.error('Workspace moved to Trash; session cleanup will retry on read.',error);}
+   return {id,name:value.name};
   }),
   restore:(id:string)=>serialize(async()=>{
-   const trashRoot=resolve(root,'trash');const source=join(trashRoot,validId(id));
-   if(!(await realpath(source)).startsWith((await realpath(trashRoot))+sep))throw new Error('Trash path escapes its root.');
-   const parent=await base();const destination=join(parent,validId(id));
-   await rename(source,destination);
+   const path=await trashFile(id);const value=await read(id,path);const destination=join(await base(),validId(id));
+   await assertAbsent(destination);
+   const session=await readSession();if(session?.lastActiveId===id)await writeSession({lastActiveId:null,updatedAt:now(),unavailable:true});
+   const restored={...value,metadata:{...value.metadata!,revision:value.metadata!.revision+1}};
+   await writeJson(path,{...restored,canvasDiagnostics:undefined},recordLimit,'Workspace record exceeds the supported size.');
+   await moveBundle(dirname(path),destination);
+   return restored;
   }),
   purge:(id:string)=>serialize(async()=>{
    const trashRoot=resolve(root,'trash');const target=join(trashRoot,validId(id));

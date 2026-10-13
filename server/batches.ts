@@ -15,16 +15,18 @@ type Dependencies = {
  persist:(batch:Batch)=>Promise<void>;read:(id:string)=>Promise<Batch>;
 };
 export function createBatches(dependencies:Dependencies){
+ let reservedWorkspaceId:string|undefined;
  let active:{batch:Batch;cancelled:boolean;runId?:string;done:Promise<Batch>;controller:AbortController}|undefined;
  const message=(error:unknown)=>error instanceof Error?error.message:'Batch operation failed.';
  const stopQueue=(batch:Batch,reason:string)=>{for(const entry of batch.entries)if(entry.status==='queued'){entry.status='not-run';entry.reason=reason;}};
  const service={
   get busy(){return !!active;},
+  get activeWorkspaceId(){return active?reservedWorkspaceId:undefined;},
   async start(input:BatchInput):Promise<Batch>{
    if(active)throw new Error('A scenario batch is in progress. Wait for cleanup.');
    // Reserve before the first await so simultaneous requests cannot create two queues.
    const state={controller:new AbortController(),batch:undefined as unknown as Batch,cancelled:false,runId:undefined as string|undefined,done:Promise.resolve(undefined as unknown as Batch)};
-   active=state;
+   active=state;reservedWorkspaceId=input.workspaceId;
    try{
     const workspace=structuredClone(await dependencies.workspace(input.workspaceId));
     const ids=input.scenarioIds??workspace.scenarios?.filter(item=>!item.skipInRunAll).map(item=>item.id)??[];

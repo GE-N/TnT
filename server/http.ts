@@ -71,6 +71,9 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         if (request.method === 'POST' && draft) return json(200, await scenarios.saveDraft(draft[1],await readJson(request,17_000_000)));
         const view = /^\/api\/workspaces\/([0-9a-f-]{36})\/view$/.exec(url.pathname);
         if (request.method === 'POST' && view) return json(200, await scenarios.saveView(view[1],await readJson(request,80_000)));
+        if(request.method==='GET'&&url.pathname==='/api/workspaces/trash')return json(200,await scenarios.listTrash());
+        const lifecycle=/^\/api\/workspaces\/([0-9a-f-]{36})\/(trash|restore)$/.exec(url.pathname);
+        if(request.method==='POST'&&lifecycle)return json(200,lifecycle[2]==='trash'?await scenarios.trashWorkspace(lifecycle[1]):await scenarios.restoreWorkspace(lifecycle[1]));
         const management = /^\/api\/workspaces\/([0-9a-f-]{36})\/(open|rename)$/.exec(url.pathname);
         if(request.method==='POST' && management){const input=await readJson(request);return json(200,management[2]==='open'?await scenarios.openWorkspace(management[1]):await scenarios.renameWorkspace(management[1],input.name,input.expectedRevision));}
         const workspace = /^\/api\/workspaces\/([0-9a-f-]{36})$/.exec(url.pathname);

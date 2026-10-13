@@ -13,7 +13,7 @@ import {createRunner} from '../server/runner.js';
 const yaml='appId: com.example.App\n---\n- launchApp\n';
 const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
 
-async function mount(options?:{recoverSession?:boolean;faults?:ReturnType<typeof createWriteFaults>;deviceId?:string;token?:string}){
+async function mount(options?:{afterRestore?:()=>void;recoverSession?:boolean;faults?:ReturnType<typeof createWriteFaults>;deviceId?:string;token?:string}){
  const directory=await mkdtemp(join(tmpdir(),'tnt-draft-ui-'));
  const faults=options?.faults??createWriteFaults();
  const service=createScenarios({root:directory,faults:faults.faults,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=>'2.11.0',run:async({directory:flowDirectory})=>{await writeFile(join(flowDirectory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');await writeFile(join(flowDirectory,'commands.json'),JSON.stringify([{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}}]));return {code:0,log:'Fixture',cleanup:{verified:true,detail:'Fixture process exited'}};}}});
@@ -30,7 +30,7 @@ async function mount(options?:{recoverSession?:boolean;faults?:ReturnType<typeof
   try{
    if(path==='/api/picker/captures'){if(pickerHold)await pickerHold;return Response.json({id:'cap',deviceName:'Phone',width:100,height:100,capturedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+60_000).toISOString()});}
    const body=init?.body?JSON.parse(init.body):undefined;const id=path.split('/')[3];
-   const data=path==='/api/session'?await service.session():path==='/api/workspaces/draft'&&body?await service.createDraftWorkspace(body):path==='/api/workspaces'?(body?await service.save(body):await service.listWorkspaces()):path.startsWith('/api/workspaces?q=')?await service.listWorkspaces(decodeURIComponent(path.split('q=')[1]??'')):path==='/api/workspaces/copy'?await service.copyWorkspace(body):path.endsWith('/draft/discard')?await service.discardDraft(id,body.expectedDraftRevision):path.endsWith('/draft')?await service.saveDraft(id,body):path.endsWith('/view')?await service.saveView(id,body):path.endsWith('/open')?await service.openWorkspace(id):path==='/api/canvas/references'?await service.references(body):path==='/api/runs'&&body?await service.wait((await service.start(body)).id):path.startsWith('/api/runs/')?await service.result(path.split('/')[3]):/^\/api\/workspaces\/[0-9a-f-]{36}$/.test(path)?await service.workspaceDetail(id):undefined;
+   const data=path==='/api/session'?await service.session():path==='/api/workspaces/draft'&&body?await service.createDraftWorkspace(body):path==='/api/workspaces'?(body?await service.save(body):await service.listWorkspaces()):path.startsWith('/api/workspaces?q=')?await service.listWorkspaces(decodeURIComponent(path.split('q=')[1]??'')):path==='/api/workspaces/trash'?await service.listTrash():path.endsWith('/trash')?await service.trashWorkspace(id):path.endsWith('/restore')?await service.restoreWorkspace(id).then(value=>{options?.afterRestore?.();return value;}):path==='/api/workspaces/copy'?await service.copyWorkspace(body):path.endsWith('/draft/discard')?await service.discardDraft(id,body.expectedDraftRevision):path.endsWith('/draft')?await service.saveDraft(id,body):path.endsWith('/view')?await service.saveView(id,body):path.endsWith('/open')?await service.openWorkspace(id):path==='/api/canvas/references'?await service.references(body):path==='/api/runs'&&body?await service.wait((await service.start(body)).id):path.startsWith('/api/runs/')?await service.result(path.split('/')[3]):/^\/api\/workspaces\/[0-9a-f-]{36}$/.test(path)?await service.workspaceDetail(id):undefined;
    return Response.json(data);
   }catch(error){return Response.json({error:error instanceof Error?error.message:'Request failed'},{status:error instanceof WorkspacePayloadTooLarge?413:error instanceof WorkspaceConflict||error instanceof DraftConflict?409:400});}
  };
@@ -557,5 +557,55 @@ test('beforeunload does not fire for an untouched new workspace',async()=>{
   assert.ok(status.classList.contains('muted'));
   assert.equal(status.querySelector('.workspace-save-icon')!.textContent,'…');
   assert.equal(leaveSite(page),false);
+ }finally{await page.close();}
+});
+
+test('named Delete supports Cancel, current Undo, noncurrent deletion and restart Restore without switching the editor',async()=>{
+ const page=await mount({recoverSession:true});try{
+  const first=await page.service.save({name:'Trash target',yaml});
+  await page.render();await page.click('Manage workspace');await page.click('Delete workspace');
+  assert.match(page.document.querySelector('[aria-label="Workspace manager"]')!.textContent!,/Trash target/);
+  assert.equal(page.document.activeElement?.textContent,'Cancel');
+  await page.click('Cancel');assert.equal(page.document.activeElement?.textContent,'Delete workspace');assert.equal((await page.service.listWorkspaces()).items.length,1);
+  await page.click('Delete workspace');await act(async()=>{page.document.activeElement?.dispatchEvent(new page.dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await page.settle();});assert.equal(page.document.activeElement?.textContent,'Delete workspace');
+  await page.click('Delete workspace');await page.click('Move to Trash');
+  assert.equal((await page.service.session()).lastActiveId,null);assert.equal(page.document.getElementById('scenario-yaml'),null);
+  assert.equal((await page.service.listWorkspaces()).items.length,0);
+  await page.click('Undo deletion of Trash target');
+  assert.equal((await page.service.session()).lastActiveId,first.id);assert.ok(page.document.getElementById('scenario-yaml'));
+  await page.click('Manage workspace');await page.click('Delete workspace');await page.click('Move to Trash');
+  await page.reload();await page.click('Trash');await page.click('Restore Trash target · '+first.id);
+  assert.equal((await page.service.session()).lastActiveId,null);assert.equal(page.document.getElementById('scenario-yaml'),null);
+  await page.click('View all workspaces');await page.click('Close workspace manager');await page.openNamed('Trash target');
+  const other=await page.service.save({name:'Other work',yaml});
+  await page.click('Manage workspace');await page.click('View all workspaces');await page.click('Delete Other work · '+other.id);await page.click('Move to Trash');
+  assert.match(page.document.querySelector('[aria-label="Manage workspace"]')!.textContent!,/Trash target/);assert.ok(page.document.getElementById('scenario-yaml'));
+  assert.equal((await page.service.listTrash()).items[0].id,other.id);
+  await page.click('Undo deletion of Other work');assert.match(page.document.querySelector('[aria-label="Manage workspace"]')!.textContent!,/Trash target/);
+ }finally{await page.close();}
+});
+
+test('failed Delete and Undo retain retry feedback, and a committed Restore with failed Open offers Retry Open',async()=>{
+ const faults=createWriteFaults();const page=await mount({recoverSession:true,faults,afterRestore:()=>faults.reject()});try{
+  const saved=await page.service.save({name:'Failure target',yaml});await page.render();
+  await page.click('Manage workspace');await page.click('Delete workspace');faults.reject();await page.click('Move to Trash');
+  assert.match(page.document.querySelector('[role="alert"]')!.textContent!,/Current work is retained.*Retry Move to Trash/);
+  assert.equal((await page.service.listWorkspaces()).items[0].id,saved.id);assert.ok(page.document.getElementById('scenario-yaml'));
+  faults.pass();await page.click('Move to Trash');faults.reject();await page.click('Undo deletion of Failure target');
+  await act(async()=>{await page.settle();});
+  assert.match(page.document.querySelector('[role="alert"]')!.textContent!,/Trash entry is retained.*Retry Restore/);assert.equal((await page.service.listTrash()).items[0].id,saved.id);
+  faults.pass();await page.click('Undo deletion of Failure target');await act(async()=>{await page.settle();});
+  assert.equal((await page.service.listTrash()).items.length,0);assert.equal((await page.service.listWorkspaces()).items[0].id,saved.id);
+  assert.match(page.document.querySelector('[role="alert"]')!.textContent!,/was restored, but could not be opened/);assert.equal(page.document.getElementById('scenario-yaml'),null);
+  faults.pass();await page.click('Retry Open');assert.ok(page.document.getElementById('scenario-yaml'));assert.equal((await page.service.session()).lastActiveId,saved.id);
+ }finally{faults.pass();await page.close();}
+});
+
+test('Undo after creating new unsaved work restores the deleted workspace without replacing the new editor',async()=>{
+ const page=await mount({recoverSession:true});try{
+  await page.service.save({name:'Deleted original',yaml});await page.render();await page.click('Manage workspace');await page.click('Delete workspace');await page.click('Move to Trash');
+  await page.click('New workspace');await page.fill('New workspace title','New unsaved work');await page.click('Create workspace');await page.click('New scenario');
+  await page.click('Undo deletion of Deleted original');
+  assert.match(page.document.querySelector('[aria-label="Manage workspace"]')!.textContent!,/New unsaved work/);assert.equal(page.document.querySelectorAll('.scenario-select').length,1);assert.equal((await page.service.listTrash()).items.length,0);
  }finally{await page.close();}
 });

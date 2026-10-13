@@ -27,6 +27,7 @@ test('batch freezes saved order and definitions, skips an invalid request, and c
   const batch=await service.startBatch({workspaceId:workspace.id,deviceId});await started;
   assert.deepEqual((await service.batch(batch.id)).entries.map(item=>item.status),['running','not-run','queued']);
   await assert.rejects(service.start({workspaceId:workspace.id,deviceId,scenarioId:'third'}),/batch/i);
+  await assert.rejects(service.trashWorkspace(workspace.id),/Active execution/);
   await service.save({...workspace,metadata:(await service.workspace(workspace.id)).metadata,scenarios:[{...workspace.scenarios![2],name:'Later edit'}]});release();
   const result=await service.waitBatch(batch.id);assert.equal(result.status,'completed');assert.deepEqual(result.entries.map(item=>item.status),['assertion-failed','not-run','passed']);assert.match(result.entries[1].reason!,/Draft/);
   const runs=await Promise.all(result.entries.filter(item=>item.runId).map(item=>service.result(item.runId!)));assert.deepEqual(runs.map(item=>item.snapshot.name),['first','third']);assert.notEqual(runs[0].id,runs[1].id);assert.equal(calls,2);assert.ok(runs.every(item=>item.cleanup.verified));

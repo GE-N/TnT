@@ -34,6 +34,8 @@ export type Maestro = {
 const validId = (id: string) => { if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new Error('Invalid workspace/run identifier.'); return id; };
 
 export function createScenarios(options: { root: string; runner: ReturnType<typeof createRunner>; maestro: Maestro; faults?: WorkspaceStoreFaults; now?: () => Date }) {
+  const activeWorkspaces=new Set<string>();
+  const deleting=new Set<string>();
   const pending = new Map<string, Promise<Run>>();
   const controllers = new Map<string, AbortController>();
   async function directory(kind: string, id: string) {
@@ -106,7 +108,8 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     async saveView(id:string,view:unknown){return workspaceStore.saveView(id,view);},
     async session(){return workspaceStore.session();},
     async setSession(id:string|null){return workspaceStore.setSession(id);},
-    async trashWorkspace(id:string){return workspaceStore.trash(id);},
+    async listTrash(){return workspaceStore.listTrash();},
+    async trashWorkspace(id:string){if(deleting.has(id))throw new Error('This workspace is already moving to Trash. Wait and retry.');if(activeWorkspaces.has(id)||batches.activeWorkspaceId===id)throw new Error('Active execution blocks deletion of this workspace. Wait for execution and cleanup; no run was cancelled.');deleting.add(id);try{return await workspaceStore.trash(id);}finally{deleting.delete(id);}},
     async restoreWorkspace(id:string){return workspaceStore.restore(id);},
     async purgeWorkspace(id:string){return workspaceStore.purge(id);},
     async copyWorkspace(input:Parameters<typeof authoredWorkspace>[0]){
@@ -145,9 +148,15 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     },
     async start(input: RunInput): Promise<Run> {
       if (batches.busy) throw new Error('A scenario batch is in progress. Wait for cleanup.');
+      if(deleting.has(input.workspaceId))throw new Error('This workspace is moving to Trash. Retry after deletion finishes.');
+      if(activeWorkspaces.has(input.workspaceId))throw new Error('Execution is in progress for this workspace. Wait for cleanup.');
+      activeWorkspaces.add(input.workspaceId);
+      try{
       const workspace = await service.workspace(input.workspaceId);
       if (batches.busy) throw new Error('A scenario batch is in progress. Wait for cleanup.');
-      return startWorkspace(input, workspace);
+      const run=await startWorkspace(input, workspace);
+      void service.wait(run.id).finally(()=>activeWorkspaces.delete(input.workspaceId)).catch(()=>{});return run;
+      }catch(error){activeWorkspaces.delete(input.workspaceId);throw error;}
     },
     async result(id: string): Promise<Run> { return readRecord(await directory('runs', id), 'result.json'); },
     async wait(id: string): Promise<Run> { return pending.get(id) ?? service.result(id); },
@@ -279,7 +288,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       } catch (error) { await release(); throw error; }
   }
   const batches = createBatches({
-    workspace: service.workspace, preview: service.preview,
+    workspace: async id=>{if(deleting.has(id))throw new Error('This workspace is moving to Trash. Retry after deletion finishes.');return service.workspace(id);}, preview: service.preview,
     start: startWorkspace, wait: service.wait, cancel: service.cancel,
     persist: async batch => writeRecord(join(await directory('batches', batch.id), 'result.json'), batch),
     read: async id => readRecord(await directory('batches', id), 'result.json'),
