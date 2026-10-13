@@ -218,7 +218,8 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  const screen=graph?.screens.find(screen=>screen.id===selected);const path=graph?.paths.find(path=>path.id===pathId);
  const entry=catalog[Number(referenceIndex)];
  const apiId=useId();
- const liveDiagnostics=graph?diagnostics.filter(item=>item.code!=='missing-destination'||missingDestination(item.actionId!)):diagnostics;
+ const displayDiagnostics=diagnostics.map(item=>item.code==='missing-destination'?{...item,ownerId:item.actionId,detail:`⚠ "${graph?.screens.flatMap(screen=>screen.tests).find(test=>test.id===item.actionId)?.label??item.actionId}" has no destination. Choose a screen, or set it to Stays on this screen.`}:item);
+ const liveDiagnostics=graph?displayDiagnostics.filter(item=>item.code!=='missing-destination'||missingDestination(item.actionId!)):displayDiagnostics;
  const seenPath=useRef(pathId);
  useEffect(()=>{if(seenPath.current===pathId)return;seenPath.current=pathId;setNewStep(undefined);setSelectedVisit('');setSelected('');setRepairTarget(undefined);},[pathId]);
  useEffect(()=>{
@@ -230,7 +231,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   target?.scrollIntoView?.({block:'nearest'});
   (target?.querySelector<HTMLElement>('input[aria-label$=" selector"]')??target?.querySelector<HTMLElement>('.visit-step-repair button,button[aria-label$=" as scenario start"]')??target?.querySelector<HTMLElement>('button,select'))?.focus();
  },[repairTarget,selected]);
- function repairDiagnostic({ownerId,visitId}:CanvasDiagnostic){
+ function repairDiagnostic({ownerId,visitId}:{ownerId:string;visitId?:string}){
   const edge=graph?.edges.find(edge=>edge.id===ownerId);
   const node=graph?.screens.find(screen=>screen.id===ownerId||screen.tests.some(test=>test.id===ownerId||edge&&edgeActions(edge).includes(test.id)));
   const test=node?.tests.find(test=>test.id===ownerId)??node?.tests.find(test=>edge&&edgeActions(edge).includes(test.id));
@@ -495,7 +496,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  <details open={!scenarioMode}><summary>Advanced associations</summary><label htmlFor={apiId+'-repair'}>Associated test to repair</label><select id={apiId+'-repair'} value={repairTest} onChange={event=>{setRepairTest(event.target.value);const test=screen.tests.find(test=>test.id===event.target.value);if(test){setTestLabel(test.label);setRole(test.role);}setReferenceIndex('');}}><option value="">Add a new association</option>{screen.tests.map(test=><option key={test.id} value={test.id}>{canvasTestLabel(test)}</option>)}</select>
  <label htmlFor={apiId+'-test-label'}>Test label</label><input id={apiId+'-test-label'} value={testLabel} onChange={event=>setTestLabel(event.target.value)} maxLength={120}/><label htmlFor={apiId+'-role'}>Test role</label><select id={apiId+'-role'} value={role} onChange={event=>setRole(event.target.value as CanvasTest['role'])}><option value="test">Test</option><option value="action">Triggering action</option><option value="assertion">Destination / shared assertion</option><option value="setup">Setup reference</option><option value="handler">Handler reference</option></select>
  <label htmlFor={apiId+'-yaml-reference'}>Executable YAML reference</label><select id={apiId+'-yaml-reference'} value={referenceIndex} onChange={event=>{setReferenceIndex(event.target.value);const chosen=catalog[Number(event.target.value)];if(chosen?.kind==='setup')setRole('setup');if(chosen?.kind==='handler')setRole('handler');}}><option value="">Choose an explicit command or reusable flow</option>{catalog.map((entry,index)=><option key={entry.kind+entry.file+(entry.index??'')+(entry.actionId??'')} value={index}>{entry.label}{entry.assertion?' · assertion':''}</option>)}</select>{referenceIndex!==''&&entry&&<pre>{entry.preview}</pre>}<button className="confirm" onClick={()=>perform(associate)}>{repairTest?'Explicitly relink test':'Associate test'}</button>
- <details><summary>Discover this screen’s reusable tests</summary>{screen.tests.map(test=><div key={test.id}><strong>{test.label}</strong><p>{test.role} · {referenceLabel(test.reference)}</p>{diagnostics.filter(item=>item.ownerId===test.id).map((item,index)=><p className="reference-error" key={index}>{item.detail}</p>)}</div>)}</details></details>
+ <details><summary>Discover this screen’s reusable tests</summary>{screen.tests.map(test=><div key={test.id}><strong>{test.label}</strong><p>{test.role} · {referenceLabel(test.reference)}</p>{displayDiagnostics.filter(item=>item.ownerId===test.id).map((item,index)=><p className="reference-error" key={index}>{item.detail}</p>)}</div>)}</details></details>
  </>}
  </fieldset>
  {!scenarioMode&&<><fieldset disabled={disabled}><legend>Connect expected screens</legend><label htmlFor={apiId+'-from'}>Source screen</label><select id={apiId+'-from'} value={from} onChange={event=>{setFrom(event.target.value);setAction('');}}><option value="">Choose source</option>{graph.screens.map(screen=><option key={screen.id} value={screen.id}>{screen.title}</option>)}</select><label htmlFor={apiId+'-action'}>Triggering YAML test</label><select id={apiId+'-action'} value={action} onChange={event=>setAction(event.target.value)}><option value="">Choose source test</option>{graph.screens.find(screen=>screen.id===from)?.tests.filter(test=>!test.check).map(test=><option key={test.id} value={test.id}>{canvasTestLabel(test)}</option>)}</select>

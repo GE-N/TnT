@@ -251,7 +251,7 @@ test('a single screen reloads YAML edits into checks and blocks incomplete draft
   const loaded=await scenarios.workspace(saved.id);
   assert.deepEqual(loaded.canvas!.screens[0].tests[0].check,{visibility:'absent',target:'text',match:'exact',value:'Error'});
   assert.equal(loaded.yaml,source);assert.equal(loaded.canvas!.screens[0].x,70);
-  assert.match(loaded.canvasDiagnostics!.find(item=>item.ownerId==='draft')!.detail,/selector/i);
+  assert.match(loaded.canvasDiagnostics!.find(item=>item.ownerId==='draft')!.detail??'',/selector/i);
   await assert.rejects(scenarios.start({workspaceId:loaded.id,deviceId,pathId:'single'}),/selector/i);
   const invalid=await scenarios.save({...loaded,metadata:(await scenarios.workspace(loaded.id)).metadata,yaml:'appId: ['});assert.equal((await scenarios.workspace(invalid.id)).yaml,'appId: [');assert.ok(invalid.canvasDiagnostics!.some(item=>item.ownerId==='yaml'));await assert.rejects(scenarios.start({workspaceId:invalid.id,deviceId,pathId:'single'}),/YAML/i);
  }finally{await rm(root,{recursive:true,force:true});}

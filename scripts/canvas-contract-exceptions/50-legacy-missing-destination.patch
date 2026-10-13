@@ -1,5 +1,20 @@
+diff --git a/server/canvas-route.ts b/server/canvas-route.ts
+index 07530b23673cb31efb7ae8d6ed20f7eacbcd6826..34967f6ca7e3fdf8253a2e9f3fd881d7ff32e1f0 100644
+--- a/server/canvas-route.ts
++++ b/server/canvas-route.ts
+@@ -20,8 +20,8 @@ export function projectCanvasRoute(graph:CanvasGraph,yaml:string,flows:Record<st
+  for(const [index,edge] of edges.entries())if(edge&&!visitOperations(graph,path,index).some(id=>edgeActions(edge).includes(id)))throw new Error('Add an action on connection '+edge.responseCondition+' in Visit '+(index+1)+' before running.');
+  const required=new Set(['yaml',path.id,...path.edgeIds,...ordered.map(item=>item.testId)]);
+  if(path.scenarioId)for(const id of unconnectedScenarioActions(graph,path.scenarioId))required.add(id);
+- const diagnostics=inspectCanvas(graph,yaml,flows,automation).diagnostics.filter(item=>required.has(item.ownerId));
+- if(diagnostics.length)throw new Error(diagnostics.map(item=>item.detail).join(' '));
++ const diagnostics=inspectCanvas(graph,yaml,flows,automation).diagnostics.filter(item=>required.has(item.ownerId??item.actionId));
++ if(diagnostics.length)throw new Error(diagnostics.map(item=>item.detail??`${item.code}:${item.actionId}`).join(' '));
+  const docs=parseAllDocuments(yaml);const sequence=docs[1]?.contents;
+  if(!isSeq(sequence)||docs.some(doc=>doc.errors.length))throw new Error('Repair the executable YAML before running.');
+  attachLeadingComments(sequence);
 diff --git a/server/canvas.ts b/server/canvas.ts
-index 8ed928cdd2b6a2317b007700158cf359615d665e..1fc7ed4e8ef65a2657e06b2964e7d3d6d86fc026 100644
+index 8ed928cdd2b6a2317b007700158cf359615d665e..a1c2e2338b1e5866cf9c5c7580ebb6889bf459b8 100644
 --- a/server/canvas.ts
 +++ b/server/canvas.ts
 @@ -13,7 +13,7 @@ export type CanvasOccurrence={id:string;visitId:string;testId:string;edgeId?:str
@@ -7,7 +22,7 @@ index 8ed928cdd2b6a2317b007700158cf359615d665e..1fc7ed4e8ef65a2657e06b2964e7d3d6
  export type CanvasGraph={screens:ScreenNode[];edges:Transition[];paths:{scenarioId?:string;id:string;name:string;edgeIds:string[];screenId?:string;finished?:boolean;visits?:CanvasVisit[]}[];execution?:CanvasExecution};
  export type CatalogEntry=YAMLReference & {label:string;command:string;assertion:boolean;preview:string};
 -export type CanvasDiagnostic={ownerId:string;visitId?:string;detail:string};
-+export type CanvasDiagnostic={ownerId:string;visitId?:string;detail:string;code?:'missing-destination';actionId?:string};
++export type CanvasDiagnostic={ownerId:string;visitId?:string;detail:string;code?:never;actionId?:never}|{code:'missing-destination';actionId:string;ownerId?:never;visitId?:never;detail?:never};
  export type OccurrenceResult={id:string;visitId:string;testId:string;edgeId?:string;status:Step['status'];stepId?:string;detail:string};
  export type CanvasResult={occurrences?:OccurrenceResult[];visits?:{id:string;screenId:string;status:Step['status'];checkIds:string[]}[];transitions?:{id:string;edgeId:string;status:Step['status']}[];pathId:string;note:string;tests:{id:string;status:Step['status'];stepId?:string;detail:string}[];screens:{id:string;status:Step['status']}[];edges:{id:string;status:Step['status']}[]};
  const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -15,7 +30,18 @@ index 8ed928cdd2b6a2317b007700158cf359615d665e..1fc7ed4e8ef65a2657e06b2964e7d3d6
   }
   for(const path of graph.paths){
    if(path.screenId&&!screens.has(path.screenId))diagnostics.push({ownerId:path.id,detail:'Restore or select the initial screen for this scenario.'});
-+  if(!path.scenarioId&&path.screenId&&!path.edgeIds.length)for(const test of screens.get(path.screenId)?.tests??[])if(isAuthored(test)&&!test.check&&!routeVisits(graph,path)[0]?.operationIds?.includes(test.id)&&!graph.edges.some(edge=>edgeActions(edge).includes(test.id))&&!diagnostics.some(item=>item.code==='missing-destination'&&item.actionId===test.id))diagnostics.push({ownerId:test.id,code:'missing-destination',actionId:test.id,detail:'Choose a destination screen for this action, or set it to Stays on this screen.'});
++  if(!path.scenarioId&&path.screenId&&!path.edgeIds.length)for(const test of screens.get(path.screenId)?.tests??[])if(isAuthored(test)&&!test.check&&!routeVisits(graph,path)[0]?.operationIds?.includes(test.id)&&!graph.edges.some(edge=>edgeActions(edge).includes(test.id))&&!diagnostics.some(item=>item.code==='missing-destination'&&item.actionId===test.id))diagnostics.push({code:'missing-destination',actionId:test.id});
    for(const [index,visit] of routeVisits(graph,path).entries()){
     const screenId=visitScreenId(graph,path,index);
     if(visit.operationIds?.some(id=>!graph.screens.find(screen=>screen.id===screenId)?.tests.some(test=>test.id===id&&isAuthored(test))))diagnostics.push({ownerId:path.id,visitId:visit.id,detail:'Visit '+(index+1)+' contains missing actions or checks. Restore them or remove them from this visit.'});
+@@ -149,8 +150,8 @@ export function selectedCanvasPath(graph:CanvasGraph,yaml:string,flows:Record<st
+  if(path.scenarioId)for(const id of unconnectedScenarioActions(graph,path.scenarioId))required.add(id);
+  const initial=initialCanvasScreen(graph,path);
+  if(initial){required.add(initial);for(const test of graph.screens.find(screen=>screen.id===initial)?.tests??[])if(visitChecks(graph,path,0).includes(test.id)||!path.scenarioId&&(test.check||!path.edgeIds.length))required.add(test.id);}
+- const errors=inspection.diagnostics.filter(diagnostic=>required.has(diagnostic.ownerId));
+- if(errors.length)throw new Error(errors.map(error=>error.detail).join(' '));
++ const errors=inspection.diagnostics.filter(diagnostic=>required.has(diagnostic.ownerId??diagnostic.actionId));
++ if(errors.length)throw new Error(errors.map(error=>error.detail??`${error.code}:${error.actionId}`).join(' '));
+  if(path.screenId&&!path.edgeIds.length)return path;
+  const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,test] as const)));
+  let previous=-Infinity;

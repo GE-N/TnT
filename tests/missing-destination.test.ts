@@ -28,8 +28,8 @@ test('a legacy start-only route step with no destination returns missing-destina
  assert.equal(missing.length,1);
  assert.equal(missing[0].code,'missing-destination');
  assert.equal(missing[0].actionId,'gear');
- assert.equal(missing[0].ownerId,'gear');
- assert.throws(()=>projectCanvasRoute(canvas,yaml,{},'route'),/Choose a destination screen for this action, or set it to Stays on this screen\./);
+ assert.deepEqual(missing,[{code:'missing-destination',actionId:'gear'}]);
+ assert.throws(()=>projectCanvasRoute(canvas,yaml,{},'route'),/missing-destination:gear/);
 });
 
 test('a step that stays on the screen, a connected step and a scenario route have no missing-destination',()=>{
@@ -57,7 +57,7 @@ test('running a legacy start-only route with a missing destination is rejected b
   const saved=await scenarios.save({name:'Legacy start',yaml,canvas});
   const loaded=await scenarios.workspace(saved.id);
   assert.deepEqual(loaded.canvasDiagnostics?.filter(item=>item.code).map(item=>({code:item.code,actionId:item.actionId})),[{code:'missing-destination',actionId:'gear'}]);
-  await assert.rejects(scenarios.start({workspaceId:loaded.id,deviceId,pathId:'route'}),/Choose a destination screen for this action/);
+  await assert.rejects(scenarios.start({workspaceId:loaded.id,deviceId,pathId:'route'}),/missing-destination:gear/);
   assert.equal(runs,0);
   const stays=await scenarios.save({...loaded,canvas:legacy([{id:'visit-1',operationIds:['gear','home-ready']}]).canvas});
   const result=await scenarios.wait((await scenarios.start({workspaceId:stays.id,deviceId,pathId:'route'})).id);

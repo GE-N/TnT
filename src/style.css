@@ -298,7 +298,7 @@ textarea:focus{outline:1px solid var(--accent)}
 .canvas-check-row button:disabled{opacity:1}
 .destination-warning{margin:6px 0;padding:8px;border-radius:6px;background:#fff4e5;color:#8a4b00;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
 .destination-warning p{margin:0 0 6px}
-.destination-warning button{font-size:12px;border:1px solid currentColor;border-radius:4px;padding:5px 7px;background:#fff;color:#8a4b00}
+.destination-warning button{font-size:12px;border:1px solid currentColor;border-radius:4px;padding:5px 7px;background:#fff;color:#0a63d1}
 .canvas-checks>button{width:100%}
 
 .canvas-operation{display:block;border-bottom:1px solid var(--border)}
@@ -719,3 +719,4 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 
 .device-toolbar>.notice{margin:16px;font-size:12px}
 .workbench .canvas-inspectors>button{min-height:44px}
+.canvas-operation select[aria-label$=" destination"]:focus{outline:3px solid #0a84ff;outline-offset:2px}

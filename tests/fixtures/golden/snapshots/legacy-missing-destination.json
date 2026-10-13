@@ -30,7 +30,7 @@
     },
     "routes": [
       {
-        "error": "Choose a destination screen for this action, or set it to Stays on this screen.",
+        "error": "missing-destination:gear",
         "pathId": "route"
       }
     ],

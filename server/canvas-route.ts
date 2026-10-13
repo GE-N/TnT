@@ -20,8 +20,8 @@ export function projectCanvasRoute(graph:CanvasGraph,yaml:string,flows:Record<st
  for(const [index,edge] of edges.entries())if(edge&&!visitOperations(graph,path,index).some(id=>edgeActions(edge).includes(id)))throw new Error('Add an action on connection '+edge.responseCondition+' in Visit '+(index+1)+' before running.');
  const required=new Set(['yaml',path.id,...path.edgeIds,...ordered.map(item=>item.testId)]);
  if(path.scenarioId)for(const id of unconnectedScenarioActions(graph,path.scenarioId))required.add(id);
- const diagnostics=inspectCanvas(graph,yaml,flows,automation).diagnostics.filter(item=>required.has(item.ownerId));
- if(diagnostics.length)throw new Error(diagnostics.map(item=>item.detail).join(' '));
+ const diagnostics=inspectCanvas(graph,yaml,flows,automation).diagnostics.filter(item=>required.has(item.ownerId??item.actionId));
+ if(diagnostics.length)throw new Error(diagnostics.map(item=>item.detail??`${item.code}:${item.actionId}`).join(' '));
  const docs=parseAllDocuments(yaml);const sequence=docs[1]?.contents;
  if(!isSeq(sequence)||docs.some(doc=>doc.errors.length))throw new Error('Repair the executable YAML before running.');
  attachLeadingComments(sequence);
