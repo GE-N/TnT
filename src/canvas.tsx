@@ -112,8 +112,14 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   const node=inspected&&screenElement(inspected.id);
   if(!inspected||!node||!card.current||!viewportRef.current){setPlacement(undefined);return;}
   const bounds=visibleBounds(rectOf(viewportRef.current),{width:window.innerWidth,height:window.innerHeight});
-  const obstacles=[...Array.from(surface.current!.querySelectorAll('[data-screen-id]')).filter(item=>item!==node),...Array.from(surface.current!.querySelectorAll('.transition-label'))].map(rectOf).filter(rect=>rect.width>0&&rect.height>0);
-  const next=placeInspector({anchor:rectOf(node),size:{width:inspectorWidth,height:card.current.scrollHeight},bounds,obstacles});
+  const rects=(elements:Element[])=>elements.map(rectOf).filter(rect=>rect.width>0&&rect.height>0);
+  const edges=Array.from(surface.current!.querySelectorAll<SVGGElement>('[data-edge-id]'));const highlightedEdge=edges.find(edge=>edge.dataset.highlighted==='true');
+  const origin=rectOf(surface.current!);const line=highlightedEdge?.querySelector('path');
+  const segment=line&&typeof line.getTotalLength==='function'?Array.from({length:17},(_,index)=>line.getPointAtLength(line.getTotalLength()*index/16)).map(point=>({left:origin.left+point.x*zoom-4,top:origin.top+point.y*zoom-4,width:8,height:8})):[];
+  const next=placeInspector({anchor:rectOf(node),size:{width:inspectorWidth,height:card.current.scrollHeight},bounds,
+   screens:rects(Array.from(surface.current!.querySelectorAll('[data-screen-id]')).filter(item=>item!==node)),
+   labels:rects(edges.filter(edge=>edge!==highlightedEdge).flatMap(edge=>Array.from(edge.querySelectorAll('.transition-label')))),
+   highlighted:[...rects(Array.from(highlightedEdge?.querySelectorAll('.transition-label')??[])),...segment]});
   setPlacement(previous=>previous&&previous.left===next.left&&previous.top===next.top&&previous.maxHeight===next.maxHeight&&previous.side===next.side&&previous.clamped===next.clamped?previous:next);
  });
  useEffect(()=>{

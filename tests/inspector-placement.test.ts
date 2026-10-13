@@ -24,7 +24,7 @@ test("the inspector opens to the right of its screen by default", () => {
   assert.deepEqual(placeInspector({ anchor, size, bounds }), {
     left: right(anchor),
     top: 100,
-    maxHeight: 800 - 2 * inspectorMargin,
+    maxHeight: 800 - inspectorMargin - 100,
     side: "right",
     clamped: false,
   });
@@ -45,7 +45,7 @@ test("the inspector flips left when the right side covers the next screen", () =
     anchor,
     size,
     bounds,
-    obstacles: [next],
+    screens: [next],
   });
   assert.equal(placement.side, "left");
 });
@@ -54,7 +54,7 @@ test("the inspector flips left when the right side covers an edge label", () => 
   const anchor = node(400, 100);
   const label: Rect = { left: 680, top: 300, width: 160, height: 48 };
   assert.equal(
-    placeInspector({ anchor, size, bounds, obstacles: [label] }).side,
+    placeInspector({ anchor, size, bounds, labels: [label] }).side,
     "left",
   );
 });
@@ -65,7 +65,7 @@ test("the inspector goes below when both sides are blocked", () => {
     anchor,
     size: { width: inspectorWidth, height: 300 },
     bounds: { left: 0, top: 0, width: 900, height: 800 },
-    obstacles: [node(600, 40), node(20, 40)],
+    screens: [node(600, 40), node(20, 40)],
   });
   assert.equal(placement.side, "below");
   assert.equal(placement.top, 40 + 200 + inspectorGap);
@@ -78,7 +78,7 @@ test("the least covered side wins when every side covers something", () => {
     anchor,
     size: { width: inspectorWidth, height: 300 },
     bounds: { left: 0, top: 0, width: 900, height: 800 },
-    obstacles: [
+    screens: [
       node(600, 40),
       { left: 0, top: 40, width: 10, height: 10 },
       node(320, 260),
@@ -112,14 +112,14 @@ for (const [name, anchor] of [
     assert.ok(placement.top + 400 <= 800 - inspectorMargin, "bottom edge");
   });
 
-test("a tall inspector scrolls inside the window instead of growing past it", () => {
+test("a tall inspector lines up with its screen's top and scrolls instead of growing past the window", () => {
   const placement = placeInspector({
     anchor: node(100, 100),
     size: { width: inspectorWidth, height: 3000 },
     bounds,
   });
-  assert.equal(placement.maxHeight, 800 - 2 * inspectorMargin);
-  assert.equal(placement.top, inspectorMargin);
+  assert.equal(placement.top, 100);
+  assert.equal(placement.maxHeight, 800 - inspectorMargin - 100);
 });
 
 test("the inspector is never wider than a narrow window", () => {
@@ -128,7 +128,7 @@ test("the inspector is never wider than a narrow window", () => {
     size,
     bounds: { left: 0, top: 0, width: 280, height: 600 },
   });
-  assert.equal(placement.clamped, true);
+  assert.equal(placement.side, "below");
   assert.equal(placement.left, inspectorMargin);
 });
 
@@ -151,6 +151,91 @@ for (const [name, top] of [
       top < 0 ? 50 + inspectorMargin : 50 + 600 - inspectorMargin - 400,
     );
   });
+
+test("when no side is clean, covering a screen beats covering an edge label", () => {
+  const anchor = node(320, 40);
+  const placement = placeInspector({
+    anchor,
+    size: { width: inspectorWidth, height: 300 },
+    bounds: { left: 0, top: 0, width: 900, height: 800 },
+    screens: [node(20, 40)],
+    labels: [{ left: 650, top: 100, width: 160, height: 48 }],
+    highlighted: [{ left: 320, top: 300, width: 160, height: 48 }],
+  });
+  assert.equal(placement.side, "left");
+});
+
+test("any overlap with the highlighted edge rules a side out before labels and screens", () => {
+  const anchor = node(400, 100);
+  const placement = placeInspector({
+    anchor,
+    size,
+    bounds,
+    screens: [node(400, 330)],
+    labels: [{ left: 20, top: 300, width: 160, height: 48 }],
+    highlighted: [{ left: 700, top: 480, width: 8, height: 8 }],
+  });
+  assert.equal(placement.side, "below");
+  assert.equal(placement.clamped, false);
+});
+
+test("the inspector-flip-left screenshot: the card avoids every edge label and lines up with Profile", () => {
+  // Measured at 1440×1000 with the Home → Profile → Settings → Profile seed,
+  // Profile selected on Visit 2, whose Profile → Settings edge is highlighted.
+  const window = { width: 1440, height: 1000 };
+  const placementBounds = visibleBounds(
+    { left: 329, top: 617, width: 1062, height: 540 },
+    window,
+  );
+  const profile: Rect = { left: 1090, top: 677, width: 250, height: 123 };
+  const screens: Rect[] = [
+    { left: 370, top: 677, width: 250, height: 123 },
+    { left: 370, top: 1037, width: 250, height: 123 },
+  ];
+  const tapAvatar: Rect = { left: 775, top: 663, width: 160, height: 48 };
+  const tapGear: Rect = { left: 775, top: 843, width: 160, height: 48 };
+  const tapClose: Rect = { left: 775, top: 907, width: 160, height: 48 };
+  const placement = placeInspector({
+    anchor: profile,
+    size: { width: inspectorWidth, height: 488 },
+    bounds: placementBounds,
+    screens,
+    labels: [tapAvatar, tapClose],
+    highlighted: [tapGear],
+  });
+  const card: Rect = {
+    left: placement.left,
+    top: placement.top,
+    width: inspectorWidth,
+    height: placement.maxHeight,
+  };
+  for (const label of [tapAvatar, tapGear, tapClose])
+    assert.ok(
+      card.left >= label.left + label.width ||
+        card.top >= label.top + label.height ||
+        card.top + card.height <= label.top,
+      "card covers an edge label",
+    );
+  assert.deepEqual(placement, {
+    left: 1391 - inspectorMargin - inspectorWidth,
+    top: 677 + 123 + inspectorGap,
+    maxHeight: 1000 - inspectorMargin - (677 + 123 + inspectorGap),
+    side: "below",
+    clamped: false,
+  });
+});
+
+test("beside its screen, a card taller than the space below lines up with the screen's top and scrolls", () => {
+  const placement = placeInspector({
+    anchor: { left: 1090, top: 677, width: 250, height: 123 },
+    size: { width: inspectorWidth, height: 488 },
+    bounds: { left: 329, top: 617, width: 1062, height: 383 },
+    screens: [{ left: 1090, top: 812, width: 250, height: 123 }],
+  });
+  assert.equal(placement.side, "left");
+  assert.equal(placement.top, 677);
+  assert.equal(placement.maxHeight, 1000 - inspectorMargin - 677);
+});
 
 test("bounds are the visible canvas, or the window when little canvas is visible", () => {
   const window = { width: 1200, height: 800 };

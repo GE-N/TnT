@@ -5,13 +5,14 @@ export type InspectorPlacement = {
   top: number;
   maxHeight: number;
   side: InspectorSide;
-  /** True when no side fit and the card was pushed inside the bounds instead. */
+  /** True when the chosen side had to be pushed inside the bounds. */
   clamped: boolean;
 };
 
 export const inspectorWidth = 300;
 export const inspectorGap = 12;
 export const inspectorMargin = 8;
+export const inspectorMinHeight = 160;
 const sides: InspectorSide[] = ["right", "left", "below"];
 
 function overlap(a: Rect, b: Rect) {
@@ -26,73 +27,100 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function covered(rect: Rect, obstacles: Rect[]) {
+  return obstacles.reduce(
+    (total, obstacle) => total + overlap(rect, obstacle),
+    0,
+  );
+}
+
 /**
  * Places the floating inspector beside its screen: right by default, then left,
- * then below. A side is skipped when the card would leave `bounds` or cover an
- * obstacle (another screen or an edge label). The result always stays inside
- * `bounds`, including when the anchor itself has been panned out of view.
+ * then below. The first side that stays inside `bounds` and covers nothing
+ * wins. Otherwise every side is clamped into `bounds` and scored: covering the
+ * anchor or the highlighted edge (`highlighted`) is worst, then other edge
+ * labels, then other screens, and the lowest score wins. The card's top lines
+ * up with the anchor's top and the card scrolls, unless that would leave less
+ * than `inspectorMinHeight` visible; then it slides up until it fits.
  */
 export function placeInspector({
   anchor,
   size,
   bounds,
-  obstacles = [],
+  screens = [],
+  labels = [],
+  highlighted = [],
 }: {
   anchor: Rect;
   size: { width: number; height: number };
   bounds: Rect;
-  obstacles?: Rect[];
+  screens?: Rect[];
+  labels?: Rect[];
+  highlighted?: Rect[];
 }): InspectorPlacement {
   const minLeft = bounds.left + inspectorMargin;
   const minTop = bounds.top + inspectorMargin;
-  const maxHeight = Math.max(0, bounds.height - 2 * inspectorMargin);
+  const bottom = bounds.top + bounds.height - inspectorMargin;
   const width = Math.min(
     size.width,
     Math.max(0, bounds.width - 2 * inspectorMargin),
   );
-  const height = Math.min(size.height, maxHeight);
-  const maxLeft = bounds.left + bounds.width - inspectorMargin - width;
-  const maxTop = bounds.top + bounds.height - inspectorMargin - height;
-  const candidates = sides.map((side) => {
-    const left =
+  const height = Math.min(size.height, Math.max(0, bottom - minTop));
+  const visible = Math.min(height, inspectorMinHeight);
+  const maxLeft = Math.max(
+    minLeft,
+    bounds.left + bounds.width - inspectorMargin - width,
+  );
+  const placeTop = (top: number) =>
+    top <= bottom - visible
+      ? Math.max(minTop, top)
+      : clamp(top, minTop, Math.max(minTop, bottom - height));
+  const candidates = sides.map((side, order) => {
+    const idealLeft =
       side === "right"
         ? anchor.left + anchor.width + inspectorGap
         : side === "left"
           ? anchor.left - inspectorGap - width
-          : clamp(anchor.left, minLeft, maxLeft);
-    const top =
-      side === "below"
-        ? anchor.top + anchor.height + inspectorGap
-        : clamp(anchor.top, minTop, maxTop);
-    const fits =
-      left >= minLeft && left <= maxLeft && top >= minTop && top <= maxTop;
-    const rect = { left, top, width, height };
-    const covered = [anchor, ...obstacles].reduce(
-      (total, obstacle) => total + overlap(rect, obstacle),
-      0,
-    );
-    return { side, left, top, fits, covered };
-  });
-  const fitting = candidates.filter((candidate) => candidate.fits);
-  const chosen =
-    fitting.find((candidate) => candidate.covered === 0) ??
-    [...fitting].sort((a, b) => a.covered - b.covered)[0];
-  if (chosen)
-    return {
-      left: chosen.left,
-      top: chosen.top,
-      maxHeight,
-      side: chosen.side,
-      clamped: false,
+          : anchor.left;
+    const idealTop =
+      side === "below" ? anchor.top + anchor.height + inspectorGap : anchor.top;
+    const left = clamp(idealLeft, minLeft, maxLeft);
+    const top = placeTop(idealTop);
+    const moved = side === "below" ? top !== idealTop : left !== idealLeft;
+    const rect = {
+      left,
+      top,
+      width,
+      height: Math.min(height, bottom - top),
     };
-  const fallback = candidates[0];
+    const score = [
+      covered(rect, [anchor, ...highlighted]),
+      covered(rect, labels),
+      covered(rect, screens),
+    ];
+    return { side, order, left, top, moved, score };
+  });
+  const chosen =
+    candidates.find(
+      (candidate) =>
+        !candidate.moved && candidate.score.every((area) => area === 0),
+    ) ??
+    [...candidates].sort(
+      (a, b) =>
+        a.score[0] - b.score[0] ||
+        a.score[1] - b.score[1] ||
+        a.score[2] - b.score[2] ||
+        Number(a.moved) - Number(b.moved) ||
+        a.order - b.order,
+    )[0];
+  // Already clamped by the per-side clamp; kept as a guard.
+  const top = clamp(chosen.top, minTop, Math.max(minTop, bottom - visible));
   return {
-    left: clamp(fallback.left, minLeft, Math.max(minLeft, maxLeft)),
-    // Already clamped by the per-side clamp on anchor.top; kept as a guard.
-    top: clamp(fallback.top, minTop, Math.max(minTop, maxTop)),
-    maxHeight,
-    side: "right",
-    clamped: true,
+    left: chosen.left,
+    top,
+    maxHeight: Math.max(0, bottom - top),
+    side: chosen.side,
+    clamped: chosen.moved,
   };
 }
 
@@ -105,7 +133,8 @@ export function visibleBounds(
   const right = Math.min(window.width, viewport.left + viewport.width);
   const bottom = Math.min(window.height, viewport.top + viewport.height);
   const usable =
-    right - left >= inspectorWidth + 2 * inspectorMargin && bottom - top >= 160;
+    right - left >= inspectorWidth + 2 * inspectorMargin &&
+    bottom - top >= inspectorMinHeight;
   return usable
     ? { left, top, width: right - left, height: bottom - top }
     : { left: 0, top: 0, width: window.width, height: window.height };
