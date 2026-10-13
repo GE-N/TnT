@@ -16,11 +16,11 @@ The demonstration used the booted iPhone 15, iOS 17.0, Maestro 2.11.0 and a deli
 
 Workspace: `b53ee551-f680-4a6c-9847-5e55b17bc071`. Each scenario was saved with explicit visit-operation selections through the existing public workspace/run service.
 
-| Scenario | Run | Outcome |
-| --- | --- | --- |
-| 1 → 2 → 3 → 2 → 1 | `14db7337-22ad-45aa-833d-15f7e8d03d6b` | passed |
-| 1 → 2 → 3 → 4 | `7a6b1b9d-5f68-4ad2-ad3f-2a60fb78e7cf` | passed |
-| 1 → 2 → 1 | `c599e802-4e6f-4d55-9b34-8db4a4d9afd0` | passed |
+| Scenario                                      | Run                                    | Outcome          |
+| --------------------------------------------- | -------------------------------------- | ---------------- |
+| 1 → 2 → 3 → 2 → 1                             | `14db7337-22ad-45aa-833d-15f7e8d03d6b` | passed           |
+| 1 → 2 → 3 → 4                                 | `7a6b1b9d-5f68-4ad2-ad3f-2a60fb78e7cf` | passed           |
+| 1 → 2 → 1                                     | `c599e802-4e6f-4d55-9b34-8db4a4d9afd0` | passed           |
 | Second visit to node 2 requires Visit count 1 | `2be41581-d71a-46cc-8218-1e04808636c9` | assertion-failed |
 
 All four runs verified owned-process cleanup. In the failure run, Visit 2 (first node-2 occurrence) passed and Visit 4 (second node-2 occurrence) failed because the fixture displayed `Visit count 2`. The outgoing action and final Home check remained skipped. Its failure screenshot and hierarchy were associated only with `step-8`, using Maestro's sequence number 9 / artifact prefix `step-010`. Earlier successful reports retained their own snapshots and passed outcomes. A subsequent scenario rename and shared screen-title edit did not change the failure report's original name or graph.

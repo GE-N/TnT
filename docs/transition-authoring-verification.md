@@ -26,13 +26,11 @@ Validation: 85 tests passed with local networking enabled; type checking, produc
 
 Final independent re-review: Standards — 0 remaining findings after sharing action creation and route membership helpers. Spec — 0 remaining actionable findings after preserving launch/setup associations, refusing silently restored Input text/Back commands, and keeping checkpoint handlers separate from top-level command occurrences. No scope creep found.
 
-
 ## Follow-up: immediate screen conditions and node deletion
 
 Add next screen now creates one draft destination check, opens its full visible/absent selector form, scrolls the destination into view and focuses the selector. The draft remains saveable and requires a selector before execution. No title is inferred as an assertion. A bin icon in each editable node header uses the existing reference-warning and Undo flow; deleting a referenced screen retains invalid route references for repair. The inspector deletion control shares the same operation.
 
 Extended the canvas GUI regression to verify the immediate condition and focus, direct node deletion, affected-route warnings, preserved route identities and graph/YAML Undo. Browser verification confirmed the same behavior and left an unsaved Home → Next screen example open, with the destination selector ready to fill. Local screenshot: `.scratch/issue-16-screen-conditions-proof.jpg`. Final checks: 85 tests, type checking, production build and whitespace checks passed. Independent Standards and Spec reviews: no actionable findings.
-
 
 ## Follow-up: Add next screen authors the navigation action
 
@@ -40,13 +38,11 @@ Add next screen now also creates a linked draft Tap action on the current node. 
 
 The existing GUI regression verifies the automatically linked source action, open destination condition, focused action selector, action/check order and deletion/Undo. Browser proof shows both forms together: local `.scratch/issue-16-auto-action-proof.jpg`. Type checking, production build, all 85 tests and independent Standards/Spec reviews pass. The app remains running at port 4322.
 
-
 ## Follow-up: editable canvas node titles
 
 Editable canvas nodes expose a title field directly in their header. Enter or blur saves a trimmed nonempty draft; Escape cancels and an empty name reverts. The field sits outside the drag/select button so typing and arrow keys do not move the node. Renaming updates the graph through its stable node identity, preserving connections, route references, actions, checks and executable YAML. Historical result boards remain read-only.
 
 The canvas GUI regression covers direct rename, empty-name recovery, Escape cancellation and unchanged YAML/connection identity. Browser proof renamed Home to Sign in with Enter in the header: local `.scratch/issue-16-node-title-proof.jpg`. Type checking, production build, all 85 tests and independent Standards/Spec reviews pass.
-
 
 ## Follow-up: Add next screen selects a runnable route
 
@@ -56,13 +52,11 @@ Creating the first screen now selects its initial route. Add next screen with no
 
 All 86 tests, type checking, production build and independent Standards/Spec reviews pass. A separate browser canvas successfully generated its execution preview after Add next screen; screenshot: `.scratch/issue-16-route-selection-proof.jpg`. The user’s existing draft was preserved, and the app remains running at port 4322.
 
-
 ## Follow-up: remove Add next screen
 
 At the user’s request, the Add next screen control and its dedicated draft-focus and route-creation logic are removed. The earlier sections describe historical implementations superseded by this change. Authors now create nodes with Add screen, add checks, and connect existing nodes with an action destination or drag connection. Existing graph data remains intact.
 
 GUI coverage now authors ordered connections through drag and Add action, retaining checks for ordering, YAML synchronization, title editing, deletion and Undo. The first-screen test retains explicit route selection and asserts the removed control is absent. All 86 tests and the production build pass. Spec review found no issues; the Standards review’s test duplication finding was resolved with a local drag helper, followed by passing canvas tests and type checking.
-
 
 ## Follow-up: remove the single-screen scenario node button
 

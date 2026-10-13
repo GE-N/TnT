@@ -51,7 +51,6 @@ A missing screen assertion remains an execution blocker: an action describes the
 
 Follow-up validation: all 107 tests passed, with type checking, production build and whitespace checks passing. Standards and Spec reviews reported no actionable findings against the user's revised UX requirements. Browser verification selected Details through Home's action destination picker and showed the resulting Home → Details sequence and arrow. The default diagnostic uses the connection's name instead of its internal ID. Screenshot: ignored `.scratch/issue-22-connection-fix.jpg`.
 
-
 ## Optional checks and a single operation order — 2026-10-10
 
 The user's follow-up explicitly supersedes the earlier destination-assertion requirement. Canvas scenarios now run with no checks, including a single-screen launch and Home → Details → Home. Included checks still require their actual execution evidence; the runner does not invent assertion evidence for unchecked screens.
@@ -77,7 +76,6 @@ No remaining actionable findings. Review verified the distinct-ID correction and
 No remaining actionable findings against the latest user requirements. Optional checks, drag destinations, one reorderable operation list, per-row destination changes and actual iOS Back navigation are covered.
 
 Review totals: Standards 0; Spec 0.
-
 
 ## Independent visit sections — 2026-10-10
 

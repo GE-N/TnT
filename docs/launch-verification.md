@@ -4,16 +4,16 @@ Verified on 2026-10-04, Asia/Bangkok. This report covers the app-launch slice, n
 
 ## Environment
 
-| Item | Observed value |
-| --- | --- |
-| macOS | 15.1, build 24B83 |
-| Xcode | 16.1, build 16B40 |
-| Node / npm | 24.7.0 / 11.5.1 |
-| Simulator | iPhone 15, iOS 17.0, already Booted |
-| Device UDID | E5C92F6E-40DC-493C-93B4-469E67193736 |
-| Installed user app | com.example.HybridApp, build 1 |
-| Launch tool | Xcode 16.1 simctl, inspected with local help |
-| Maestro | Not installed in PATH or the conventional user installation directory |
+| Item               | Observed value                                                        |
+| ------------------ | --------------------------------------------------------------------- |
+| macOS              | 15.1, build 24B83                                                     |
+| Xcode              | 16.1, build 16B40                                                     |
+| Node / npm         | 24.7.0 / 11.5.1                                                       |
+| Simulator          | iPhone 15, iOS 17.0, already Booted                                   |
+| Device UDID        | E5C92F6E-40DC-493C-93B4-469E67193736                                  |
+| Installed user app | com.example.HybridApp, build 1                                        |
+| Launch tool        | Xcode 16.1 simctl, inspected with local help                          |
+| Maestro            | Not installed in PATH or the conventional user installation directory |
 
 ## Browser-to-device proof
 
