@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { JSDOM } from "jsdom";
 import { act, createElement, useState } from "react";
-import { writeChecks } from "../shared/canvas-authoring.js";
+import { refreshChecks, writeChecks } from "../shared/canvas-authoring.js";
 import type { CanvasGraph, CanvasTest } from "../server/canvas.js";
 import type { Rect } from "../src/inspector-placement.js";
 
@@ -179,12 +179,13 @@ async function mount(
   const { createRoot } = await import("react-dom/client");
   const { CanvasEditor } = await import("../src/canvas.js");
   const views: View[] = [];
+  const changes:CanvasGraph[]=[];let latestGraph:CanvasGraph=canvas;let latestSource=yaml;let replaceGraph:(graph:CanvasGraph)=>void=()=>{};let replaceSource:(source:string)=>void=()=>{};
   function Host() {
-    const [graph, setGraph] = useState<CanvasGraph | undefined>(canvas);
-    const [source, setSource] = useState(yaml);
+    const [graph, setGraph] = useState<CanvasGraph | undefined>(()=>refreshChecks(canvas,yaml));
+    const [source, setSource] = useState(yaml);latestGraph=graph!;latestSource=source;replaceGraph=setGraph;replaceSource=setSource;
     return createElement(CanvasEditor, {
       graph,
-      onChange: setGraph,
+      onChange: next=>{if(next)changes.push(next);setGraph(next);},
       yaml: source,
       onYamlChange: setSource,
       catalog: [],
@@ -253,6 +254,9 @@ async function mount(
   return {
     window,
     document,
+    changes,
+    saved:()=>({graph:structuredClone(latestGraph),yaml:latestSource}),
+    restore:async(state:{graph:CanvasGraph;yaml:string})=>act(async()=>{replaceGraph(state.graph);replaceSource(state.yaml);}),
     rects,
     views,
     card,
@@ -733,8 +737,8 @@ test('visit menu filters groups, adds with arrows/Enter and restores focus on Es
   absent(page.document.querySelector('[role=dialog]'));const rows=page.section(1,'Home')!.querySelectorAll('.visit-step');assert.equal(rows.length,3);
   assert.match(rows[2].querySelector('.visit-step-summary')!.textContent!,/3 assertNotVisible/);assert.match(rows[2].textContent!,/after navigation, on Profile/);
   assert.equal(page.document.activeElement?.getAttribute('aria-label'),'Check 2 selector');
-  await page.press(page.document.activeElement!,'Escape');await page.click(trigger);await page.press(page.document.querySelector('[role=combobox]')!,'Escape');same(page.document.activeElement,trigger);assert.ok(page.card());
-  await page.click(trigger);await page.press(page.document.querySelector('[role=combobox]')!,'Tab');const cancel=page.document.activeElement as HTMLButtonElement;assert.equal(cancel.textContent,'Cancel');assert.equal(await page.press(cancel,'Enter'),false,'Enter on Cancel must not select an option');await page.click(cancel);assert.equal(page.section(1,'Home')!.querySelectorAll('.visit-step').length,3);
+  await page.press(page.document.activeElement!,'Escape');assert.equal(page.section(1,'Home')!.querySelectorAll('.visit-step').length,2,'Escape removes a new blank step');await page.click(trigger);await page.press(page.document.querySelector('[role=combobox]')!,'Escape');same(page.document.activeElement,trigger);assert.ok(page.card());
+  await page.click(trigger);await page.press(page.document.querySelector('[role=combobox]')!,'Tab');const cancel=page.document.activeElement as HTMLButtonElement;assert.equal(cancel.textContent,'Cancel');assert.equal(await page.press(cancel,'Enter'),false,'Enter on Cancel must not select an option');await page.click(cancel);assert.equal(page.section(1,'Home')!.querySelectorAll('.visit-step').length,2);
  }finally{await page.close();}
 });
 
@@ -746,9 +750,10 @@ test('inline rows commit Enter and blur, cancel Escape, and move above navigatio
   async function type(value:string){const input=row.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});return input;}
   await page.click(summary);let input=await type('Saved on Enter');await page.press(input,'Enter');assert.match(summary.textContent!,/Saved on Enter/);assert.equal(summary.getAttribute('aria-expanded'),'false');
   await page.click(summary);input=await type('Cancelled');await page.press(input,'Escape');assert.match(summary.textContent!,/Saved on Enter/);assert.doesNotMatch(summary.textContent!,/Cancelled/);
-  await page.click(summary);input=await type('Saved on blur');await act(async()=>page.heading(1,'Home').focus());assert.match(summary.textContent!,/Saved on blur/);
+  await page.click(summary);input=await type('Saved on blur');await act(async()=>page.heading(1,'Home').focus());assert.match(summary.textContent!,/Saved on blur/);same(page.document.activeElement,page.heading(1,'Home'),'Successful blur retains the chosen focus');
   const trigger=page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!;await page.click(trigger);const combo=page.document.querySelector('[role=combobox]')!;await page.press(combo,'ArrowDown');await page.press(combo,'ArrowDown');await page.press(combo,'ArrowDown');await page.press(combo,'Enter');
   const added=[...page.card()!.querySelectorAll<HTMLElement>('.visit-step')].at(-1)!;
+  const pendingInput=added.querySelector<HTMLInputElement>('input[aria-label$=" selector"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(pendingInput,'Later check');pendingInput.dispatchEvent(new page.window.Event('input',{bubbles:true}));});await page.press(pendingInput,'Enter');
   const move=[...added.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='↑ Move above actions')!;assert.ok(move);await page.click(move);
   assert.deepEqual([...page.card()!.querySelectorAll('.visit-step-summary')].map(node=>node.textContent?.trim().split(' ')[0]),['1','2','3']);assert.equal(added.querySelector('.navigation-hint'),null);
   assert.match(page.card()!.querySelector('[role=status]')!.textContent!,/position 2/);
@@ -764,4 +769,122 @@ test('bottom fade is shown only when the inspector content overflows',async()=>{
   await page.click(page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!);
   absent(page.card()!.querySelector('.inspector-bottom-fade'),'Equal content/client height must not show a fade');
  }finally{await page.close();}
+});
+
+test('empty selector Enter and blur retain the draft, save nothing, and expose an accessible error',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const row=page.card()!.querySelector<HTMLElement>('[data-operation-id="home-ready"]')!;await page.click(row.querySelector<HTMLButtonElement>('.visit-step-summary')!);
+  const input=row.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;const before=page.saved();
+  await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,'   ');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});
+  await page.press(input,'Enter');assert.equal(input.getAttribute('aria-invalid'),'true');assert.equal(page.document.getElementById(input.getAttribute('aria-describedby')!)!.textContent,'✕ Enter text to look for.');assert.deepEqual(page.saved(),before);assert.equal(row.querySelector('.visit-step-summary')!.getAttribute('aria-expanded'),'true');
+  await act(async()=>page.heading(1,'Home').focus());same(page.document.activeElement,page.heading(1,'Home'));assert.deepEqual(page.saved(),before);assert.equal(input.value,'   ');
+  await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,' a ');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});assert.equal(input.getAttribute('aria-invalid'),null);
+  await page.press(input,'Enter');assert.equal(page.saved().graph.screens[0].tests.find(test=>test.id==='home-ready')!.check!.value,' a ');
+ }finally{await page.close();}
+});
+
+test('ArrowUp moves backwards and wraps, while ArrowDown wraps forwards',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!);const combo=page.document.querySelector<HTMLInputElement>('[role=combobox]')!;
+  const active=()=>page.document.querySelector('[role=option][aria-selected=true]')!.textContent;
+  assert.equal(active(),'Tap');await page.press(combo,'ArrowUp');assert.equal(active(),'assertNotVisible');await page.press(combo,'ArrowUp');assert.equal(active(),'assertVisible');await page.press(combo,'ArrowDown');assert.equal(active(),'assertNotVisible');await page.press(combo,'ArrowDown');assert.equal(active(),'Tap');
+ }finally{await page.close();}
+});
+
+test('mouse Cancel and Escape followed by focusout never save, and reopening restores the saved value',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const row=page.card()!.querySelector<HTMLElement>('[data-operation-id="home-ready"]')!;const summary=row.querySelector<HTMLButtonElement>('.visit-step-summary')!;const input=row.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;const before=page.saved();
+  async function type(value:string){await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});}
+  await page.click(summary);await type('Mouse draft');const cancel=[...row.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Cancel')!;
+  await act(async()=>{cancel.dispatchEvent(new page.window.Event('pointerdown',{bubbles:true}));input.dispatchEvent(new page.window.FocusEvent('focusout',{bubbles:true,relatedTarget:null}));cancel.click();});assert.deepEqual(page.saved(),before);assert.equal(page.changes.length,0);same(page.document.activeElement,summary);
+  await page.click(summary);assert.equal(input.value,'Home');await type('Escape draft');
+  await act(async()=>{input.dispatchEvent(new page.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));input.dispatchEvent(new page.window.FocusEvent('focusout',{bubbles:true,relatedTarget:null}));page.heading(1,'Home').focus();});assert.deepEqual(page.saved(),before);assert.equal(page.changes.length,0);
+  await page.click(summary);assert.equal(input.value,'Home');await type('Saved');await page.press(input,'Enter');same(page.document.activeElement,summary);
+  await page.click(summary);await type('Saved with Done');await page.click([...row.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Done')!);same(page.document.activeElement,summary);assert.equal(page.saved().graph.screens[0].tests.find(test=>test.id==='home-ready')!.check!.value,'Saved with Done');
+ }finally{await page.close();}
+});
+
+test('Escape discards a new blank selector and leaves existing Undo history unchanged',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const trigger=page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!;
+  await page.click(trigger);const combo=page.document.querySelector('[role=combobox]')!;await page.press(combo,'ArrowUp');await page.press(combo,'Enter');
+  const newRow=page.section(1,'Home')!.querySelector<HTMLElement>('.visit-step:last-of-type')!;const input=newRow.querySelector<HTMLInputElement>('input[aria-label$=" selector"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,'Later');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});await page.press(input,'Enter');
+  await page.click([...newRow.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='↑ Move above actions')!);
+  const before=page.saved();const undo=[...page.document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Undo canvas deletion')!;assert.equal(undo.disabled,false);
+  await page.click(trigger);await page.press(page.document.querySelector('[role=combobox]')!,'Enter');const blank=page.document.activeElement!;await page.press(blank,'Escape');assert.deepEqual(page.saved(),before);assert.equal(undo.disabled,false);same(page.document.activeElement,trigger);
+  await page.click(undo);assert.ok(page.card()!.querySelector('.navigation-hint'),'The prior move Undo is still available');
+ }finally{await page.close();}
+});
+
+test('blank tap blur alone is blocked without refocusing, and Escape removes the new draft without Undo',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const before=page.saved();await page.click(page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!);await page.press(page.document.querySelector('[role=combobox]')!,'Enter');const input=page.document.activeElement as HTMLInputElement;const row=input.closest('.visit-step')!;const afterAdd=page.saved();assert.deepEqual(afterAdd,before,'Add keeps the blank step outside saved graph/source');assert.equal(page.changes.length,0);
+  await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,' \t ');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));page.heading(1,'Home').focus();});assert.equal(input.getAttribute('aria-invalid'),'true');assert.equal(page.document.getElementById(input.getAttribute('aria-describedby')!)!.textContent,'✕ Enter an element to tap.');same(page.document.activeElement,page.heading(1,'Home'));assert.deepEqual(page.saved(),afterAdd);assert.equal(input.value,' \t ');
+  await page.press(input,'Escape');assert.equal(row.isConnected,false);assert.deepEqual(page.saved(),before);assert.equal([...page.document.querySelectorAll('button')].some(button=>button.textContent==='Undo canvas deletion'),false);
+ }finally{await page.close();}
+});
+
+test('an external Undo refreshes an open draft without moving focus or writing the stale draft on blur',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const row=page.card()!.querySelector<HTMLElement>('[data-operation-id="home-ready"]')!;await page.click(row.querySelector<HTMLButtonElement>('.visit-step-summary')!);const input=row.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,'Stale draft');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});
+  const before=page.saved();const graph={...before.graph,screens:before.graph.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.id==='home-ready'?{...test,check:{...test.check!,value:'Restored by Undo'}}:test)}))};const yaml=writeChecks(before.yaml,before.graph,graph);await page.restore({graph:refreshChecks(graph,yaml),yaml});assert.equal(input.value,'Restored by Undo');same(page.document.activeElement,input);
+  const restored=page.saved();await act(async()=>page.heading(1,'Home').focus());assert.deepEqual(page.saved(),restored);assert.equal(page.changes.length,0,'Blur must not overwrite restored state');
+ }finally{await page.close();}
+});
+
+test('summaries retain command quotes and destination, and last-step Move down is disabled',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  assert.equal(page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary')!.textContent,'2 tapOn "Avatar" → Profile');assert.equal(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Move action 1 down"]')!.disabled,true);
+  const before=page.saved();const graph={...before.graph,edges:[{...before.graph.edges[0],id:'foreign',from:'settings',to:'home'},...before.graph.edges]};await page.restore({graph,yaml:before.yaml});assert.equal(page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary')!.textContent,'2 tapOn "Avatar" → Profile','Destination lookup must be scoped to this screen');
+ }finally{await page.close();}
+});
+
+test('navigation warning appears only at the first affected step and follows the next step after moving it',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const before=page.saved();const title='Settings with a very long destination name for keyboard and touch users';await page.restore({graph:{...before.graph,screens:before.graph.screens.map(screen=>screen.id==='profile'?{...screen,title}:screen)},yaml:before.yaml});
+  const trigger=page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!;
+  for(const value of ['First affected','Second affected']){await page.click(trigger);const combo=page.document.querySelector('[role=combobox]')!;await page.press(combo,'ArrowUp');await page.press(combo,'Enter');const input=page.document.activeElement as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});await page.press(input,'Enter');}
+  assert.equal(page.card()!.querySelectorAll('.navigation-hint').length,1);assert.equal(page.card()!.querySelector('.navigation-hint p')!.textContent,'⚠ This step runs after navigation, on '+title);assert.match(page.card()!.querySelector('.navigation-hint')!.closest('.visit-step')!.textContent!,/First affected/);
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('.navigation-hint button')!);assert.equal(page.card()!.querySelectorAll('.navigation-hint').length,1);assert.match(page.card()!.querySelector('.navigation-hint')!.closest('.visit-step')!.textContent!,/Second affected/);
+ }finally{await page.close();}
+});
+
+
+test('a saved new Back step remains saved when a later blank edit is cancelled',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!);const combo=page.document.querySelector('[role=combobox]')!;await page.press(combo,'ArrowDown');await page.press(combo,'ArrowDown');await page.press(combo,'Enter');
+  const input=page.document.activeElement as HTMLInputElement;const row=input.closest('.visit-step')!;await page.press(input,'Enter');const saved=page.saved();
+  await page.click(row.querySelector<HTMLButtonElement>('.visit-step-summary')!);await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,'');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});await page.press(input,'Escape');assert.equal(row.isConnected,true);assert.deepEqual(page.saved(),saved);
+ }finally{await page.close();}
+});
+
+
+test('first valid new step and destination commit once and Undo restores exact graph/source',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const before=page.saved();await page.click(page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!);await page.press(page.document.querySelector('[role=combobox]')!,'Enter');const input=page.document.activeElement as HTMLInputElement;const row=input.closest('.visit-step')!;
+  assert.equal(page.changes.length,0);await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,' Next ');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));const to=row.querySelector<HTMLSelectElement>('[aria-label$=" destination"]')!;to.value='settings';to.dispatchEvent(new page.window.Event('change',{bubbles:true}));});await page.press(input,'Enter');
+  assert.equal(page.changes.length,1,'first valid commit publishes one graph change');const added=page.saved();const id=row.getAttribute('data-operation-id')!;assert.equal(added.graph.screens[0].tests.find(test=>test.id===id)!.tap!.value,' Next ');assert.equal(added.graph.edges.find(edge=>edge.actionTestId===id||edge.actionTestIds?.includes(id))!.to,'settings');
+  const undo=[...page.document.querySelectorAll<HTMLButtonElement>('button')].filter(button=>button.textContent==='Undo canvas deletion');assert.equal(undo.length,1);await page.click(undo[0]);assert.deepEqual(page.saved(),before);assert.equal([...page.document.querySelectorAll('button')].some(button=>button.textContent==='Undo canvas deletion'),false);
+ }finally{await page.close();}
+});
+
+test('visit review styles retain minimum hit targets and accessible validation colours',()=>{
+ const css=readFileSync(new URL('../src/style.css',import.meta.url),'utf8');const rules=[...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([,selector,body])=>({selector:selector.trim(),body}));
+ const rule=(selector:string)=>rules.find(item=>item.selector===selector)!.body;
+ for(const selector of ['.floating-inspector .visit-step-summary','.visit-step-actions summary','.visit-step-actions button','.navigation-hint button,.visit-yaml-link'])assert.match(rule(selector),/min-height:44px/);
+ assert.match(rule('.visit-step-actions summary'),/min-width:44px/);assert.match(rule('.navigation-hint button,.visit-yaml-link'),/font-size:12px/);
+ assert.match(rule('.visit-selector-error'),/color:#b3261e/);assert.match(rule('.visit-selector-error'),/font-size:12px/);assert.match(rule('.visit-inline-fields input[aria-invalid=true]'),/border:2px solid #b3261e/);
+ assert.match(css,/--warning: #8a4b00/);assert.match(css,/--warning-surface: #fff4e5/);assert.match(rule('.navigation-hint'),/color:var\(--warning\)/);assert.match(rule('.navigation-hint'),/background:var\(--warning-surface\)/);
+ assert.match(rule('.floating-inspector .selected-visit>.visit-section-heading'),/width:calc\(100% \+ 16px\)/);
 });

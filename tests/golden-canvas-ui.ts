@@ -68,7 +68,7 @@ async function perform(document:Document,script:GoldenScript,graph:()=>CanvasGra
     await chooseDestination(document,script.actionId,script.to,script.visitId);
   }else if(script.op==='clear-destination'){
     await chooseDestination(document,script.actionId,'',script.visitId);
-    await confirmDeletion(document);
+    if(document.querySelector('[role=alertdialog]'))throw new Error('Clearing a destination must be immediate with Undo.');
   }else if(script.op==='delete-step'){
     await act(async()=>{
       const scope=script.visitId?document.querySelector(`[data-visit-id="${script.visitId}"]`):document;
@@ -76,7 +76,7 @@ async function perform(document:Document,script:GoldenScript,graph:()=>CanvasGra
       if(!button)throw new Error('Missing delete control for '+script.actionId);
       button.click();
     });
-    await confirmDeletion(document);
+    if(document.querySelector('[role=alertdialog]'))throw new Error('Deleting a step must be immediate with Undo.');
   }else if(script.op==='delete-connection'){
     const edge=graph().edges.find(item=>item.id===script.edgeId);
     if(!edge)throw new Error('Missing connection '+script.edgeId);

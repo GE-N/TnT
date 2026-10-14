@@ -1,3 +1,6 @@
+import {addVisitStep,inspectScreen} from './workspace-ui-helpers.js';
+import {writeChecks} from '../shared/canvas-authoring.js';
+import type {CanvasGraph} from '../server/canvas.js';
 import {DraftConflict,WorkspaceConflict,WorkspacePayloadTooLarge,createWriteFaults} from '../server/workspace-store.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -22,6 +25,7 @@ async function mount(options?:{afterRestore?:()=>void;recoverSession?:boolean;fa
  const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  const pending:Promise<Response>[]=[];
+ const requests:{path:string;body:any}[]=[];
  let pickerHold:Promise<void>|undefined;
  let releasePickerHold=()=>{};
  const holdPicker=()=>{pickerHold=new Promise(resolve=>{releasePickerHold=()=>{pickerHold=undefined;resolve();};});};
@@ -34,7 +38,7 @@ async function mount(options?:{afterRestore?:()=>void;recoverSession?:boolean;fa
    return Response.json(data);
   }catch(error){return Response.json({error:error instanceof Error?error.message:'Request failed'},{status:error instanceof WorkspacePayloadTooLarge?413:error instanceof WorkspaceConflict||error instanceof DraftConflict?409:400});}
  };
- const fetchImpl=(path:string,init?:{body?:string})=>{const response=request(path,init);pending.push(response);return response;};
+ const fetchImpl=(path:string,init?:{body?:string})=>{if(init?.body)requests.push({path,body:JSON.parse(init.body)});const response=request(path,init);pending.push(response);return response;};
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetchImpl:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');let root=createRoot(dom.window.document.getElementById('root')!);const document=dom.window.document;
  const settle=async()=>{do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);};
@@ -44,7 +48,7 @@ async function mount(options?:{afterRestore?:()=>void;recoverSession?:boolean;fa
  const editYaml=async(value:string)=>act(async()=>{const node=document.getElementById('scenario-yaml') as HTMLTextAreaElement;Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const fill=async(label:string,value:string)=>act(async()=>{const input=[...document.querySelectorAll('label')].find(node=>node.textContent===label);const node=document.getElementById(input?.htmlFor??'') as HTMLInputElement;assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const openNamed=async(name:string)=>{await click('Manage workspace');const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>node.getAttribute('aria-label')?.startsWith('Open '+name+' ·'));assert.ok(button,name);await act(async()=>{button.click();await settle();});};
- return {directory,service,faults,document,dom,click,render,reload,editYaml,fill,openNamed,settle,holdPicker,releasePicker,close:async()=>{await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor] of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true}).catch(()=>rm(directory,{recursive:true,force:true}));}};
+ return {directory,service,faults,document,dom,requests,click,render,reload,editYaml,fill,openNamed,settle,holdPicker,releasePicker,close:async()=>{await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor] of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true}).catch(()=>rm(directory,{recursive:true,force:true}));}};
 }
 
 test('queued and rejected draft writes never show Saved locally, and Retry does after a durable ack',async()=>{
@@ -608,4 +612,33 @@ test('Undo after creating new unsaved work restores the deleted workspace withou
   await page.click('Undo deletion of Deleted original');
   assert.match(page.document.querySelector('[aria-label="Manage workspace"]')!.textContent!,/New unsaved work/);assert.equal(page.document.querySelectorAll('.scenario-select').length,1);assert.equal((await page.service.listTrash()).items.length,0);
  }finally{await page.close();}
+});
+
+
+test('new blank visit steps never reach autosave payloads, and the first valid commit has one Undo',async(context)=>{
+ const page=await mount({recoverSession:true});
+ try{
+  const graph:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[]}],edges:[],paths:[{id:'route',name:'Main',scenarioId:'main',screenId:'home',edgeIds:[],visits:[{id:'v1',operationIds:[]}]}]};
+  const source=writeChecks(yaml,{screens:[],edges:[],paths:[]},graph);
+  const saved=await page.service.save({name:'Blank step regression',yaml:source,canvas:graph,scenarios:[{id:'main',name:'Main',authoring:'canvas',pathId:'route',steps:[],inputs:{},parameters:{},enabledHandlerIds:[]}]});await page.service.setSession(saved.id);await page.render();
+  await inspectScreen(page.document,{id:'home'},{id:'v1'});
+  context.mock.timers.enable({apis:['setTimeout']});
+  await addVisitStep(page.document,'Add action to Home');
+  const input=page.document.activeElement as HTMLInputElement;const row=input.closest('.visit-step')!;const id=row.getAttribute('data-operation-id')!;assert.ok(id);
+  await act(async()=>{input.dispatchEvent(new page.dom.window.FocusEvent('focusout',{bubbles:true,relatedTarget:page.document.querySelector('h3')}));page.document.querySelector<HTMLElement>('h3')!.focus();});
+  assert.equal(input.getAttribute('aria-invalid'),'true');assert.equal(row.querySelector('.visit-step-summary')!.getAttribute('aria-expanded'),'true');
+  await act(async()=>{row.querySelector('summary')!.click();page.document.querySelector('.floating-inspector')!.dispatchEvent(new page.dom.window.Event('scroll'));});
+  // An unrelated pending field makes actual draft POSTs, so this is not a vacuous no-request assertion.
+  await page.fill('Expected page text for reusable assertion','Pending unrelated assertion');
+  await act(async()=>{context.mock.timers.tick(801);await page.settle();});
+  const draftPosts=()=>page.requests.filter(request=>/\/api\/workspaces(?:\/[^/]+)?\/draft$/.test(request.path));assert.ok(draftPosts().length>0,'actual draft payload inspected');
+  for(const request of page.requests.filter(request=>request.path.startsWith('/api/workspaces'))){const canvas=request.body.content?.canvas??request.body.canvas;if(!canvas)continue;assert.equal(canvas.screens.flatMap((screen:any)=>screen.tests).some((test:any)=>test.id===id||test.tap?.value===''),false,'blank new step never appears in any saved payload');assert.equal(request.body.content?.yaml??request.body.yaml,saved.yaml,'blank step never changes persisted YAML');}
+  assert.ok(row.querySelector('[role=alert]'));
+  const baseline=draftPosts().at(-1)!.body.content;assert.equal([...page.document.querySelectorAll('button')].some(button=>button.textContent==='Undo canvas deletion'),false);
+  await act(async()=>{Object.getOwnPropertyDescriptor(page.dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,' a ');input.dispatchEvent(new page.dom.window.Event('input',{bubbles:true}));input.dispatchEvent(new page.dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));});
+  await act(async()=>{context.mock.timers.tick(801);await page.settle();});
+  const committed=draftPosts().at(-1)!.body.content;const added=committed.canvas.screens.flatMap((screen:any)=>screen.tests).filter((test:any)=>test.id===id);assert.equal(added.length,1);assert.equal(added[0].tap.value,' a ');
+  const undo=[...page.document.querySelectorAll<HTMLButtonElement>('button')].filter(button=>button.textContent==='Undo canvas deletion');assert.equal(undo.length,1);assert.equal(undo[0].disabled,false);
+  await act(async()=>undo[0].click());await act(async()=>{context.mock.timers.tick(801);await page.settle();});const restored=draftPosts().at(-1)!.body.content;assert.deepEqual(restored.canvas,baseline.canvas);assert.equal(restored.yaml,baseline.yaml);assert.equal([...page.document.querySelectorAll('button')].some(button=>button.textContent==='Undo canvas deletion'),false,'one Undo completely removes the first commit');
+ }finally{context.mock.timers.reset();await page.close();}
 });

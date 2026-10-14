@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {CanvasGraph,CanvasTest} from '../server/canvas.js';
-import {appendVisitStep,navigationHint,moveAboveNavigation} from '../src/inspector-operations.js';
+import {appendVisitStep,navigationHint,moveAboveNavigation,isCommittableSelector,stepRowLabel} from '../src/inspector-operations.js';
 import {refreshChecks,writeChecks} from '../shared/canvas-authoring.js';
 import {projectCanvasRoute} from '../server/canvas-route.js';
 const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
@@ -41,4 +41,21 @@ test('move above navigation crosses both actions atomically and preserves storag
  const next=appendVisitStep(graph,'route','v1',check);const moved=moveAboveNavigation(next,'route','v1','check');
  assert.deepEqual(moved.paths[0].visits![0].operationIds,['check','first','second']);assert.equal(navigationHint(moved,'route','v1','check'),undefined);
  assert.equal(writeChecks(source,graph,moved),writeChecks(source,graph,next));assert.equal(moveAboveNavigation(moved,'route','v1','check'),moved);
+});
+
+test('selector validation rejects empty whitespace but preserves meaningful surrounding spaces',()=>{
+ for(const value of ['', '   ', '\t', '\n', ' \t\n '])assert.equal(isCommittableSelector(value),false,JSON.stringify(value));
+ assert.equal(isCommittableSelector(' a '),true);assert.equal(isCommittableSelector('Gear'),true);
+});
+test('stepRowLabel formats every command with quoted values and optional destination',()=>{
+ const cases:[CanvasTest,string][]=[
+  [tap('Gear'),'tapOn "Gear"'],
+  [{...check,check:{...check.check!,value:'Ready'}},'assertVisible "Ready"'],
+  [{...check,check:{...check.check!,visibility:'absent',value:'Error'}},'assertNotVisible "Error"'],
+  [{id:'input',label:'Input',role:'action',reference,input:' a "b" '},'inputText " a \\"b\\" "'],
+  [{id:'back',label:'Back',role:'action',reference,back:true},'back "Back"'],
+  [{id:'back',label:'Back',role:'action',reference,back:true,backSelector:{target:'id',match:'exact',value:'nav.back'}},'back "nav.back"']
+ ];
+ for(const [item,command] of cases){assert.equal(stepRowLabel(item,4),'4 '+command);assert.equal(stepRowLabel(item,4,'Settings'),'4 '+command+' → Settings');}
+ assert.equal(stepRowLabel(tap(''),1),'1 tapOn ""');
 });

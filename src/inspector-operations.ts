@@ -1,5 +1,5 @@
 import type {CanvasGraph,CanvasTest} from '../server/canvas.js';
-import {edgeActions,freezeVisitOperations,routeVisits,updateVisitOperations,visitOperations,visitScreenId} from '../shared/canvas-authoring.js';
+import {backControl,edgeActions,freezeVisitOperations,routeVisits,updateVisitOperations,visitOperations,visitScreenId} from '../shared/canvas-authoring.js';
 
 /** Append without inheriting a destination; workspace storage order stays unchanged. */
 export function appendVisitStep(graph:CanvasGraph,pathId:string,visitId:string,test:CanvasTest):CanvasGraph{
@@ -33,4 +33,11 @@ export function moveAboveNavigation(graph:CanvasGraph,pathId:string,visitId:stri
  const next=freezeVisitOperations(graph);const path=next.paths.find(item=>item.id===pathId)!;const index=routeVisits(next,path).findIndex(visit=>visit.id===visitId);
  const ids=visitOperations(next,path,index).filter(id=>id!==testId);ids.splice(ids.indexOf(hint.firstActionId),0,testId);
  return updateVisitOperations(next,pathId,visitId,ids);
+}
+
+export function isCommittableSelector(value:string):boolean{return value.trim().length>0;}
+export function stepRowLabel(test:CanvasTest,position:number,destination?:string):string{
+ const command=test.check?(test.check.visibility==='visible'?'assertVisible':'assertNotVisible'):test.tap?'tapOn':test.input!==undefined?'inputText':'back';
+ const value=test.check?.value??test.tap?.value??test.input??backControl(test)?.value??'';
+ return position+' '+command+' '+JSON.stringify(value)+(destination?' → '+destination:'');
 }
