@@ -10,7 +10,7 @@ import type {ScenarioDefinition} from '../server/scenario-definitions.js';
 import {DefaultActions} from './default-actions.js';
 import type {Automation} from '../server/default-actions.js';
 import {canvasAfterDeletion,restoreDeletionReferences} from './yaml-forms.js';
-import {YamlEditor} from './yaml-editor.js';
+import {YamlDraftProvider,YamlEditor} from './yaml-editor.js';
 import { runnerClient,RunnerRequestError } from './runner-client.js';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import type { Run, Workspace } from '../server/scenarios.js';
@@ -106,7 +106,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     const previous=fieldsRef.current.get(id);
     const same=!!previous&&previous.pending===report.pending&&previous.key===report.key&&previous.value===report.value;
     if(!report.pending&&!previous)return;
-    if(report.pending)fieldsRef.current.set(id,report);else fieldsRef.current.delete(id);
+    if(report.pending){if(!same)fieldsRef.current.delete(id);fieldsRef.current.set(id,report);}else fieldsRef.current.delete(id);
     setDrafts(current=>report.pending?(current.includes(id)?current:[...current,id]):current.filter(item=>item!==id));
     if(!same)setFieldEpoch(value=>value+1);
   },[]);
@@ -142,6 +142,8 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const staleDraft=showRecovery&&draftBase<savedRevision;
   const storedCanvas=viewRef.current.canvas;
   const initialCanvasView=storedCanvas&&typeof storedCanvas==='object'&&!Array.isArray(storedCanvas)?storedCanvas as {zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string}:undefined;
+  const storedCards=viewRef.current.cards;
+  const cardPositions=storedCards&&typeof storedCards==='object'&&!Array.isArray(storedCards)?storedCards as {picker?:{x:number;y:number};yaml?:{x:number;y:number}}:undefined;
   useEffect(()=>{
     if(noWorkspace||!token||conflict||submitting||pickerBusy)return;
     if(pendingDraft){
@@ -405,11 +407,27 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     const current=viewRef.current;
     const canvas=patch.canvas&&typeof patch.canvas==='object'&&!Array.isArray(patch.canvas)?{...(current.canvas&&typeof current.canvas==='object'&&!Array.isArray(current.canvas)?current.canvas as Record<string,unknown>:{}),...patch.canvas as Record<string,unknown>}:current.canvas;
     const panels=patch.panels&&typeof patch.panels==='object'&&!Array.isArray(patch.panels)?{...(current.panels&&typeof current.panels==='object'&&!Array.isArray(current.panels)?current.panels as Record<string,unknown>:{}),...patch.panels as Record<string,unknown>}:current.panels;
+    const cards=patch.cards&&typeof patch.cards==='object'&&!Array.isArray(patch.cards)?{...(current.cards&&typeof current.cards==='object'&&!Array.isArray(current.cards)?current.cards as Record<string,unknown>:{}),...patch.cards as Record<string,unknown>}:current.cards;
     const incomingFormat=typeof patch.format==='number'&&patch.format>=1?patch.format:1;
     const existingFormat=typeof current.format==='number'&&current.format>=1?current.format:1;
-    viewRef.current={...current,...patch,format:Math.max(incomingFormat,existingFormat),...(canvas===undefined?{}:{canvas}),...(panels===undefined?{}:{panels})};
+    viewRef.current={...current,...patch,format:Math.max(incomingFormat,existingFormat),...(canvas===undefined?{}:{canvas}),...(panels===undefined?{}:{panels}),...(cards===undefined?{}:{cards})};
     if(typeof patch.dismissedDraftRevision==='number')setDismissedDraft(patch.dismissedDraftRevision);
     setViewTick(value=>value+1);
+  }
+  function yamlDeletionWarnings(index:number){return [...definitions.filter(item=>item.steps.some(ref=>ref.index!>=index)).map(item=>'Scenario · '+item.name),...(canvas?.screens.flatMap(screen=>screen.tests.filter(test=>test.reference.kind==='flow'||(test.reference.file==='flow.yaml'&&(test.reference.index??-1)>=index)).map(test=>screen.title+' · '+test.label))??[]),...(automation?.checkpoints.filter(checkpoint=>checkpoint.beforeStep>=index).map(checkpoint=>'Default-action checkpoint before step '+(checkpoint.beforeStep+1))??[])];}
+  function deleteYamlStep(next:string,index:number){
+    const previous=canvas;const changed=canvasAfterDeletion(canvas,index);
+    const previousDefinitions=definitions;
+    const changedDefinitions=definitions.map(item=>({...item,steps:item.steps.map(ref=>ref.index!>=index?{...ref,fingerprint:'deleted:'+ref.fingerprint.slice(-56)}:ref)}));
+    setDefinitions(changedDefinitions);
+    const previousAutomation=automation;
+    const changedAutomation=automation?{...automation,checkpoints:automation.checkpoints.map(checkpoint=>checkpoint.beforeStep>=index?{...checkpoint,fingerprint:'deleted:'+checkpoint.fingerprint.slice(-56)}:checkpoint)}:undefined;
+    setYaml(next);setCanvas(changed);setAutomation(changedAutomation);
+    return ()=>{setDefinitions(current=>current.map(item=>{const previous=previousDefinitions.find(previous=>previous.id===item.id);const changed=changedDefinitions.find(changed=>changed.id===item.id);return previous&&changed?{...item,steps:item.steps.map(ref=>{const match=changed.steps.find(step=>step.index===ref.index&&step.fingerprint===ref.fingerprint);const original=previous.steps.find(step=>step.index===ref.index);return match&&original?original:ref;})}:item;}));setCanvas(current=>restoreDeletionReferences(current,previous,changed));setAutomation(current=>current&&previousAutomation&&changedAutomation?{...current,checkpoints:current.checkpoints.map(checkpoint=>{
+      const changed=changedAutomation.checkpoints.find(item=>item.beforeStep===checkpoint.beforeStep&&item.fingerprint===checkpoint.fingerprint);
+      const previous=previousAutomation.checkpoints.find(item=>item.beforeStep===checkpoint.beforeStep);
+      return changed&&previous?{...checkpoint,fingerprint:previous.fingerprint}:checkpoint;
+    })}:current);};
   }
   function selectScenario(id:string){
     setScenarioId(id);setInputs('');
@@ -533,7 +551,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       setFlows(JSON.stringify(nextFlows,null,2));setYaml(docs[0].toString()+docs[1].toString());setError('');
     } catch(error){setError(error instanceof Error?error.message:'Cannot add assertion.');}
   }
-  return <WorkspaceDrafts.Provider value={reportDraft}><RecoveredFields.Provider value={recoveredFields}><section className="panel scenario-panel" aria-labelledby="scenario-heading">
+  return <WorkspaceDrafts.Provider value={reportDraft}><RecoveredFields.Provider value={recoveredFields}><YamlDraftProvider resetToken={loadRevision} yaml={yaml}><section className="panel scenario-panel" aria-labelledby="scenario-heading">
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Scenario workspace</h2><p>Design scenarios on the shared canvas. Connect a simulator when ready to run.</p></div></div>
     {!!lastValid.current?.omittedValues?.length&&missingValues({...lastValid.current,scenarios:definitions,automation}).length>0&&<aside className="draft-banner" role="status"><p>Imported values need repair before execution: {missingValues({...lastValid.current,scenarios:definitions,automation}).join(' ')}</p><button onClick={()=>{if(advanced.current)advanced.current.open=true;}}>Review required values</button></aside>}
     <div className="canvas-workspace"><details className="scenario-controls"><summary>Scenarios</summary>{!noWorkspace&&<ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={simulatorConnected} onSelect={selectScenario} onCreate={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);rememberView({scenarioId:id,scenarioName:'Scenario '+(definitions.length+1),pathId:path});}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item))} key={'sidebar-'+loadRevision}>{run?.status==='running'&&!batchRunning&&<button className="confirm" onClick={()=>void cancel()}>Cancel run</button>}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</ScenarioSidebar>}</details><div className="workspace-canvas"><WorkspaceManager empty={noWorkspace} token={token} id={workspaceId} name={name} status={persistenceStatus} statusNote={pauseNote} dirty={dirty} busy={submitting||pickerBusy} blocked={running||launchBusy||pickerBusy} onAction={workspaceAction} onSave={manualSave} onPrepare={prepareSwitch} onExport={async({includeValues,savedOnly})=>{
@@ -549,7 +567,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     {draftError&&<div className="draft-banner danger" role="alert"><p>A recovered draft couldn't be read.</p>{confirmCorrupt?<><p>Discard the unreadable draft? This can't be undone.</p><button type="button" className="workspace-danger" onClick={()=>void discardCorrupt()}>Discard</button><button type="button" ref={corruptCancelButton} onClick={()=>setConfirmCorrupt(false)}>Cancel</button></>:<button type="button" ref={discardDraftButton} onClick={()=>setConfirmCorrupt(true)}>Discard draft</button>}</div>}
     {showRecovery&&<div className="draft-banner" role="status"><p>Unsaved changes from <time dateTime={draftSavedAt}>{draftSavedAt?new Date(draftSavedAt).toLocaleString():'earlier'}</time> were recovered.{staleDraft?' Based on an older version.':''}</p>{staleDraft?<button type="button" className="primary" onClick={()=>void copyWithDraft()}>Restore as a copy</button>:<button type="button" className="primary" onClick={()=>draftRecord.current&&restoreDraft(draftRecord.current)}>Restore draft</button>}<button type="button" onClick={()=>void keepSaved()}>Keep saved version</button></div>}
     {conflictBar&&<div className="draft-banner conflict-bar" role="status"><p>This workspace was changed in another tab.</p><button type="button" className="primary" onClick={()=>void loadLatest()}>Load latest</button><button type="button" onClick={()=>void (pendingDraft?copyWithDraft():copyConflict())}>Restore as a copy</button></div>}
-    <CanvasEditor initialView={initialCanvasView} onViewChange={next=>rememberView({canvas:next})} onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={simulatorConnected?()=>void submit(true):undefined} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));rememberView({pathId:id});}} disabled={running||submitting||pickerBusy||launchBusy}/>
+    <CanvasEditor yamlDeletionWarnings={yamlDeletionWarnings} onYamlDelete={deleteYamlStep} initialView={initialCanvasView} cards={cardPositions} onCardPosition={(card,position)=>rememberView({cards:{[card]:position}})} picker={{token,deviceId,disabled:running||submitting||launchBusy,onBusy:setPickerBusy}} onViewChange={next=>rememberView({canvas:next})} onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={simulatorConnected?()=>void submit(true):undefined} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));rememberView({pathId:id});}} disabled={running||submitting||pickerBusy||launchBusy}/>
     </>}
     </div></div>
     {!noWorkspace&&<>
@@ -563,22 +581,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       <div className="label-row"><span>Executable flow</span><button className="text-button" disabled={!bundleId || pickerBusy || submitting} onClick={() => setYaml(`appId: ${bundleId}\n---\n- launchApp\n- assertVisible: Home\n`)}>Use launch app ID</button></div>
       <DefaultActions key={'automation-'+loadRevision} value={automation} onChange={setAutomation} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} disabled={pickerBusy||submitting} onError={setAutomationError}/>
       {(automation||selectedScenario||canvas)&&<><button type="button" className="confirm" disabled={pickerBusy||submitting||!!automationError} onClick={async()=>{try{const source=JSON.stringify({yaml,flows,automation,definitions,scenarioId,resetApp,inputs,canvas,pathId});const result=await api('/api/automation/preview',{yaml,flows:JSON.parse(flows),automation,canvas,mock,pathId,scenarios:definitions,scenarioId:definitions.length?scenarioId:undefined,resetApp,runtimeInputs:inputs.trim()?JSON.parse(inputs):undefined});setPreview({source,yaml:result.executionYaml});setError('');}catch(error){setError(error instanceof Error?error.message:'Cannot preview execution.');}}}>Preview execution YAML</button>{preview&&<details open><summary>Derived execution preview{preview.source!==JSON.stringify({yaml,flows,automation,definitions,scenarioId,resetApp,inputs,canvas,pathId})?' · outdated, refresh before running':''}</summary><pre className="execution-yaml">{preview.yaml}</pre></details>}</>}
-      <YamlEditor key={loadRevision} yaml={yaml} onChange={setYaml} disabled={pickerBusy||submitting}
-        deletionWarnings={index=>[...definitions.filter(item=>item.steps.some(ref=>ref.index!>=index)).map(item=>'Scenario · '+item.name),...(canvas?.screens.flatMap(screen=>screen.tests.filter(test=>test.reference.kind==='flow'||(test.reference.file==='flow.yaml'&&(test.reference.index??-1)>=index)).map(test=>screen.title+' · '+test.label))??[]),...(automation?.checkpoints.filter(checkpoint=>checkpoint.beforeStep>=index).map(checkpoint=>'Default-action checkpoint before step '+(checkpoint.beforeStep+1))??[])]}
-        onDelete={(next,index)=>{
-          const previous=canvas;const changed=canvasAfterDeletion(canvas,index);
-          const previousDefinitions=definitions;
-          const changedDefinitions=definitions.map(item=>({...item,steps:item.steps.map(ref=>ref.index!>=index?{...ref,fingerprint:'deleted:'+ref.fingerprint.slice(-56)}:ref)}));
-          setDefinitions(changedDefinitions);
-          const previousAutomation=automation;
-          const changedAutomation=automation?{...automation,checkpoints:automation.checkpoints.map(checkpoint=>checkpoint.beforeStep>=index?{...checkpoint,fingerprint:'deleted:'+checkpoint.fingerprint.slice(-56)}:checkpoint)}:undefined;
-          setYaml(next);setCanvas(changed);setAutomation(changedAutomation);
-          return ()=>{setDefinitions(current=>current.map(item=>{const previous=previousDefinitions.find(previous=>previous.id===item.id);const changed=changedDefinitions.find(changed=>changed.id===item.id);return previous&&changed?{...item,steps:item.steps.map(ref=>{const match=changed.steps.find(step=>step.index===ref.index&&step.fingerprint===ref.fingerprint);const original=previous.steps.find(step=>step.index===ref.index);return match&&original?original:ref;})}:item;}));setCanvas(current=>restoreDeletionReferences(current,previous,changed));setAutomation(current=>current&&previousAutomation&&changedAutomation?{...current,checkpoints:current.checkpoints.map(checkpoint=>{
-            const changed=changedAutomation.checkpoints.find(item=>item.beforeStep===checkpoint.beforeStep&&item.fingerprint===checkpoint.fingerprint);
-            const previous=previousAutomation.checkpoints.find(item=>item.beforeStep===checkpoint.beforeStep);
-            return changed&&previous?{...checkpoint,fingerprint:previous.fingerprint}:checkpoint;
-          })}:current);};
-        }}/>
+      <YamlEditor key={loadRevision} yaml={yaml} onChange={setYaml} disabled={pickerBusy||submitting} deletionWarnings={yamlDeletionWarnings} onDelete={deleteYamlStep}/>
 
       <p className="field-hint">Reusable files declared above are snapshotted with the scenario; other external files and custom artifact paths are unsupported. Edits during a run apply to the next run.</p>
       <label className="checkbox-label"><input type="checkbox" checked={resetApp} disabled={running||submitting||pickerBusy||!selectedScenario} onChange={event=>setResetApp(event.target.checked)}/>Reset app data before setup (default: No)</label><p className="field-hint">No preserves app data and relaunches before declared setup. Setup must establish required app/session state. Reset clears app data; it does not clear the simulator Keychain or server-side sessions.</p>
@@ -613,5 +616,5 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     {saveProblem&&!conflict&&<div className="notice error" role="alert"><p>{saveProblem}</p><button className="save-retry" onClick={()=>{failedKey.current='';failedDraftKey.current='';setSaveFailed(false);setDraftFailed(false);setRetrySave(value=>value+1);}}>Retry</button></div>}
     {runError&&<div className="run-error-toast" role="alert"><button className="text-button" aria-label="Dismiss run error" onClick={()=>setRunError('')}>×</button><strong>Cannot run scenario</strong><p>{runError}</p></div>}
     </>}
-  </section></RecoveredFields.Provider></WorkspaceDrafts.Provider>;
+  </section></YamlDraftProvider></RecoveredFields.Provider></WorkspaceDrafts.Provider>;
 }
