@@ -36,3 +36,19 @@ Review `5512448458`, comment `4266223090` (thread `PRRT_kwDOU7InGc6sJG5Z`) found
 A new mounted CanvasEditor regression uses two actual paths and a parent path selector. It failed on `935ee4a` with `another path must not offer Undo that cannot restore focus`. Implementation `f3a6c97d1cd46525b47342a752087867247da242` records the original `pathId` with step deletion Undo and includes it in the existing availability guard. Switching away hides and clears the entry without changing graph/YAML or moving focus; switching back cannot revive it. Connection/screen Undo behavior is unchanged.
 
 After the fix: inspector/helper **38/38**, full suite **319/319**, typecheck, build and canvas contract pass. All 18 golden fixtures match without updates. Independent Codex Standards and Spec reviewers approve `f3a6c97` with no new findings. Earlier review approval did not cover this bug; the two-path regression now covers the reachable case.
+
+## Cursor follow-up and integration with main #49
+
+Processed Cursor verdicts `6159800195` (old head) and `6159837831` (path fix confirmed). Both remaining behavior notes are now addressed by `9e2c15f7f40511101b9b5aa6f2ef5a6547541309`:
+
+- Temporary `disabled` state controls visibility/interaction separately from the graph/YAML/path match guard. The snapshot survives a brief submit/run state, with the original expiry still running. A real edit while disabled still permanently invalidates it, including after the edit is reverted. The busy-state regression failed before the fix, then passed.
+- Menu and drag positions use the full visit order including repair IDs; menu moves stay adjacent, displayed step numbers reflect their visit positions, and deletion focus skips repair IDs to the next editable row. Three regressions failed before the fix (wrong menu order, wrong drag target, focus on Add step), then passed.
+- Renamed the expiry test to describe its actual timer-and-restore scenario; added the separate real-edit/revert invalidation test.
+
+Integrated main `9711456` (#72/#49) in merge `a47aa71`. Conflicts were additive in canvas rendering, styles and inspector tests. Kept both sets of controls/tests, and applied `canvas-undo` only to the generic Undo button, preserving its toolbar positioning and the step toast's own fixed position.
+
+Final validation: full suite **328/328**, inspector/helper/layout **47/47**, typecheck/build/canvas contract pass. Golden fixtures unchanged. Independent Codex Standards and Spec approve `9e2c15f` with no new actionable findings (the earlier optional duplicated-swap observation remains nonblocking). GitHub Codex approved prior head `20b49bd` with no major issues (`6159800094`); a fresh review is required for this behavior revision.
+
+Desktop browser fixture at 1280×720 with the merged canvas layout and a repair ID: menu movement across the repair position, native drag from position 1 to 4, one Undo to the pre-drag order, deletion, busy→ready while retaining Undo, and restored-step focus all verified. Temporary fixture and server removed; no simulator run was performed.
+
+![Undo after a brief busy state on the merged canvas](evidence/issue46-busy-undo.png)
