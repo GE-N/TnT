@@ -59,3 +59,16 @@ test('stepRowLabel formats every command with quoted values and optional destina
  for(const [item,command] of cases){assert.equal(stepRowLabel(item,4),'4 '+command);assert.equal(stepRowLabel(item,4,'Settings'),'4 '+command+' → Settings');}
  assert.equal(stepRowLabel(tap(''),1),'1 tapOn ""');
 });
+
+test('drag reorder composes adjacent swaps on an immutable visit and preserves other visits and YAML',async()=>{
+ const {reorderVisitStep}=await import('../src/inspector-operations.js');
+ const original=appendVisitStep(appendVisitStep(graph,'route','v1',check),'route','v1',tap('local'));
+ const snapshot=structuredClone(original);const originalYaml=writeChecks(source,graph,original);
+ const moved=reorderVisitStep(original,'route','v1','first',3);
+ assert.deepEqual(moved.paths[0].visits![0].operationIds,['second','check','local','first']);
+ assert.deepEqual(moved.paths[0].visits![1],snapshot.paths[0].visits![1]);
+ assert.deepEqual(original,snapshot);assert.equal(writeChecks(originalYaml,original,moved),originalYaml);
+ assert.deepEqual(reorderVisitStep(moved,'route','v1','first',0).paths[0].visits![0].operationIds,['first','second','check','local']);
+ assert.equal(reorderVisitStep(original,'route','v2','first',0),original);
+ assert.equal(reorderVisitStep(original,'route','v1','first',0),original);
+});

@@ -620,6 +620,17 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 
 .visit-selector-error{color:#b3261e;font-size:12px;white-space:nowrap;margin:0}
 .visit-inline-fields input[aria-invalid=true]{border:2px solid #b3261e}
+
+.floating-inspector .visit-step-summary{padding-left:44px}
+.floating-inspector .visit-step-drag{position:absolute;left:0;top:2px;width:44px;min-width:44px;min-height:44px;padding:0;border:0;background:transparent;color:#5f6670;cursor:grab}
+.visit-step[data-drop-position]::after{content:'';position:absolute;left:0;right:0;height:3px;background:#0a63d1;z-index:3;pointer-events:none}
+.visit-step[data-drop-position="before"]::after{top:-2px}
+.visit-step[data-drop-position="after"]::after{bottom:-2px}
+
+.floating-inspector .visit-step-actions .visit-step-delete{color:#5f6670;background:transparent;border-color:transparent}
+.floating-inspector .visit-step-actions .visit-step-delete:hover,.floating-inspector .visit-step-actions .visit-step-delete:focus{color:#b3261e;background:#fdecea}
+.step-undo-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:80;display:flex;align-items:center;gap:6px;padding:8px 16px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 20px #25304129}
+.step-undo-toast button{min-height:44px}
 /* #49 desktop canvas: controls float in reserved top/bottom bands. */
 .workbench{min-height:100dvh;background:var(--subtle)}
 .workbench>main{max-width:none;margin:0;padding:0}

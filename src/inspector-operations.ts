@@ -41,3 +41,13 @@ export function stepRowLabel(test:CanvasTest,position:number,destination?:string
  const value=test.check?.value??test.tap?.value??test.input??backControl(test)?.value??'';
  return position+' '+command+' '+JSON.stringify(value)+(destination?' → '+destination:'');
 }
+
+/** Compose adjacent swaps locally so one drop creates one undoable graph change. */
+export function reorderVisitStep(graph:CanvasGraph,pathId:string,visitId:string,testId:string,position:number):CanvasGraph{
+ const path=graph.paths.find(item=>item.id===pathId);if(!path)return graph;
+ const index=routeVisits(graph,path).findIndex(visit=>visit.id===visitId);if(index<0)return graph;
+ const ids=[...visitOperations(graph,path,index)];let at=ids.indexOf(testId);
+ if(at<0||!Number.isInteger(position)||position<0||position>=ids.length||position===at)return graph;
+ while(at!==position){const neighbor=at+(position>at?1:-1);[ids[at],ids[neighbor]]=[ids[neighbor],ids[at]];at=neighbor;}
+ return updateVisitOperations(freezeVisitOperations(graph),pathId,visitId,ids);
+}

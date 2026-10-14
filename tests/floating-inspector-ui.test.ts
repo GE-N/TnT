@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { JSDOM } from "jsdom";
-import { act, createElement, useState } from "react";
+import { act, createElement, useState, type ChangeEvent } from "react";
 import { refreshChecks, writeChecks } from "../shared/canvas-authoring.js";
 import type { CanvasGraph, CanvasTest } from "../server/canvas.js";
 import type { Rect } from "../src/inspector-placement.js";
@@ -109,7 +109,7 @@ type View = {
 };
 
 async function mount(
-  options: { initialView?: View; rects?: Map<string, Rect>; workbench?: boolean } = {},
+  options: { initialView?: View; rects?: Map<string, Rect>; graph?:CanvasGraph; workbench?:boolean } = {},
 ) {
   const dom = new JSDOM('<div id="root"'+(options.workbench?' class="workbench"':'')+'></div>', { url: "http://localhost/" });
   const window = dom.window;
@@ -179,26 +179,29 @@ async function mount(
   const { createRoot } = await import("react-dom/client");
   const { CanvasEditor } = await import("../src/canvas.js");
   const views: View[] = [];
-  const changes:CanvasGraph[]=[];let latestGraph:CanvasGraph=canvas;let latestSource=yaml;let replaceGraph:(graph:CanvasGraph)=>void=()=>{};let replaceSource:(source:string)=>void=()=>{};
+  const changes:CanvasGraph[]=[];let latestGraph:CanvasGraph=canvas;let latestSource=yaml;let replaceGraph:(graph:CanvasGraph)=>void=()=>{};let replaceSource:(source:string)=>void=()=>{};let setDisabled:(value:boolean)=>void=()=>{};
   function Host() {
-    const [graph, setGraph] = useState<CanvasGraph | undefined>(()=>refreshChecks(canvas,yaml));
+    const [graph, setGraph] = useState<CanvasGraph | undefined>(()=>refreshChecks(options.graph??canvas,yaml));
+    const [pathId,setPathId]=useState("route");
+    const [disabled,updateDisabled]=useState(false);setDisabled=updateDisabled;
     const [source, setSource] = useState(yaml);latestGraph=graph!;latestSource=source;replaceGraph=setGraph;replaceSource=setSource;
-    return createElement(CanvasEditor, {
+    const editor=createElement(CanvasEditor, {
       graph,
       onChange: next=>{if(next)changes.push(next);setGraph(next);},
       yaml: source,
       onYamlChange: setSource,
       catalog: [],
       diagnostics: [],
-      pathId: "route",
-      onPathChange: () => {},
-      disabled: false,
+      pathId,
+      onPathChange: setPathId,
+      disabled,
       scenarioMode: true,
       scenarioId: "main",
-      scenarios: [{ id: "main", name: "Main", pathId: "route" }],
+      scenarios: (options.graph??canvas).paths.map(path=>({id:path.scenarioId!,name:path.name,pathId:path.id})),
       initialView: options.initialView,
       onViewChange: (view) => views.push(view),
     });
+    return options.graph?createElement("div",null,createElement("select",{"aria-label":"Selected scenario path",value:pathId,onChange:(event:ChangeEvent<HTMLSelectElement>)=>setPathId(event.target.value)},graph!.paths.map(path=>createElement("option",{key:path.id,value:path.id},path.name))),editor):editor;
   }
   const root = createRoot(document.getElementById("root")!);
   await act(async () => root.render(createElement(Host)));
@@ -256,6 +259,7 @@ async function mount(
     document,
     changes,
     saved:()=>({graph:structuredClone(latestGraph),yaml:latestSource}),
+    disable:async(value:boolean)=>act(async()=>setDisabled(value)),
     restore:async(state:{graph:CanvasGraph;yaml:string})=>act(async()=>{replaceGraph(state.graph);replaceSource(state.yaml);}),
     rects,
     views,
@@ -889,6 +893,107 @@ test('visit review styles retain minimum hit targets and accessible validation c
  assert.match(rule('.floating-inspector .selected-visit>.visit-section-heading'),/width:calc\(100% \+ 16px\)/);
 });
 
+test('step menu moves retain focus, announce position and undo in one change',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const before=page.saved();const row=()=>page.card()!.querySelector<HTMLElement>('[data-operation-id="home-ready"]')!;
+  const menu=row().querySelector<HTMLElement>('[aria-label="Step actions"]');assert.ok(menu);
+  assert.equal(row().querySelector<HTMLButtonElement>('[aria-label="Move check 1 up"]')!.disabled,true);
+  await page.click(row().querySelector<HTMLButtonElement>('[aria-label="Move check 1 down"]')!);
+  assert.deepEqual(page.saved().graph.paths[0].visits![0].operationIds,['avatar','home-ready']);
+  same(page.document.activeElement,row().querySelector('.visit-step-summary'));
+  assert.match(page.card()!.querySelector('[role=status]')!.textContent!,/Step 1 moved to position 2/);
+  assert.equal(row().querySelector<HTMLButtonElement>('[aria-label="Move check 1 down"]')!.disabled,true);
+  assert.equal(row().querySelector('details')!.open,false);
+  await page.click([...page.document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Undo canvas deletion')!);
+  assert.deepEqual(page.saved(),before);
+ }finally{await page.close();}
+});
+
+test('drag handle shows a drop line, commits once, and one Undo restores the visit',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const before=page.saved();const from=page.card()!.querySelector<HTMLElement>('[data-operation-id="home-ready"]')!;
+  const to=page.card()!.querySelector<HTMLElement>('[data-operation-id="avatar"]')!;
+  const handle=from.querySelector<HTMLButtonElement>('[aria-label="Drag step 1"]');assert.ok(handle);assert.equal(handle.draggable,true);
+  async function drag(target:Element,type:string,y=1){await act(async()=>{const event=new page.window.MouseEvent(type,{bubbles:true,cancelable:true,clientY:y});Object.defineProperty(event,'dataTransfer',{value:{setData(){},effectAllowed:'',dropEffect:''}});target.dispatchEvent(event);});}
+  await drag(handle,'dragstart');await drag(to,'dragover');assert.equal(to.dataset.dropPosition,'after');
+  const count=page.changes.length;await drag(to,'drop');assert.equal(page.changes.length,count+1);
+  assert.deepEqual(page.saved().graph.paths[0].visits![0].operationIds,['avatar','home-ready']);
+  absent(page.card()!.querySelector('[data-drop-position]'));same(page.document.activeElement,from.querySelector('.visit-step-summary'));
+  await page.click([...page.document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Undo canvas deletion')!);
+  assert.deepEqual(page.saved(),before);
+ }finally{await page.close();}
+});
+
+test('delete step offers live Undo toast and restores focus without a dialog',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const before=page.saved();const row=page.card()!.querySelector<HTMLElement>('[data-operation-id="home-ready"]')!;
+  await page.click(row.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  absent(page.document.querySelector('[role=alertdialog]'));absent(page.card()!.querySelector('[data-operation-id="home-ready"]'));
+  const toast=page.document.querySelector<HTMLElement>('.step-undo-toast[role=status]');assert.ok(toast);assert.match(toast.textContent!,/Step 1 deleted · Undo/);
+  const undo=toast.querySelector<HTMLButtonElement>('button')!;assert.equal(undo.disabled,false);
+  same(page.document.activeElement,page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary'));
+  await page.click(undo);assert.deepEqual(page.saved(),before);same(page.document.activeElement,page.card()!.querySelector('[data-operation-id="home-ready"] .visit-step-summary'));absent(page.document.querySelector('.step-undo-toast'));
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete action 1"]')!);
+  assert.equal(page.saved().graph.paths[0].edgeIds.length,0,'only outgoing action cuts the route');
+  same(page.document.activeElement,page.card()!.querySelector('.add-visit-step'));
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('.visit-step-summary')!);
+  const input=page.card()!.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,'Changed');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});
+  await page.press(input,'Enter');absent(page.document.querySelector('.step-undo-toast'));
+ }finally{await page.close();}
+});
+
+test('deletion toast expires and cannot revive when the deleted snapshot returns',async context=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  context.mock.timers.enable({apis:['setTimeout']});
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  const deleted=page.saved();assert.ok(page.document.querySelector('.step-undo-toast'));
+  await act(async()=>context.mock.timers.tick(8001));absent(page.document.querySelector('.step-undo-toast'));
+  await page.restore(deleted);absent(page.document.querySelector('.step-undo-toast'));
+ }finally{context.mock.timers.reset();await page.close();}
+});
+
+test('a drag cannot drop into a different visit or survive a drag end',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'profile',selectedVisitId:'v2'}});
+ try{
+  const before=page.saved();const handle=page.section(2,'Profile')!.querySelector<HTMLButtonElement>('.visit-step-drag')!;
+  async function drag(target:Element,type:string){await act(async()=>{const event=new page.window.MouseEvent(type,{bubbles:true,cancelable:true,clientY:1});Object.defineProperty(event,'dataTransfer',{value:{setData(){},effectAllowed:'',dropEffect:''}});target.dispatchEvent(event);});}
+  await drag(handle,'dragstart');await page.click(page.heading(4,'Profile'));
+  const row=page.section(4,'Profile')!.querySelector('.visit-step')!;
+  await drag(row,'dragover');absent(page.document.querySelector('[data-drop-position]'));await drag(row,'drop');assert.deepEqual(page.saved(),before);
+  await drag(row.querySelector('.visit-step-drag')!,'dragstart');await drag(row,'dragover');assert.ok(page.document.querySelector('[data-drop-position]'));
+  await drag(row.querySelector('.visit-step-drag')!,'dragend');absent(page.document.querySelector('[data-drop-position]'));await drag(row,'drop');assert.deepEqual(page.saved(),before);
+ }finally{await page.close();}
+});
+
+test('leaving a drag target hides its drop line without committing',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const before=page.saved();const row=page.card()!.querySelector('[data-operation-id="avatar"]')!;
+  async function drag(target:Element,type:string){await act(async()=>{const event=new page.window.MouseEvent(type,{bubbles:true,cancelable:true,clientY:1});Object.defineProperty(event,'dataTransfer',{value:{setData(){},effectAllowed:'',dropEffect:''}});target.dispatchEvent(event);});}
+  await drag(page.card()!.querySelector('.visit-step-drag')!,'dragstart');await drag(row,'dragover');assert.ok(page.document.querySelector('[data-drop-position]'));
+  await drag(row,'dragleave');absent(page.document.querySelector('[data-drop-position]'));assert.deepEqual(page.saved(),before);
+ }finally{await page.close();}
+});
+
+test('switching to another path invalidates step Undo without moving focus or reviving it on return',async()=>{
+ const graph=structuredClone(canvas);graph.paths.push({id:'other',name:'Other',scenarioId:'other-scenario',screenId:'settings',edgeIds:[],visits:[{id:'other-visit',operationIds:['settings-ready']}]});
+ const page=await mount({graph,initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  assert.ok(page.document.querySelector('.step-undo-toast'),'deletion offers Undo in its original path');
+  const deleted=page.saved();const control=page.document.querySelector<HTMLSelectElement>('[aria-label="Selected scenario path"]')!;
+  async function choose(id:string){await act(async()=>{control.focus();Object.getOwnPropertyDescriptor(page.window.HTMLSelectElement.prototype,'value')!.set!.call(control,id);control.dispatchEvent(new page.window.Event('change',{bubbles:true}));});}
+  await choose('other');same(page.document.activeElement,control);absent(page.document.querySelector('.step-undo-toast'),'another path must not offer Undo that cannot restore focus');
+  assert.deepEqual(page.saved(),deleted,'switching paths does not edit graph or YAML');
+  await choose('route');absent(page.document.querySelector('.step-undo-toast'),'returning to the original path cannot revive stale Undo');same(page.document.activeElement,control);assert.deepEqual(page.saved(),deleted);
+ }finally{await page.close();}
+});
+
 test("floating controls reserve inspector bounds and an open popover moves the card to a clear side", async () => {
   const page = await mount({workbench:true,initialView:{selectedScreenId:"home"},rects:new Map([
     ["viewport",{left:0,top:0,width:1200,height:800}],
@@ -926,4 +1031,62 @@ test("floating controls reserve inspector bounds and an open popover moves the c
     await page.relayout();
     assert.ok(page.placement().left + 300 <= 800, "A run failure must not cover inspector actions");
   } finally { await page.close(); }
+});
+
+
+test('temporary disablement hides step Undo without discarding it or restarting its expiry',async context=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  context.mock.timers.enable({apis:['setTimeout']});const before=page.saved();
+  const remove=()=>page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  await remove();await page.disable(true);absent(page.document.querySelector('.step-undo-toast'));
+  await act(async()=>context.mock.timers.tick(1000));await page.disable(false);
+  const undo=page.document.querySelector<HTMLButtonElement>('.step-undo-toast button');assert.ok(undo,'temporary submit/run state must preserve matching Undo');assert.equal(undo.disabled,false);
+  await page.click(undo);assert.deepEqual(page.saved(),before);
+  await remove();await page.disable(true);await act(async()=>context.mock.timers.tick(8001));await page.disable(false);
+  absent(page.document.querySelector('.step-undo-toast'),'the original timeout still expires while disabled');
+ }finally{context.mock.timers.reset();await page.close();}
+});
+
+function graphWithRepairStep(){const graph=structuredClone(canvas);graph.paths[0].visits![0].operationIds=['home-ready','profile-ready','avatar'];return graph;}
+
+test('menu moves stay adjacent in the full visit order including repair steps',async()=>{
+ const page=await mount({graph:graphWithRepairStep(),initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const row=page.card()!.querySelector<HTMLElement>('[data-operation-id="avatar"]')!;
+  await page.click(row.querySelector<HTMLButtonElement>('[aria-label="Move action 1 up"]')!);
+  assert.deepEqual(page.saved().graph.paths[0].visits![0].operationIds,['home-ready','avatar','profile-ready']);
+  assert.match(row.querySelector('.visit-step-summary')!.textContent!,/^2 /);same(page.document.activeElement,row.querySelector('.visit-step-summary'));
+  assert.equal(row.querySelector<HTMLButtonElement>('[aria-label="Move action 1 down"]')!.disabled,false,'a repair step still occupies the next visit position');
+  await page.click(row.querySelector<HTMLButtonElement>('[aria-label="Move action 1 down"]')!);
+  assert.deepEqual(page.saved().graph.paths[0].visits![0].operationIds,['home-ready','profile-ready','avatar']);
+ }finally{await page.close();}
+});
+
+test('drag targets use full visit positions across repair steps and one Undo restores order',async()=>{
+ const page=await mount({graph:graphWithRepairStep(),initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const before=page.saved();const from=page.card()!.querySelector('[data-operation-id="home-ready"]')!;const target=page.card()!.querySelector('[data-operation-id="avatar"]')!;
+  async function drag(node:Element,type:string){await act(async()=>{const event=new page.window.MouseEvent(type,{bubbles:true,cancelable:true,clientY:1});Object.defineProperty(event,'dataTransfer',{value:{setData(){},effectAllowed:'',dropEffect:''}});node.dispatchEvent(event);});}
+  await drag(from.querySelector('.visit-step-drag')!,'dragstart');await drag(target,'dragover');await drag(target,'drop');
+  assert.deepEqual(page.saved().graph.paths[0].visits![0].operationIds,['profile-ready','avatar','home-ready']);
+  await page.click(page.document.querySelector<HTMLButtonElement>('.canvas-undo')!);assert.deepEqual(page.saved(),before);
+ }finally{await page.close();}
+});
+
+test('delete focus skips repair steps to the next editable step',async()=>{
+ const page=await mount({graph:graphWithRepairStep(),initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  same(page.document.activeElement,page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary'),'repair rows must not divert next-step focus to Add step');
+ }finally{await page.close();}
+});
+
+test('a graph edit while temporarily disabled permanently invalidates deletion Undo',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);const deleted=page.saved();
+  await page.disable(true);const edited=structuredClone(deleted);edited.graph.screens[0].title='Edited Home';await page.restore(edited);
+  await page.restore(deleted);await page.disable(false);absent(page.document.querySelector('.step-undo-toast'),'reverting a later edit must not revive a discarded Undo');
+ }finally{await page.close();}
 });
