@@ -35,10 +35,12 @@ async function mount(scenarioMode:boolean){
  }
  await act(async()=>root.render(createElement(Host)));
  const document=dom.window.document;
+ const pickerCalls:string[]=[];
+ Object.defineProperty(dom.window.HTMLSelectElement.prototype,'showPicker',{value:function(this:HTMLSelectElement){assert.equal(document.activeElement,this);pickerCalls.push(this.closest<HTMLElement>('[data-operation-id]')!.dataset.operationId!);},configurable:true});
  await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Select screen Home"]')!.click());
  const row=(id:string)=>document.querySelector<HTMLElement>(`[data-operation-id="${id}"]`)!;
  return {
-  document,state,row,
+  document,state,row,pickerCalls,
   warnings:()=>[...document.querySelectorAll('.destination-warning p')].map(node=>node.textContent),
   choose:async(id:string,value:string)=>act(async()=>{const select=row(id).querySelector<HTMLSelectElement>('select[aria-label$=" destination"]')!;Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(select,value);select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));}),
   option:(id:string,text:string)=>[...row(id).querySelectorAll<HTMLOptionElement>('select[aria-label$=" destination"] option')].find(option=>option.textContent===text)!.value,
@@ -66,6 +68,7 @@ for(const scenarioMode of [false,true])test(`Choose destination opens that step'
    const select=page.row(id).querySelector<HTMLSelectElement>('select[aria-label$=" destination"]')!;
    assert.equal(page.document.activeElement,select);
    assert.equal(select.closest('details')!.open,true);
+   assert.equal(page.pickerCalls.at(-1),id);
   }
  }finally{await page.close();}
 });
