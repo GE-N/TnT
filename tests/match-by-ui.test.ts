@@ -370,7 +370,122 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       await act(async()=>recovered.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
       assert.equal(recovered.querySelector<HTMLInputElement>('#yaml-card-form-value')!.value,'New command');
       assert.equal(recovered.querySelector<HTMLInputElement>('.yaml-value input')!.value,'Gear pending');
-      assert.equal(page.document.querySelector('.workspace-save-status')?.getAttribute('aria-label')==="Couldn't save.",false);
+      const advanced=await showAdvanced(page.document);
+      assert.equal(advanced.querySelector<HTMLInputElement>('#form-value')!.value,'New command');
+      await act(async()=>advanced.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
+      assert.equal(advanced.querySelector<HTMLInputElement>('.yaml-value input')!.value,'Gear pending');
+      await act(async()=>[...advanced.querySelectorAll('button')].find(item=>item.textContent==='Reset step 2 text draft')!.click());
+      assert.equal(advanced.querySelector('[aria-label="Reset step 2 text draft"]'),null);
+      assert.equal(recovered.querySelector('[aria-label="Reset step 2 text draft"]'),null);
+      assert.equal(recovered.querySelector<HTMLInputElement>('.yaml-value input')!.value,'.*Gear.*');
+      const beforeAppend=await page.service.workspace(page.workspace.id);
+      await act(async()=>[...recovered.querySelectorAll('button')].find(item=>item.textContent==='Append command')!.click());
+      assert.equal(recovered.querySelector<HTMLInputElement>('#yaml-card-form-value')!.value,'');
+      assert.equal(advanced.querySelector<HTMLInputElement>('#form-value')!.value,'');
+      assert.match(page.document.querySelector<HTMLTextAreaElement>('#scenario-yaml')!.value,/tapOn: "New command"/);
+      const saved=await page.published(beforeAppend.metadata?.revision??0);
+      assert.match(saved.yaml,/tapOn: "New command"/);
+      assert.equal((await page.service.workspaceDetail(page.workspace.id)).draft?.fields['yaml-command'],undefined);
+      assert.equal((await page.service.workspaceDetail(page.workspace.id)).draft?.fields['yaml-form:1:text'],undefined);
+      assert.equal(page.document.querySelector('.workspace-save-status')?.getAttribute('aria-label'),'Saved locally');
+    }finally{await page.close();}
+  });
+
+  test('a recovered step draft applies in both YAML editors and then saves',async()=>{
+    const page=await openWorkspace('tap');
+    const typeInto=async(input:HTMLInputElement,value:string)=>{await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});};
+    try{
+      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
+      const yaml=page.card('YAML')!;
+      await act(async()=>[...yaml.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
+      await act(async()=>yaml.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
+      await typeInto(yaml.querySelector<HTMLInputElement>('.yaml-value input')!,'Gear pending');
+      const deadline=Date.now()+8000;
+      let stored='';
+      while(Date.now()<deadline){
+        await act(async()=>{await new Promise(resolve=>setTimeout(resolve,50));});
+        await page.settle();
+        stored=(await page.service.workspaceDetail(page.workspace.id)).draft?.fields['yaml-form:1:text']??'';
+        if(stored==='Gear pending')break;
+      }
+      assert.equal(stored,'Gear pending');
+      await page.remount();
+      await page.settle();
+      const restoredDeadline=Date.now()+8000;
+      while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<restoredDeadline){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
+      await act(async()=>[...page.document.querySelectorAll('button')].find(item=>item.textContent==='Restore draft')!.click());
+      const afterRestore=Date.now()+8000;
+      while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<afterRestore){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
+      await inspectScreen(page.document,{id:'home'},{id:'visit-home'});
+      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
+      const card=page.card('YAML')!;
+      await act(async()=>[...card.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
+      await act(async()=>card.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
+      const advanced=await showAdvanced(page.document);
+      await act(async()=>advanced.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
+      assert.equal(card.querySelector<HTMLInputElement>('.yaml-value input')!.value,'Gear pending');
+      assert.equal(advanced.querySelector<HTMLInputElement>('.yaml-value input')!.value,'Gear pending');
+      const beforeApply=await page.service.workspace(page.workspace.id);
+      await act(async()=>card.querySelector<HTMLButtonElement>('[aria-label="Apply step 2 text"]')!.click());
+      assert.equal(card.querySelector('[aria-label="Reset step 2 text draft"]'),null);
+      assert.equal(advanced.querySelector('[aria-label="Reset step 2 text draft"]'),null);
+      assert.equal(card.querySelector<HTMLInputElement>('.yaml-value input')!.value,'Gear pending');
+      assert.equal(advanced.querySelector<HTMLInputElement>('.yaml-value input')!.value,'Gear pending');
+      assert.match(page.document.querySelector<HTMLTextAreaElement>('#scenario-yaml')!.value,/Gear pending/);
+      await page.published(beforeApply.metadata?.revision??0);
+      assert.equal((await page.service.workspaceDetail(page.workspace.id)).draft?.fields['yaml-form:1:text'],undefined);
+      assert.equal(page.document.querySelector('.workspace-save-status')?.getAttribute('aria-label'),'Saved locally');
+    }finally{await page.close();}
+  });
+
+  test('the YAML card and Advanced editor share one pending command',async()=>{
+    const page=await openWorkspace('tap');
+    const typeInto=async(input:HTMLInputElement,value:string)=>{await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});};
+    try{
+      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
+      const card=page.card('YAML')!;
+      await act(async()=>[...card.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
+      await typeInto(card.querySelector<HTMLInputElement>('#yaml-card-form-value')!,'card pending');
+      const advanced=await showAdvanced(page.document);
+      assert.equal(advanced.querySelector<HTMLInputElement>('#form-value')!.value,'card pending');
+      await typeInto(advanced.querySelector<HTMLInputElement>('#form-value')!,'advanced pending');
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-value')!.value,'advanced pending');
+      const deadline=Date.now()+8000;
+      let stored='';
+      while(Date.now()<deadline){
+        await act(async()=>{await new Promise(resolve=>setTimeout(resolve,50));});
+        await page.settle();
+        stored=(await page.service.workspaceDetail(page.workspace.id)).draft?.fields['yaml-command']??'';
+        if(stored==='advanced pending')break;
+      }
+      assert.equal(stored,'advanced pending');
+      await page.remount();
+      await page.settle();
+      const restoredDeadline=Date.now()+8000;
+      while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<restoredDeadline){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
+      await act(async()=>[...page.document.querySelectorAll('button')].find(item=>item.textContent==='Restore draft')!.click());
+      const afterRestore=Date.now()+8000;
+      while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<afterRestore){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
+      await inspectScreen(page.document,{id:'home'},{id:'visit-home'});
+      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
+      const restoredCard=page.card('YAML')!;
+      await act(async()=>[...restoredCard.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
+      const restoredAdvanced=await showAdvanced(page.document);
+      assert.equal(restoredCard.querySelector<HTMLInputElement>('#yaml-card-form-value')!.value,'advanced pending');
+      assert.equal(restoredAdvanced.querySelector<HTMLInputElement>('#form-value')!.value,'advanced pending');
     }finally{await page.close();}
   });
 });
+
+async function showAdvanced(document:Document){
+  const summary=[...document.querySelectorAll('summary')].find(item=>item.textContent?.startsWith('Advanced mode'));
+  assert.ok(summary);
+  const details=summary.closest('details');
+  if(details&&!details.open)await act(async()=>summary.click());
+  const editor=[...document.querySelectorAll('section[aria-label="YAML form and code editor"]')].find(section=>section.querySelector('#scenario-yaml'));
+  assert.ok(editor);
+  const forms=[...editor.querySelectorAll('button')].find(item=>item.textContent==='Command forms');
+  assert.ok(forms);
+  if(forms.getAttribute('aria-pressed')!=='true')await act(async()=>forms.click());
+  return editor;
+}

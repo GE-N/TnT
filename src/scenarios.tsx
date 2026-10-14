@@ -10,7 +10,7 @@ import type {ScenarioDefinition} from '../server/scenario-definitions.js';
 import {DefaultActions} from './default-actions.js';
 import type {Automation} from '../server/default-actions.js';
 import {canvasAfterDeletion,restoreDeletionReferences} from './yaml-forms.js';
-import {YamlEditor} from './yaml-editor.js';
+import {YamlDraftProvider,YamlEditor} from './yaml-editor.js';
 import { runnerClient,RunnerRequestError } from './runner-client.js';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import type { Run, Workspace } from '../server/scenarios.js';
@@ -551,7 +551,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       setFlows(JSON.stringify(nextFlows,null,2));setYaml(docs[0].toString()+docs[1].toString());setError('');
     } catch(error){setError(error instanceof Error?error.message:'Cannot add assertion.');}
   }
-  return <WorkspaceDrafts.Provider value={reportDraft}><RecoveredFields.Provider value={recoveredFields}><section className="panel scenario-panel" aria-labelledby="scenario-heading">
+  return <WorkspaceDrafts.Provider value={reportDraft}><RecoveredFields.Provider value={recoveredFields}><YamlDraftProvider resetToken={loadRevision}><section className="panel scenario-panel" aria-labelledby="scenario-heading">
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Scenario workspace</h2><p>Design scenarios on the shared canvas. Connect a simulator when ready to run.</p></div></div>
     {!!lastValid.current?.omittedValues?.length&&missingValues({...lastValid.current,scenarios:definitions,automation}).length>0&&<aside className="draft-banner" role="status"><p>Imported values need repair before execution: {missingValues({...lastValid.current,scenarios:definitions,automation}).join(' ')}</p><button onClick={()=>{if(advanced.current)advanced.current.open=true;}}>Review required values</button></aside>}
     <div className="canvas-workspace"><details className="scenario-controls"><summary>Scenarios</summary>{!noWorkspace&&<ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={simulatorConnected} onSelect={selectScenario} onCreate={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);rememberView({scenarioId:id,scenarioName:'Scenario '+(definitions.length+1),pathId:path});}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item))} key={'sidebar-'+loadRevision}>{run?.status==='running'&&!batchRunning&&<button className="confirm" onClick={()=>void cancel()}>Cancel run</button>}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</ScenarioSidebar>}</details><div className="workspace-canvas"><WorkspaceManager empty={noWorkspace} token={token} id={workspaceId} name={name} status={persistenceStatus} statusNote={pauseNote} dirty={dirty} busy={submitting||pickerBusy} blocked={running||launchBusy||pickerBusy} onAction={workspaceAction} onSave={manualSave} onPrepare={prepareSwitch} onExport={async({includeValues,savedOnly})=>{
@@ -616,5 +616,5 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     {saveProblem&&!conflict&&<div className="notice error" role="alert"><p>{saveProblem}</p><button className="save-retry" onClick={()=>{failedKey.current='';failedDraftKey.current='';setSaveFailed(false);setDraftFailed(false);setRetrySave(value=>value+1);}}>Retry</button></div>}
     {runError&&<div className="run-error-toast" role="alert"><button className="text-button" aria-label="Dismiss run error" onClick={()=>setRunError('')}>×</button><strong>Cannot run scenario</strong><p>{runError}</p></div>}
     </>}
-  </section></RecoveredFields.Provider></WorkspaceDrafts.Provider>;
+  </section></YamlDraftProvider></RecoveredFields.Provider></WorkspaceDrafts.Provider>;
 }
