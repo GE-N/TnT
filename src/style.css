@@ -700,4 +700,5 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 
 .workbench:has(.draft-banner) .canvas-inspectors{top:320px;max-height:calc(100dvh - 408px)}
 
-.workbench .canvas-toolbar button{border:0;display:inline-flex;align-items:center;justify-content:center}
+.workbench .canvas-toolbar button{border:0;background:transparent;box-shadow:none;padding:0;display:inline-flex;align-items:center;justify-content:center}
+.workbench .canvas-toolbar button:hover:not(:disabled){background:transparent}
