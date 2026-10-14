@@ -1,6 +1,6 @@
 # Issue 60: legacy routes without destinations
 
-Based on main `006024a` (includes #59, #45, #49 and #46). Original Cursor branch `cursor/legacy-missing-destination-de36` at `dbcaba1` is preserved; implementation lives on `codex/60-legacy-missing-destination` in its dedicated worktree.
+Integrated main `296b9fc` after the original rebase onto `006024a` (includes #59, #45, #49, #46 and the later picker/YAML draft fixes). Original Cursor branch `cursor/legacy-missing-destination-de36` at `dbcaba1` is preserved; implementation lives on `codex/60-legacy-missing-destination` in its dedicated worktree.
 
 ## Behavior
 
@@ -13,7 +13,7 @@ One exception file, `50-legacy-missing-destination.patch`, records the protected
 ## Validation
 
 - `npm run typecheck`: pass.
-- `npm test`: 342/342 pass on the rebased implementation.
+- `npm test`: 358/358 pass on the rebased implementation.
 - Focused warning/server tests: 13/13 pass, including two own labels, exact diagnostic shape, picker invocation while focused, both destination choices and pre-Maestro rejection.
 - Mutation: remove the missing-destination emission in `inspectCanvas`; both actual CanvasEditor own-label warning tests fail (exit 1, expected two warnings versus none). Restore emission; focused tests pass.
 - `GOLDEN_UPDATE=1 node --import tsx --test tests/golden-canvas.test.ts`: two runs, each 20/20 pass. No tracked golden diff after either run, and the two recorded golden diffs are identical.
@@ -42,6 +42,10 @@ Review regression: adding an actual stale YAML association alongside the two mis
 
 **Capture limitation:** the native macOS menu is a separate overlay omitted by the available application/window screenshot API, although its open menu and focused item are exposed by accessibility. These are real screenshots, without a fabricated menu overlay. Independent Cursor design review should confirm the native menu visually and provide an overlay-inclusive capture if its environment supports it.
 
+## Main integration
+
+Main advanced after Cursor approved `18f4817`, producing a content conflict at the VisitStep close and warning row. The ticket branch integrates main with a merge commit, preserving main's `picker`, `sourceYaml`, card-position props and the separate amber warning row. The feature diff relative to current main remains focused; server/shared exception content is unchanged. Independent exact-head re-review is required for this integration.
+
 ## Delivery gate
 
-Draft PR targeting main. Independent Cursor review must name the final head, cover the rebase and the diagnostic/UI contract, and resolve all findings. Per the latest #60 task instruction, Codex must not self-merge; follow approved delivery with the team's merge owner and verify/report the actual result in the issue. A 30-minute heartbeat tracks review, feedback and delivery until verified completion.
+PR targeting main, awaiting review of the integrated head. Independent Cursor review must name the final head, cover the rebase and the diagnostic/UI contract, and resolve all findings. Per the latest #60 task instruction, Codex must not self-merge; follow approved delivery with the team's merge owner and verify/report the actual result in the issue. A 30-minute heartbeat tracks review, feedback and delivery until verified completion.
