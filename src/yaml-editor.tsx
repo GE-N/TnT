@@ -4,6 +4,8 @@ import {readForms,editForm,appendForm,deleteForm,formCommands,type FormCommand,t
 
 type EditorProps={
   yaml:string;onChange:(yaml:string)=>void;disabled:boolean;
+  /** Defaults to the advanced-panel id so an on-demand card can host a second editor. */
+  inputId?:string;
   deletionWarnings?:(index:number)=>string[];
   onDelete?:(yaml:string,index:number)=>(()=>void);
 };
@@ -44,7 +46,7 @@ function StepRow({step,yaml,onChange,disabled,expanded,onExpand,onDelete,onCode}
     </div>}
   </div>;
 }
-export function YamlEditor({yaml,onChange,disabled,deletionWarnings,onDelete}:EditorProps){
+export function YamlEditor({yaml,onChange,disabled,deletionWarnings,onDelete,inputId='scenario-yaml'}:EditorProps){
   const view=useMemo(()=>readForms(yaml),[yaml]);
   const [mode,setMode]=useState<'code'|'forms'>('code');
   const [expanded,setExpanded]=useState<number>();
@@ -71,7 +73,7 @@ export function YamlEditor({yaml,onChange,disabled,deletionWarnings,onDelete}:Ed
     <div className="label-row"><button className="confirm" type="button" aria-pressed={mode==='code'} onClick={()=>setMode('code')}>YAML code</button><button className="confirm" type="button" aria-pressed={mode==='forms'} onClick={()=>setMode('forms')}>Command forms</button></div>
     {view.error&&<div role="alert" className="notice error">{view.error} Your code is retained. Repair it in YAML code; form transformations are blocked.</div>}
     {undo&&<div role="status" className="yaml-undo">Step deleted. <button type="button" disabled={disabled||yaml!==undo.after} onClick={()=>{onChange(undo.before);undo.restore?.();setUndo(undefined);setError('');}}>Undo deletion</button>{yaml!==undo.after&&<span> Undo unavailable after further YAML edits.</span>}</div>}
-    <div hidden={mode!=='code'}><label htmlFor="scenario-yaml">Maestro YAML</label><textarea id="scenario-yaml" value={yaml} disabled={disabled} onChange={event=>onChange(event.target.value)} spellCheck={false} maxLength={100_000}/></div><div hidden={mode!=='forms'}>
+    <div hidden={mode!=='code'}><label htmlFor={inputId}>Maestro YAML</label><textarea id={inputId} value={yaml} disabled={disabled} onChange={event=>onChange(event.target.value)} spellCheck={false} maxLength={100_000}/></div><div hidden={mode!=='forms'}>
       <p className="field-hint">Edit values inline; expand Details for arguments. Enter or Apply saves a value. Complex YAML remains editable in code.</p>
       {view.steps.map(step=><StepRow key={step.index+':'+step.command} step={step} yaml={yaml} onChange={onChange} disabled={disabled} expanded={expanded===step.index} onExpand={()=>setExpanded(expanded===step.index?undefined:step.index)} onDelete={()=>requestDeletion(step.index)} onCode={()=>setMode('code')}/>)}
       <fieldset className="yaml-add" disabled={disabled||!!view.error||!view.canAppend}><legend>Add command</legend><label className="sr-only" htmlFor="form-command">Command</label><select id="form-command" value={command} onChange={event=>setCommand(event.target.value as FormCommand)}>{formCommands.map(command=><option key={command}>{command}</option>)}</select><label className="sr-only" htmlFor="form-value">New command value</label><input id="form-value" placeholder="Command value" value={value} onChange={event=>setValue(event.target.value)}/><button type="button" className="confirm" onClick={append}>Append command</button></fieldset>

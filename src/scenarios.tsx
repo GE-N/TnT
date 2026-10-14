@@ -142,6 +142,8 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const staleDraft=showRecovery&&draftBase<savedRevision;
   const storedCanvas=viewRef.current.canvas;
   const initialCanvasView=storedCanvas&&typeof storedCanvas==='object'&&!Array.isArray(storedCanvas)?storedCanvas as {zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string}:undefined;
+  const storedCards=viewRef.current.cards;
+  const cardPositions=storedCards&&typeof storedCards==='object'&&!Array.isArray(storedCards)?storedCards as {picker?:{x:number;y:number};yaml?:{x:number;y:number}}:undefined;
   useEffect(()=>{
     if(noWorkspace||!token||conflict||submitting||pickerBusy)return;
     if(pendingDraft){
@@ -405,9 +407,10 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     const current=viewRef.current;
     const canvas=patch.canvas&&typeof patch.canvas==='object'&&!Array.isArray(patch.canvas)?{...(current.canvas&&typeof current.canvas==='object'&&!Array.isArray(current.canvas)?current.canvas as Record<string,unknown>:{}),...patch.canvas as Record<string,unknown>}:current.canvas;
     const panels=patch.panels&&typeof patch.panels==='object'&&!Array.isArray(patch.panels)?{...(current.panels&&typeof current.panels==='object'&&!Array.isArray(current.panels)?current.panels as Record<string,unknown>:{}),...patch.panels as Record<string,unknown>}:current.panels;
+    const cards=patch.cards&&typeof patch.cards==='object'&&!Array.isArray(patch.cards)?{...(current.cards&&typeof current.cards==='object'&&!Array.isArray(current.cards)?current.cards as Record<string,unknown>:{}),...patch.cards as Record<string,unknown>}:current.cards;
     const incomingFormat=typeof patch.format==='number'&&patch.format>=1?patch.format:1;
     const existingFormat=typeof current.format==='number'&&current.format>=1?current.format:1;
-    viewRef.current={...current,...patch,format:Math.max(incomingFormat,existingFormat),...(canvas===undefined?{}:{canvas}),...(panels===undefined?{}:{panels})};
+    viewRef.current={...current,...patch,format:Math.max(incomingFormat,existingFormat),...(canvas===undefined?{}:{canvas}),...(panels===undefined?{}:{panels}),...(cards===undefined?{}:{cards})};
     if(typeof patch.dismissedDraftRevision==='number')setDismissedDraft(patch.dismissedDraftRevision);
     setViewTick(value=>value+1);
   }
@@ -549,7 +552,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     {draftError&&<div className="draft-banner danger" role="alert"><p>A recovered draft couldn't be read.</p>{confirmCorrupt?<><p>Discard the unreadable draft? This can't be undone.</p><button type="button" className="workspace-danger" onClick={()=>void discardCorrupt()}>Discard</button><button type="button" ref={corruptCancelButton} onClick={()=>setConfirmCorrupt(false)}>Cancel</button></>:<button type="button" ref={discardDraftButton} onClick={()=>setConfirmCorrupt(true)}>Discard draft</button>}</div>}
     {showRecovery&&<div className="draft-banner" role="status"><p>Unsaved changes from <time dateTime={draftSavedAt}>{draftSavedAt?new Date(draftSavedAt).toLocaleString():'earlier'}</time> were recovered.{staleDraft?' Based on an older version.':''}</p>{staleDraft?<button type="button" className="primary" onClick={()=>void copyWithDraft()}>Restore as a copy</button>:<button type="button" className="primary" onClick={()=>draftRecord.current&&restoreDraft(draftRecord.current)}>Restore draft</button>}<button type="button" onClick={()=>void keepSaved()}>Keep saved version</button></div>}
     {conflictBar&&<div className="draft-banner conflict-bar" role="status"><p>This workspace was changed in another tab.</p><button type="button" className="primary" onClick={()=>void loadLatest()}>Load latest</button><button type="button" onClick={()=>void (pendingDraft?copyWithDraft():copyConflict())}>Restore as a copy</button></div>}
-    <CanvasEditor initialView={initialCanvasView} onViewChange={next=>rememberView({canvas:next})} onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={simulatorConnected?()=>void submit(true):undefined} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));rememberView({pathId:id});}} disabled={running||submitting||pickerBusy||launchBusy}/>
+    <CanvasEditor initialView={initialCanvasView} cards={cardPositions} onCardPosition={(card,position)=>rememberView({cards:{[card]:position}})} picker={{token,deviceId,disabled:running||submitting||launchBusy,onBusy:setPickerBusy}} onViewChange={next=>rememberView({canvas:next})} onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={simulatorConnected?()=>void submit(true):undefined} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));rememberView({pathId:id});}} disabled={running||submitting||pickerBusy||launchBusy}/>
     </>}
     </div></div>
     {!noWorkspace&&<>
