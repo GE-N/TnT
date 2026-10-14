@@ -627,6 +627,110 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       assert.equal([...card.querySelectorAll('input')].some(input=>input.value==='Canvas pending'),false);
     }finally{await page.close();}
   });
+
+  test('a code edit after a shift does not restore the pending value onto another command',async()=>{
+    const page=await openWorkspace('tap');
+    const source='appId: com.example.App\n---\n- tapOn: First\n- tapOn: Second\n- tapOn: Third\n';
+    const edited='appId: com.example.App\n---\n- tapOn: Second changed\n- tapOn: Third changed\n';
+    try{
+      const before=await page.service.workspace(page.workspace.id);
+      await setScenarioYaml(page,source);
+      await page.published(before.metadata?.revision??0);
+      const card=await openYamlForms(page);
+      await typeInto(page,card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!,'Second pending');
+      await confirmDelete(card,'Delete step 1');
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!.value,'Second pending');
+      const revision=(await page.service.workspace(page.workspace.id)).metadata?.revision??0;
+      await setScenarioYaml(page,edited);
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!.value,'Second changed');
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!.value,'Third changed');
+      assert.equal([...card.querySelectorAll('input')].some(input=>input.value==='Second pending'),false);
+      const fields=await waitUntilClear(page,'Second pending');
+      assert.equal(fields['yaml-form:1'],undefined);
+      assert.equal(Object.values(fields).includes('Second pending'),false);
+      const saved=await page.published(revision);
+      assert.match(saved.yaml,/tapOn: Second changed/);
+      assert.match(saved.yaml,/tapOn: Third changed/);
+      assert.doesNotMatch(saved.yaml,/Second pending/);
+      await page.remount();
+      await page.settle();
+      const restoredDeadline=Date.now()+8000;
+      while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<restoredDeadline){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
+      const restore=[...page.document.querySelectorAll('button')].find(item=>item.textContent==='Restore draft');
+      assert.equal(restore,undefined);
+      await inspectScreen(page.document,{id:'home'},{id:'visit-home'});
+      const reopened=await openYamlForms(page);
+      assert.equal(reopened.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!.value,'Second changed');
+      assert.equal(reopened.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!.value,'Third changed');
+      const beforeApply=page.document.querySelector<HTMLTextAreaElement>('#scenario-yaml')!.value;
+      const neighbor=beforeApply.split('\n').find(line=>line.includes('Second changed'));
+      assert.ok(neighbor);
+      await act(async()=>reopened.querySelector<HTMLButtonElement>('[aria-label="Apply step 2"]')!.click());
+      const afterApply=page.document.querySelector<HTMLTextAreaElement>('#scenario-yaml')!.value;
+      assert.equal(afterApply.includes(neighbor),true);
+      assert.match(afterApply,/Third changed/);
+      assert.doesNotMatch(afterApply,/Second pending/);
+      const applied=await page.published(saved.metadata?.revision??0);
+      assert.match(applied.yaml,/tapOn: Second changed/);
+      assert.match(applied.yaml,/Third changed/);
+      assert.doesNotMatch(applied.yaml,/Second pending/);
+      assert.equal(page.document.querySelector('.workspace-save-status')?.getAttribute('aria-label'),'Saved locally');
+    }finally{await page.close();}
+  });
+
+  test('a duplicate neighbor does not receive a draft whose saved text changed',async()=>{
+    const page=await openWorkspace('tap');
+    const source='appId: com.example.App\n---\n- tapOn: Twin\n- tapOn: Alpha\n- tapOn: Twin\n';
+    const edited='appId: com.example.App\n---\n- tapOn: AlphaEdited\n- tapOn: Twin\n';
+    try{
+      const before=await page.service.workspace(page.workspace.id);
+      await setScenarioYaml(page,source);
+      await page.published(before.metadata?.revision??0);
+      const card=await openYamlForms(page);
+      await typeInto(page,card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!,'Alpha pending');
+      await confirmDelete(card,'Delete step 1');
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!.value,'Alpha pending');
+      const revision=(await page.service.workspace(page.workspace.id)).metadata?.revision??0;
+      await setScenarioYaml(page,edited);
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!.value,'AlphaEdited');
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!.value,'Twin');
+      assert.equal([...card.querySelectorAll('input')].some(input=>input.value==='Alpha pending'),false);
+      await waitUntilClear(page,'Alpha pending');
+      const saved=await page.published(revision);
+      assert.match(saved.yaml,/tapOn: AlphaEdited/);
+      assert.match(saved.yaml,/tapOn: Twin/);
+      assert.doesNotMatch(saved.yaml,/Alpha pending/);
+    }finally{await page.close();}
+  });
+
+  test('continued edits after repeated shifts do not attach the draft to another command',async()=>{
+    const page=await openWorkspace('tap');
+    const edited='appId: com.example.App\n---\n- tapOn: Second changed\n- tapOn: Neighbor\n';
+    try{
+      const before=await page.service.workspace(page.workspace.id);
+      await setScenarioYaml(page,'appId: com.example.App\n---\n- tapOn: First\n- tapOn: Second\n- tapOn: Third\n');
+      await page.published(before.metadata?.revision??0);
+      const card=await openYamlForms(page);
+      await typeInto(page,card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!,'Second pending');
+      await confirmDelete(card,'Delete step 1');
+      const shifted=card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!;
+      assert.equal(shifted.value,'Second pending');
+      await typeInto(page,shifted,'Second pending shifted');
+      await confirmDelete(card,'Delete step 2');
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!.value,'Second pending shifted');
+      await typeInto(page,card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!,'Second pending twice');
+      const revision=(await page.service.workspace(page.workspace.id)).metadata?.revision??0;
+      await setScenarioYaml(page,edited);
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!.value,'Second changed');
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!.value,'Neighbor');
+      assert.equal([...card.querySelectorAll('input')].some(input=>input.value.includes('Second pending')),false);
+      await waitUntilClear(page,'Second pending');
+      const saved=await page.published(revision);
+      assert.match(saved.yaml,/tapOn: Second changed/);
+      assert.match(saved.yaml,/tapOn: Neighbor/);
+      assert.doesNotMatch(saved.yaml,/Second pending/);
+    }finally{await page.close();}
+  });
 });
 
 type WorkspacePage=Awaited<ReturnType<typeof openWorkspace>>;
@@ -653,6 +757,17 @@ async function setScenarioYaml(page:WorkspacePage,value:string){
   const text=page.document.getElementById('scenario-yaml') as HTMLTextAreaElement;
   assert.ok(text);
   await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLTextAreaElement.prototype,'value')!.set!.call(text,value);text.dispatchEvent(new page.window.Event('input',{bubbles:true}));});
+}
+async function waitUntilClear(page:WorkspacePage,value:string){
+  const deadline=Date.now()+8000;
+  let fields:Record<string,string>={};
+  while(Date.now()<deadline){
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,40));});
+    await page.settle();
+    fields=(await page.service.workspaceDetail(page.workspace.id)).draft?.fields??{};
+    if(!Object.values(fields).some(item=>item.includes(value)))return fields;
+  }
+  throw new Error('Draft value '+value+' was still stored');
 }
 async function waitForField(page:WorkspacePage,key:string,value:string){
   const deadline=Date.now()+8000;
