@@ -344,6 +344,8 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   }else setReviewNotice('');
  }
  function destinationChange(screenId:string,test:CanvasTest,visitId:string|undefined,to:string){
+  const current=graph!.edges.find(item=>item.from===screenId&&edgeActions(item).includes(test.id))?.to??'';
+  if(to===current)return;
   if(!to){
    const edge=graph!.edges.find(item=>item.from===screenId&&edgeActions(item).includes(test.id));
    if(!edge)return;
