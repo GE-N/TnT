@@ -40,7 +40,7 @@ test('opening a floating control closes the previous floating popover',async()=>
  const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/'});
  const keys=['window','document','HTMLElement','Event','IS_REACT_ACT_ENVIRONMENT','fetch'];
  const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
- for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='fetch'?async()=>Response.json({ready:false,devices:[],token:'',tool:'test'}):Reflect.get(dom.window,key),configurable:true});
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='fetch'?async()=>Response.json({ready:false,devices:[],token:'',tool:'test',error:'Runner unavailable'}):Reflect.get(dom.window,key),configurable:true});
  const {act}=await import('react');
  const {App}=await import('../src/app.js');
  const {createRoot}=await import('react-dom/client');
@@ -49,6 +49,8 @@ test('opening a floating control closes the previous floating popover',async()=>
   await act(async()=>root.render(createElement(App)));
   const scenarios=dom.window.document.querySelector<HTMLDetailsElement>('.scenario-controls')!;
   const device=dom.window.document.querySelector<HTMLDetailsElement>('.device-toolbar')!;
+  assert.equal(device.querySelector('[role="alert"]')?.textContent,'Runner unavailable','Runner details belong inside Simulator & app, clear of authoring controls');
+  assert.equal(dom.window.document.querySelector('.workbench>main>.notice'),null);
   await act(async()=>{scenarios.open=true;scenarios.dispatchEvent(new dom.window.Event('toggle'));});
   assert.ok(scenarios.open);
   await act(async()=>{device.open=true;device.dispatchEvent(new dom.window.Event('toggle'));});
