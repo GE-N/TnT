@@ -36,10 +36,11 @@ export function moveAboveNavigation(graph:CanvasGraph,pathId:string,visitId:stri
 }
 
 export function isCommittableSelector(value:string):boolean{return value.trim().length>0;}
-export function stepRowLabel(test:CanvasTest,position:number,destination?:string):string{
+export function stepRowLabel(test:CanvasTest,position:number,destination?:string,staysOn?:string):string{
  const command=test.check?(test.check.visibility==='visible'?'assertVisible':'assertNotVisible'):test.tap?'tapOn':test.input!==undefined?'inputText':'back';
  const value=test.check?.value??test.tap?.value??test.input??backControl(test)?.value??'';
- return position+' '+command+' '+JSON.stringify(value)+(destination?' → '+destination:'');
+ const suffix=destination?' → '+destination:!test.check&&staysOn?' ↺ stays on '+staysOn:'';
+ return position+' '+command+' '+JSON.stringify(value)+suffix;
 }
 
 /** Compose adjacent swaps locally so one drop creates one undoable graph change. */

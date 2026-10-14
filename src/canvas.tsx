@@ -11,7 +11,36 @@ import {inspectorWidth,placeInspector,visibleBounds,type InspectorPlacement,type
 
 export const emptyCanvas=():CanvasGraph=>({screens:[],edges:[],paths:[]});
 const identity=()=>crypto.randomUUID();
+const NEW_SCREEN='__new_screen__';
 function DeleteIcon(){return <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg>;}
+function ClearDestinationDialog({title,visits,disabled,onConfirm,onCancel}:{title:string;visits:string[];disabled:boolean;onConfirm:()=>void;onCancel:()=>void}){
+ const cancel=useRef<HTMLButtonElement>(null);
+ useLayoutEffect(()=>{cancel.current?.focus({preventScroll:true});},[]);
+ return <div role="alertdialog" aria-label="Remove destination link" aria-modal="true" className="notice canvas-delete-dialog" onKeyDown={event=>{if(event.key==='Escape')onCancel();}}>
+  <p>Remove the link to {title}?</p>
+  {!!visits.length&&<p>This removes {visits.join(', ')}.</p>}
+  <button disabled={disabled} onClick={onConfirm}>Remove link</button>
+  <button ref={cancel} onClick={onCancel}>Cancel</button>
+ </div>;
+}
+function DestinationSelect({name,graph,value,onChange,onCreate}:{name:string;graph:CanvasGraph;value:string;onChange:(to:string)=>void;onCreate:(title:string)=>void}){
+ const [creating,setCreating]=useState(false);const [title,setTitle]=useState('');const field=useRef<HTMLInputElement>(null);
+ useEffect(()=>{if(creating)field.current?.focus();},[creating]);
+ function choose(next:string){if(next===NEW_SCREEN){setCreating(true);setTitle('');return;}setCreating(false);onChange(next);}
+ function commit(){const next=title.trim();if(!next)return;setCreating(false);setTitle('');onCreate(next);}
+ return <div className="destination-select">
+  <p className="field-hint">Destination</p>
+  <select aria-label={name+' destination'} value={creating?NEW_SCREEN:value} onChange={event=>choose(event.target.value)}>
+   <option value="">Stays on this screen</option>
+   {graph.screens.map(screen=><option key={screen.id} value={screen.id}>{screen.title}</option>)}
+   <option value={NEW_SCREEN}>+ New screen…</option>
+  </select>
+  {creating&&<input ref={field} aria-label="New screen title" placeholder="Screen title" maxLength={120} value={title} onChange={event=>setTitle(event.target.value)} onKeyDown={event=>{
+   if(event.key==='Escape'){event.preventDefault();setCreating(false);setTitle('');}
+   if(event.key==='Enter'){event.preventDefault();commit();}
+  }}/>}
+ </div>;
+}
 function draftNavigationAction():CanvasTest{return {id:identity(),label:'Tap action',role:'action',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},tap:{target:'text',match:'exact',value:''}};}
 function draftScreenCheck():CanvasTest{return {id:identity(),label:'Screen check',role:'assertion',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:''}};}
 function NodeTitle({title,screenId,onRename,onSelect}:{title:string;screenId:string;onRename:(title:string)=>void;onSelect?:()=>void}){
@@ -189,6 +218,9 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
 
 export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,onRun,onRepairSource,scenarioMode=false,scenarioId,scenarios=[],initialView,onViewChange,picker,cards,onCardPosition,yamlDeletionWarnings,onYamlDelete}:{onRepairSource?:(ownerId:string)=>void;scenarioId?:string;scenarios?:{id:string;name:string;pathId?:string}[];scenarioMode?:boolean;onRun?:()=>void;yaml?:string;onYamlChange?:(yaml:string)=>void;graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string};onViewChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number;selectedScreenId:string;selectedVisitId:string})=>void;picker?:PickerSession;cards?:{picker?:CardPosition;yaml?:CardPosition};onCardPosition?:(card:'picker'|'yaml',position:CardPosition)=>void;yamlDeletionWarnings?:(index:number)=>string[];onYamlDelete?:(yaml:string,index:number)=>()=>void}){
  const [pending,setPending]=useState<{graph:CanvasGraph;source?:string;warnings:string[]}>();
+ const [clearPending,setClearPending]=useState<{graph:CanvasGraph;source?:string;title:string;visits:string[]}>();
+ const [linkedEdgeId,setLinkedEdgeId]=useState<string>();
+ const [reviewNotice,setReviewNotice]=useState('');
  const [undo,setUndo]=useState<{graph:CanvasGraph;yaml?:string;after:CanvasGraph;afterYaml?:string;step?:{pathId:string;visitId:string;id:string;position:number;screenId:string}}>();
  const [newStep,setNewStep]=useState<{pathId:string;visitId:string;test:CanvasTest}>();
  const focusStep=useRef<{visitId:string;id?:string}|undefined>(undefined);
@@ -290,9 +322,61 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
    if(visitId)focusStep.current={visitId,id:ids.slice(position+1).find(id=>graph!.screens.find(screen=>screen.id===screenId)!.tests.some(test=>test.id===id))};setExpandedRow('');
   });
  }
+ function announceDestination(before:CanvasGraph,next:CanvasGraph,screenId:string,testId:string,visitId:string|undefined,to:string,previous:string){
+  const fromTitle=next.screens.find(screen=>screen.id===screenId)?.title??'Missing screen';
+  const toTitle=next.screens.find(screen=>screen.id===to)?.title??'Missing screen';
+  const route=next.paths.find(item=>item.id===pathId);
+  const visitIndex=route&&visitId?routeVisits(next,route).findIndex(visit=>visit.id===visitId):-1;
+  const ids=route&&visitIndex>=0?visitOperations(next,route,visitIndex):[];
+  const actionNumber=ids.filter(id=>{const item=next.screens.find(screen=>screen.id===screenId)?.tests.find(test=>test.id===id);return item&&!item.check;}).indexOf(testId)+1;
+  const destinationVisit=visitIndex>=0?visitIndex+2:route?route.edgeIds.length+1:2;
+  setAnnouncement('Linked '+fromTitle+' action '+(actionNumber||1)+' to '+toTitle+' (Visit '+destinationVisit+')');
+  const edge=next.edges.find(item=>item.from===screenId&&edgeActions(item).includes(testId));
+  if(edge)setLinkedEdgeId(edge.id);
+  if(previous&&previous!==to&&route&&visitIndex>=0){
+   const reviews:string[]=[];
+   for(let index=visitIndex+1;index<routeVisits(next,route).length;index++){
+    const id=visitScreenId(next,route,index);
+    const operations=visitOperations(next,route,index);
+    if(operations.some(operationId=>!next.screens.find(screen=>screen.id===id)?.tests.some(test=>test.id===operationId)))reviews.push('Visit '+(index+1));
+   }
+   setReviewNotice(reviews.length?'Review '+reviews.join(', '):'');
+  }else setReviewNotice('');
+ }
  function destinationChange(screenId:string,test:CanvasTest,visitId:string|undefined,to:string){
-  if(!to){const privateOperation=visitId?privateVisitOperation(graph!,pathId,visitId,test.id):{graph:graph!,testId:test.id};const plan=planCanvasDeletion(privateOperation.graph,{kind:'operation',id:privateOperation.testId,clearDestination:true,...(visitId?{pathId,visitId}: {})});commitRemoval(plan.graph);return;}
-  editOperation(test.id,visitId,(canvas,id)=>visitId?connectVisitAction(canvas,pathId,visitId,id,to):connectCanvasAction(canvas,screenId,id,to,pathId).graph);
+  if(!to){
+   const edge=graph!.edges.find(item=>item.from===screenId&&edgeActions(item).includes(test.id));
+   if(!edge)return;
+   const privateOperation=visitId?privateVisitOperation(graph!,pathId,visitId,test.id):{graph:graph!,testId:test.id};
+   const plan=planCanvasDeletion(privateOperation.graph,{kind:'operation',id:privateOperation.testId,clearDestination:true,...(visitId?{pathId,visitId}: {})});
+   const title=graph!.screens.find(screen=>screen.id===edge.to)?.title??'Missing screen';
+   const beforeCount=path?routeVisits(graph!,path).length:0;
+   const afterPath=plan.graph.paths.find(item=>item.id===pathId);
+   const afterCount=afterPath?routeVisits(plan.graph,afterPath).length:0;
+   const visits=beforeCount>afterCount?Array.from({length:beforeCount-afterCount},(_,index)=>'Visit '+(afterCount+index+1)):plan.warnings;
+   setClearPending({graph:plan.graph,source:yaml,title,visits});
+   return;
+  }
+  perform(()=>{
+   const privateOperation=visitId?privateVisitOperation(graph!,pathId,visitId,test.id):{graph:graph!,testId:test.id};
+   const previous=privateOperation.graph.edges.find(item=>item.from===screenId&&edgeActions(item).includes(privateOperation.testId))?.to??'';
+   const next=visitId?connectVisitAction(privateOperation.graph,pathId,visitId,privateOperation.testId,to):connectCanvasAction(privateOperation.graph,screenId,privateOperation.testId,to,pathId).graph;
+   if(yaml!==undefined&&onYamlChange)changeChecks(next);else onChange(next);
+   announceDestination(graph!,next,screenId,privateOperation.testId,visitId,to,previous);
+  });
+ }
+ function createDestination(screenId:string,test:CanvasTest,visitId:string|undefined,title:string){
+  perform(()=>{
+   if(!title.trim())throw new Error('Name the screen.');
+   if(graph!.screens.length>=40)throw new Error('This canvas supports up to 40 screens.');
+   const id=identity();const source=graph!.screens.find(screen=>screen.id===screenId)!;
+   let next:CanvasGraph={...graph!,screens:[...graph!.screens,{id,title:title.trim(),x:source.x+370,y:source.y,tests:[]}]};
+   const privateOperation=visitId?privateVisitOperation(next,pathId,visitId,test.id):{graph:next,testId:test.id};
+   next=visitId?connectVisitAction(privateOperation.graph,pathId,visitId,privateOperation.testId,id):connectCanvasAction(privateOperation.graph,screenId,privateOperation.testId,id,pathId).graph;
+   if(yaml!==undefined&&onYamlChange)changeChecks(next);else onChange(next);
+   announceDestination(graph!,next,screenId,privateOperation.testId,visitId,id,'');
+   setSelected(screenId);if(visitId)setSelectedVisit(visitId);
+  });
  }
  function assignedScenarios(test:CanvasTest){
   if(test.scenarioIds!==undefined)return test.scenarioIds;
@@ -363,36 +447,45 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   appendVisitStep(graph!,pathId,visitId,test);setNewStep({pathId,visitId,test});setExpandedRow(test.id);
  }
  function discardVisitStep(visitId:string){discardedVisit.current=visitId;setNewStep(undefined);setExpandedRow('');}
- function saveVisitStep(screenId:string,visitId:string,test:CanvasTest,to:string,connectionName?:string){
+ function saveVisitStep(screenId:string,visitId:string,test:CanvasTest,to:string,connectionName?:string,newScreenTitle?:string){
   if(newStep?.test.id===test.id){
    const selector=test.check??test.tap??backControl(test);if(selector&&!isCommittableSelector(selector.value))return;
-   let next=appendVisitStep(graph!,pathId,visitId,test);if(to)next=connectVisitAction(next,pathId,visitId,test.id,to);
-   changeChecks(next,true);setNewStep(undefined);return;
+   perform(()=>{
+    let next=appendVisitStep(graph!,pathId,visitId,test);
+    if(newScreenTitle!==undefined){
+     if(!newScreenTitle.trim())throw new Error('Name the screen.');
+     if(next.screens.length>=40)throw new Error('This canvas supports up to 40 screens.');
+     const id=identity();const source=next.screens.find(screen=>screen.id===screenId)!;
+     next={...next,screens:[...next.screens,{id,title:newScreenTitle.trim(),x:source.x+370,y:source.y,tests:[]}]};
+     next=connectVisitAction(next,pathId,visitId,test.id,id);
+     changeChecks(next,true);announceDestination(graph!,next,screenId,test.id,visitId,id,'');
+    }else if(to){next=connectVisitAction(next,pathId,visitId,test.id,to);changeChecks(next,true);announceDestination(graph!,next,screenId,test.id,visitId,to,'');}
+    else changeChecks(next,true);
+    setNewStep(undefined);
+   });
+   return;
   }
   const current=graph!.screens.find(screen=>screen.id===screenId)!.tests.find(item=>item.id===test.id)!;
   const connection=graph!.edges.find(edge=>edge.from===screenId&&edgeActions(edge).includes(test.id));
   const unchanged=(['tap','check','input','back','backSelector'] as const).every(key=>JSON.stringify(current[key])===JSON.stringify(test[key]))&&connectionName===connection?.responseCondition;
-  if(unchanged&&to===(connection?.to??''))return;
-  if(unchanged&&!to&&connection){destinationChange(screenId,current,visitId,to);return;}
+  if(unchanged)return;
   editOperation(test.id,visitId,(canvas,id)=>{
    let next={...canvas,screens:canvas.screens.map(screen=>({...screen,tests:screen.tests.map(item=>item.id===id?{...test,id,reference:item.reference}:item)}))};
-   const previous=canvas.edges.find(edge=>edge.from===screenId&&edgeActions(edge).includes(id))?.to??'';
    if(connection&&connectionName!==undefined)next={...next,edges:next.edges.map(edge=>edge.id===connection.id?{...edge,responseCondition:connectionName}:edge)};
-   if(to!==previous){if(to)next=connectVisitAction(next,pathId,visitId,id,to);else next=planCanvasDeletion(next,{kind:'operation',id,pathId,visitId,clearDestination:true}).graph;}
    return next;
-  },!!connection&&!to);
+  });
  }
  function renderChecks(screenId:string,edgeId?:string,visitIndex?:number){const node=graph!.screens.find(screen=>screen.id===screenId);if(!node)return <p>Restore the missing source screen before editing its actions.</p>;const visit=visitIndex!==undefined&&path?routeVisits(graph!,path)[visitIndex]:undefined;const visitIds=visitIndex!==undefined&&path?visitOperations(graph!,path,visitIndex):undefined;const edge=graph!.edges.find(edge=>edge.id===edgeId);const operations=visitIds?visitIds.flatMap(id=>node.tests.filter(test=>test.id===id)):(scenarioMode?node.tests.filter(isAuthored):edge?edgeActions(edge).flatMap(id=>node.tests.filter(test=>test.id===id)):node.tests.filter(test=>isAuthored(test)&&!graph!.edges.some(edge=>edge.actionTestIds?.includes(test.id)))).filter(test=>visitIds!==undefined||visibleOperation(test));const preview=visit&&newStep?.pathId===pathId&&newStep.visitId===visit.id?appendVisitStep(graph!,pathId,visit.id,newStep.test):graph!;if(preview!==graph)operations.push(newStep!.test);const checks=operations.filter(test=>test.check);const taps=operations.filter(test=>!test.check);return <fieldset className={edge?'canvas-checks canvas-navigation-actions':'canvas-checks'} disabled={disabled}>
  {scenarioMode&&!edge&&path?.screenId&&!path.finished&&(visitIndex===undefined||visitIndex===path.edgeIds.length)&&visitScreenId(graph!,path,path.edgeIds.length)===screenId&&graph!.edges.filter(edge=>edge.from===screenId&&!path.edgeIds.includes(edge.id)).map(edge=><button key={edge.id} aria-label={'Append connection '+edge.responseCondition} onClick={()=>perform(()=>appendConnection(edge.id))}>Continue → {graph!.screens.find(screen=>screen.id===edge.to)?.title} · {edge.responseCondition}</button>)}{scenarioMode&&!edge&&(visitIndex===undefined||visitIndex===0)&&<button aria-label={'Use '+node.title+' as scenario start'} disabled={!path||path.screenId===screenId} onClick={()=>perform(()=>setScenarioStart(screenId))}>{path?.screenId===screenId?'Scenario start':'Use as scenario start'}</button>}
- {edge&&!scenarioMode&&<><legend>Actions to reach {graph!.screens.find(screen=>screen.id===edge.to)?.title??'Missing screen'}</legend><input aria-label={'Connection name '+edge.id} value={edge.responseCondition} maxLength={300} onChange={event=>onChange({...graph!,edges:graph!.edges.map(item=>item.id===edge.id?{...item,responseCondition:event.target.value}:item)})}/></>}
- {operations.map((test,index)=>{const selector=test.check??test.tap??backControl(test);const stepIndex=visitIds?(visitIds.includes(test.id)?visitIds.indexOf(test.id):visitIds.length):index;const name=edge&&!scenarioMode?edge.responseCondition+' action '+(index+1):(!test.check?'Action '+(taps.indexOf(test)+1):'Check '+(checks.indexOf(test)+1));if(visit)return <VisitStep key={test.id} graph={preview} pathId={pathId} visitId={visit.id} test={test} index={stepIndex} name={name} screenId={screenId} last={stepIndex>=(visitIds?.length??operations.length)-1} isNew={newStep?.test.id===test.id} moveDisabled={disabled||!!newStep} editing={expandedRow===test.id} onEdit={()=>{if(!newStep||newStep.test.id===test.id)setExpandedRow(test.id);}} onClose={()=>setExpandedRow('')} onSave={(draft,to,name)=>saveVisitStep(screenId,visit.id,draft,to,name)} onMoveAbove={()=>perform(()=>{const next=moveAboveNavigation(graph!,pathId,visit.id,test.id);changeChecks(next,true);setAnnouncement('Step moved to position '+(routeVisits(next,next.paths.find(item=>item.id===pathId)! ).find(item=>item.id===visit.id)!.operationIds!.indexOf(test.id)+1)+', above navigating actions.');})} onMove={direction=>{const neighbor=visitIds![stepIndex+direction];if(neighbor)moveOperation(screenId,test.id,neighbor,visit.id);}} onDelete={()=>newStep?.test.id===test.id?discardVisitStep(visit.id):deleteOperation(test,visit.id)} onDiscard={()=>perform(()=>discardVisitStep(visit.id))} dropPosition={dropTarget?.visitId===visit.id&&dropTarget.id===test.id?(dropTarget.after?'after':'before'):undefined} onDragStart={()=>{dragging.current={visitId:visit.id,id:test.id};}} onDragEnd={endDrag} onDragLeave={()=>setDropTarget(undefined)} onDragOver={after=>{if(disabled||newStep||dragging.current?.visitId!==visit.id)return false;setDropTarget({visitId:visit.id,id:test.id,after});return true;}} onDrop={after=>{
+ {edge&&!scenarioMode&&<><legend>Actions to reach {graph!.screens.find(screen=>screen.id===edge.to)?.title??'Missing screen'}</legend><details className="connection-name"><summary>Connection name</summary><input aria-label={'Connection name '+edge.id} value={edge.responseCondition} maxLength={300} onChange={event=>onChange({...graph!,edges:graph!.edges.map(item=>item.id===edge.id?{...item,responseCondition:event.target.value}:item)})}/></details></>}
+ {operations.map((test,index)=>{const selector=test.check??test.tap??backControl(test);const stepIndex=visitIds?(visitIds.includes(test.id)?visitIds.indexOf(test.id):visitIds.length):index;const name=edge&&!scenarioMode?edge.responseCondition+' action '+(index+1):(!test.check?'Action '+(taps.indexOf(test)+1):'Check '+(checks.indexOf(test)+1));if(visit)return <VisitStep key={test.id} graph={preview} pathId={pathId} visitId={visit.id} test={test} index={stepIndex} name={name} screenId={screenId} last={stepIndex>=(visitIds?.length??operations.length)-1} isNew={newStep?.test.id===test.id} moveDisabled={disabled||!!newStep} editing={expandedRow===test.id} onEdit={()=>{if(!newStep||newStep.test.id===test.id)setExpandedRow(test.id);}} onClose={()=>setExpandedRow('')} onSave={(draft,to,connection,title)=>saveVisitStep(screenId,visit.id,draft,to,connection,title)} onDestinationChange={to=>destinationChange(screenId,test,visit.id,to)} onCreateDestination={title=>createDestination(screenId,test,visit.id,title)} onMoveAbove={()=>perform(()=>{const next=moveAboveNavigation(graph!,pathId,visit.id,test.id);changeChecks(next,true);setAnnouncement('Step moved to position '+(routeVisits(next,next.paths.find(item=>item.id===pathId)! ).find(item=>item.id===visit.id)!.operationIds!.indexOf(test.id)+1)+', above navigating actions.');})} onMove={direction=>{const neighbor=visitIds![stepIndex+direction];if(neighbor)moveOperation(screenId,test.id,neighbor,visit.id);}} onDelete={()=>newStep?.test.id===test.id?discardVisitStep(visit.id):deleteOperation(test,visit.id)} onDiscard={()=>perform(()=>discardVisitStep(visit.id))} dropPosition={dropTarget?.visitId===visit.id&&dropTarget.id===test.id?(dropTarget.after?'after':'before'):undefined} onDragStart={()=>{dragging.current={visitId:visit.id,id:test.id};}} onDragEnd={endDrag} onDragLeave={()=>setDropTarget(undefined)} onDragOver={after=>{if(disabled||newStep||dragging.current?.visitId!==visit.id)return false;setDropTarget({visitId:visit.id,id:test.id,after});return true;}} onDrop={after=>{
  const source=dragging.current;endDrag();if(disabled||newStep||!source||source.visitId!==visit.id)return;
  perform(()=>{const from=visitIds!.indexOf(source.id);const insertion=stepIndex+(after?1:0);const position=insertion-(from<insertion?1:0);const next=reorderVisitStep(graph!,pathId,visit.id,source.id,position);if(next===graph)return;changeChecks(next,true);focusStep.current={visitId:visit.id,id:source.id};setAnnouncement('Step '+(from+1)+' moved to position '+(position+1)+'.');});
  }} picker={picker} sourceYaml={yaml} cardPosition={cards?.picker} onCardPosition={position=>onCardPosition?.('picker',position)}/>;return <div key={test.id} className="canvas-operation" data-operation-id={test.id}>
  {test.check&&!test.check.value&&<p className="field-hint">Screen condition: choose what must be visible or absent when this screen is reached.</p>}
  <details open={expandedRow===test.id?true:undefined} className="canvas-check-row"><summary>{canvasTestLabel(test)}</summary>
- {!test.check&&(!edge||scenarioMode)&&<><p className="field-hint">Destination</p><select aria-label={`${name} destination`} value={graph!.edges.find(edge=>edge.from===screenId&&edgeActions(edge).includes(test.id))?.to??''} onChange={event=>perform(()=>{destinationChange(screenId,test,undefined,event.target.value);})}><option value="">Choose destination screen</option>{graph!.screens.map(screen=><option key={screen.id} value={screen.id}>{screen.title}</option>)}</select></>}
- {scenarioMode&&!test.check&&graph!.edges.filter(edge=>edge.from===screenId&&edgeActions(edge).includes(test.id)&&edgeActions(edge)[0]===test.id).map(edge=><input key={edge.id} aria-label={'Connection name '+edge.id} value={edge.responseCondition} maxLength={300} onChange={event=>onChange({...graph!,edges:graph!.edges.map(item=>item.id===edge.id?{...item,responseCondition:event.target.value}:item)})}/>)}
+ {!test.check&&(!edge||scenarioMode)&&<DestinationSelect name={name} graph={graph!} value={graph!.edges.find(item=>item.from===screenId&&edgeActions(item).includes(test.id))?.to??''} onChange={to=>destinationChange(screenId,test,undefined,to)} onCreate={title=>createDestination(screenId,test,undefined,title)}/>}
+ {scenarioMode&&!test.check&&graph!.edges.filter(edge=>edge.from===screenId&&edgeActions(edge).includes(test.id)&&edgeActions(edge)[0]===test.id).map(edge=><details key={edge.id} className="connection-name"><summary>Connection name</summary><input aria-label={'Connection name '+edge.id} value={edge.responseCondition} maxLength={300} onChange={event=>onChange({...graph!,edges:graph!.edges.map(item=>item.id===edge.id?{...item,responseCondition:event.target.value}:item)})}/></details>)}
  {test.check&&<select aria-label={`${name} visibility`} value={test.check.visibility} onChange={event=>updateCheck(screenId,test.id,{visibility:event.target.value as ScreenCheck['visibility']},undefined)}><option value="visible">Visible</option><option value="absent">Absent</option></select>}
  {selector&&<><select aria-label={`${name} target`} value={selector.target} onChange={event=>updateCheck(screenId,test.id,{target:event.target.value as ScreenCheck['target']},undefined)}><option value="text">Text</option><option value="id">Element identifier</option></select>
  <input aria-label={`${name} selector`} value={selector.value} maxLength={4000} placeholder="Enter selector" onChange={event=>updateCheck(screenId,test.id,{value:event.target.value},undefined)}/>
@@ -418,13 +511,14 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   const visits=routeVisits(graph!,path).map((visit,index)=>({visit,index})).filter(({index})=>visitScreenId(graph!,path,index)===screenId);
   if(!visits.length)return <button className="visit-start-button" disabled={disabled} aria-label={'Use '+node.title+' as scenario start'} onClick={()=>perform(()=>setScenarioStart(screenId))}>Use as scenario start</button>;
   const expanded=expandedVisitId(screenId);
-  return visits.map(({visit,index})=><section key={visit.id} className={'canvas-visit-section '+(expanded===visit.id?'selected-visit':'')} aria-label={'Visit '+(index+1)+' · '+node.title+' operations'} data-visit-id={visit.id}><button className="visit-section-heading" aria-expanded={expanded===visit.id} aria-controls={expanded===visit.id?apiId+'-visit-'+visit.id:undefined} onClick={()=>{setSelected(screenId);setSelectedVisit(visit.id);}}><span className="visit-disclosure" aria-hidden="true">{expanded===visit.id?'▾':'▸'}</span><span>Visit {index+1} · {node.title}<small>{scenarios.find(item=>item.id===scenarioId)?.name}</small></span></button>{expanded===visit.id&&<div className="visit-section-body" id={apiId+'-visit-'+visit.id}>{visit.operationIds?.filter(id=>!node.tests.some(test=>test.id===id)).map(id=><div className="visit-step-repair" key={id}><p>This step belongs to the previous destination: {graph!.screens.flatMap(screen=>screen.tests).find(test=>test.id===id)?.label??'Missing step'}. Remove it or restore the destination.</p><button disabled={disabled} onClick={()=>perform(()=>changeChecks(updateVisitOperations(freezeVisitOperations(graph!),pathId,visit.id,visit.operationIds!.filter(item=>item!==id))))}>Remove from this visit</button></div>)}<p className="sr-only" role="status">{announcement}</p>{renderChecks(screenId,undefined,index)}{onYamlChange&&<button type="button" className="text-button visit-yaml-link" aria-label="Open YAML" onClick={event=>{yamlOpener.current=event.currentTarget;setYamlHost(true);setYamlOpen(true);}}>{'{ } YAML ↗'}</button>}</div>}</section>);
+  return visits.map(({visit,index})=><section key={visit.id} className={'canvas-visit-section '+(expanded===visit.id?'selected-visit':'')} aria-label={'Visit '+(index+1)+' · '+node.title+' operations'} data-visit-id={visit.id}><button className="visit-section-heading" aria-expanded={expanded===visit.id} aria-controls={expanded===visit.id?apiId+'-visit-'+visit.id:undefined} onClick={()=>{setSelected(screenId);setSelectedVisit(visit.id);}}><span className="visit-disclosure" aria-hidden="true">{expanded===visit.id?'▾':'▸'}</span><span>Visit {index+1} · {node.title}<small>{scenarios.find(item=>item.id===scenarioId)?.name}</small></span></button> {expanded===visit.id&&<div className="visit-section-body" id={apiId+'-visit-'+visit.id}>{visit.operationIds?.filter(id=>!node.tests.some(test=>test.id===id)).map(id=><div className="visit-step-repair" key={id}><p>This step belongs to the previous destination: {graph!.screens.flatMap(screen=>screen.tests).find(test=>test.id===id)?.label??'Missing step'}. Remove it or restore the destination.</p><button disabled={disabled} onClick={()=>perform(()=>changeChecks(updateVisitOperations(freezeVisitOperations(graph!),pathId,visit.id,visit.operationIds!.filter(item=>item!==id))))}>Remove from this visit</button></div>)}{reviewNotice&&expanded===visit.id&&<p className="destination-review-notice" role="status">{reviewNotice}</p>}<p className="sr-only" role="status">{announcement}</p>{renderChecks(screenId,undefined,index)}{onYamlChange&&<button type="button" className="text-button visit-yaml-link" aria-label="Open YAML" onClick={event=>{yamlOpener.current=event.currentTarget;setYamlHost(true);setYamlOpen(true);}}>{'{ } YAML ↗'}</button>}</div>}</section>);
  }
  function screenVisits(screenId:string){return graph&&scenarioMode&&path?.screenId?routeVisits(graph,path).map((visit,index)=>({visit,index})).filter(({index})=>visitScreenId(graph!,path,index)===screenId):[];}
  function expandedVisitId(screenId:string){const visits=screenVisits(screenId);return (visits.find(({visit})=>visit.id===selectedVisit)??visits[0])?.visit.id;}
  const inspectedVisit=selected?screenVisits(selected).find(({visit})=>visit.id===expandedVisitId(selected)):undefined;
- const highlightedEdge=inspectedVisit&&path?graph?.edges.find(edge=>edge.id===(path.edgeIds[inspectedVisit.index]??path.edgeIds[inspectedVisit.index-1])):undefined;
- const highlightNote=highlightedEdge&&'Visit '+(inspectedVisit!.index+1)+'’s edge, '+(graph!.screens.find(screen=>screen.id===highlightedEdge.from)?.title??'Missing screen')+' → '+(graph!.screens.find(screen=>screen.id===highlightedEdge.to)?.title??'Missing screen')+(highlightedEdge.responseCondition?' · '+highlightedEdge.responseCondition:'')+', is highlighted on the main canvas.';
+ const visitEdge=inspectedVisit&&path?graph?.edges.find(edge=>edge.id===(path.edgeIds[inspectedVisit.index]??path.edgeIds[inspectedVisit.index-1])):undefined;
+ const highlightedEdge=(linkedEdgeId&&graph?.edges.find(edge=>edge.id===linkedEdgeId))||visitEdge;
+ const highlightNote=highlightedEdge&&(inspectedVisit?'Visit '+(inspectedVisit.index+1)+'’s edge, ':'')+(graph!.screens.find(screen=>screen.id===highlightedEdge.from)?.title??'Missing screen')+' → '+(graph!.screens.find(screen=>screen.id===highlightedEdge.to)?.title??'Missing screen')+(highlightedEdge.responseCondition?' · '+highlightedEdge.responseCondition:'')+', is highlighted on the main canvas.';
  function addScreen(title:string,x=60+(graph!.screens.length%7)*370,y=60+Math.floor(graph!.screens.length/7)*260){
   if(!title.trim())throw new Error('Name the screen.');
   if(graph!.screens.length>=40)throw new Error('This canvas supports up to 40 screens.');
@@ -491,6 +585,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  </fieldset></>}</div>}
  {visibleDiagnostics.length>0&&<div className="notice error" role="alert"><strong>{scenarioMode?'Before running':'References need review'}</strong>{visibleDiagnostics.map((diagnostic,index)=>{const label=graph.screens.flatMap(screen=>screen.tests).find(test=>test.id===diagnostic.ownerId)?.label??graph.screens.find(screen=>screen.id===diagnostic.ownerId)?.title??graph.edges.find(edge=>edge.id===diagnostic.ownerId)?.responseCondition??graph.paths.find(path=>path.id===diagnostic.ownerId)?.name??diagnostic.ownerId;return <p key={index}>{scenarioMode&&(scenarios.find(item=>item.id===scenarioId)?.name??'Selected scenario')+' · '}{label}: {diagnostic.detail} <button className="text-button" disabled={disabled} aria-label={'Repair '+label} onClick={()=>repairDiagnostic(diagnostic)}>Repair</button></p>;})}</div>}
  {pending&&<div role="alertdialog" aria-label="Canvas reference warning" aria-modal="true" className="notice canvas-delete-dialog" onKeyDown={event=>{if(event.key==='Escape')setPending(undefined);}}><p>Confirm cleanup: {pending.warnings.join(', ')}. Shared actions/checks used elsewhere will be kept.</p><button autoFocus disabled={disabled||pending.source!==yaml} onClick={()=>perform(()=>{if(yaml!==undefined&&onYamlChange)changeChecks(pending.graph,true);else{setUndo({graph:graph!,after:pending.graph});onChange(pending.graph);}setPending(undefined);})}>Delete anyway</button><button onClick={()=>setPending(undefined)}>Cancel deletion</button></div>}
+ {clearPending&&<ClearDestinationDialog title={clearPending.title} visits={clearPending.visits} disabled={disabled||clearPending.source!==yaml} onConfirm={()=>perform(()=>{commitRemoval(clearPending.graph);setClearPending(undefined);setLinkedEdgeId(undefined);setReviewNotice('');setAnnouncement('Removed the link to '+clearPending.title+'.');})} onCancel={()=>setClearPending(undefined)}/>}
  {undoAvailable&&(undo.step?<div className="step-undo-toast" role="status">Step {undo.step.position} deleted · <button aria-label="Undo canvas deletion" onPointerDown={()=>setExpandedRow('')} onClick={undoChange}>Undo</button></div>:<button className="canvas-undo" onPointerDown={()=>setExpandedRow('')} onClick={undoChange}>Undo canvas deletion</button>)}
  {infoScreen&&<NodeInfo screen={infoScreen} disabled={disabled} error={error} onImage={file=>void image(infoScreen.id,file)} onRemove={()=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===infoScreen.id?{...screen,referenceScreenshot:undefined}:screen)})} onClose={()=>{setNodeInfoId('');setError('');}}/>}
  {error&&!infoScreen&&<div className="notice error" role="alert">{error}</div>}

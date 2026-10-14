@@ -21,19 +21,19 @@ async function click(document:Document,label:string){
   });
 }
 
-async function chooseDestination(document:Document,actionId:string,screenId:string,visitId?:string){
+async function chooseDestination(document:Document,actionId:string,screenId:string,visitId?:string,commit=true){
   const scope=visitId?document.querySelector<HTMLElement>(`[data-visit-id="${visitId}"]`):document;
   const summary=scope?.querySelector<HTMLButtonElement>(`[data-operation-id="${actionId}"] .visit-step-summary`);
   if(summary?.getAttribute('aria-expanded')==='false')await act(async()=>summary.click());
   await act(async()=>{
     const scope=visitId?document.querySelector<HTMLElement>(`[data-visit-id="${visitId}"]`):document;
     const row=scope?.querySelector<HTMLElement>(`[data-operation-id="${actionId}"]`);
-    const select=row?.querySelector<HTMLSelectElement>('select[aria-label$=" destination"]');
-    if(!select)throw new Error('Missing destination for '+actionId);
-    Object.getOwnPropertyDescriptor(document.defaultView!.HTMLSelectElement.prototype,'value')!.set!.call(select,screenId);
-    select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));
+    const control=row?.querySelector<HTMLSelectElement>('select[aria-label$=" destination"]')??document.querySelector<HTMLSelectElement>(`[data-operation-id="${actionId}"] select[aria-label$=" destination"]`);
+    if(!control)throw new Error('Missing destination for '+actionId);
+    Object.getOwnPropertyDescriptor(document.defaultView!.HTMLSelectElement.prototype,'value')!.set!.call(control,screenId);
+    control.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));
   });
-  await commitVisitEdits(document);
+  if(commit)await commitVisitEdits(document);
 }
 
 async function confirmDeletion(document:Document){
@@ -67,8 +67,12 @@ async function perform(document:Document,script:GoldenScript,graph:()=>CanvasGra
     if(!script.to)throw new Error(script.op+' requires a destination screen.');
     await chooseDestination(document,script.actionId,script.to,script.visitId);
   }else if(script.op==='clear-destination'){
-    await chooseDestination(document,script.actionId,'',script.visitId);
-    if(document.querySelector('[role=alertdialog]'))throw new Error('Clearing a destination must be immediate with Undo.');
+    await chooseDestination(document,script.actionId,'',script.visitId,false);
+    const dialog=document.querySelector('[role=alertdialog]');
+    if(!dialog)throw new Error('Clearing a destination must ask for confirmation.');
+    const cancel=[...dialog.querySelectorAll('button')].find(button=>button.textContent==='Cancel');
+    if(document.activeElement!==cancel)throw new Error('Clear-destination confirm must start focus on Cancel.');
+    await click(document,'Remove link');
   }else if(script.op==='delete-step'){
     await act(async()=>{
       const scope=script.visitId?document.querySelector(`[data-visit-id="${script.visitId}"]`):document;
