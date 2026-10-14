@@ -617,7 +617,7 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
 .match-by{display:flex;padding:2px;border:1px solid var(--border);border-radius:8px;background:var(--subtle)}
-.match-by label{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;border-radius:6px;font-size:13px}
+.match-by label{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;margin:0;border-radius:6px;font-size:13px;cursor:pointer}
 .match-by label:has(input:checked){background:var(--surface);color:var(--inspector-primary);font-weight:600;box-shadow:0 1px 2px #25304114}
 .floating-inspector .match-by input{min-height:0;width:auto;margin:0}
 .element-field{display:grid;gap:6px}
