@@ -1,6 +1,6 @@
 # Issue #46 verification
 
-Base: main `f3e96cd4b5f30bbe63470594922bad13b77b46b4`. Implementation: `4c8d19b279f8fea6a1ce7b1f45fef67282528128`, branch `codex/46-step-actions`. Dedicated chat: `01a1383c-4e18-7e13-ac3e-1453216bd268`.
+Original base: main `f3e96cd4b5f30bbe63470594922bad13b77b46b4`; integrated current main `d7c6ecbea3a850e28279545f391c78aec1ec746c` (PR #71 platform fix) after initial validation. Implementation: `4c8d19b279f8fea6a1ce7b1f45fef67282528128`, branch `codex/46-step-actions`. Dedicated chat: `01a1383c-4e18-7e13-ac3e-1453216bd268`.
 
 The existing Step actions disclosure now has the requested accessible name. Menu moves retain focus and announce the new position. Drag handles apply successive adjacent swaps to a local visit order and commit one graph/YAML change. Deleting a saved visit step still uses the existing deletion planner immediately, now with a guarded, eight-second status toast. Undo restores the step and focus. A later graph/YAML edit invalidates and removes the Undo entry. Connection and screen deletion retain their existing confirmation dialogs.
 
@@ -9,10 +9,10 @@ The existing Step actions disclosure now has the requested accessible name. Menu
 - Red/green regressions: menu accessible name and focus; atomic reorder helper; drag handle/drop line/one Undo; delete toast/focus; drag-leave indicator cleanup. Added expiry, cross-visit drop rejection and drag cancellation coverage.
 - `tests/floating-inspector-ui.test.ts` and `tests/inspector-operations.test.ts`: **37/37 pass**.
 - Initial broader run of those files plus `tests/canvas-ui.test.ts` and `tests/golden-canvas.test.ts`: **63/63 pass** (before three additional expiry/cross-visit/drag-leave cases were added). Full suite includes all final cases.
-- Full `npm test`: **316/318 pass**. Only failures: the two pre-existing Bash 3.2 zero-exception cases in `tests/check-canvas-contract.test.ts`, caused by `exception_patches[@]: unbound variable`. The script and its tests are unchanged from the pinned base. Existing PR #71 addresses this platform issue; #46 does not duplicate it.
+- Initial full `npm test`: **316/318 pass**. Only failures: the two pre-existing Bash 3.2 zero-exception cases in `tests/check-canvas-contract.test.ts`, caused by `exception_patches[@]: unbound variable`. The script and its tests are unchanged from the pinned base. PR #71 merged during delivery; integrating main fixes these failures without changing #46 implementation. Final full `npm test`: **318/318 pass**, no failures.
 - Typecheck and production build pass. Vite reports the existing >500 kB bundle warning.
 - `npm run check:canvas-contract`: **pass (1 exception patch)**. No `shared/`, server or golden fixture changes.
-- All **18 golden fixtures** match committed snapshots in both the broader targeted run and full suite; no snapshot updates.
+- All **18 golden fixtures** match committed snapshots in the broader targeted run and both full-suite runs; no snapshot updates.
 - Desktop browser at 1280×720, real CanvasEditor fixture: menu move retains focused step and announces; native pointer drag from position 2 to 4 reorders across multiple steps; one Undo restores pre-drag order; deletion commits immediately, focuses the next step and offers Undo; Undo restores the deleted step and focus; toast expires. Drag handles have 44px targets. Fixture and local server are temporary; no simulator/app execution was performed.
 
 ![Deletion status toast and visit steps](evidence/issue46-undo.png)
