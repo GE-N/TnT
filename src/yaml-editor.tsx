@@ -125,7 +125,7 @@ type EditorProps={
   onDelete?:(yaml:string,index:number)=>(()=>void);
 };
 function visibleDraft(stored:YamlFormDraft|undefined,committed:string,yaml:string,recoveredValue:string|undefined,retired:boolean):YamlFormDraft{
-  if(stored?.dirty&&stored.value!==committed)return {source:stored.source||yaml,value:stored.value,dirty:true};
+  if(stored?.dirty&&stored.value!==committed)return {source:stored.source||yaml,value:stored.value,dirty:true,index:stored.index,field:stored.field};
   if(!retired&&!stored&&recoveredValue!==undefined&&recoveredValue!==committed)return {source:yaml,value:recoveredValue,dirty:true};
   return {source:yaml,value:committed,dirty:false};
 }
@@ -152,7 +152,7 @@ function ValueEditor({step,field,yaml,onChange,disabled,idPrefix}:{step:FormStep
   }
   return <div className="yaml-value">
     <label className={field?'':'sr-only'} htmlFor={id}>{field?field.name:`Step ${step.index+1} value`}</label>
-    <input id={id} value={draft.value} disabled={disabled} onChange={event=>store.setForm(fieldKey,{source:draft.dirty?draft.source:yaml,value:event.target.value,dirty:true,index:step.index,field:field?.name})} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();apply();}}}/>
+    <input id={id} value={draft.value} disabled={disabled} onChange={event=>{const stored=store.forms[fieldKey];const extending=!!stored?.dirty&&stored.source!=='';store.setForm(fieldKey,{source:extending?stored.source:yaml,value:event.target.value,dirty:true,index:extending&&stored.index!==undefined?stored.index:step.index,field:extending?stored.field:field?.name});}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();apply();}}}/>
     <button type="button" className="confirm" disabled={disabled} onClick={apply} aria-label={`Apply ${name}`}>Apply</button>
     {draft.dirty&&<button type="button" className="text-button" disabled={disabled} onClick={()=>{store.setForm(fieldKey,{source:yaml,value:committed,dirty:false});setError('');}}>Reset {name} draft</button>}
     {error&&<p role="alert" className="notice error">{error}</p>}

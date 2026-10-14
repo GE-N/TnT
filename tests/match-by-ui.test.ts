@@ -532,6 +532,71 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
     }finally{await page.close();}
   });
 
+  test('editing a shifted draft keeps its origin through Undo and Apply',async()=>{
+    const page=await openWorkspace('tap');
+    const source='appId: com.example.App\n---\n- tapOn: First\n- tapOn: Second\n';
+    try{
+      const before=await page.service.workspace(page.workspace.id);
+      await setScenarioYaml(page,source);
+      await page.published(before.metadata?.revision??0);
+      const card=await openYamlForms(page);
+      await typeInto(page,card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!,'Second pending');
+      await confirmDelete(card,'Delete step 1');
+      const shifted=card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!;
+      assert.equal(shifted.value,'Second pending');
+      await typeInto(page,shifted,'Second pending typed');
+      const undo=[...card.querySelectorAll('button')].find(button=>button.textContent==='Undo deletion');
+      assert.ok(undo);assert.equal((undo as HTMLButtonElement).disabled,false);
+      await act(async()=>undo.click());
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!.value,'First');
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!.value,'Second pending typed');
+      const advanced=await showAdvanced(page.document);
+      assert.equal(advanced.querySelector<HTMLInputElement>('#form-step-0')!.value,'First');
+      assert.equal(advanced.querySelector<HTMLInputElement>('#form-step-1')!.value,'Second pending typed');
+      const revision=(await page.service.workspace(page.workspace.id)).metadata?.revision??0;
+      await act(async()=>card.querySelector<HTMLButtonElement>('[aria-label="Apply step 2"]')!.click());
+      const edited=page.document.querySelector<HTMLTextAreaElement>('#scenario-yaml')!.value;
+      assert.equal(edited,'appId: com.example.App\n---\n- tapOn: First\n- tapOn: "Second pending typed"\n');
+      const saved=await page.published(revision);
+      assert.match(saved.yaml,/- tapOn: First\n/);
+      assert.match(saved.yaml,/Second pending typed/);
+      assert.doesNotMatch(saved.yaml,/tapOn: "Second pending typed"\n- tapOn: Second/);
+      assert.equal((await page.service.workspaceDetail(page.workspace.id)).draft?.fields['yaml-form:0'],undefined);
+      assert.equal((await page.service.workspaceDetail(page.workspace.id)).draft?.fields['yaml-form:1'],undefined);
+      assert.equal(page.document.querySelector('.workspace-save-status')?.getAttribute('aria-label'),'Saved locally');
+    }finally{await page.close();}
+  });
+
+  test('a draft edited across repeated shifts stays on its own step',async()=>{
+    const page=await openWorkspace('tap');
+    try{
+      const before=await page.service.workspace(page.workspace.id);
+      await setScenarioYaml(page,'appId: com.example.App\n---\n- tapOn: First\n- tapOn: Second\n- tapOn: Third\n');
+      await page.published(before.metadata?.revision??0);
+      const card=await openYamlForms(page);
+      await typeInto(page,card.querySelector<HTMLInputElement>('#yaml-card-form-step-2')!,'Third pending');
+      await confirmDelete(card,'Delete step 1');
+      const once=card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!;
+      assert.equal(once.value,'Third pending');
+      await typeInto(page,once,'Third pending shifted');
+      await confirmDelete(card,'Delete step 1');
+      const twice=card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!;
+      assert.equal(twice.value,'Third pending shifted');
+      await typeInto(page,twice,'Third pending twice');
+      const undo=[...card.querySelectorAll('button')].find(button=>button.textContent==='Undo deletion');
+      assert.ok(undo);assert.equal((undo as HTMLButtonElement).disabled,false);
+      await act(async()=>undo.click());
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!.value,'Second');
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!.value,'Third pending twice');
+      assert.equal([...card.querySelectorAll('input')].some(input=>input.value==='First'),false);
+      await act(async()=>card.querySelector<HTMLButtonElement>('[aria-label="Apply step 2"]')!.click());
+      assert.match(card.textContent??'',/YAML changed after this form draft began/);
+      assert.equal(page.document.querySelector<HTMLTextAreaElement>('#scenario-yaml')!.value.includes('tapOn: Second'),true);
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-0')!.value,'Second');
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!.value,'Third pending twice');
+    }finally{await page.close();}
+  });
+
   test('editing the YAML code drops a draft whose step was removed',async()=>{
     const page=await openWorkspace('tap');
     try{
