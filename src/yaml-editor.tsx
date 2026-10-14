@@ -22,7 +22,7 @@ function uniqueStep(steps:FormStep[],identity:string){
   const hits=steps.filter(step=>stepIdentity(step)===identity);
   return hits.length===1?hits[0]:undefined;
 }
-/** Keep a pending value on the same step only when that step is still uniquely identifiable. The draft key is the current owner; source, index, and field stay the origin used by Apply. A matching command shape at the old index is not ownership. */
+/** Keep a pending value on the same step when that step is still uniquely identifiable. Source, index, and field stay the origin used by Apply. The draft key is the current owner. After that owner moves, a matching command shape at the old index is not ownership. */
 function locateFormDraft(key:string,draft:YamlFormDraft,current:ReturnType<typeof readForms>){
   const parts=formKeyParts(key);
   if(!parts)return;
@@ -37,6 +37,11 @@ function locateFormDraft(key:string,draft:YamlFormDraft,current:ReturnType<typeo
   const exact=uniqueStep(current.steps,identity);
   const originUnique=uniqueStep(origin.steps,identity);
   if(exact&&originUnique&&fieldOnStep(exact,originField))return formDraftKey(exact.index,originField);
+  if(parts.index!==originIndex||parts.field!==originField)return;
+  const occupant=current.steps[originIndex];
+  const occupantOrigin=occupant&&uniqueStep(origin.steps,stepIdentity(occupant));
+  const shiftedIn=!!occupantOrigin&&occupantOrigin.index!==originStep.index;
+  if(!shiftedIn&&originUnique&&occupant&&stepStructure(occupant)===stepStructure(originStep)&&fieldOnStep(occupant,originField))return formDraftKey(originIndex,originField);
 }
 function reconcileFormDrafts(forms:Record<string,YamlFormDraft>,yaml:string,retired:ReadonlySet<string>){
   const current=readForms(yaml);
