@@ -2,13 +2,86 @@ import {RecoveredFields,useWorkspaceDraft} from './workspace-drafts.js';
 import {createContext,useCallback,useContext,useEffect,useMemo,useState,type ReactNode} from 'react';
 import {readForms,editForm,appendForm,deleteForm,formCommands,type FormCommand,type FormStep,type FormField} from './yaml-forms.js';
 
-type YamlFormDraft={source:string;value:string;dirty:boolean};
-type YamlDraftStore={command:string;setCommand:(value:string)=>void;forms:Record<string,YamlFormDraft>;setForm:(key:string,draft:YamlFormDraft)=>void};
+type YamlFormDraft={source:string;value:string;dirty:boolean;index?:number;field?:string};
+type YamlDraftStore={command:string;setCommand:(value:string)=>void;forms:Record<string,YamlFormDraft>;setForm:(key:string,draft:YamlFormDraft)=>void;retired:ReadonlySet<string>};
 const YamlDraftContext=createContext<YamlDraftStore|null>(null);
 const formDraftKey=(index:number,field?:string)=>`yaml-form:${index}${field?':'+encodeURIComponent(field):''}`;
+function formKeyParts(key:string){
+  const match=/^yaml-form:(\d+)(?::(.*))?$/.exec(key);
+  if(!match)return;
+  return {index:Number(match[1]),field:match[2]===undefined?undefined:decodeURIComponent(match[2])};
+}
+function stepStructure(step:FormStep){return step.command+'\0'+(step.fields?.map(field=>field.name).join('\0')??(step.editable?'*':'-'));}
+function stepIdentity(step:FormStep){return stepStructure(step)+'\0'+(step.value??'')+'\0'+(step.fields?.map(field=>field.name+'='+field.value).join('\0')??'');}
+function fieldOnStep(step:FormStep,field?:string){return field?!!step.fields?.some(item=>item.name===field):!!step.editable;}
+function fieldStillPresent(view:ReturnType<typeof readForms>,key:string){
+  const parts=formKeyParts(key);const step=parts&&view.steps[parts.index];
+  return !!step&&fieldOnStep(step,parts?.field);
+}
+function uniqueStep(steps:FormStep[],identity:string){
+  const hits=steps.filter(step=>stepIdentity(step)===identity);
+  return hits.length===1?hits[0]:undefined;
+}
+/** Keep a pending value on the same step when YAML changes, and drop it when that step or field is gone. Identical steps are not guessed apart. */
+function locateFormDraft(key:string,draft:YamlFormDraft,current:ReturnType<typeof readForms>){
+  const parts=formKeyParts(key);
+  if(!parts)return;
+  const originIndex=draft.index??parts.index;
+  const originField=draft.field??parts.field;
+  if(!draft.source)return fieldStillPresent(current,key)?key:undefined;
+  const origin=readForms(draft.source);
+  if(origin.error)return;
+  const originStep=origin.steps[originIndex];
+  if(!originStep||!fieldOnStep(originStep,originField))return;
+  const identity=stepIdentity(originStep);
+  const exact=uniqueStep(current.steps,identity);
+  const originUnique=uniqueStep(origin.steps,identity);
+  if(exact&&originUnique&&fieldOnStep(exact,originField))return formDraftKey(exact.index,originField);
+  const occupant=current.steps[originIndex];
+  const occupantOrigin=occupant&&uniqueStep(origin.steps,stepIdentity(occupant));
+  const shiftedIn=!!occupantOrigin&&occupantOrigin.index!==originStep.index;
+  if(!shiftedIn&&originUnique&&occupant&&stepStructure(occupant)===stepStructure(originStep)&&fieldOnStep(occupant,originField))return formDraftKey(originIndex,originField);
+}
+function reconcileFormDrafts(forms:Record<string,YamlFormDraft>,yaml:string,retired:ReadonlySet<string>){
+  const current=readForms(yaml);
+  if(current.error)return {forms,retired};
+  const nextRetired=new Set(retired);
+  const claims=new Map<string,{from:string;draft:YamlFormDraft}>();
+  const blocked=new Set<string>();
+  const dropped=new Set<string>();
+  for(const [key,draft] of Object.entries(forms)){
+    if(!draft.dirty)continue;
+    const target=locateFormDraft(key,draft,current);
+    const previous=target?claims.get(target):undefined;
+    if(!target||blocked.has(target)||previous){
+      dropped.add(key);
+      if(previous)dropped.add(previous.from);
+      if(target){blocked.add(target);claims.delete(target);nextRetired.add(target);}
+      continue;
+    }
+    claims.set(target,{from:key,draft});
+  }
+  const next:Record<string,YamlFormDraft>={};
+  for(const [target,claim] of claims){
+    if(blocked.has(target))continue;
+    next[target]=claim.draft;
+    nextRetired.delete(target);
+    if(claim.from!==target)nextRetired.add(claim.from);
+  }
+  for(const key of dropped)nextRetired.add(key);
+  for(const [key,draft] of Object.entries(forms)){
+    if(draft.dirty||next[key]||nextRetired.has(key))continue;
+    if(fieldStillPresent(current,key))next[key]=draft;
+    else nextRetired.add(key);
+  }
+  return {forms:next,retired:nextRetired};
+}
 function seedForms(recovered:Record<string,string>){
   const forms:Record<string,YamlFormDraft>={};
-  for(const [key,value] of Object.entries(recovered))if(key.startsWith('yaml-form:'))forms[key]={source:'',value,dirty:true};
+  for(const [key,value] of Object.entries(recovered)){
+    const parts=formKeyParts(key);
+    if(parts)forms[key]={source:'',value,dirty:true,index:parts.index,field:parts.field};
+  }
   return forms;
 }
 function recoveredStamp(recovered:Record<string,string>){
@@ -19,16 +92,22 @@ function ReportedDraft({fieldKey,value}:{fieldKey:string;value:string}){
   return null;
 }
 /** One pending command and one pending value per step field, shared by every YAML editor. */
-export function YamlDraftProvider({children,resetToken=0}:{children:ReactNode;resetToken?:number}){
+export function YamlDraftProvider({children,resetToken=0,yaml}:{children:ReactNode;resetToken?:number;yaml?:string}){
   const recovered=useContext(RecoveredFields);
   const stamp=recoveredStamp(recovered);
   const [generation,setGeneration]=useState(stamp);
   const [token,setToken]=useState(resetToken);
   const [command,setCommand]=useState(recovered['yaml-command']??'');
   const [forms,setForms]=useState(()=>seedForms(recovered));
-  if(token!==resetToken||generation!==stamp){setToken(resetToken);setGeneration(stamp);setCommand(recovered['yaml-command']??'');setForms(seedForms(recovered));}
-  const setForm=useCallback((key:string,draft:YamlFormDraft)=>{setForms(current=>{const previous=current[key];if(previous&&previous.source===draft.source&&previous.value===draft.value&&previous.dirty===draft.dirty)return current;return {...current,[key]:draft};});},[]);
-  const store=useMemo(()=>({command,setCommand,forms,setForm}),[command,forms,setForm]);
+  const [retired,setRetired]=useState<ReadonlySet<string>>(()=>new Set());
+  const [boundYaml,setBoundYaml]=useState(yaml);
+  if(token!==resetToken||generation!==stamp){setToken(resetToken);setGeneration(stamp);setCommand(recovered['yaml-command']??'');setForms(seedForms(recovered));setRetired(new Set());setBoundYaml(yaml);}
+  else if(yaml!==undefined&&yaml!==boundYaml){const result=reconcileFormDrafts(forms,yaml,retired);setBoundYaml(yaml);setForms(result.forms);setRetired(result.retired);}
+  const setForm=useCallback((key:string,draft:YamlFormDraft)=>{
+    setForms(current=>{const previous=current[key];if(previous&&previous.source===draft.source&&previous.value===draft.value&&previous.dirty===draft.dirty)return current;return {...current,[key]:draft};});
+    setRetired(current=>{if(!current.has(key))return current;const next=new Set(current);next.delete(key);return next;});
+  },[]);
+  const store=useMemo(()=>({command,setCommand,forms,setForm,retired}),[command,forms,setForm,retired]);
   useWorkspaceDraft(command.length>0,'yaml-command',command);
   return <YamlDraftContext.Provider value={store}>{children}{Object.entries(forms).map(([key,draft])=>draft.dirty?<ReportedDraft key={key} fieldKey={key} value={draft.value}/>:null)}</YamlDraftContext.Provider>;
 }
@@ -45,25 +124,25 @@ type EditorProps={
   deletionWarnings?:(index:number)=>string[];
   onDelete?:(yaml:string,index:number)=>(()=>void);
 };
-function visibleDraft(stored:YamlFormDraft|undefined,committed:string,yaml:string,recoveredValue:string|undefined):YamlFormDraft{
+function visibleDraft(stored:YamlFormDraft|undefined,committed:string,yaml:string,recoveredValue:string|undefined,retired:boolean):YamlFormDraft{
   if(stored?.dirty&&stored.value!==committed)return {source:stored.source||yaml,value:stored.value,dirty:true};
-  if(!stored&&recoveredValue!==undefined&&recoveredValue!==committed)return {source:yaml,value:recoveredValue,dirty:true};
+  if(!retired&&!stored&&recoveredValue!==undefined&&recoveredValue!==committed)return {source:yaml,value:recoveredValue,dirty:true};
   return {source:yaml,value:committed,dirty:false};
 }
 function DraftBinding({fieldKey,committed,yaml}:{fieldKey:string;committed:string;yaml:string}){
-  const store=useYamlDrafts();const recovered=useContext(RecoveredFields);const stored=store.forms[fieldKey];
+  const store=useYamlDrafts();const recovered=useContext(RecoveredFields);const stored=store.forms[fieldKey];const retired=store.retired.has(fieldKey);
   useEffect(()=>{
     if(stored?.dirty&&stored.value===committed){store.setForm(fieldKey,{source:yaml,value:committed,dirty:false});return;}
-    if(stored?.dirty&&stored.source===''){store.setForm(fieldKey,{...stored,source:yaml});return;}
-    if(!stored&&recovered[fieldKey]!==undefined&&recovered[fieldKey]!==committed)store.setForm(fieldKey,{source:yaml,value:recovered[fieldKey],dirty:true});
-  },[store,stored,fieldKey,committed,yaml,recovered]);
+    if(stored?.dirty&&stored.source===''){const parts=formKeyParts(fieldKey);store.setForm(fieldKey,{...stored,source:yaml,index:stored.index??parts?.index,field:stored.field??parts?.field});return;}
+    if(!retired&&!stored&&recovered[fieldKey]!==undefined&&recovered[fieldKey]!==committed){const parts=formKeyParts(fieldKey);store.setForm(fieldKey,{source:yaml,value:recovered[fieldKey],dirty:true,index:parts?.index,field:parts?.field});}
+  },[store,stored,fieldKey,committed,yaml,recovered,retired]);
   return null;
 }
 function ValueEditor({step,field,yaml,onChange,disabled,idPrefix}:{step:FormStep;field?:FormField;yaml:string;onChange:(yaml:string)=>void;disabled:boolean;idPrefix:string}){
   const committed=field?.value??step.value??'';
   const store=useYamlDrafts();const recovered=useContext(RecoveredFields);
   const fieldKey=formDraftKey(step.index,field?.name);
-  const draft=visibleDraft(store.forms[fieldKey],committed,yaml,recovered[fieldKey]);
+  const draft=visibleDraft(store.forms[fieldKey],committed,yaml,recovered[fieldKey],store.retired.has(fieldKey));
   const [error,setError]=useState('');
   const id=`${idPrefix}form-step-${step.index}${field?'-'+field.name:''}`;
   const name=`step ${step.index+1}${field?' '+field.name:''}`;
@@ -73,7 +152,7 @@ function ValueEditor({step,field,yaml,onChange,disabled,idPrefix}:{step:FormStep
   }
   return <div className="yaml-value">
     <label className={field?'':'sr-only'} htmlFor={id}>{field?field.name:`Step ${step.index+1} value`}</label>
-    <input id={id} value={draft.value} disabled={disabled} onChange={event=>store.setForm(fieldKey,{source:draft.dirty?draft.source:yaml,value:event.target.value,dirty:true})} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();apply();}}}/>
+    <input id={id} value={draft.value} disabled={disabled} onChange={event=>store.setForm(fieldKey,{source:draft.dirty?draft.source:yaml,value:event.target.value,dirty:true,index:step.index,field:field?.name})} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();apply();}}}/>
     <button type="button" className="confirm" disabled={disabled} onClick={apply} aria-label={`Apply ${name}`}>Apply</button>
     {draft.dirty&&<button type="button" className="text-button" disabled={disabled} onClick={()=>{store.setForm(fieldKey,{source:yaml,value:committed,dirty:false});setError('');}}>Reset {name} draft</button>}
     {error&&<p role="alert" className="notice error">{error}</p>}
@@ -138,5 +217,5 @@ function YamlEditorBody({yaml,onChange,disabled,deletionWarnings,onDelete,inputI
 export function YamlEditor(props:EditorProps){
   const shared=useContext(YamlDraftContext);
   if(shared)return <YamlEditorBody {...props}/>;
-  return <YamlDraftProvider><YamlEditorBody {...props}/></YamlDraftProvider>;
+  return <YamlDraftProvider yaml={props.yaml}><YamlEditorBody {...props}/></YamlDraftProvider>;
 }

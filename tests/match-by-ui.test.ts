@@ -475,8 +475,131 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       assert.equal(restoredAdvanced.querySelector<HTMLInputElement>('#form-value')!.value,'advanced pending');
     }finally{await page.close();}
   });
+
+  test('deleting a dirty final step clears its draft and the workspace saves',async()=>{
+    const page=await openWorkspace('tap');
+    try{
+      const card=await openYamlForms(page);
+      await act(async()=>card.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
+      await typeInto(page,card.querySelector<HTMLInputElement>('.yaml-value input')!,'Gone pending');
+      await waitForField(page,'yaml-form:1:text','Gone pending');
+      await confirmDelete(card,'Delete step 2');
+      const saved=await page.published();
+      assert.doesNotMatch(saved.yaml,/Gone pending/);
+      assert.equal((await page.service.workspaceDetail(page.workspace.id)).draft?.fields['yaml-form:1:text'],undefined);
+      assert.equal(page.document.querySelector('.workspace-save-status')?.getAttribute('aria-label'),'Saved locally');
+      assert.equal(card.querySelector('[aria-label="Reset step 2 text draft"]'),null);
+    }finally{await page.close();}
+  });
+
+  test('a shifted step does not inherit a deleted draft, and Undo restores each draft on its own step',async()=>{
+    const page=await openWorkspace('tap');
+    try{
+      const before=await page.service.workspace(page.workspace.id);
+      await setScenarioYaml(page,'appId: com.example.App\n---\n- tapOn: First\n- tapOn: Second\n- tapOn: Third\n');
+      await page.published(before.metadata?.revision??0);
+      const card=await openYamlForms(page);
+      await typeInto(page,card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!,'deleted pending');
+      await typeInto(page,card.querySelector<HTMLInputElement>('#yaml-card-form-step-2')!,'kept pending');
+      await waitForField(page,'yaml-form:1','deleted pending');
+      await waitForField(page,'yaml-form:2','kept pending');
+      await confirmDelete(card,'Delete step 2');
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!.value,'kept pending');
+      assert.equal(card.querySelector('#yaml-card-form-step-2'),null);
+      assert.equal([...card.querySelectorAll('input')].some(input=>input.value==='deleted pending'),false);
+      await act(async()=>card.querySelector<HTMLButtonElement>('[aria-label="Apply step 2"]')!.click());
+      assert.match(card.textContent??'',/YAML changed after this form draft began/);
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!.value,'kept pending');
+      const undo=[...card.querySelectorAll('button')].find(button=>button.textContent==='Undo deletion');
+      assert.ok(undo);assert.equal((undo as HTMLButtonElement).disabled,false);
+      await act(async()=>undo.click());
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-1')!.value,'Second');
+      assert.equal(card.querySelector<HTMLInputElement>('#yaml-card-form-step-2')!.value,'kept pending');
+      const advanced=await showAdvanced(page.document);
+      assert.equal(advanced.querySelector<HTMLInputElement>('#form-step-1')!.value,'Second');
+      assert.equal(advanced.querySelector<HTMLInputElement>('#form-step-2')!.value,'kept pending');
+      const deadline=Date.now()+8000;
+      let fields:Record<string,string>={};
+      while(Date.now()<deadline){
+        await act(async()=>{await new Promise(resolve=>setTimeout(resolve,40));});
+        await page.settle();
+        fields=(await page.service.workspaceDetail(page.workspace.id)).draft?.fields??{};
+        if(fields['yaml-form:2']==='kept pending'&&fields['yaml-form:1']===undefined&&!Object.values(fields).includes('deleted pending'))break;
+      }
+      assert.equal(fields['yaml-form:2'],'kept pending');
+      assert.equal(fields['yaml-form:1'],undefined);
+      assert.equal(Object.values(fields).includes('deleted pending'),false);
+    }finally{await page.close();}
+  });
+
+  test('editing the YAML code drops a draft whose step was removed',async()=>{
+    const page=await openWorkspace('tap');
+    try{
+      const card=await openYamlForms(page);
+      await act(async()=>card.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
+      await typeInto(page,card.querySelector<HTMLInputElement>('.yaml-value input')!,'Code pending');
+      await waitForField(page,'yaml-form:1:text','Code pending');
+      await setScenarioYaml(page,'appId: com.example.App\n---\n- launchApp\n');
+      const saved=await page.published();
+      assert.doesNotMatch(saved.yaml,/Code pending/);
+      assert.equal((await page.service.workspaceDetail(page.workspace.id)).draft?.fields['yaml-form:1:text'],undefined);
+      assert.equal(page.document.querySelector('.workspace-save-status')?.getAttribute('aria-label'),'Saved locally');
+    }finally{await page.close();}
+  });
+
+  test('deleting the visit step drops its unapplied YAML draft and the workspace saves',async()=>{
+    const page=await openWorkspace('tap');
+    try{
+      const card=await openYamlForms(page);
+      await act(async()=>card.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
+      await typeInto(page,card.querySelector<HTMLInputElement>('.yaml-value input')!,'Canvas pending');
+      await waitForField(page,'yaml-form:1:text','Canvas pending');
+      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Delete action 1"]')!.click());
+      const saved=await page.published();
+      assert.doesNotMatch(saved.yaml,/Canvas pending/);
+      assert.equal((await page.service.workspaceDetail(page.workspace.id)).draft?.fields['yaml-form:1:text'],undefined);
+      assert.equal(page.document.querySelector('.workspace-save-status')?.getAttribute('aria-label'),'Saved locally');
+      assert.equal([...card.querySelectorAll('input')].some(input=>input.value==='Canvas pending'),false);
+    }finally{await page.close();}
+  });
 });
 
+type WorkspacePage=Awaited<ReturnType<typeof openWorkspace>>;
+async function typeInto(page:WorkspacePage,input:HTMLInputElement,value:string){
+  await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});
+}
+async function openYamlForms(page:WorkspacePage){
+  await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
+  const card=[...page.document.querySelectorAll<HTMLElement>('[role="dialog"][aria-label="YAML"]')].find(item=>!item.hidden);
+  assert.ok(card);
+  await act(async()=>[...card.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
+  return card;
+}
+async function confirmDelete(root:ParentNode,label:string){
+  await act(async()=>root.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click());
+  const warning=root.querySelector('[aria-label="Step reference warning"]');
+  if(warning)await act(async()=>[...warning.querySelectorAll('button')].find(item=>item.textContent==='Delete anyway')!.click());
+}
+async function setScenarioYaml(page:WorkspacePage,value:string){
+  const summary=[...page.document.querySelectorAll('summary')].find(item=>item.textContent?.startsWith('Advanced mode'));
+  assert.ok(summary);
+  const details=summary.closest('details');
+  if(details&&!details.open)await act(async()=>summary.click());
+  const text=page.document.getElementById('scenario-yaml') as HTMLTextAreaElement;
+  assert.ok(text);
+  await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLTextAreaElement.prototype,'value')!.set!.call(text,value);text.dispatchEvent(new page.window.Event('input',{bubbles:true}));});
+}
+async function waitForField(page:WorkspacePage,key:string,value:string){
+  const deadline=Date.now()+8000;
+  let fields:Record<string,string>={};
+  while(Date.now()<deadline){
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,40));});
+    await page.settle();
+    fields=(await page.service.workspaceDetail(page.workspace.id)).draft?.fields??{};
+    if(fields[key]===value)return fields;
+  }
+  throw new Error('Draft field '+key+' stayed '+(fields[key]??'empty'));
+}
 async function showAdvanced(document:Document){
   const summary=[...document.querySelectorAll('summary')].find(item=>item.textContent?.startsWith('Advanced mode'));
   assert.ok(summary);
