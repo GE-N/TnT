@@ -106,7 +106,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     const previous=fieldsRef.current.get(id);
     const same=!!previous&&previous.pending===report.pending&&previous.key===report.key&&previous.value===report.value;
     if(!report.pending&&!previous)return;
-    if(report.pending)fieldsRef.current.set(id,report);else fieldsRef.current.delete(id);
+    if(report.pending){if(!same)fieldsRef.current.delete(id);fieldsRef.current.set(id,report);}else fieldsRef.current.delete(id);
     setDrafts(current=>report.pending?(current.includes(id)?current:[...current,id]):current.filter(item=>item!==id));
     if(!same)setFieldEpoch(value=>value+1);
   },[]);

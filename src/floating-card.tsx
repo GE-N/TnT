@@ -16,7 +16,7 @@ function isTextField(target:EventTarget|null){
   return target instanceof HTMLElement&&!!target.closest('input,textarea,select,[contenteditable="true"]');
 }
 
-export function FloatingCard({label,position,onPosition,opener,onClose,children}:{label:string;position?:CardPosition;onPosition?:(position:CardPosition)=>void;opener:HTMLElement|null;onClose:()=>void;children:ReactNode}){
+export function FloatingCard({label,position,onPosition,opener,onClose,open=true,children}:{label:string;position?:CardPosition;onPosition?:(position:CardPosition)=>void;opener:HTMLElement|null;onClose:()=>void;open?:boolean;children:ReactNode}){
   const fallback=label==='YAML'?{x:32,y:72}:{x:56,y:104};
   const [pos,setPos]=useState(()=>clampCard(position??fallback));
   const posRef=useRef(pos);
@@ -26,7 +26,7 @@ export function FloatingCard({label,position,onPosition,opener,onClose,children}
   openerRef.current=opener;
   function commit(next:CardPosition){posRef.current=next;setPos(next);}
   function close(){openerRef.current?.focus();onClose();}
-  useEffect(()=>{handle.current?.focus();},[]);
+  useEffect(()=>{if(open)handle.current?.focus();},[open]);
   useEffect(()=>{
     const snap=()=>{
       const next=clampCard(posRef.current);
@@ -58,7 +58,7 @@ export function FloatingCard({label,position,onPosition,opener,onClose,children}
     const next=clampCard({x:posRef.current.x+direction[0]*amount,y:posRef.current.y+direction[1]*amount});
     commit(next);onPosition?.(next);
   }
-  return <div role="dialog" aria-label={label} className="floating-card" style={{left:pos.x,top:pos.y,width:floatingCardSize.width,height:floatingCardSize.height}} onKeyDown={event=>{
+  return <div role="dialog" aria-label={label} hidden={open?undefined:true} className="floating-card" style={{left:pos.x,top:pos.y,width:floatingCardSize.width,height:floatingCardSize.height}} onKeyDown={event=>{
     if(event.key!=='Escape')return;
     event.stopPropagation();
     if(isTextField(event.target))return;

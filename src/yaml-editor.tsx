@@ -12,7 +12,7 @@ type EditorProps={
 function ValueEditor({step,field,yaml,onChange,disabled,idPrefix}:{step:FormStep;field?:FormField;yaml:string;onChange:(yaml:string)=>void;disabled:boolean;idPrefix:string}){
   const value=field?.value??step.value??'';
   const recovered=useContext(RecoveredFields);
-  const fieldKey=`${idPrefix}yaml-form:${step.index}${field?':'+encodeURIComponent(field.name):''}`;
+  const fieldKey=`yaml-form:${step.index}${field?':'+encodeURIComponent(field.name):''}`;
   const recoveredValue=recovered[fieldKey];
   const [draft,setDraft]=useState({source:yaml,value:recoveredValue??value,dirty:recoveredValue!==undefined&&recoveredValue!==value});
   const [error,setError]=useState('');
@@ -49,7 +49,7 @@ function StepRow({step,yaml,onChange,disabled,expanded,onExpand,onDelete,onCode,
 export function YamlEditor({yaml,onChange,disabled,deletionWarnings,onDelete,inputId='scenario-yaml'}:EditorProps){
   const view=useMemo(()=>readForms(yaml),[yaml]);
   const idPrefix=inputId==='scenario-yaml'?'':inputId+'-';
-  const commandKey=idPrefix+'yaml-command';
+  const commandKey='yaml-command';
   const commandId=idPrefix+'form-command';
   const valueId=idPrefix+'form-value';
   const [mode,setMode]=useState<'code'|'forms'>('code');
