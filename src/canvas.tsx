@@ -177,7 +177,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
 
 export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,onRun,onRepairSource,scenarioMode=false,scenarioId,scenarios=[],initialView,onViewChange}:{onRepairSource?:(ownerId:string)=>void;scenarioId?:string;scenarios?:{id:string;name:string;pathId?:string}[];scenarioMode?:boolean;onRun?:()=>void;yaml?:string;onYamlChange?:(yaml:string)=>void;graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string};onViewChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number;selectedScreenId:string;selectedVisitId:string})=>void}){
  const [pending,setPending]=useState<{graph:CanvasGraph;source?:string;warnings:string[]}>();
- const [undo,setUndo]=useState<{graph:CanvasGraph;yaml?:string;after:CanvasGraph;afterYaml?:string;step?:{visitId:string;id:string;position:number;screenId:string}}>();
+ const [undo,setUndo]=useState<{graph:CanvasGraph;yaml?:string;after:CanvasGraph;afterYaml?:string;step?:{pathId:string;visitId:string;id:string;position:number;screenId:string}}>();
  const [newStep,setNewStep]=useState<{pathId:string;visitId:string;test:CanvasTest}>();
  const focusStep=useRef<{visitId:string;id?:string}|undefined>(undefined);
  useLayoutEffect(()=>{const target=focusStep.current;if(!target)return;focusStep.current=undefined;const visit=Array.from(document.querySelectorAll<HTMLElement>('.canvas-editor [data-visit-id]')).find(node=>node.dataset.visitId===target.visitId);const row=Array.from(visit?.querySelectorAll<HTMLElement>('[data-operation-id]')??[]).find(node=>node.dataset.operationId===target.id);(row?.querySelector<HTMLButtonElement>('.visit-step-summary')??visit?.querySelector<HTMLButtonElement>('.add-visit-step'))?.focus();});
@@ -228,7 +228,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   setSelectedVisit(visit?.id??'');setSelected(node?.id??(path&&index!==undefined?visitScreenId(graph!,path,index):undefined)??'');setExpandedRow(test?.id??'');setRepairTest(test&&!isAuthored(test)?test.id:'');setRepairTarget({ownerId:test?.id??ownerId,visitId:visit?.id});
  }
  const currentGraph=useRef(graph);currentGraph.current=graph;
- const undoAvailable=!!undo&&!disabled&&yaml===undo.afterYaml&&JSON.stringify(graph)===JSON.stringify(undo.after);
+ const undoAvailable=!!undo&&!disabled&&(!undo.step||undo.step.pathId===pathId)&&yaml===undo.afterYaml&&JSON.stringify(graph)===JSON.stringify(undo.after);
  useEffect(()=>{if(undo&&!undoAvailable)setUndo(undefined);},[undo,undoAvailable]);
  useEffect(()=>{if(!undo?.step)return;const timer=setTimeout(()=>setUndo(undefined),8000);return ()=>clearTimeout(timer);},[undo]);
  function undoChange(){
@@ -273,7 +273,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
    const current=path&&visitId?routeVisits(graph!,path).findIndex(visit=>visit.id===visitId):-1;
    const ids=current>=0?visitOperations(graph!,path!,current):[];const position=ids.indexOf(test.id);
    const screenId=graph!.screens.find(screen=>screen.tests.some(item=>item.id===test.id))!.id;
-   commitRemoval(planCanvasDeletion(graph!,{kind:'operation',id:test.id,...(visitId?{pathId,visitId}: {})}).graph,visitId?{visitId,id:test.id,position:position+1,screenId}:undefined);
+   commitRemoval(planCanvasDeletion(graph!,{kind:'operation',id:test.id,...(visitId?{pathId,visitId}: {})}).graph,visitId?{pathId,visitId,id:test.id,position:position+1,screenId}:undefined);
    if(visitId)focusStep.current={visitId,id:ids[position+1]};setExpandedRow('');
   });
  }

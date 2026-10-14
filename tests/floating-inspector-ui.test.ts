@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { JSDOM } from "jsdom";
-import { act, createElement, useState } from "react";
+import { act, createElement, useState, type ChangeEvent } from "react";
 import { refreshChecks, writeChecks } from "../shared/canvas-authoring.js";
 import type { CanvasGraph, CanvasTest } from "../server/canvas.js";
 import type { Rect } from "../src/inspector-placement.js";
@@ -109,7 +109,7 @@ type View = {
 };
 
 async function mount(
-  options: { initialView?: View; rects?: Map<string, Rect> } = {},
+  options: { initialView?: View; rects?: Map<string, Rect>; graph?:CanvasGraph } = {},
 ) {
   const dom = new JSDOM('<div id="root"></div>', { url: "http://localhost/" });
   const window = dom.window;
@@ -181,24 +181,26 @@ async function mount(
   const views: View[] = [];
   const changes:CanvasGraph[]=[];let latestGraph:CanvasGraph=canvas;let latestSource=yaml;let replaceGraph:(graph:CanvasGraph)=>void=()=>{};let replaceSource:(source:string)=>void=()=>{};
   function Host() {
-    const [graph, setGraph] = useState<CanvasGraph | undefined>(()=>refreshChecks(canvas,yaml));
+    const [graph, setGraph] = useState<CanvasGraph | undefined>(()=>refreshChecks(options.graph??canvas,yaml));
+    const [pathId,setPathId]=useState("route");
     const [source, setSource] = useState(yaml);latestGraph=graph!;latestSource=source;replaceGraph=setGraph;replaceSource=setSource;
-    return createElement(CanvasEditor, {
+    const editor=createElement(CanvasEditor, {
       graph,
       onChange: next=>{if(next)changes.push(next);setGraph(next);},
       yaml: source,
       onYamlChange: setSource,
       catalog: [],
       diagnostics: [],
-      pathId: "route",
-      onPathChange: () => {},
+      pathId,
+      onPathChange: setPathId,
       disabled: false,
       scenarioMode: true,
       scenarioId: "main",
-      scenarios: [{ id: "main", name: "Main", pathId: "route" }],
+      scenarios: (options.graph??canvas).paths.map(path=>({id:path.scenarioId!,name:path.name,pathId:path.id})),
       initialView: options.initialView,
       onViewChange: (view) => views.push(view),
     });
+    return options.graph?createElement("div",null,createElement("select",{"aria-label":"Selected scenario path",value:pathId,onChange:(event:ChangeEvent<HTMLSelectElement>)=>setPathId(event.target.value)},graph!.paths.map(path=>createElement("option",{key:path.id,value:path.id},path.name))),editor):editor;
   }
   const root = createRoot(document.getElementById("root")!);
   await act(async () => root.render(createElement(Host)));
@@ -973,5 +975,19 @@ test('leaving a drag target hides its drop line without committing',async()=>{
   async function drag(target:Element,type:string){await act(async()=>{const event=new page.window.MouseEvent(type,{bubbles:true,cancelable:true,clientY:1});Object.defineProperty(event,'dataTransfer',{value:{setData(){},effectAllowed:'',dropEffect:''}});target.dispatchEvent(event);});}
   await drag(page.card()!.querySelector('.visit-step-drag')!,'dragstart');await drag(row,'dragover');assert.ok(page.document.querySelector('[data-drop-position]'));
   await drag(row,'dragleave');absent(page.document.querySelector('[data-drop-position]'));assert.deepEqual(page.saved(),before);
+ }finally{await page.close();}
+});
+
+test('switching to another path invalidates step Undo without moving focus or reviving it on return',async()=>{
+ const graph=structuredClone(canvas);graph.paths.push({id:'other',name:'Other',scenarioId:'other-scenario',screenId:'settings',edgeIds:[],visits:[{id:'other-visit',operationIds:['settings-ready']}]});
+ const page=await mount({graph,initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  assert.ok(page.document.querySelector('.step-undo-toast'),'deletion offers Undo in its original path');
+  const deleted=page.saved();const control=page.document.querySelector<HTMLSelectElement>('[aria-label="Selected scenario path"]')!;
+  async function choose(id:string){await act(async()=>{control.focus();Object.getOwnPropertyDescriptor(page.window.HTMLSelectElement.prototype,'value')!.set!.call(control,id);control.dispatchEvent(new page.window.Event('change',{bubbles:true}));});}
+  await choose('other');same(page.document.activeElement,control);absent(page.document.querySelector('.step-undo-toast'),'another path must not offer Undo that cannot restore focus');
+  assert.deepEqual(page.saved(),deleted,'switching paths does not edit graph or YAML');
+  await choose('route');absent(page.document.querySelector('.step-undo-toast'),'returning to the original path cannot revive stale Undo');same(page.document.activeElement,control);assert.deepEqual(page.saved(),deleted);
  }finally{await page.close();}
 });
