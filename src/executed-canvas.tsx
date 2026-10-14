@@ -2,7 +2,7 @@ import {useEffect,useMemo,useRef,useState} from 'react';
 import {parseAllDocuments} from 'yaml';
 import {canvasTestLabel} from '../shared/canvas-authoring.js';
 import type {Run} from '../server/scenarios.js';
-import {CanvasBoard,type CanvasInspection} from './canvas.js';
+import {type CanvasInspection} from './canvas.js';
 
 export function ExecutedCanvas({run,onArtifact}:{run:Run;onArtifact:(name:string)=>void}){
  const [selection,setSelection]=useState<CanvasInspection>();
@@ -17,7 +17,7 @@ export function ExecutedCanvas({run,onArtifact}:{run:Run;onArtifact:(name:string
  const transitionResult=result.transitions?.find(item=>item.id===selection?.id);
  return <details open><summary>Executed canvas · {graph.paths.find(path=>path.id===result.pathId)?.name}</summary>
   <p>Immutable scenario snapshot · {run.snapshot.scenario?.name??run.snapshot.name} · {run.startedAt}</p><p>{result.note}</p>
-  <CanvasBoard graph={graph} pathId={result.pathId} result={result} onInspect={setSelection}/>
+ {result?.visits&&<section aria-label="Visit execution details"><h3>Visit execution details</h3>{result.visits.map((visit,index)=><details key={visit.id} open><summary onClick={()=>setSelection?.({kind:'visit',id:visit.id})}>Visit {index+1} · {graph.screens.find(screen=>screen.id===visit.screenId)?.title??visit.screenId} · {visit.status}</summary>{setSelection&&<button className="text-button" aria-label={'Inspect visit '+(index+1)} onClick={()=>setSelection({kind:'visit',id:visit.id})}>Inspect visit</button>}{result.occurrences?.filter(item=>item.visitId===visit.id).map(item=><p key={item.id}>{graph.screens.flatMap(screen=>screen.tests).find(test=>test.id===item.testId)?.label??item.testId} · {item.status}<small style={{display:'block'}}>{item.detail} {item.stepId}</small>{setSelection&&<button className="text-button" aria-label={'Inspect occurrence '+item.id} onClick={()=>setSelection({kind:'occurrence',id:item.id})}>Inspect action/check</button>}</p>)}</details>)}{result.transitions?.map((transition,index)=><p key={transition.id}>Transition {index+1} · {graph.edges.find(edge=>edge.id===transition.edgeId)?.responseCondition??transition.edgeId} · {transition.status}{setSelection&&<button className="text-button" aria-label={'Inspect transition '+(index+1)} onClick={()=>setSelection({kind:'transition',id:transition.id})}>Inspect connection occurrence</button>}</p>)}</section>}
   {selection&&<section ref={evidence} tabIndex={-1} aria-label="Execution evidence" className="execution-evidence">
    <h3>{selection.kind==='visit'?'Visit':selection.kind==='transition'?'Connection occurrence':'Action/check occurrence'} evidence · {visit?.status??transitionResult?.status??occurrences[0]?.status??'unavailable'}</h3>
    <p>Scenario: {run.snapshot.scenario?.name??run.snapshot.name} · Run: {run.id}</p>

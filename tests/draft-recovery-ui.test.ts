@@ -436,26 +436,15 @@ test('a missing runner token shows Unsaved changes · Autosave paused and resume
  }finally{await page.close();}
 });
 
-test('an open picker shows Unsaved changes · Autosave paused and resumes to Saving…',async()=>{
+test('the canvas workspace does not mount a live simulator picker',async()=>{
  const page=await mount({deviceId});
  try{
   await page.render();
-  page.holdPicker();
-  await page.editYaml('appId: com.example.App\n---\n- tapOn: Paused\n');
-  const refresh=[...page.document.querySelectorAll('button')].find(button=>button.textContent==='Refresh screen') as HTMLButtonElement|undefined;
-  assert.ok(refresh&&!refresh.disabled);
-  await act(async()=>{refresh.click();});
-  const status=saveStatus(page.document);
-  assert.equal(saveText(page.document),'Unsaved changes · Autosave paused');
-  assert.ok(status.classList.contains('warning'));
-  assert.equal(status.querySelector('.workspace-save-icon')!.textContent,'‖');
-  assert.equal(status.getAttribute('title'),'while the picker is open');
-  assert.equal(status.getAttribute('aria-description'),'while the picker is open');
-  assert.equal(status.getAttribute('aria-label'),'Unsaved changes · Autosave paused');
-  page.releasePicker();
-  await act(async()=>{await page.settle();});
+  assert.equal(page.document.querySelector('.picker'),null);
+  assert.equal([...page.document.querySelectorAll('button')].find(button=>button.textContent==='Refresh screen'),undefined);
+  await page.editYaml('appId: com.example.App\n---\n- tapOn: Saved\n');
   assert.equal(saveText(page.document),'Saving…');
- }finally{page.releasePicker();await page.close();}
+ }finally{await page.close();}
 });
 
 test('beforeunload fires while autosave is paused',async()=>{

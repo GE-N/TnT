@@ -109,9 +109,9 @@ type View = {
 };
 
 async function mount(
-  options: { initialView?: View; rects?: Map<string, Rect>; graph?:CanvasGraph } = {},
+  options: { initialView?: View; rects?: Map<string, Rect>; graph?:CanvasGraph; workbench?:boolean } = {},
 ) {
-  const dom = new JSDOM('<div id="root"></div>', { url: "http://localhost/" });
+  const dom = new JSDOM('<div id="root"'+(options.workbench?' class="workbench"':'')+'></div>', { url: "http://localhost/" });
   const window = dom.window;
   const document = window.document;
   const keys = [
@@ -147,7 +147,7 @@ async function mount(
   ) {
     const key = this.classList.contains("canvas-viewport")
       ? "viewport"
-      : (this.dataset.screenId ??
+      : (this.dataset.layout ?? this.dataset.screenId ??
         (this.classList.contains("transition-label")
           ? "label:" +
             this.closest<SVGGElement>("[data-edge-id]")?.dataset.edgeId
@@ -990,4 +990,43 @@ test('switching to another path invalidates step Undo without moving focus or re
   assert.deepEqual(page.saved(),deleted,'switching paths does not edit graph or YAML');
   await choose('route');absent(page.document.querySelector('.step-undo-toast'),'returning to the original path cannot revive stale Undo');same(page.document.activeElement,control);assert.deepEqual(page.saved(),deleted);
  }finally{await page.close();}
+});
+
+test("floating controls reserve inspector bounds and an open popover moves the card to a clear side", async () => {
+  const page = await mount({workbench:true,initialView:{selectedScreenId:"home"},rects:new Map([
+    ["viewport",{left:0,top:0,width:1200,height:800}],
+    ["home",{left:450,top:20,width:250,height:180}]
+  ])});
+  try {
+    assert.ok(page.placement().top >= 164, "Inspector stays below the top control band");
+    assert.ok(page.placement().top + Number.parseFloat(page.card()!.style.maxHeight) <= 704, "Inspector stays above zoom controls");
+    page.rects.set("home",{left:450,top:300,width:250,height:180});
+    await page.relayout();
+    assert.equal(page.placement().side,"right");
+    const controls=page.document.createElement("details");
+    controls.className="device-toolbar";
+    controls.dataset.layout="device-controls";
+    page.rects.set("device-controls",{left:700,top:92,width:450,height:350});
+    page.document.getElementById("root")!.append(controls);
+    await act(async()=>{controls.open=true;controls.dispatchEvent(new page.window.Event("toggle"));});
+    assert.equal(page.placement().side,"left", "An open simulator popover must not cover the inspector");
+    controls.remove();
+    const notice=page.document.createElement("aside");
+    notice.className="notice error";
+    notice.dataset.layout="canvas-notice";
+    page.rects.set("canvas-notice",{left:24,top:156,width:600,height:60});
+    page.rects.set("home",{left:100,top:160,width:250,height:180});
+    page.document.querySelector(".canvas-editor")!.append(notice);
+    await page.relayout();
+    assert.ok(page.placement().left >= 624, "A short error notice must also stay clear of the inspector");
+    notice.remove();
+    const toast=page.document.createElement("aside");
+    toast.className="run-error-toast";
+    toast.dataset.layout="run-error";
+    page.rects.set("run-error",{left:800,top:560,width:400,height:100});
+    page.rects.set("home",{left:650,top:400,width:250,height:180});
+    page.document.getElementById("root")!.append(toast);
+    await page.relayout();
+    assert.ok(page.placement().left + 300 <= 800, "A run failure must not cover inspector actions");
+  } finally { await page.close(); }
 });

@@ -18,6 +18,16 @@ export function App() {
   const [error, setError] = useState('');
   const [result, setResult] = useState<LaunchResult>();
   const [screen, setScreen] = useState('');
+  useEffect(()=>{
+    const workbench=document.querySelector('.workbench');
+    const toggle=(event:Event)=>{
+      const opened=event.target as HTMLDetailsElement;
+      if(!workbench?.contains(opened)||!opened.open||!opened.matches('.device-toolbar,.scenario-controls,.workspace-advanced,.report-tools'))return;
+      workbench.querySelectorAll<HTMLDetailsElement>('.device-toolbar,.scenario-controls,.workspace-advanced,.report-tools').forEach(panel=>{if(panel!==opened)panel.open=false;});
+    };
+    document.addEventListener('toggle',toggle,true);
+    return()=>document.removeEventListener('toggle',toggle,true);
+  },[]);
 
   async function refresh() {
     setError('');
@@ -65,17 +75,16 @@ export function App() {
   const devNoRunner = import.meta.env?.DEV === true && new URLSearchParams(window.location.search).has('no-runner');
 
   return <div className="workbench">
-    <header className="topbar"><a className="brand" href="/">tnt<span className="brand-dot">.</span></a><span className="product">MOBILE TEST WORKBENCH</span><span className={'connection ' + (status?.ready ? 'connected' : '')}><i />{status?.ready ? 'Local runner connected' : status ? 'Runner needs attention' : 'Connecting to runner'}</span></header>
+    <header className="topbar" hidden><a className="brand" href="/">tnt<span className="brand-dot">.</span></a><span className="product">MOBILE TEST WORKBENCH</span><span className={'connection ' + (status?.ready ? 'connected' : '')}><i />{status?.ready ? 'Local runner connected' : status ? 'Runner needs attention' : 'Connecting to runner'}</span></header>
     <main>
-      <div className="workspace-device-controls">
+      <details className="device-toolbar"><summary>Simulator &amp; app</summary><div className="workspace-device-controls">
         <label htmlFor="device">Simulator</label><select id="device" value={deviceId} disabled={busy||scenarioBusy} onChange={event=>setDeviceId(event.target.value)}><option value="">Design offline</option>{status?.devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select>
         <button className="text-button" disabled={busy||scenarioBusy} onClick={()=>void refresh()}>Refresh devices</button>
         <AppPicker key={deviceId+status?.token} deviceId={deviceId} token={status?.token??''} value={bundleId} onChange={setBundleId} onReady={setPickerReady} disabled={busy||scenarioBusy}/>
-      </div>
-      {(error||status?.error)&&<div className="notice error" role="alert">{error||status?.error}</div>}
-      <Scenarios token={devNoRunner?'':status?.token??''} deviceId={deviceId} bundleId={bundleId} launchBusy={busy} onRunning={setScenarioBusy} recoverSession/>
-      <details><summary>Advanced launch tools</summary><form onSubmit={launch}><button className="confirm" disabled={!ready||!pickerReady||busy||scenarioBusy}>Launch app</button></form>{result&&<><p>{result.bundleId} · {result.status}</p>{screen&&<img className="device-screen" src={screen} alt="Captured launch screen"/>}{result.status==='awaiting-confirmation'&&<button onClick={()=>void confirm()} disabled={busy||!screen}>I can see the app</button>}<pre>{result.log}</pre></>}</details>
-      <footer><span>iOS first · Local execution</span><span>Pick reviewed steps from the simulator · Isolated mock scenarios and reusable assertions.</span></footer>
+      </div>{(error||status?.error)&&<div className="notice error" role="alert">{error||status?.error}</div>}<details className="launch-tools"><summary>Advanced launch tools</summary><form onSubmit={launch}><button className="confirm" disabled={!ready||!pickerReady||busy||scenarioBusy}>Launch app</button></form>{result&&<><p>{result.bundleId} · {result.status}</p>{result.status==='awaiting-confirmation'&&<button onClick={()=>void confirm()} disabled={busy||!screen}>I can see the app</button>}<pre>{result.log}</pre></>}</details></details>
+      <Scenarios token={devNoRunner?'':status?.token??''} deviceId={deviceId} bundleId={bundleId} launchBusy={busy} onRunning={setScenarioBusy} recoverSession simulatorConnected={!!ready}/>
+
+      <footer hidden><span>iOS first · Local execution</span><span>Pick reviewed steps from the simulator · Isolated mock scenarios and reusable assertions.</span></footer>
     </main>
   </div>;
 }
