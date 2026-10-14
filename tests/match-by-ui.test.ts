@@ -75,12 +75,14 @@ async function openWorkspace(kind:'tap'|'check'){
   await render();
   await workspaceCommand(document,'open',settle);
   await inspectScreen(document,{id:'home'},{id:'visit-home'});
-  async function published(){
+  async function published(previousRevision=0){
     const deadline=Date.now()+8000;
     while(Date.now()<deadline){
       await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});
       await settle();
-      if(document.querySelector('.workspace-save-status')?.getAttribute('aria-label')==='Saved locally')return service.workspace(workspace.id);
+      if(document.querySelector('.workspace-save-status')?.getAttribute('aria-label')!=='Saved locally')continue;
+      const saved=await service.workspace(workspace.id);
+      if((saved.metadata?.revision??0)>previousRevision)return saved;
     }
     throw new Error('The workspace did not save. '+document.querySelector('.workspace-save-status')?.getAttribute('aria-label'));
   }
@@ -132,11 +134,23 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       assert.equal((page.row().querySelector('select[aria-label$=" matching"]') as HTMLSelectElement).value,'contains');
       await page.choose('id');
       assert.equal(page.row().querySelector<HTMLInputElement>('input[aria-label$=" selector"]')!.value,'gear.button');
+      await page.choose('text');
       const before=await page.service.workspace(page.workspace.id);
       assert.equal(before.canvas?.screens[0].tests[0].tap?.target,'text');
       assert.equal(before.canvas?.screens[0].tests[0].tap?.match,'contains');
       await page.done();
-      const saved=await page.published();
+      const textSaved=await page.published();
+      assert.deepEqual(textSaved.canvas?.screens[0].tests[0].tap,{target:'text',match:'contains',value:'Gear'});
+      assert.match(textSaved.yaml,/tnt-match:contains/);
+      assert.match(textSaved.yaml,/tapOn:[\s\S]*text:.*Gear/);
+      assert.doesNotMatch(textSaved.yaml,/id:/);
+      await page.edit();
+      await page.choose('id');
+      assert.equal(page.row().querySelector<HTMLInputElement>('input[aria-label$=" selector"]')!.value,'');
+      await page.fill('gear.button');
+      assert.equal((page.row().querySelector('select[aria-label$=" matching"]') as HTMLSelectElement).value,'contains');
+      await page.done();
+      const saved=await page.published(textSaved.metadata?.revision??0);
       assert.deepEqual(saved.canvas?.screens[0].tests[0].tap,{target:'id',match:'contains',value:'gear.button'});
       assert.match(saved.yaml,/tnt-match:contains/);
       assert.match(saved.yaml,/tapOn:[\s\S]*id:.*gear/);
@@ -144,7 +158,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
     }finally{await page.close();}
   });
 
-  test('a check uses the same Match by control and round-trips to Maestro id YAML',async()=>{
+  test('a check uses the same Match by control and round-trips to Maestro text and id YAML',async()=>{
     const page=await openWorkspace('check');
     try{
       await page.edit();
@@ -157,8 +171,20 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       assert.equal((page.row().querySelector('select[aria-label$=" matching"]') as HTMLSelectElement).value,'exact');
       await page.choose('id');
       assert.equal(page.row().querySelector<HTMLInputElement>('input[aria-label$=" selector"]')!.value,'banner.id');
+      await page.choose('text');
       await page.done();
-      const saved=await page.published();
+      const textSaved=await page.published();
+      assert.deepEqual(textSaved.canvas?.screens[0].tests[0].check,{visibility:'visible',target:'text',match:'exact',value:'Ready'});
+      assert.match(textSaved.yaml,/assertVisible:[\s\S]*text:.*Ready/);
+      assert.match(textSaved.yaml,/tnt-match:exact/);
+      assert.doesNotMatch(textSaved.yaml,/id:/);
+      await page.edit();
+      await page.choose('id');
+      assert.equal(page.row().querySelector<HTMLInputElement>('input[aria-label$=" selector"]')!.value,'');
+      await page.fill('banner.id');
+      assert.equal((page.row().querySelector('select[aria-label$=" matching"]') as HTMLSelectElement).value,'exact');
+      await page.done();
+      const saved=await page.published(textSaved.metadata?.revision??0);
       assert.deepEqual(saved.canvas?.screens[0].tests[0].check,{visibility:'visible',target:'id',match:'exact',value:'banner.id'});
       assert.match(saved.yaml,/assertVisible:[\s\S]*id:.*banner/);
       assert.match(saved.yaml,/tnt-match:exact/);
@@ -195,6 +221,11 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       await act(async()=>popped.querySelector('img')!.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true,clientX:10,clientY:10})));
       await page.settle();
       await act(async()=>popped.querySelector<HTMLInputElement>('input[name="picked-element"]')!.click());
+      const selectorField=popped.querySelector<HTMLTextAreaElement>('#picked-selector')!;
+      selectorField.focus();
+      await page.press(selectorField,'Escape');
+      assert.ok(page.card('Pick from screen'));
+      assert.equal(page.row().querySelector<HTMLInputElement>('input[aria-label$=" selector"]')!.value,'');
       await act(async()=>[...popped.querySelectorAll('button')].find(item=>item.textContent==='Choose targeted identifier')!.click());
       await act(async()=>[...popped.querySelectorAll('button')].find(item=>item.textContent==='Preview selector')!.click());
       await page.settle();
@@ -264,6 +295,17 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       await inspectScreen(page.document,{id:'home'},{id:'visit-home'});
       await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
       assert.deepEqual(page.origin('YAML'),snapped);
+      const restored=page.card('YAML')!;
+      assert.equal(page.document.querySelectorAll('#form-command').length,1);
+      assert.equal(restored.querySelector('#form-command'),null);
+      assert.ok(restored.querySelector('#yaml-card-form-command'));
+      const beforeDelete=await page.service.workspace(page.workspace.id);
+      await act(async()=>[...restored.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
+      await act(async()=>restored.querySelector<HTMLButtonElement>('[aria-label="Delete step 1"]')!.click());
+      const warning=restored.querySelector('[aria-label="Step reference warning"]');
+      if(warning)await act(async()=>[...warning.querySelectorAll('button')].find(item=>item.textContent==='Delete anyway')!.click());
+      const deleted=await page.published(beforeDelete.metadata?.revision??0);
+      assert.match(deleted.canvas?.screens[0].tests[0].reference.fingerprint??'',/^deleted:/);
     }finally{await page.close();}
   });
 });

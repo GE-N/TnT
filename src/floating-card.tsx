@@ -59,8 +59,10 @@ export function FloatingCard({label,position,onPosition,opener,onClose,children}
     commit(next);onPosition?.(next);
   }
   return <div role="dialog" aria-label={label} className="floating-card" style={{left:pos.x,top:pos.y,width:floatingCardSize.width,height:floatingCardSize.height}} onKeyDown={event=>{
-    if(event.key!=='Escape'||isTextField(event.target))return;
-    event.preventDefault();event.stopPropagation();close();
+    if(event.key!=='Escape')return;
+    event.stopPropagation();
+    if(isTextField(event.target))return;
+    event.preventDefault();close();
   }}>
     <header className="floating-card-header">
       <div ref={handle} tabIndex={0} className="floating-card-handle" aria-label={'Move '+label} onKeyDown={onArrows} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>{label}</div>

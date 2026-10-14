@@ -9,16 +9,16 @@ type EditorProps={
   deletionWarnings?:(index:number)=>string[];
   onDelete?:(yaml:string,index:number)=>(()=>void);
 };
-function ValueEditor({step,field,yaml,onChange,disabled}:{step:FormStep;field?:FormField;yaml:string;onChange:(yaml:string)=>void;disabled:boolean}){
+function ValueEditor({step,field,yaml,onChange,disabled,idPrefix}:{step:FormStep;field?:FormField;yaml:string;onChange:(yaml:string)=>void;disabled:boolean;idPrefix:string}){
   const value=field?.value??step.value??'';
   const recovered=useContext(RecoveredFields);
-  const fieldKey=`yaml-form:${step.index}${field?':'+encodeURIComponent(field.name):''}`;
+  const fieldKey=`${idPrefix}yaml-form:${step.index}${field?':'+encodeURIComponent(field.name):''}`;
   const recoveredValue=recovered[fieldKey];
   const [draft,setDraft]=useState({source:yaml,value:recoveredValue??value,dirty:recoveredValue!==undefined&&recoveredValue!==value});
   const [error,setError]=useState('');
   useWorkspaceDraft(draft.dirty,fieldKey,draft.value);
   useEffect(()=>{setDraft(current=>current.dirty?current:{source:yaml,value,dirty:false});},[yaml,value]);
-  const id=`form-step-${step.index}${field?'-'+field.name:''}`;
+  const id=`${idPrefix}form-step-${step.index}${field?'-'+field.name:''}`;
   const name=`step ${step.index+1}${field?' '+field.name:''}`;
   function apply(){
     try{const next=editForm(yaml,{source:draft.dirty?draft.source:yaml,index:step.index,field:field?.name,value:draft.value});onChange(next);setDraft({source:next,value:draft.value,dirty:false});setError('');}
@@ -32,30 +32,34 @@ function ValueEditor({step,field,yaml,onChange,disabled}:{step:FormStep;field?:F
     {error&&<p role="alert" className="notice error">{error}</p>}
   </div>;
 }
-function StepRow({step,yaml,onChange,disabled,expanded,onExpand,onDelete,onCode}:{step:FormStep;yaml:string;onChange:(yaml:string)=>void;disabled:boolean;expanded:boolean;onExpand:()=>void;onDelete:()=>void;onCode:()=>void}){
+function StepRow({step,yaml,onChange,disabled,expanded,onExpand,onDelete,onCode,idPrefix}:{step:FormStep;yaml:string;onChange:(yaml:string)=>void;disabled:boolean;expanded:boolean;onExpand:()=>void;onDelete:()=>void;onCode:()=>void;idPrefix:string}){
   const summary=step.fields?.map(field=>`${field.name}: ${field.value}`).join(' · ')??step.raw.trim();
   return <div className="yaml-step">
     <div className="yaml-step-row">
       <strong title={step.command}>{step.index+1}. {step.command}</strong>
-      {step.editable?<ValueEditor step={step} yaml={yaml} onChange={onChange} disabled={disabled}/>:<span className="yaml-step-summary" title={summary}>{summary}</span>}
+      {step.editable?<ValueEditor step={step} yaml={yaml} onChange={onChange} disabled={disabled} idPrefix={idPrefix}/>:<span className="yaml-step-summary" title={summary}>{summary}</span>}
       {!step.editable&&<button type="button" className="text-button" aria-expanded={expanded} onClick={onExpand} aria-label={`Details step ${step.index+1}`}>Details</button>}
       <button type="button" className="text-button" disabled={disabled} onClick={onDelete} aria-label={`Delete step ${step.index+1}`}>Delete</button>
     </div>
     {expanded&&!step.editable&&<div className="yaml-step-details">
-      {step.fields?step.fields.map(field=><ValueEditor key={field.name} step={step} field={field} yaml={yaml} onChange={onChange} disabled={disabled}/>):<><p className="field-hint">{step.reason}</p><pre>{step.raw}</pre><button className="text-button" type="button" onClick={onCode}>Edit YAML</button></>}
+      {step.fields?step.fields.map(field=><ValueEditor key={field.name} step={step} field={field} yaml={yaml} onChange={onChange} disabled={disabled} idPrefix={idPrefix}/>):<><p className="field-hint">{step.reason}</p><pre>{step.raw}</pre><button className="text-button" type="button" onClick={onCode}>Edit YAML</button></>}
     </div>}
   </div>;
 }
 export function YamlEditor({yaml,onChange,disabled,deletionWarnings,onDelete,inputId='scenario-yaml'}:EditorProps){
   const view=useMemo(()=>readForms(yaml),[yaml]);
+  const idPrefix=inputId==='scenario-yaml'?'':inputId+'-';
+  const commandKey=idPrefix+'yaml-command';
+  const commandId=idPrefix+'form-command';
+  const valueId=idPrefix+'form-value';
   const [mode,setMode]=useState<'code'|'forms'>('code');
   const [expanded,setExpanded]=useState<number>();
   const [command,setCommand]=useState<FormCommand>('tapOn');
   const recovered=useContext(RecoveredFields);
-  const [value,setValue]=useState(recovered['yaml-command']??'');const [error,setError]=useState('');
+  const [value,setValue]=useState(recovered[commandKey]??'');const [error,setError]=useState('');
   const [pending,setPending]=useState<{index:number;source:string;warnings:string[]}>();
   const [undo,setUndo]=useState<{before:string;after:string;restore?:()=>void}>();
-  useWorkspaceDraft(value.length>0,'yaml-command',value);
+  useWorkspaceDraft(value.length>0,commandKey,value);
   function append(){try{onChange(appendForm(yaml,command,value));setValue('');setError('');}catch(error){setError(error instanceof Error?error.message:'Form edit failed.');}}
   function remove(index:number){
     try{
@@ -75,8 +79,8 @@ export function YamlEditor({yaml,onChange,disabled,deletionWarnings,onDelete,inp
     {undo&&<div role="status" className="yaml-undo">Step deleted. <button type="button" disabled={disabled||yaml!==undo.after} onClick={()=>{onChange(undo.before);undo.restore?.();setUndo(undefined);setError('');}}>Undo deletion</button>{yaml!==undo.after&&<span> Undo unavailable after further YAML edits.</span>}</div>}
     <div hidden={mode!=='code'}><label htmlFor={inputId}>Maestro YAML</label><textarea id={inputId} value={yaml} disabled={disabled} onChange={event=>onChange(event.target.value)} spellCheck={false} maxLength={100_000}/></div><div hidden={mode!=='forms'}>
       <p className="field-hint">Edit values inline; expand Details for arguments. Enter or Apply saves a value. Complex YAML remains editable in code.</p>
-      {view.steps.map(step=><StepRow key={step.index+':'+step.command} step={step} yaml={yaml} onChange={onChange} disabled={disabled} expanded={expanded===step.index} onExpand={()=>setExpanded(expanded===step.index?undefined:step.index)} onDelete={()=>requestDeletion(step.index)} onCode={()=>setMode('code')}/>)}
-      <fieldset className="yaml-add" disabled={disabled||!!view.error||!view.canAppend}><legend>Add command</legend><label className="sr-only" htmlFor="form-command">Command</label><select id="form-command" value={command} onChange={event=>setCommand(event.target.value as FormCommand)}>{formCommands.map(command=><option key={command}>{command}</option>)}</select><label className="sr-only" htmlFor="form-value">New command value</label><input id="form-value" placeholder="Command value" value={value} onChange={event=>setValue(event.target.value)}/><button type="button" className="confirm" onClick={append}>Append command</button></fieldset>
+      {view.steps.map(step=><StepRow key={step.index+':'+step.command} step={step} yaml={yaml} onChange={onChange} disabled={disabled} expanded={expanded===step.index} onExpand={()=>setExpanded(expanded===step.index?undefined:step.index)} onDelete={()=>requestDeletion(step.index)} onCode={()=>setMode('code')} idPrefix={idPrefix}/>)}
+      <fieldset className="yaml-add" disabled={disabled||!!view.error||!view.canAppend}><legend>Add command</legend><label className="sr-only" htmlFor={commandId}>Command</label><select id={commandId} value={command} onChange={event=>setCommand(event.target.value as FormCommand)}>{formCommands.map(command=><option key={command}>{command}</option>)}</select><label className="sr-only" htmlFor={valueId}>New command value</label><input id={valueId} placeholder="Command value" value={value} onChange={event=>setValue(event.target.value)}/><button type="button" className="confirm" onClick={append}>Append command</button></fieldset>
       {!view.canAppend&&!view.error&&<p className="field-hint">This command-list style is code-only for additions.</p>}
     </div>
     {pending&&<div role="alertdialog" aria-label="Step reference warning" className="notice"><p>Deleting step {pending.index+1} affects references: {pending.warnings.join(', ')}. These references will need repair before running the affected path.</p><button type="button" disabled={disabled||yaml!==pending.source} onClick={()=>remove(pending.index)}>Delete anyway</button><button type="button" onClick={()=>setPending(undefined)}>Cancel deletion</button>{yaml!==pending.source&&<p>YAML changed. Cancel and select the step again.</p>}</div>}
