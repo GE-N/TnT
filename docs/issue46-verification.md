@@ -28,3 +28,11 @@ Independent Codex reviewer: **PASS**, **0 actionable findings**, targeted tests 
 ## Confirmed baseline clarification
 
 Issue #46's destination-confirmation bullet is stale. Current main and `tests/golden-canvas-ui.ts` require immediate destination clearing with Undo. Cursor confirmed preserving that behavior for #46 in issue comments `6159549507` and `6159553957`; any change to that contract belongs to #47. No destination behavior was changed here.
+
+## GitHub Codex follow-up: path-scoped deletion Undo
+
+Review `5512448458`, comment `4266223090` (thread `PRRT_kwDOU7InGc6sJG5Z`) found a P2 missed by the earlier path-switch probe: two real paths can have identical graph/YAML state while the active `pathId` changes. The old guard still offered deletion Undo, but its restored visit was absent from the current path, losing focus.
+
+A new mounted CanvasEditor regression uses two actual paths and a parent path selector. It failed on `935ee4a` with `another path must not offer Undo that cannot restore focus`. Implementation `f3a6c97d1cd46525b47342a752087867247da242` records the original `pathId` with step deletion Undo and includes it in the existing availability guard. Switching away hides and clears the entry without changing graph/YAML or moving focus; switching back cannot revive it. Connection/screen Undo behavior is unchanged.
+
+After the fix: inspector/helper **38/38**, full suite **319/319**, typecheck, build and canvas contract pass. All 18 golden fixtures match without updates. Independent Codex Standards and Spec reviewers approve `f3a6c97` with no new findings. Earlier review approval did not cover this bug; the two-path regression now covers the reachable case.
