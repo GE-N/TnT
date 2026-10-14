@@ -33,9 +33,6 @@ paths=(shared server/canvas.ts server/canvas-route.ts server/default-actions.ts)
 # Each patch and the diff are split into per-file sections and compared in path order, so the patch
 # filenames do not need to sort like git's paths. Two patches must not touch the same file.
 exception=scripts/canvas-contract-exceptions
-shopt -s nullglob
-exception_patches=("$exception"/*.patch)
-shopt -u nullglob
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -144,7 +141,10 @@ fail_split() {
 
 : > "$work/expected.idx"
 i=0
-for patch in "${exception_patches[@]}"; do
+# Bash 3.2 (macOS /bin/bash) treats "${empty[@]}" as unbound under set -u, so iterate
+# the glob with nullglob instead of expanding an empty exception_patches array.
+shopt -s nullglob
+for patch in "$exception"/*.patch; do
   i=$((i + 1))
   set +e
   split_sections "e$i" "$patch" < "$patch" >> "$work/expected.idx"
@@ -152,6 +152,7 @@ for patch in "${exception_patches[@]}"; do
   set -e
   fail_split "$status" "$patch"
 done
+shopt -u nullglob
 
 duplicate="$(cut -f1 "$work/expected.idx" | LC_ALL=C sort | uniq -d | head -n 1)"
 if [[ -n "$duplicate" ]]; then
@@ -197,5 +198,5 @@ if [[ -n "$status" ]]; then
   printf '%s\n' "$status" >&2
   exit 1
 fi
-count=${#exception_patches[@]}
+count=$i
 echo "canvas contract check passed ($count exception $([[ $count == 1 ]] && echo patch || echo patches))"
