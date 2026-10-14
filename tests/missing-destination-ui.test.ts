@@ -21,13 +21,14 @@ function workspace(){
  return {yaml,canvas:refreshChecks(canvas,yaml)};
 }
 
-async function mount(scenarioMode:boolean){
+async function mount(scenarioMode:boolean,brokenReference=false){
  const dom=new JSDOM('<div id="root"></div>');
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);
  const state={...workspace()};
+ if(brokenReference)state.canvas.screens[0].tests.push({id:'stale',label:'Broken reference',role:'assertion',reference:{...reference,index:999,fingerprint:'missing'}});
  function Host(){
   const [graph,setGraph]=useState(state.canvas);const [yaml,setYaml]=useState(state.yaml);
   state.canvas=graph;state.yaml=yaml;
@@ -55,6 +56,8 @@ for(const scenarioMode of [false,true])test(`each legacy start-only step without
   assert.equal(page.row('gear').querySelector('.destination-warning p')?.textContent,warning('tap Gear'));
   assert.equal(page.row('profile').querySelector('.destination-warning p')?.textContent,warning('open Profile'));
   assert.equal(page.row('home-ready').querySelector('.destination-warning'),null);
+  assert.equal(page.document.querySelector('.notice.error,[role="alert"],.reference-error')===null,true);
+  assert.equal(page.document.querySelector('button[aria-label="Repair tap Gear"],button[aria-label="Repair open Profile"]'),null);
  }finally{await page.close();}
 });
 
@@ -85,6 +88,22 @@ for(const scenarioMode of [false,true])test(`the warning clears once Stays on th
   assert.equal(inspectCanvas(page.state.canvas,page.state.yaml).diagnostics.length,0);
   const projected=projectCanvasRoute(page.state.canvas,page.state.yaml,{},'route');
   assert.deepEqual(projected.canvas.execution!.occurrences.map(item=>[item.testId,item.edgeId??null]),[['gear',null],['home-ready',null],['profile',page.state.canvas.edges[0].id],['settings-ready',null]]);
+ }finally{await page.close();}
+});
+
+for(const scenarioMode of [false,true])test(`missing destinations stay amber while genuine stale references retain their error and Repair action (${scenarioMode?'contextual':'legacy'} canvas)`,async()=>{
+ const page=await mount(scenarioMode,true);
+ try{
+  assert.deepEqual(page.warnings(),[warning('tap Gear'),warning('open Profile')]);
+  const alert=page.document.querySelector('[role="alert"]')!;
+  assert.ok(alert);
+  assert.match(alert.textContent!,/Broken reference.*Broken or stale YAML reference/);
+  assert.doesNotMatch(alert.textContent!,/has no destination|tap Gear|open Profile/);
+  assert.ok(alert.querySelector('button[aria-label="Repair Broken reference"]'));
+  assert.equal(page.document.querySelector('button[aria-label="Repair tap Gear"],button[aria-label="Repair open Profile"]'),null);
+  const referenceErrors=[...page.document.querySelectorAll('.reference-error')];
+  assert.equal(referenceErrors.length,scenarioMode?0:1);
+  for(const referenceError of referenceErrors){assert.match(referenceError.textContent!,/Broken or stale YAML reference/);assert.doesNotMatch(referenceError.textContent!,/has no destination/);}
  }finally{await page.close();}
 });
 
