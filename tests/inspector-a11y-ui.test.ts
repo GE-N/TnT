@@ -34,9 +34,9 @@ async function mount(){
  const {createRoot}=await import('react-dom/client');
  const {CanvasEditor}=await import('../src/canvas.js');
  function Host(){
-  const [graph,setGraph]=useState(()=>refreshChecks(canvas,yaml));
+  const [graph,setGraph]=useState<CanvasGraph|undefined>(()=>refreshChecks(canvas,yaml));
   const [source,setSource]=useState(yaml);
-  return createElement(CanvasEditor,{graph,onChange:next=>setGraph(next),yaml:source,onYamlChange:setSource,catalog:[],diagnostics:[],pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode:true,scenarioId:'main',scenarios:[{id:'main',name:'Main',pathId:'route'}],initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+  return createElement(CanvasEditor,{graph,onChange:setGraph,yaml:source,onYamlChange:setSource,catalog:[],diagnostics:[],pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode:true,scenarioId:'main',scenarios:[{id:'main',name:'Main',pathId:'route'}],initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  }
  const root=createRoot(document.getElementById('root')!);
  await act(async()=>root.render(createElement(Host)));

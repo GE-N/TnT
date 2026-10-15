@@ -1,0 +1,137 @@
+[
+  {
+    "name": "inspector-a11y-1440x900",
+    "width": 300,
+    "height": 900,
+    "zoom": 0.85,
+    "screen": "home",
+    "edit": false,
+    "file": "evidence/inspector-a11y-1440x900.png",
+    "side": "right",
+    "clamped": false,
+    "left": 259,
+    "top": 164,
+    "close": {
+      "w": 44,
+      "h": 44
+    },
+    "summary": {
+      "w": 254,
+      "h": 44
+    },
+    "primary": "#0a63d1",
+    "danger": "#b3261e",
+    "dangerSurface": "#fdecea",
+    "warning": "#8a4b00",
+    "warningSurface": "#fff4e5",
+    "focusOutline": "rgb(10, 132, 255) solid 3px"
+  },
+  {
+    "name": "inspector-a11y-1280x800",
+    "width": 300,
+    "height": 800,
+    "zoom": 0.85,
+    "screen": "home",
+    "edit": false,
+    "file": "evidence/inspector-a11y-1280x800.png",
+    "side": "right",
+    "clamped": false,
+    "left": 259,
+    "top": 164,
+    "close": {
+      "w": 44,
+      "h": 44
+    },
+    "summary": {
+      "w": 254,
+      "h": 44
+    },
+    "primary": "#0a63d1",
+    "danger": "#b3261e",
+    "dangerSurface": "#fdecea",
+    "warning": "#8a4b00",
+    "warningSurface": "#fff4e5",
+    "focusOutline": "rgb(10, 132, 255) solid 3px"
+  },
+  {
+    "name": "inspector-a11y-flip-clamped",
+    "width": 300,
+    "height": 800,
+    "zoom": 1.15,
+    "screen": "settings",
+    "edit": false,
+    "file": "evidence/inspector-a11y-flip-clamped.png",
+    "side": "below",
+    "clamped": false,
+    "left": 920,
+    "top": 227,
+    "close": {
+      "w": 44,
+      "h": 44
+    },
+    "summary": {
+      "w": 254,
+      "h": 44
+    },
+    "primary": "#0a63d1",
+    "danger": "#b3261e",
+    "dangerSurface": "#fdecea",
+    "warning": "#8a4b00",
+    "warningSurface": "#fff4e5",
+    "focusOutline": "rgb(10, 132, 255) solid 3px"
+  },
+  {
+    "name": "inspector-a11y-zoom-fixed",
+    "width": 300,
+    "height": 900,
+    "zoom": 0.5,
+    "screen": "profile",
+    "edit": false,
+    "file": "evidence/inspector-a11y-zoom-fixed.png",
+    "side": "right",
+    "clamped": false,
+    "left": 347,
+    "top": 164,
+    "close": {
+      "w": 44,
+      "h": 44
+    },
+    "summary": {
+      "w": 254,
+      "h": 44
+    },
+    "primary": "#0a63d1",
+    "danger": "#b3261e",
+    "dangerSurface": "#fdecea",
+    "warning": "#8a4b00",
+    "warningSurface": "#fff4e5",
+    "focusOutline": "rgb(10, 132, 255) solid 3px"
+  },
+  {
+    "name": "inspector-a11y-contrast-targets",
+    "width": 300,
+    "height": 900,
+    "zoom": 0.85,
+    "screen": "home",
+    "edit": true,
+    "file": "evidence/inspector-a11y-contrast-targets.png",
+    "side": "right",
+    "clamped": false,
+    "left": 259,
+    "top": 164,
+    "close": {
+      "w": 44,
+      "h": 44
+    },
+    "summary": {
+      "w": 254,
+      "h": 44
+    },
+    "primary": "#0a63d1",
+    "danger": "#b3261e",
+    "dangerSurface": "#fdecea",
+    "warning": "#8a4b00",
+    "warningSurface": "#fff4e5",
+    "focusOutline": "rgb(10, 132, 255) solid 3px"
+  }
+]
