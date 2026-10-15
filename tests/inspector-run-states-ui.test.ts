@@ -1,6 +1,6 @@
-import {addVisitStep,commitVisitEdits,editVisitField,inspectorCard,inspectScreen,workspaceCommand} from './workspace-ui-helpers.js';
+import {addVisitStep,commitVisitEdits,editVisitField,inspectorCard,inspectorOwner,inspectScreen,workspaceCommand} from './workspace-ui-helpers.js';
 import assert from 'node:assert/strict';
-import {test} from 'node:test';
+import {test,describe} from 'node:test';
 import {JSDOM} from 'jsdom';
 import {act,createElement} from 'react';
 import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
@@ -14,6 +14,7 @@ import {writeChecks} from '../shared/canvas-authoring.js';
 import type {CanvasGraph} from '../server/canvas.js';
 
 const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
+describe('inspector run states',{concurrency:false},()=>{
 
 async function journey(work:(ui:{
  document:Document;
@@ -26,14 +27,16 @@ async function journey(work:(ui:{
  settle:()=>Promise<void>;
 })=>Promise<void>){
  const directory=await mkdtemp(join(tmpdir(),'tnt-run-states-'));
- let fail=false;let failIndex=3;let hold=false;let releaseHold:(()=>void)|undefined;let token='test';
+ let fail=false;let failIndex=3;let hold=false;let returnRunning=false;let releaseHold:(()=>void)|undefined;let token='test';
  let holdCapture=false;let releaseCapture:(value:Response)=>void=()=>{};
  const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=>'2.11.0',run:async({directory:dir,flow,signal})=>{
   if(hold){hold=false;await new Promise<void>(resolve=>{releaseHold=resolve;if(signal.aborted)resolve();else signal.addEventListener('abort',()=>resolve(),{once:true});});releaseHold=undefined;}
-  const commands=parseAllDocuments(await readFile(flow,'utf8'))[1].toJS();
+  const commands=parseAllDocuments(await readFile(flow,'utf8'))[1].toJS() as unknown[];
   const failing=fail;fail=false;
+  const assertIndexes=commands.flatMap((command,index)=>command&&typeof command==='object'&&('assertVisible' in (command as object)||'assertNotVisible' in (command as object))?[index]:[]);
+  const failedAt=assertIndexes.includes(failIndex)?failIndex:(assertIndexes.at(-1)??failIndex);
   await writeFile(join(dir,'report.xml'),'<testsuites><testsuite tests="1" failures="'+(failing?1:0)+'"/></testsuites>');
-  await writeFile(join(dir,'commands.json'),JSON.stringify(commands.map((command:any,index:number)=>({command:{[command==='back'?'backPressCommand':command==='launchApp'||command.launchApp?'launchAppCommand':command.tapOn?'tapOnElement':command.inputText?'inputTextCommand':'assertConditionCommand']:{}},metadata:{depth:0,status:failing&&index===failIndex?'FAILED':failing&&index>failIndex?'SKIPPED':'COMPLETED',error:failing&&index===failIndex?{message:'Assertion failed at visit 3'}:undefined}}))));
+  await writeFile(join(dir,'commands.json'),JSON.stringify(commands.map((command:any,index:number)=>({command:{[command==='back'?'backPressCommand':command==='launchApp'||command.launchApp?'launchAppCommand':command.tapOn?'tapOnElement':command.inputText?'inputTextCommand':'assertConditionCommand']:{}},metadata:{depth:0,status:failing&&index===failedAt?'FAILED':failing&&index>failedAt?'SKIPPED':'COMPLETED',error:failing&&index===failedAt?{message:'Assertion failed at visit 3'}:undefined}}))));
   return {code:failing?1:0,log:'Simulator boundary fixture',cleanup:{verified:true,detail:'Fixture exited'}};
  }}});
  const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
@@ -58,11 +61,24 @@ async function journey(work:(ui:{
  const request=async(path:string,options?:{body?:string})=>{
   try{
    const body=options?.body?JSON.parse(options.body):undefined;
+   const id=path.split('/')[3];
    if(path==='/api/picker/captures')return Response.json({error:'Capture unavailable in this fixture'},{status:400});
-   if(path==='/api/runs')return Response.json(await service.start(body),{status:202});
+   if(path==='/api/runs'){
+    const started=await service.start(body);
+    // holdNext clears `hold` inside Maestro; keep a separate latch so the UI can observe running.
+    if(returnRunning){returnRunning=false;return Response.json(started,{status:202});}
+    return Response.json(await service.wait(started.id));
+   }
    if(path.startsWith('/api/runs/')&&path.endsWith('/cancel'))return Response.json(await service.cancel(path.split('/')[3]));
    if(path.startsWith('/api/runs/'))return Response.json(await service.result(path.slice('/api/runs/'.length)));
-   return Response.json(path==='/api/workspaces'?await service.save(body):path.startsWith('/api/workspaces?q=')?await service.listWorkspaces():path.endsWith('/open')?await service.openWorkspace(path.split('/')[3]):path==='/api/canvas/references'?await service.references(body):await service.workspace(path.slice('/api/workspaces/'.length)));
+   if(path==='/api/workspaces')return Response.json(body?await service.save(body):await service.listWorkspaces());
+   if(path.startsWith('/api/workspaces?q='))return Response.json(await service.listWorkspaces());
+   if(path.endsWith('/open'))return Response.json(await service.openWorkspace(id));
+   if(path.endsWith('/view'))return Response.json(await service.saveView(id,body));
+   if(path.endsWith('/draft/discard'))return Response.json(await service.discardDraft(id,body.expectedDraftRevision));
+   if(path.endsWith('/draft'))return Response.json(await service.saveDraft(id,body));
+   if(path==='/api/canvas/references')return Response.json(await service.references(body));
+   return Response.json(await service.workspace(path.slice('/api/workspaces/'.length)));
   }catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}
  };
  const fetch=(path:string,options?:{body?:string})=>{
@@ -79,6 +95,7 @@ async function journey(work:(ui:{
  const settle=async()=>{do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);};
  const setToken=async(next:string)=>{token=next;await act(async()=>root.render(createElement(Scenarios,{token,deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{},simulatorConnected:!!token})));await settle();};
  const click=async(label:string)=>{
+  const owner=inspectorOwner(label);if(owner)await inspectScreen(document,{title:owner});
   if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',settle);
   if(await addVisitStep(document,label))return;
   await commitVisitEdits(document);
@@ -98,9 +115,14 @@ async function journey(work:(ui:{
   await click('Use Home as scenario start');
   await click('Append connection 1 → 2');
   await click('Append connection 2 → 3');
+  // Appended destination visits start empty; copy each screen's existing check into its visit.
+  await inspectScreen(document,{title:'Mid'},{number:2});
+  await click('Copy Visible text · Mid to Visit 2');
+  await inspectScreen(document,{title:'End'},{number:3});
+  await click('Copy Visible text · End to Visit 3');
   await click('Finish sequence');
   await click('Save workspace');
-  await work({document,click,fill,holdNext:()=>{hold=true;},holdPicker:()=>{holdCapture=true;},failNext:(index=5)=>{fail=true;failIndex=index;},setToken,settle});
+  await work({document,click,fill,holdNext:()=>{hold=true;returnRunning=true;},holdPicker:()=>{holdCapture=true;},failNext:(index=5)=>{fail=true;failIndex=index;},setToken,settle});
  }finally{
   releaseHold?.();
   releaseCapture(Response.json({error:'cancelled'},{status:400}));
@@ -144,13 +166,13 @@ test('passed run shows subtle ✓ Passed on visits and steps',()=>journey(async(
  assert.doesNotMatch(inspectorCard(document)!.textContent!,/Not run|Partly run/);
 }));
 
-test('failed visit auto-expands with red inline error, no banner or Go to step, and keeps focus',()=>journey(async({document,click,failNext,settle})=>{
+test('failed visit auto-expands with red inline error, no banner or Go to step, and keeps focus',()=>journey(async({document,click,failNext})=>{
  await inspectScreen(document,{title:'Home'},{number:1});
  const beforeFocus=document.activeElement;
- const selectedVisit=document.querySelector('.canvas-visit-section.selected-visit')?.getAttribute('data-visit-id');
+ const selectedVisit=document.querySelector('[aria-label="Visit 1 · Home operations"]')?.getAttribute('data-visit-id');
  failNext(5);
- await act(async()=>{document.querySelector<HTMLButtonElement>('[aria-label="Run scenario"]')!.click();await settle();});
- await act(async()=>{for(let i=0;i<20;i++){await new Promise(resolve=>setTimeout(resolve,50));await settle();if(document.querySelector('.result-tag'))break;}});
+ await click('Run scenario');
+ assert.ok(document.querySelector('.result-tag'),document.querySelector('.run-error-toast')?.textContent??'missing result');
  await inspectScreen(document,{title:'End'},{number:3});
  const section=document.querySelector('[aria-label="Visit 3 · End operations"]')!;
  assert.equal(section.querySelector('.visit-section-heading')?.getAttribute('aria-expanded'),'true');
@@ -172,7 +194,8 @@ test('invalid draft shows the warning, inline field errors, and disables Run wit
  assert.ok(document.querySelector('.visit-selector-error[role="alert"]'));
  const field=document.querySelector('[aria-label$="selector"][aria-invalid="true"], .visit-step-summary[aria-describedby]');
  assert.ok(field);
- const run=document.querySelector<HTMLButtonElement>('[aria-label^="Run scenario"]')!;
+ assert.ok(field.getAttribute('aria-describedby')||document.querySelector('[aria-describedby]'));
+ const run=document.querySelector<HTMLButtonElement>('.run-toolbar [aria-label^="Run scenario"]')!;
  assert.ok(run.disabled);
  assert.equal(run.getAttribute('aria-label'),'Run scenario — Draft kept, not valid yet');
 }));
@@ -219,3 +242,4 @@ test('autosave paused without a runner keeps edits in-tab with leave warning and
  document.defaultView!.dispatchEvent(leave);
  assert.equal(warned&&leave.defaultPrevented,true);
 }));
+});
