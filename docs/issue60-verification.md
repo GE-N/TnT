@@ -1,6 +1,6 @@
 # Issue 60: legacy routes without destinations
 
-Integrated main `b362c0e` (#47 destination linking), following `296b9fc` and the original rebase onto `006024a` (includes #59, #45, #49, #46 and the later picker/YAML draft fixes). Original Cursor branch `cursor/legacy-missing-destination-de36` at `dbcaba1` is preserved; implementation lives on `codex/60-legacy-missing-destination` in its dedicated worktree.
+Integrated main `e510ade` (#50 inspector run/failure/draft/autosave states), following `b362c0e` (#47 destination linking), `296b9fc` and the original rebase onto `006024a` (includes #59, #45, #49, #46 and the later picker/YAML draft fixes). Original Cursor branch `cursor/legacy-missing-destination-de36` at `dbcaba1` is preserved; implementation lives on `codex/60-legacy-missing-destination` in its dedicated worktree.
 
 ## Behavior
 
@@ -13,8 +13,8 @@ One exception file, `50-legacy-missing-destination.patch`, records the protected
 ## Validation
 
 - `npm run typecheck`: pass.
-- `npm test`: 365/365 pass on the rebased implementation.
-- Focused warning/server tests: 15/15; with #47 destination-linking tests: 20/20 pass, including two own labels, exact diagnostic shape, picker invocation while focused, both destination choices and pre-Maestro rejection.
+- `npm test`: 376/376 pass on the integrated implementation. An initial run hit an `ENOTEMPTY` temporary-directory teardown race in #50’s run-state test; the isolated run and final full rerun pass.
+- Focused warning/server tests: 17/17; with #47 destination-linking tests: 22/22 pass. Combined #47/#50/#60 check: 31/31; final warning/run UI check: 20/20, including two own labels, exact diagnostic shape, picker invocation while focused, both destination choices and pre-Maestro rejection.
 - Mutation: remove the missing-destination emission in `inspectCanvas`; both actual CanvasEditor own-label warning tests fail (exit 1, expected two warnings versus none). Restore emission; focused tests pass.
 - `GOLDEN_UPDATE=1 node --import tsx --test tests/golden-canvas.test.ts`: two runs, each 20/20 pass. No tracked golden diff after either run, and the two recorded golden diffs are identical.
 - `npm run check:canvas-contract`: pass, 2 exception patches. Uses the current main checker; no duplication of #59/#70 work.
@@ -44,7 +44,7 @@ Review regression: adding an actual stale YAML association alongside the two mis
 
 ## Main integration
 
-Main advanced after Cursor approved `18f4817`, producing a content conflict at the VisitStep close and warning row. The ticket branch integrates main with a merge commit, preserving main's `picker`, `sourceYaml`, card-position props and the separate amber warning row. The feature diff relative to current main remains focused; server/shared exception content is unchanged. After that approval, main `b362c0e` introduced #47's destination component, New screen creation and clear-link confirmation. The second integration keeps those behaviors and adds an unresolved-only disabled placeholder to the private DestinationSelect component. Selecting Stays on this screen explicitly records legacy execution before the ordinary no-op guard; existing screen and New screen choices preserve frozen-start routing. New legacy/contextual cross-ticket regressions cover choosing Stays for one step, then creating/linking a new screen for the other, retaining both executable actions. The #47 linking, screen creation and clear-link-confirmation tests also pass. Independent exact-head re-review is required for this integration.
+Main advanced after Cursor approved `18f4817`, producing a content conflict at the VisitStep close and warning row. The ticket branch integrates main with a merge commit, preserving main's `picker`, `sourceYaml`, card-position props and the separate amber warning row. The feature diff relative to current main remains focused; server/shared exception content is unchanged. After that approval, main `b362c0e` introduced #47's destination component, New screen creation and clear-link confirmation. The second integration keeps those behaviors and adds an unresolved-only disabled placeholder to the private DestinationSelect component. Selecting Stays on this screen explicitly records legacy execution before the ordinary no-op guard; existing screen and New screen choices preserve frozen-start routing. New legacy/contextual cross-ticket regressions cover choosing Stays for one step, then creating/linking a new screen for the other, retaining both executable actions. The #47 linking, screen creation and clear-link-confirmation tests also pass. Main then advanced to `e510ade` (#50). The third integration preserves VisitStep run locking, status badges and draft-error props, drag/drop locking, and main’s run/failure/autosave implementation. Legacy warning controls are disabled/inert while running; labels, warnings and run badges remain readable. Two cross-ticket regressions verify that the warning remains visible while Choose destination cannot open the picker or change the graph during a run. Independent exact-head re-review is required for this integration.
 
 ## Delivery gate
 

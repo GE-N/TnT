@@ -641,6 +641,21 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 
 .visit-selector-error{color:#b3261e;font-size:12px;white-space:nowrap;margin:0}
 .visit-inline-fields input[aria-invalid=true]{border:2px solid #b3261e}
+.visit-step-failed{background:#fdecea;border-radius:8px;padding:4px 8px;margin:0 -8px}
+.visit-step-failed .visit-step-summary,.visit-step-error{color:#b3261e}
+.visit-step-error{font-size:12px;margin:0 0 6px;padding-left:44px;overflow-wrap:anywhere}
+.visit-step-locked .visit-step-summary{padding-left:0}
+.run-status-badge{display:inline-flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap}
+.run-status-badge.passed{color:var(--success)}
+.run-status-badge.failed{color:#b3261e}
+.run-status-badge.running{color:var(--inspector-primary)}
+.run-status-spinner{width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:run-status-spin .7s linear infinite;flex:none}
+@keyframes run-status-spin{to{transform:rotate(360deg)}}
+.inspector-draft-notice{margin:8px 0;padding:8px 10px;border-radius:8px;background:#fff4e5;color:#8a4b00;font-size:12px;font-weight:600}
+.floating-inspector .visit-section-heading .run-status-badge{margin-left:auto}
+.run-toolbar .primary[aria-label="Stop scenario"]{background:#b3261e}
+.run-toolbar .primary[aria-label="Stop scenario"]:hover:not(:disabled){background:#912017}
+.workbench .inspector-save,.run-toolbar button.primary:not(:disabled){min-width:72px}
 
 .floating-inspector .visit-step-summary{padding-left:44px}
 .floating-inspector .visit-step-drag{position:absolute;left:0;top:2px;width:44px;min-width:44px;min-height:44px;padding:0;border:0;background:transparent;color:#5f6670;cursor:grab}

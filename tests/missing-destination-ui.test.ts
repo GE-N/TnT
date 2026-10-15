@@ -20,7 +20,7 @@ function workspace(){
  return {yaml,canvas:refreshChecks(canvas,yaml)};
 }
 
-async function mount(scenarioMode:boolean,brokenReference=false){
+async function mount(scenarioMode:boolean,brokenReference=false,running=false){
  const dom=new JSDOM('<div id="root"></div>');
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
@@ -31,7 +31,7 @@ async function mount(scenarioMode:boolean,brokenReference=false){
  function Host(){
   const [graph,setGraph]=useState(state.canvas);const [yaml,setYaml]=useState(state.yaml);
   state.canvas=graph;state.yaml=yaml;
-  return createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),yaml,onYamlChange:setYaml,catalog:[],diagnostics:inspectCanvas(graph,yaml).diagnostics,pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode});
+  return createElement(CanvasEditor,{graph,onChange:next=>setGraph(next!),yaml,onYamlChange:setYaml,catalog:[],diagnostics:inspectCanvas(graph,yaml).diagnostics,pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode,run:running?{status:'running'}:undefined});
  }
  await act(async()=>root.render(createElement(Host)));
  const document=dom.window.document;
@@ -146,4 +146,20 @@ test('the destination warning uses #8a4b00 on #fff4e5 at 12px or larger',()=>{
  assert.match(rule,/(?:^|;)color:#8a4b00(?:;|$)/);
  assert.match(rule,/background:#fff4e5/);
  assert.ok(Number(rule.match(/font-size:(\d+)px/)?.[1])>=12);
+});
+
+for(const scenarioMode of [false,true])test(`running preserves legacy warnings while locking destination edits (${scenarioMode?'contextual':'legacy'} canvas)`,async()=>{
+ const page=await mount(scenarioMode,false,true);
+ try{
+  assert.deepEqual(page.warnings(),[warning('tap Gear'),warning('open Profile')]);
+  const before=JSON.stringify(page.state.canvas);
+  for(const id of ['gear','profile']){
+   assert.ok(page.row(id).querySelector('details')!.hasAttribute('inert'));
+   const choose=page.row(id).querySelector<HTMLButtonElement>('.destination-warning button')!;
+   assert.equal(choose.disabled,true);
+   await act(async()=>choose.click());
+  }
+  assert.deepEqual(page.pickerCalls,[]);
+  assert.equal(JSON.stringify(page.state.canvas),before);
+ }finally{await page.close();}
 });
