@@ -136,8 +136,12 @@ test('a node action keeps its destination picker in the default canvas',()=>jour
 test('a new blank check stays local, exposes its inline error and blocks execution until valid',()=>journey(async({document,click,fill})=>{
  await click('New scenario');await fill('Scenario name','Repair journey');await click('Use Home as scenario start');await click('Add check to Home');
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
- await click('Run scenario');const input=document.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;assert.equal(input.getAttribute('aria-invalid'),'true');assert.match(input.closest('.visit-step')!.textContent!,/Enter text to look for/);assert.match(document.body.textContent!,/Apply or cancel incomplete authoring drafts/);assert.equal(document.querySelector('.result-tag'),null);
- await fill('Check 1 selector','Home');await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+ const run=document.querySelector<HTMLButtonElement>('.run-toolbar [aria-label^="Run scenario"]')!;
+ assert.ok(run.disabled);assert.equal(run.getAttribute('aria-label'),'Run scenario — Draft kept, not valid yet');
+ const input=document.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;assert.equal(input.getAttribute('aria-invalid'),'true');assert.match(input.closest('.visit-step')!.textContent!,/Enter text|selector/);assert.equal(document.querySelector('.result-tag'),null);
+ await fill('Check 1 selector','Home');
+ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,50));});
+ await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
 },true));
 
 test('choosing action destinations creates connections and an action-only Home Details Back journey runs without mandatory checks',()=>journey(async({document,selectedCommand,click,fill,saved})=>{

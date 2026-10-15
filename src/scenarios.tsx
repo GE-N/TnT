@@ -137,7 +137,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const autosavePaused=(!token||pickerBusy)&&!blockedFailure&&!draftAcked&&!persistedClean;
   const pauseNote=autosavePaused?!token?'Changes are kept in this tab. Leaving the site warns you. Autosave resumes automatically when a runner connects.':'while the picker is open':undefined;
   const draftInvalid=pendingDraft;
-  const persistenceStatus=blockedFailure?"Couldn't save.":draftAcked||incompleteCanvas||invalidSource?'Draft kept, not valid yet.':saving||draftSaving||willAutosave||(submitting&&!persistedClean)?'Saving…':persistedClean&&workspaceId?'Saved locally':persistedClean?'Not saved yet':autosavePaused?'Unsaved changes · Autosave paused':'Not saved yet';
+  const persistenceStatus=blockedFailure?"Couldn't save.":draftAcked?'Draft kept, not valid yet.':saving||draftSaving||willAutosave||(submitting&&!persistedClean)?'Saving…':persistedClean&&workspaceId?'Saved locally':persistedClean?'Not saved yet':autosavePaused?'Unsaved changes · Autosave paused':'Not saved yet';
   const runBlockedReason=!simulatorConnected?'Simulator not connected':draftInvalid?'Draft kept, not valid yet':pickerBusy?'Picker is open':undefined;
   warnOnLeaveRef.current=!persistedClean&&!draftAcked;
   const showRecovery=draftRevisionShown>0&&draftRevisionShown>dismissedDraft&&!draftError;
