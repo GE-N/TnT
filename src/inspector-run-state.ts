@@ -11,6 +11,8 @@ export type InspectorRunView={
  visitStatus:(visitId:string)=>InspectorStepStatus|undefined;
  stepStatus:(visitId:string,testId:string)=>InspectorStepStatus|undefined;
 };
+/** Canvas only needs status + mapped canvas outcomes — not logs, artifacts, or the full snapshot. */
+export type InspectorRunFeed={status:Run['status'];canvas?:CanvasResult};
 
 const runningLabel={tone:'running' as const};
 const passedLabel={tone:'passed' as const};
@@ -22,7 +24,7 @@ function visitEdgeId(graph:CanvasGraph,pathId:string,visitIndex:number){
 }
 
 /** Derive inspector run feedback from the current run snapshot. Live Maestro progress is unavailable, so a running scenario highlights the first route step. */
-export function inspectorRunView(graph:CanvasGraph|undefined,pathId:string|undefined,run:Run|undefined):InspectorRunView|undefined{
+export function inspectorRunView(graph:CanvasGraph|undefined,pathId:string|undefined,run:InspectorRunFeed|undefined):InspectorRunView|undefined{
  if(!graph||!pathId||!run?.canvas||run.canvas.pathId!==pathId)return;
  if(run.status==='cancelled')return;
  const path=graph.paths.find(item=>item.id===pathId);
