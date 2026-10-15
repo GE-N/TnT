@@ -3,10 +3,9 @@ import {readFileSync} from 'node:fs';
 import {test} from 'node:test';
 import {JSDOM} from 'jsdom';
 import {act,createElement,useState} from 'react';
-import {CanvasEditor} from '../src/canvas.js';
 import {inspectCanvas,type CanvasGraph,type CanvasTest} from '../server/canvas.js';
 import {projectCanvasRoute} from '../server/canvas-route.js';
-import {refreshChecks,writeChecks} from '../shared/canvas-authoring.js';
+import {edgeActions,refreshChecks,writeChecks} from '../shared/canvas-authoring.js';
 
 const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
 function tap(id:string,label:string,value:string):CanvasTest{return {id,label,role:'action',reference,tap:{target:'text',match:'exact',value}};}
@@ -26,7 +25,7 @@ async function mount(scenarioMode:boolean,brokenReference=false){
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
- const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);
+ const {createRoot}=await import('react-dom/client');const {CanvasEditor}=await import('../src/canvas.js');const root=createRoot(dom.window.document.getElementById('root')!);
  const state={...workspace()};
  if(brokenReference)state.canvas.screens[0].tests.push({id:'stale',label:'Broken reference',role:'assertion',reference:{...reference,index:999,fingerprint:'missing'}});
  function Host(){
@@ -41,7 +40,7 @@ async function mount(scenarioMode:boolean,brokenReference=false){
  await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Select screen Home"]')!.click());
  const row=(id:string)=>document.querySelector<HTMLElement>(`[data-operation-id="${id}"]`)!;
  return {
-  document,state,row,pickerCalls,
+  document,state,row,pickerCalls,window:dom.window,
   warnings:()=>[...document.querySelectorAll('.destination-warning p')].map(node=>node.textContent),
   choose:async(id:string,value:string)=>act(async()=>{const select=row(id).querySelector<HTMLSelectElement>('select[aria-label$=" destination"]')!;Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype,'value')!.set!.call(select,value);select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));}),
   option:(id:string,text:string)=>[...row(id).querySelectorAll<HTMLOptionElement>('select[aria-label$=" destination"] option')].find(option=>option.textContent===text)!.value,
@@ -104,6 +103,33 @@ for(const scenarioMode of [false,true])test(`missing destinations stay amber whi
   const referenceErrors=[...page.document.querySelectorAll('.reference-error')];
   assert.equal(referenceErrors.length,scenarioMode?0:1);
   for(const referenceError of referenceErrors){assert.match(referenceError.textContent!,/Broken or stale YAML reference/);assert.doesNotMatch(referenceError.textContent!,/has no destination/);}
+ }finally{await page.close();}
+});
+
+for(const scenarioMode of [false,true])test(`an unresolved legacy destination supports New screen after an explicit stay choice (${scenarioMode?'contextual':'legacy'} canvas)`,async()=>{
+ const page=await mount(scenarioMode);
+ try{
+  const initial=page.row('gear').querySelector<HTMLSelectElement>('select[aria-label$=" destination"]')!;
+  assert.equal(initial.selectedOptions[0].textContent,'Choose destination screen');
+  assert.equal(initial.selectedOptions[0].disabled,true);
+  assert.ok(page.option('gear','+ New screen…'));
+  await page.choose('gear',page.option('gear','Stays on this screen'));
+  assert.deepEqual(page.warnings(),[warning('open Profile')]);
+  await page.choose('profile',page.option('profile','+ New screen…'));
+  const title=page.row('profile').querySelector<HTMLInputElement>('[aria-label="New screen title"]')!;
+  await act(async()=>{
+   Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(title,'More');
+   title.dispatchEvent(new page.window.Event('input',{bubbles:true}));
+   title.dispatchEvent(new page.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+  });
+  const created=page.state.canvas.screens.find(screen=>screen.title==='More');
+  assert.ok(created);
+  assert.equal(page.state.canvas.edges.find(edge=>edgeActions(edge).includes('profile'))?.to,created.id);
+  assert.deepEqual(page.warnings(),[]);
+  assert.equal(inspectCanvas(page.state.canvas,page.state.yaml).diagnostics.length,0);
+  const projected=projectCanvasRoute(page.state.canvas,page.state.yaml,{},'route');
+  assert.ok(projected.canvas.execution!.occurrences.some(item=>item.testId==='gear'));
+  assert.ok(projected.canvas.execution!.occurrences.some(item=>item.testId==='profile'));
  }finally{await page.close();}
 });
 

@@ -56,8 +56,9 @@ test('stepRowLabel formats every command with quoted values and optional destina
   [{id:'back',label:'Back',role:'action',reference,back:true},'back "Back"'],
   [{id:'back',label:'Back',role:'action',reference,back:true,backSelector:{target:'id',match:'exact',value:'nav.back'}},'back "nav.back"']
  ];
- for(const [item,command] of cases){assert.equal(stepRowLabel(item,4),'4 '+command);assert.equal(stepRowLabel(item,4,'Settings'),'4 '+command+' → Settings');}
+ for(const [item,command] of cases){assert.equal(stepRowLabel(item,4),'4 '+command);assert.equal(stepRowLabel(item,4,'Settings'),'4 '+command+' → Settings');assert.equal(stepRowLabel(item,4,undefined,'Home'),item.check?'4 '+command:'4 '+command+' ↺ stays on Home');}
  assert.equal(stepRowLabel(tap(''),1),'1 tapOn ""');
+ assert.equal(stepRowLabel(tap('Gear'),2,undefined,'Home'),'2 tapOn "Gear" ↺ stays on Home');
 });
 
 test('drag reorder composes adjacent swaps on an immutable visit and preserves other visits and YAML',async()=>{
