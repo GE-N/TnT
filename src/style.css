@@ -610,6 +610,9 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .add-step-dialog [role=option]{text-align:left;margin:2px 0;background:transparent;color:var(--text)}
 .add-step-dialog [aria-selected=true]{background:var(--inspector-selected);color:var(--inspector-primary)}
 .add-step-dialog strong{display:block;margin:10px 0 4px}
+.connection-name{font-size:12px}
+.connection-name summary{cursor:pointer;color:var(--muted)}
+.destination-review-notice{font-size:12px;color:var(--warning);margin:0 0 8px}
 .navigation-hint{font-size:12px;color:var(--warning);background:var(--warning-surface);border-radius:6px;padding:6px}
 .navigation-hint p{white-space:normal;overflow-wrap:anywhere;margin:4px 0}
 .navigation-hint button,.visit-yaml-link{color:var(--inspector-primary);min-height:44px;font-size:12px}
