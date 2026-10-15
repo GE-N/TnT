@@ -428,9 +428,10 @@ test('a missing runner token shows Unsaved changes · Autosave paused and resume
   assert.equal(saveText(page.document),'Unsaved changes · Autosave paused');
   assert.ok(status.classList.contains('warning'));
   assert.equal(status.querySelector('.workspace-save-icon')!.textContent,'‖');
-  assert.equal(status.getAttribute('title'),'no runner connected');
-  assert.equal(status.getAttribute('aria-description'),'no runner connected');
+  assert.match(status.getAttribute('title')??'',/Changes are kept in this tab.*Autosave resumes automatically/);
+  assert.match(status.getAttribute('aria-description')??'',/Changes are kept in this tab.*Autosave resumes automatically/);
   assert.equal(status.getAttribute('aria-label'),'Unsaved changes · Autosave paused');
+  assert.equal([...page.document.querySelectorAll('button')].some(button=>button.textContent==='Save'),false,'No Save button when autosave is paused without a runner');
   await page.render({token:'local'});
   assert.equal(saveText(page.document),'Saving…');
  }finally{await page.close();}
