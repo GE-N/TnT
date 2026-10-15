@@ -13,9 +13,9 @@
   --warning: #8a4b00;
   --warning-surface: #fff4e5;
   --warning-border: #d9bc7d;
-  --danger: #a33439;
-  --danger-surface: #fff0f1;
-  --danger-border: #d9a5a8;
+  --danger: #b3261e;
+  --danger-surface: #fdecea;
+  --danger-border: #e3b4af;
   --overlay: #25304166;
   --shadow: 0 8px 24px #25304114;
   /* White on #0a63d1 is 5.65:1; #0a84ff is reserved for non-text accents. */
@@ -391,12 +391,14 @@ textarea:focus{outline:1px solid var(--accent)}
 
 .highlighted-transition path{filter:drop-shadow(0 0 4px #0a84ff80)}
 .highlighted-transition .transition-label{border-color:var(--inspector-highlight);color:var(--inspector-selected-text)}
-.floating-inspector{position:fixed;z-index:40;width:300px;box-sizing:border-box;overflow:auto;overscroll-behavior:contain;background:var(--surface);border-radius:12px;box-shadow:0 12px 32px #25304129,0 1px 3px #2530411f;padding:0 14px 14px;font-size:13px;--accent:var(--inspector-primary);--accent-hover:#08519f}
-.floating-inspector-header{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 -14px;padding:4px 4px 4px 14px;background:var(--surface);border-bottom:1px solid var(--border)}
+.floating-inspector{position:fixed;z-index:40;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto minmax(0,1fr) auto;align-content:start;width:300px;box-sizing:border-box;overflow:auto;overscroll-behavior:contain;background:var(--surface);border-radius:12px;box-shadow:0 12px 32px #25304129,0 1px 3px #2530411f;padding:0 14px 14px;font-size:13px;--accent:var(--inspector-primary);--accent-hover:#08519f}
+.floating-inspector-header{position:sticky;top:0;z-index:1;grid-column:1;grid-row:1;display:flex;align-items:center;gap:8px;margin:0 -14px 0 -14px;padding:4px 4px 4px 14px;background:var(--surface);border-bottom:1px solid var(--border)}
 .floating-inspector-header h3{font-size:17px;margin:0;overflow-wrap:anywhere}
-.floating-inspector-close{min-width:44px;min-height:44px;border:0;border-radius:8px;background:transparent;color:var(--text);font-size:16px}
+.floating-inspector-close{position:sticky;top:4px;z-index:2;grid-column:2;grid-row:1;justify-self:end;align-self:start;margin:0 -4px 0 0;min-width:44px;min-height:44px;border:0;border-radius:8px;background:var(--surface);color:var(--text);font-size:16px}
 .floating-inspector-close:hover{background:var(--subtle)}
-.floating-inspector-note{font-size:12px;color:var(--muted);margin:10px 0 0;line-height:1.5}
+.floating-inspector-note{grid-column:1/-1;grid-row:2;font-size:12px;color:var(--muted);margin:10px 0 0;line-height:1.5}
+.floating-inspector-body{grid-column:1/-1;grid-row:3;min-width:0}
+.floating-inspector .inspector-bottom-fade{grid-column:1/-1;grid-row:4}
 .floating-inspector :focus-visible{outline:3px solid var(--inspector-highlight);outline-offset:2px}
 .floating-inspector button,.floating-inspector select,.floating-inspector input:not([type=checkbox]),.floating-inspector summary{min-height:44px;font-size:13px}
 .floating-inspector .field-hint,.floating-inspector small,.floating-inspector .unused-operations,.floating-inspector .operation-scenarios label,.floating-inspector .canvas-navigation-actions>input,.floating-inspector .canvas-delete-operation,.floating-inspector legend,.floating-inspector .outcome{font-size:12px}
