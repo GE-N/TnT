@@ -445,7 +445,7 @@
         }
       ],
       "focusOutline": "rgb(10, 132, 255) solid 3px",
-      "focused": "+ Add step",
+      "focused": "Edit Check 1",
       "tabStops": 1,
       "keyboard": [
         {
@@ -508,15 +508,25 @@
           "className": "visit-step-summary"
         },
         {
+          "step": "linked step",
+          "id": "cadfed88-be9f-4ba8-bb7a-224f6f6f6798",
+          "text": "3 tapOn \"created-id\" → Profile",
+          "orderedIds": [
+            "home-ready",
+            "avatar",
+            "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+          ]
+        },
+        {
           "step": "reorder",
           "beforeOrder": [
             "home-ready",
             "avatar",
-            "0c679d04-159e-4ad0-8ef9-2984e9b393e7"
+            "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
           ],
           "afterOrder": [
             "home-ready",
-            "0c679d04-159e-4ad0-8ef9-2984e9b393e7",
+            "cadfed88-be9f-4ba8-bb7a-224f6f6f6798",
             "avatar"
           ],
           "changed": true
@@ -531,7 +541,14 @@
               "Edit Check 1",
               "Edit Action 1"
             ]
-          }
+          },
+          "remaining": [
+            "home-ready",
+            "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+          ],
+          "focusImmediately": "+ Add step",
+          "focusAfter": "Edit Check 1",
+          "stops": 1
         }
       ]
     }
@@ -597,15 +614,25 @@
       "className": "visit-step-summary"
     },
     {
+      "step": "linked step",
+      "id": "cadfed88-be9f-4ba8-bb7a-224f6f6f6798",
+      "text": "3 tapOn \"created-id\" → Profile",
+      "orderedIds": [
+        "home-ready",
+        "avatar",
+        "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+      ]
+    },
+    {
       "step": "reorder",
       "beforeOrder": [
         "home-ready",
         "avatar",
-        "0c679d04-159e-4ad0-8ef9-2984e9b393e7"
+        "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
       ],
       "afterOrder": [
         "home-ready",
-        "0c679d04-159e-4ad0-8ef9-2984e9b393e7",
+        "cadfed88-be9f-4ba8-bb7a-224f6f6f6798",
         "avatar"
       ],
       "changed": true
@@ -620,7 +647,14 @@
           "Edit Check 1",
           "Edit Action 1"
         ]
-      }
+      },
+      "remaining": [
+        "home-ready",
+        "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+      ],
+      "focusImmediately": "+ Add step",
+      "focusAfter": "Edit Check 1",
+      "stops": 1
     }
   ]
 }

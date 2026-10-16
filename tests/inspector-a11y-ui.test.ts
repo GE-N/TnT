@@ -187,24 +187,40 @@ test('running keeps one list tab stop and arrow navigation without unlocking edi
  await click('Stop scenario');
 }));
 
-test('edit tab order is fields → Destination → Pick → YAML → ✕',()=>journey(async({document})=>{
+test('edit tab order is fields → Destination → Pick → YAML → ✕',()=>journey(async({document,press})=>{
  await inspectScreen(document,{title:'Home'},{number:1});
  const card=inspectorCard(document)!;
- const row=[...card.querySelectorAll<HTMLElement>('[data-operation-id]')].find(item=>item.querySelector('[aria-label$=" destination"]')||item.querySelector('.visit-step-summary')?.textContent?.includes('Stay'))
+ const row=[...card.querySelectorAll<HTMLElement>('[data-operation-id]')].find(item=>item.querySelector('.visit-step-summary')?.textContent?.includes('Stay'))
   ??[...card.querySelectorAll<HTMLElement>('[data-operation-id]')].find(item=>item.querySelector('.visit-step-summary')?.textContent?.includes('Go 2'))!;
  await act(async()=>row.querySelector<HTMLButtonElement>('.visit-step-summary')!.click());
  await act(async()=>row.querySelector<HTMLInputElement>('input[type=radio][value=id]')!.click());
  const selector=row.querySelector<HTMLInputElement>('[aria-label$=" selector"]')!;
- const destination=row.querySelector<HTMLSelectElement>('[aria-label$=" destination"]')!;
- const pick=row.querySelector<HTMLButtonElement>('.pick-from-screen')!;
- const yaml=card.querySelector<HTMLButtonElement>('.visit-yaml-link')!;
- const close=card.querySelector<HTMLButtonElement>('.floating-inspector-close')!;
- assert.ok(pick.closest('.visit-inline-fields'),'Pick stays in the Element edit flow');
- const following=document.defaultView!.Node.DOCUMENT_POSITION_FOLLOWING;
- assert.ok(selector.compareDocumentPosition(destination)&following,'Destination follows fields');
- assert.ok(destination.compareDocumentPosition(pick)&following,'Pick follows Destination in DOM/tab order');
- assert.ok(pick.compareDocumentPosition(yaml)&following,'YAML follows Pick');
- assert.ok(yaml.compareDocumentPosition(close)&following,'✕ follows YAML');
+ const labelOf=(element:Element|null)=>element?.getAttribute('aria-label')||(element?.textContent??'').replace(/\s+/g,' ').trim()||'';
+ const stops=()=>[...card.querySelectorAll<HTMLElement>('button,input,select,textarea,summary,a[href]')].filter(element=>{
+  if(element.tabIndex<0||element.closest('[hidden]')||(element as HTMLButtonElement).disabled||element.getAttribute('aria-disabled')==='true')return false;
+  const details=element.closest('details');
+  if(details&&!details.open&&element.tagName!=='SUMMARY')return false;
+  if(element.tagName==='INPUT'&&(element as HTMLInputElement).type==='radio'){
+   const group=[...card.querySelectorAll<HTMLInputElement>('input[type=radio]')].filter(item=>item.name===(element as HTMLInputElement).name);
+   return element===(group.find(item=>item.checked)??group[0]);
+  }
+  return true;
+ });
+ selector.focus();
+ const seen:string[]=[];
+ for(let step=0;step<16&&!seen.at(-1)?.startsWith('Close ');step++){
+  const active=document.activeElement as HTMLElement;
+  seen.push(labelOf(active));
+  const before=stops();
+  const index=before.findIndex(item=>item===active||item.contains(active));
+  const prevented=await press(active,'Tab');
+  if(!prevented)before[index+1]?.focus();
+ }
+ const at=(part:string)=>seen.findIndex(label=>label===part||label.endsWith(part)||label.startsWith(part));
+ assert.ok(at('matching')>=0&&at('matching')<at('destination'),seen.join(' | '));
+ assert.ok(at('destination')<at('Pick from screen'),seen.join(' | '));
+ assert.ok(at('Pick from screen')<at('Open YAML'),seen.join(' | '));
+ assert.ok(at('Open YAML')<at('Close '),seen.join(' | '));
 }));
 
 test('shortcuts stay suppressed in fields; failed run announces status',()=>journey(async({document,press,failNext,click,settle})=>{

@@ -210,8 +210,9 @@ try{
   await new Promise(r=>setTimeout(r,500));
   const note=async(step,extra={})=>{const info=await focused(page);keyboardLog.push({step,...info,...extra});console.log('keyboard',step,info.label,extra);};
   const shiftTab=async()=>{await page.keyboard.down('Shift');await page.keyboard.press('Tab');await page.keyboard.up('Shift');};
-  const ids=()=>page.evaluate(()=>[...document.querySelectorAll('.floating-inspector .visit-step')].map(item=>item.getAttribute('data-operation-id')));
-  await openScreen(page,'Home');
+ const ids=()=>page.evaluate(()=>[...document.querySelectorAll('.floating-inspector .visit-step')].map(item=>item.getAttribute('data-operation-id')));
+ await openScreen(page,'Home');
+ const initialIds=await ids();
   await tabUntil(page,info=>info.className.includes('visit-step-summary'),8);
   const stopsBefore=await page.evaluate(()=>document.querySelectorAll('.floating-inspector .visit-step-summary[tabindex="0"]').length);
   if(stopsBefore!==1)throw new Error('Expected one list tab stop, got '+stopsBefore);
@@ -280,8 +281,14 @@ try{
    const active=document.activeElement;
    return !!active&&active.classList.contains('visit-step-summary')&&active.getAttribute('aria-expanded')==='false';
   });
-  await note('committed step');
-  const beforeOrder=await ids();
+ await note('committed step');
+ const committedIds=await ids();
+ const created=committedIds.filter(id=>id&&!initialIds.includes(id));
+ if(created.length!==1)throw new Error('Expected one created step, got '+created.join(','));
+ const linkedText=await page.evaluate(id=>document.querySelector(`[data-operation-id="${id}"] .visit-step-summary`)?.textContent?.replace(/\s+/g,' ').trim()??'',created[0]);
+ if(!linkedText.includes('Profile'))throw new Error('Created step did not show destination Profile: '+linkedText);
+ keyboardLog.push({step:'linked step',id:created[0],text:linkedText,orderedIds:committedIds});
+ const beforeOrder=await ids();
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Enter');
   await tabUntil(page,info=>info.label.startsWith('Move ')&&info.label.endsWith(' up'),6);
@@ -312,7 +319,22 @@ try{
    const summaries=[...document.querySelectorAll('.floating-inspector .visit-step-summary')];
    return {count:summaries.length,stops:summaries.filter(item=>item.tabIndex===0).length,labels:summaries.map(item=>item.getAttribute('aria-label'))};
   });
-  keyboardLog.push({step:'delete',target:deleted,afterDelete});
+  const remaining=await ids();
+ if(remaining.includes('avatar'))throw new Error('Deleted row avatar is still in the list');
+ if(!remaining.includes(created[0]))throw new Error('Created step disappeared during delete');
+ const focusImmediately=await focused(page);
+ let focusAfter=focusImmediately;
+ if(!focusAfter.className.includes('visit-step-summary')){
+  for(let step=0;step<6&&!(await focused(page)).className.includes('visit-step-summary');step++)await shiftTab();
+  if(!(await focused(page)).className.includes('visit-step-summary')){
+   for(let step=0;step<8&&!(await focused(page)).className.includes('visit-step-summary');step++)await page.keyboard.press('Tab');
+  }
+ }
+ focusAfter=await focused(page);
+ if(!focusAfter.className.includes('visit-step-summary'))throw new Error('Focus could not return to the surviving list stop from '+focusAfter.label);
+ const stopCount=await page.evaluate(()=>document.querySelectorAll('.floating-inspector .visit-step-summary[tabindex="0"]').length);
+ if(stopCount!==1)throw new Error('Expected one list tab stop after returning focus, got '+stopCount);
+ keyboardLog.push({step:'delete',target:deleted,afterDelete,remaining,focusImmediately:focusImmediately.label,focusAfter:focusAfter.label,stops:stopCount});
   const afterMetrics=await page.evaluate(measureScript);
   const file=resolve(evidence,'inspector-a11y-keyboard-journey.png');
   await page.screenshot({path:file,fullPage:false});

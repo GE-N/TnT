@@ -605,9 +605,8 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .step-command{color:var(--muted)}
 .visit-inline-fields{display:flex;flex-direction:column;gap:6px;padding:8px 0}
 .visit-inline-fields input,.visit-inline-fields select{width:100%;box-sizing:border-box}
-/* Visual Element-field packing: Pick sits under the selector, while DOM order keeps Destination → Pick for Tab. */
+/* Pick stays inside the Element field. Tab order after Destination is handled in the inspector, not by moving the button. */
 .visit-inline-fields > .element-field{order:1}
-.visit-inline-fields > .pick-from-screen{order:2}
 .visit-inline-fields > [aria-label$=" matching"]{order:3}
 .visit-inline-fields > [aria-label$=" visibility"]{order:3}
 .visit-inline-fields > [aria-label$=" text"]{order:3}

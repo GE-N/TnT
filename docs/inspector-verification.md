@@ -5,12 +5,12 @@ Parent: [#40](https://github.com/GE-N/TnT/issues/40) Option 1 floating inspector
 ## What changed
 
 - **Tab order:** visit step summaries form one composite list (a single `tabIndex={0}` stop; Arrow Up/Down/Home/End move between rows). The one-stop / arrow contract stays active while a run is locked (edits stay blocked). Drag handles and the ⋯ trigger stay out of the tab order (`tabIndex={-1}`; ArrowRight reaches ⋯ when unlocked). Deleting or discarding the focused row heals the list stop onto a surviving row.
-- **Inline edit order:** fields → Destination → Pick from screen (Element mode) → YAML → ✕. Pick stays in the Element edit flow visually (flex `order` under the selector) while DOM order keeps Destination before Pick for Tab.
+- **Inline edit order:** fields → Destination → Pick from screen (Element mode) → YAML → ✕. Pick stays inside the Element field, next to the selector. Tab from Destination moves to Pick (then Done) when that differs from DOM order. Native Tab is left alone for every other stop, including leaving the inspector.
 - **Focus stability:** run / save / autosave still do not move focus (covered by #50 journeys and kept here). Esc closes the inspector only when the target is not an editable field; inline edit Esc still cancels the row first.
 - **Shortcut suppression:** shared `isEditableTarget` suppresses single-key inspector/canvas shortcuts inside inputs, textareas, selects, comboboxes and the YAML editor (floating-card Esc/arrows, screen-node nudge arrows, step-list arrows).
 - **Accessible structure:** errors keep `role="alert"`; run/status badges and notices keep `role="status"`. Targets remain ≥44px. Danger palette aligned to AA tokens `#b3261e` on `#fdecea`; warning `#8a4b00` on `#fff4e5`; primary `#0a63d1`.
 
-UI-only: no `shared/`, `server/canvas*.ts` or `server/default-actions.ts` changes. Golden fixtures unchanged.
+The #51 edits stay in the inspector UI, these tests, and this review. This branch is merged with main, including the #60 missing-destination warning. The #51 diff does not change `shared/`, `server/canvas*.ts`, `server/default-actions.ts`, or golden fixtures.
 
 ## jsdom coverage (public workspace boundary)
 
@@ -19,16 +19,16 @@ UI-only: no `shared/`, `server/canvas*.ts` or `server/default-actions.ts` change
 - one tab stop + Arrow/Home/End; deleting the last focused row keeps a stop
 - discarding a new active row restores a surviving stop
 - running keeps one list stop and arrow navigation without unlocking edits
-- edit tab order fields → Destination → Pick → YAML → ✕ (DOM order)
+- edit tab order is observed by walking focus: matching, then Destination, then Pick from screen, then Open YAML, then Close. The test does not assert CSS ancestry.
 - shortcut suppression in a focused selector; failed run announces `role="status"` / `role="alert"`
 
-Existing floating-inspector, match-by and run-state UI journeys remain green.
+`tests/match-by-ui.test.ts` keeps the original assertion that Pick lives in `.element-field` beside the selector. A separate test checks that Tab from Destination focuses Pick, and the next Tab focuses Done. Existing floating-inspector and run-state UI journeys remain green.
 
 ## Desktop browser review
 
 Reviewed with the real `CanvasEditor` fixture via Vite + Chrome headless (`scripts/inspector-browser-review.mjs`) on Linux, Node 22. Metrics: `docs/evidence/inspector-a11y-metrics.json`.
 
-Desktop shots open the named screen with Enter on its article, then Tab to the step summary. The keyboard journey does not call `focus()` or click controls from script.
+Desktop shots open the named screen with Enter on its article, then Tab to the step summary. The keyboard journey uses `page.keyboard` for navigation and activation. It does not call `focus()`, set control values, or click controls. The contrast shot still opens the step menu in the page so Delete can be measured; that mutation is not part of the keyboard journey.
 
 | Shot | Viewport | Recorded |
 | --- | --- | --- |
@@ -64,9 +64,10 @@ Recorded under `keyboard` in the metrics:
 1. Enter on Screen Home, Tab to the list. One stop. ArrowDown, ArrowUp and End moved Check 1 ↔ Action 1.
 2. Tab to Add step, Enter, Enter to create a Tap. Shift+Tab, ArrowRight to Element, type `created-id`.
 3. Tab order from the selector: matching → type → **destination → Pick from screen**. Pick's box stays with the element field (top 294, directly under the selector at 244) and above Destination (top 462).
-4. Shift+Tab back to Destination. ArrowDown twice changed the focused select from empty to `profile`. Enter on Done committed the step.
-5. ArrowRight, Enter, Tab to Move up, Enter. Order changed from `home-ready, avatar, <new>` to `home-ready, <new>, avatar`.
-6. End, ArrowRight, Enter, Delete on the last row (`Delete action 2`). Two rows remained and exactly one summary had `tabIndex=0`.
+4. Shift+Tab back to the focused Destination select. ArrowDown twice changed that select from empty to `profile`. Enter on Done committed the step.
+5. The created row's summary text is `3 tapOn "created-id" → Profile`. Ordered ids were `home-ready`, `avatar`, then the new id.
+6. On that focused row: ArrowRight, Enter, Tab to **Move up**, Enter. Order changed to `home-ready`, the new id, `avatar`.
+7. End, ArrowRight, Enter, Enter on `Delete action 2` (the last row, `avatar`). Remaining ids were `home-ready` and the created id. Focus landed on `+ Add step`, then Shift+Tab / Tab returned to `Edit Check 1`. Exactly one summary had `tabIndex=0`.
 
 ### Screenshots
 
@@ -86,14 +87,14 @@ Recorded under `keyboard` in the metrics:
 
 ## Keyboard-only walkthrough (recorded)
 
-The trace above is the walkthrough. It creates a step, links Destination to Profile from the keyboard, reorders with Move up, and deletes the last focused row while leaving one list tab stop. Pick stays visually with the element field and comes after Destination in the tab order.
+The trace above is the walkthrough. It creates a step, links Destination to Profile from the keyboard (the new row shows Profile), reorders that row with its own Move up, and deletes the last row (`avatar`) while the created step remains. Focus can return to the one list tab stop from the keyboard. Pick stays visually with the element field and is reached after Destination.
 
 ## Verification
 
 - `npm run typecheck`
 - `npm run build`
 - `npm test` (2 known macOS-only `plutil` failures in `tests/apps.test.ts` on Linux)
-- Golden #41 unchanged
-- `npm run check:canvas-contract` empty
+- Golden fixtures unchanged by the #51 edits (main already contains the #60 legacy-missing-destination fixture)
+- `npm run check:canvas-contract` passes with the existing named exception, including the #60 legacy-missing-destination patch
 
 Re-run screenshots: `npm install --no-save puppeteer-core && node scripts/inspector-browser-review.mjs`.

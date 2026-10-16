@@ -206,10 +206,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       assert.equal([...page.document.querySelectorAll('.floating-inspector button')].some(button=>(button.getAttribute('aria-label')??button.textContent)==='Picker'),false);
       await page.choose('id');
       const pick=page.row().querySelector<HTMLButtonElement>('button.pick-from-screen')!;
-      const fields=pick.closest('.visit-inline-fields')!;
-      assert.ok(fields.querySelector('.element-field input[aria-label$=" selector"]'),'Pick stays in the Element edit flow');
-      const destination=fields.querySelector('[aria-label$=" destination"]');
-      assert.ok(destination&&(destination.compareDocumentPosition(pick)&page.window.Node.DOCUMENT_POSITION_FOLLOWING),'Destination precedes Pick for Tab');
+      assert.equal(pick.closest('.element-field')?.querySelector<HTMLInputElement>('input[aria-label$=" selector"]')!=null,true);
       assert.match(pick.title,/element/);
       assert.match(pick.title,/id/);
       await act(async()=>pick.click());
@@ -246,6 +243,21 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       assert.equal(page.row().querySelector<HTMLInputElement>('input[aria-label$=" selector"]')!.value,'gear.button');
       assert.equal((page.row().querySelector('select[aria-label$=" matching"]') as HTMLSelectElement).value,'contains');
       assert.equal(page.document.activeElement,page.row().querySelector('button.pick-from-screen'));
+    }finally{await page.close();}
+  });
+
+  test('Tab from Destination focuses Pick from screen',async()=>{
+    const page=await openWorkspace('tap');
+    try{
+      await page.edit();
+      await page.choose('id');
+      const destination=page.row().querySelector<HTMLSelectElement>('[aria-label$=" destination"]')!;
+      const pick=page.row().querySelector<HTMLButtonElement>('button.pick-from-screen')!;
+      destination.focus();
+      await page.press(destination,'Tab');
+      assert.equal(page.document.activeElement,pick);
+      await page.press(pick,'Tab');
+      assert.equal(page.document.activeElement?.textContent,'Done');
     }finally{await page.close();}
   });
 

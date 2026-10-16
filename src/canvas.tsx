@@ -1,7 +1,7 @@
 import {createPortal} from 'react-dom';
 import {appendVisitStep,isCommittableSelector,moveAboveNavigation,reorderVisitStep} from './inspector-operations.js';
 import {FloatingCard,type CardPosition} from './floating-card.js';
-import {isEditableTarget} from './inspector-a11y.js';
+import {isEditableTarget,moveInspectorTab} from './inspector-a11y.js';
 import {AddStepMenu,RunStatusBadge,VisitStep,type PickerSession} from './visit-steps.js';
 import {YamlEditor} from './yaml-editor.js';
 import {RecoveredFields,useWorkspaceDraft} from './workspace-drafts.js';
@@ -212,7 +212,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  {(contextMenu.screenId?onDelete:onAdd)&&<button role="menuitem" disabled={!contextMenu.screenId&&graph.screens.length>=40} onClick={()=>{setContextMenu(undefined);if(contextMenu.screenId)onDelete?.(contextMenu.screenId);else onAdd?.(contextMenu.x,contextMenu.y);}}>{contextMenu.screenId?'Delete node':'Add node'}</button>}
  {!contextMenu.screenId&&onRun&&<button role="menuitem" onClick={()=>{setContextMenu(undefined);onRun();}}>Run scenario</button>}
  </div>}
- {inspected&&<aside ref={card} className="floating-inspector" aria-labelledby={marker+'-inspector-title'} data-inspector-side={placement?.side} data-inspector-clamped={placement?.clamped?'true':undefined} style={placement?{left:placement.left,top:placement.top,maxHeight:placement.maxHeight}:{visibility:'hidden'}} onKeyDown={event=>{if(event.key!=='Escape'||event.defaultPrevented||isEditableTarget(event.target))return;event.preventDefault();event.stopPropagation();closeInspector();}}>
+ {inspected&&<aside ref={card} className="floating-inspector" aria-labelledby={marker+'-inspector-title'} data-inspector-side={placement?.side} data-inspector-clamped={placement?.clamped?'true':undefined} style={placement?{left:placement.left,top:placement.top,maxHeight:placement.maxHeight}:{visibility:'hidden'}} onKeyDown={event=>{if(event.defaultPrevented)return;if(event.key==='Tab'){moveInspectorTab(event,event.currentTarget);return;}if(event.key!=='Escape'||isEditableTarget(event.target))return;event.preventDefault();event.stopPropagation();closeInspector();}}>
  <header className="floating-inspector-header"><h3 id={marker+'-inspector-title'}>{inspected.title}</h3></header>
  {inspectorNote&&<p className="floating-inspector-note">{inspectorNote}</p>}
  <div className="floating-inspector-body">{renderInspector!(inspected.id)}</div>{overflow&&<div className="inspector-bottom-fade" aria-hidden="true"/>}
