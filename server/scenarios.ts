@@ -139,7 +139,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       validate(content.yaml,content.flows,[],new Set(),missing);
       if(!content.scenarios?.length)try{await service.preview(content);}catch(error){missing.push(error instanceof Error?error.message:'Repair missing YAML inputs.');}
       for(const scenario of content.scenarios??[])try{await service.preview({...content,scenarioId:scenario.id});}catch(error){missing.push(scenario.name+': '+(error instanceof Error?error.message:'Repair scenario.'));}
-      const review=packageReview(content,[...missing,...(content.canvasDiagnostics??[]).map(item=>item.detail)]);
+      const review=packageReview(content,[...missing,...(content.canvasDiagnostics??[]).map(item=>item.detail??`${item.code}:${item.actionId}`)]);
       return {package:{...pkg,dependencies:review.dependencies,workspace:portableContent(content,true)},review};
     },
     async importWorkspace(input:{package:unknown;name:string}){

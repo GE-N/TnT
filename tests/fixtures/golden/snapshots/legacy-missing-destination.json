@@ -1,0 +1,207 @@
+{
+  "baseline": {
+    "canvas": {
+      "edges": [],
+      "paths": [
+        {
+          "edgeIds": [],
+          "id": "route",
+          "scenarioId": null,
+          "screenId": "home"
+        }
+      ],
+      "screens": [
+        {
+          "id": "home",
+          "tests": [
+            "gear",
+            "home-ready"
+          ],
+          "title": "Home"
+        },
+        {
+          "id": "settings",
+          "tests": [
+            "settings-ready"
+          ],
+          "title": "Settings"
+        }
+      ]
+    },
+    "routes": [
+      {
+        "error": "missing-destination:gear",
+        "pathId": "route"
+      }
+    ],
+    "visits": [
+      {
+        "checkIds": null,
+        "index": 0,
+        "operationIds": [
+          "home-ready"
+        ],
+        "pathId": "route",
+        "screenId": "home",
+        "storedOperationIds": null,
+        "visitId": "route:visit:0"
+      }
+    ],
+    "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:gear\n# tnt-match:exact\n- tapOn:\n    text: ^Gear$\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:settings-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Settings$\n"
+  },
+  "description": "A legacy start-only route whose tap has no destination does not project: it reports the missing destination. Connecting the tap to Settings makes the route project.",
+  "fixture": "legacy-missing-destination",
+  "operations": [
+    {
+      "detail": {
+        "actionId": "gear",
+        "op": "connect",
+        "screenId": "home",
+        "to": "settings"
+      },
+      "op": "connect",
+      "result": {
+        "canvas": {
+          "edges": [
+            {
+              "actionTestId": "gear",
+              "actionTestIds": null,
+              "from": "home",
+              "id": "action-link:gear",
+              "to": "settings"
+            }
+          ],
+          "paths": [
+            {
+              "edgeIds": [
+                "action-link:gear"
+              ],
+              "id": "route",
+              "scenarioId": null,
+              "screenId": "home"
+            }
+          ],
+          "screens": [
+            {
+              "id": "home",
+              "tests": [
+                "gear",
+                "home-ready"
+              ],
+              "title": "Home"
+            },
+            {
+              "id": "settings",
+              "tests": [
+                "settings-ready"
+              ],
+              "title": "Settings"
+            }
+          ]
+        },
+        "routes": [
+          {
+            "checkpoints": null,
+            "executionYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:gear\n# tnt-match:exact\n- tapOn:\n    text: ^Gear$\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:settings-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Settings$\n",
+            "pathId": "route",
+            "projectedVisits": [
+              {
+                "checkIds": [
+                  "home-ready"
+                ],
+                "id": "route:visit:0",
+                "screenId": "home"
+              },
+              {
+                "checkIds": [
+                  "settings-ready"
+                ],
+                "id": "id:1",
+                "screenId": "settings"
+              }
+            ],
+            "setup": null,
+            "steps": [
+              {
+                "assertion": false,
+                "edgeId": "action-link:gear",
+                "id": "occurrence:[\"route:visit:0\",\"gear\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "f72493ea81e9da824ef288314e5729a9ae5fa7c1489843431ae428fd90746ffb",
+                  "index": 1,
+                  "kind": "step"
+                },
+                "testId": "gear",
+                "visitId": "route:visit:0"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"route:visit:0\",\"home-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "c24a05499ed936126d12b849f52191d9564ddbcfd86a3940e9b6963698fdbc0d",
+                  "index": 2,
+                  "kind": "step"
+                },
+                "testId": "home-ready",
+                "visitId": "route:visit:0"
+              },
+              {
+                "assertion": true,
+                "edgeId": null,
+                "id": "occurrence:[\"id:1\",\"settings-ready\"]",
+                "reference": {
+                  "actionId": null,
+                  "file": "flow.yaml",
+                  "fingerprint": "08266d0c862b248eb639b6b80151c876d0c2ef5704d2c1c648a54a829acdb859",
+                  "index": 3,
+                  "kind": "step"
+                },
+                "testId": "settings-ready",
+                "visitId": "id:1"
+              }
+            ],
+            "transitions": [
+              {
+                "destinationVisitId": "id:1",
+                "edgeId": "action-link:gear",
+                "id": "id:1:transition",
+                "visitId": "route:visit:0"
+              }
+            ]
+          }
+        ],
+        "visits": [
+          {
+            "checkIds": null,
+            "index": 0,
+            "operationIds": [
+              "gear",
+              "home-ready"
+            ],
+            "pathId": "route",
+            "screenId": "home",
+            "storedOperationIds": null,
+            "visitId": "route:visit:0"
+          },
+          {
+            "checkIds": null,
+            "index": 1,
+            "operationIds": [
+              "settings-ready"
+            ],
+            "pathId": "route",
+            "screenId": "settings",
+            "storedOperationIds": null,
+            "visitId": "id:1"
+          }
+        ],
+        "workspaceYaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:gear\n# tnt-match:exact\n- tapOn:\n    text: ^Gear$\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:settings-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Settings$\n"
+      }
+    }
+  ]
+}

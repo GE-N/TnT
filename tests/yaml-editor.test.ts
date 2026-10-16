@@ -59,7 +59,7 @@ test('form edits make old canvas associations repairable and prevent executing t
   const canvas={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'action',label:'Settings',role:'action',reference:catalog.references[0]}]},{id:'target',title:'Settings',x:400,y:0,tests:[{id:'assertion',label:'Settings visible',role:'assertion',reference:catalog.references[1]}]}],edges:[{id:'edge',from:'home',to:'target',actionTestId:'action',assertionTestId:'assertion',responseCondition:'Settings opens'}],paths:[{id:'path',name:'Settings',edgeIds:['edge']}]};
   const yaml=editForm(source,{source,index:1,value:'Maintenance'});
   const saved=await service.save({name:'Changed form',yaml,canvas});
-  assert.match(saved.canvasDiagnostics!.find(error=>error.ownerId==='assertion')!.detail,/stale.*relink/i);
+  assert.match(saved.canvasDiagnostics!.find(error=>error.ownerId==='assertion')!.detail??'',/stale.*relink/i);
   await assert.rejects(service.start({workspaceId:saved.id,deviceId:'E5C92F6E-40DC-493C-93B4-469E67193736',pathId:'path'}),/stale/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
@@ -93,7 +93,7 @@ test('deleting a duplicate step explicitly invalidates affected canvas reference
  const reference=referenceCatalog(source).references[0];
  const graph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'action',label:'Home',role:'action' as const,reference}]}],edges:[],paths:[]};
  const changed=canvasAfterDeletion(graph,0);
- assert.match(inspectCanvas(changed!,deleteForm(source,0)).diagnostics[0].detail,/stale/);
+ assert.match(inspectCanvas(changed!,deleteForm(source,0)).diagnostics[0].detail??'',/stale/);
  assert.equal(inspectCanvas(graph,source).diagnostics.length,0);
  const empty=deleteForm(deleteForm(source,0),0);
  assert.equal(readForms(appendForm(empty,'tapOn','Next')).steps[0].value,'Next');

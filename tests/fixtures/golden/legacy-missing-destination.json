@@ -1,0 +1,95 @@
+{
+  "canvas": {
+    "edges": [],
+    "paths": [
+      {
+        "edgeIds": [],
+        "id": "route",
+        "name": "Home checks",
+        "screenId": "home"
+      }
+    ],
+    "screens": [
+      {
+        "id": "home",
+        "tests": [
+          {
+            "id": "gear",
+            "label": "tap Gear",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 1,
+              "kind": "step"
+            },
+            "role": "action",
+            "tap": {
+              "match": "exact",
+              "target": "text",
+              "value": "Gear"
+            }
+          },
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Home",
+              "visibility": "visible"
+            },
+            "id": "home-ready",
+            "label": "Home",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 2,
+              "kind": "step"
+            },
+            "role": "assertion"
+          }
+        ],
+        "title": "Home",
+        "x": 40,
+        "y": 40
+      },
+      {
+        "id": "settings",
+        "tests": [
+          {
+            "check": {
+              "match": "exact",
+              "target": "text",
+              "value": "Settings",
+              "visibility": "visible"
+            },
+            "id": "settings-ready",
+            "label": "Settings",
+            "reference": {
+              "file": "flow.yaml",
+              "fingerprint": "draft",
+              "index": 3,
+              "kind": "step"
+            },
+            "role": "assertion"
+          }
+        ],
+        "title": "Settings",
+        "x": 420,
+        "y": 40
+      }
+    ]
+  },
+  "description": "A legacy start-only route whose tap has no destination does not project: it reports the missing destination. Connecting the tap to Settings makes the route project.",
+  "id": "legacy-missing-destination",
+  "pathId": "route",
+  "scenarioMode": false,
+  "scenarios": [],
+  "scripts": [
+    {
+      "actionId": "gear",
+      "op": "connect",
+      "screenId": "home",
+      "to": "settings"
+    }
+  ],
+  "yaml": "appId: com.example.App\n---\n- launchApp\n# tnt-check:gear\n# tnt-match:exact\n- tapOn:\n    text: ^Gear$\n# tnt-check:home-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Home$\n# tnt-check:settings-ready\n# tnt-match:exact\n- assertVisible:\n    text: ^Settings$\n"
+}

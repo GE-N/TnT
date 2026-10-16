@@ -381,6 +381,20 @@ function retargetSameScreen():GoldenFixture{
   ]};
 }
 
+function legacyMissingDestination():GoldenFixture{
+  const canvas:CanvasGraph={
+    screens:[
+      screen('home','Home',40,40,[{...tap('gear','Gear'),label:'tap Gear'},check('home-ready','Home')]),
+      screen('settings','Settings',420,40,[check('settings-ready','Settings')]),
+    ],
+    edges:[],
+    paths:[{id:'route',name:'Home checks',screenId:'home',edgeIds:[]}],
+  };
+  return {id:'legacy-missing-destination',description:'A legacy start-only route whose tap has no destination does not project: it reports the missing destination. Connecting the tap to Settings makes the route project.',scenarioMode:false,pathId:'route',scenarios:[],...materialize(canvas),scripts:[
+    {op:'connect',screenId:'home',actionId:'gear',to:'settings'},
+  ]};
+}
+
 export function buildGoldenFixtures():GoldenFixture[]{
-  return [linearRoute(),textTap(),idTap(),literalBack(),backControlFixture(),repeatedVisit(),sharedStep(),multiActionEdge(),unfrozenVisits(),legacyVisits(),deletionCut(),defaultActions(),sameScreenSteps(),staysOnScreen(),checkAfterNavigation(),sameScreenLastVisit(),retargetFrozenVisit(),retargetSameScreen()];
+  return [linearRoute(),textTap(),idTap(),literalBack(),backControlFixture(),repeatedVisit(),sharedStep(),multiActionEdge(),unfrozenVisits(),legacyVisits(),deletionCut(),defaultActions(),sameScreenSteps(),staysOnScreen(),checkAfterNavigation(),sameScreenLastVisit(),retargetFrozenVisit(),retargetSameScreen(),legacyMissingDestination()];
 }

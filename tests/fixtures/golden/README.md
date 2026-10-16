@@ -36,6 +36,7 @@ npm run check:canvas-contract
 | `same-screen-last-visit.json` | A same-screen tap in the last visit, which has no outgoing connection, runs in place (#44) |
 | `retarget-frozen-visit.json` | Retargeting the navigating tap of a frozen visit onto another screen keeps the same-screen tap off the connection, and the route still projects (#44) |
 | `retarget-same-screen.json` | Retargeting a navigating tap to its current destination is a no-op (#44) |
+| `legacy-missing-destination.json` | A legacy start-only route whose tap has no destination reports the missing destination instead of projecting. Connecting the tap makes the route project |
 
 Each snapshot records, for the baseline and after every script:
 
