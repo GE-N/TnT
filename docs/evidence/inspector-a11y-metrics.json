@@ -1,137 +1,704 @@
-[
-  {
-    "name": "inspector-a11y-1440x900",
-    "width": 300,
-    "height": 900,
-    "zoom": 0.85,
-    "screen": "home",
-    "edit": false,
-    "file": "evidence/inspector-a11y-1440x900.png",
-    "side": "right",
-    "clamped": false,
-    "left": 259,
-    "top": 164,
-    "close": {
-      "w": 44,
-      "h": 44
+{
+  "shots": [
+    {
+      "name": "inspector-a11y-1440x900",
+      "width": 300,
+      "height": 900,
+      "zoom": 0.85,
+      "screen": "home",
+      "edit": false,
+      "file": "evidence/inspector-a11y-1440x900.png",
+      "side": "right",
+      "clamped": false,
+      "left": 259,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": null,
+        "destination": {
+          "w": 0,
+          "h": 0
+        },
+        "done": null
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "danger text on inspector surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        },
+        {
+          "label": "danger on danger-surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(253, 236, 234)",
+          "ratio": 5.72
+        },
+        {
+          "label": "warning on warning-surface",
+          "fg": "rgb(138, 75, 0)",
+          "bg": "rgb(255, 244, 229)",
+          "ratio": 6.26
+        },
+        {
+          "label": "primary Add step",
+          "fg": "rgb(10, 99, 209)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 5.65
+        },
+        {
+          "label": "failed status",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "tabStops": 1
     },
-    "summary": {
-      "w": 254,
-      "h": 44
+    {
+      "name": "inspector-a11y-1280x800",
+      "width": 300,
+      "height": 800,
+      "zoom": 0.85,
+      "screen": "home",
+      "edit": false,
+      "file": "evidence/inspector-a11y-1280x800.png",
+      "side": "right",
+      "clamped": false,
+      "left": 259,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": null,
+        "destination": {
+          "w": 0,
+          "h": 0
+        },
+        "done": null
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "danger text on inspector surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        },
+        {
+          "label": "danger on danger-surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(253, 236, 234)",
+          "ratio": 5.72
+        },
+        {
+          "label": "warning on warning-surface",
+          "fg": "rgb(138, 75, 0)",
+          "bg": "rgb(255, 244, 229)",
+          "ratio": 6.26
+        },
+        {
+          "label": "primary Add step",
+          "fg": "rgb(10, 99, 209)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 5.65
+        },
+        {
+          "label": "failed status",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "tabStops": 1
     },
-    "primary": "#0a63d1",
-    "danger": "#b3261e",
-    "dangerSurface": "#fdecea",
-    "warning": "#8a4b00",
-    "warningSurface": "#fff4e5",
-    "focusOutline": "rgb(10, 132, 255) solid 3px"
-  },
-  {
-    "name": "inspector-a11y-1280x800",
-    "width": 300,
-    "height": 800,
-    "zoom": 0.85,
-    "screen": "home",
-    "edit": false,
-    "file": "evidence/inspector-a11y-1280x800.png",
-    "side": "right",
-    "clamped": false,
-    "left": 259,
-    "top": 164,
-    "close": {
-      "w": 44,
-      "h": 44
+    {
+      "name": "inspector-a11y-flip-below",
+      "width": 300,
+      "height": 800,
+      "zoom": 1.15,
+      "screen": "settings",
+      "edit": false,
+      "file": "evidence/inspector-a11y-flip-below.png",
+      "side": "below",
+      "clamped": false,
+      "left": 920,
+      "top": 227,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": null,
+        "destination": null,
+        "done": null
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "danger text on inspector surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        },
+        {
+          "label": "danger on danger-surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(253, 236, 234)",
+          "ratio": 5.72
+        },
+        {
+          "label": "warning on warning-surface",
+          "fg": "rgb(138, 75, 0)",
+          "bg": "rgb(255, 244, 229)",
+          "ratio": 6.26
+        },
+        {
+          "label": "primary Add step",
+          "fg": "rgb(10, 99, 209)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 5.65
+        },
+        {
+          "label": "failed status",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "tabStops": 1
     },
-    "summary": {
-      "w": 254,
-      "h": 44
+    {
+      "name": "inspector-a11y-zoom-fixed",
+      "width": 300,
+      "height": 900,
+      "zoom": 0.5,
+      "screen": "profile",
+      "edit": false,
+      "file": "evidence/inspector-a11y-zoom-fixed.png",
+      "side": "right",
+      "clamped": false,
+      "left": 347,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": null,
+        "destination": {
+          "w": 0,
+          "h": 0
+        },
+        "done": null
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "danger text on inspector surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        },
+        {
+          "label": "danger on danger-surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(253, 236, 234)",
+          "ratio": 5.72
+        },
+        {
+          "label": "warning on warning-surface",
+          "fg": "rgb(138, 75, 0)",
+          "bg": "rgb(255, 244, 229)",
+          "ratio": 6.26
+        },
+        {
+          "label": "primary Add step",
+          "fg": "rgb(10, 99, 209)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 5.65
+        },
+        {
+          "label": "failed status",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "tabStops": 1
     },
-    "primary": "#0a63d1",
-    "danger": "#b3261e",
-    "dangerSurface": "#fdecea",
-    "warning": "#8a4b00",
-    "warningSurface": "#fff4e5",
-    "focusOutline": "rgb(10, 132, 255) solid 3px"
-  },
-  {
-    "name": "inspector-a11y-flip-clamped",
-    "width": 300,
-    "height": 800,
-    "zoom": 1.15,
-    "screen": "settings",
-    "edit": false,
-    "file": "evidence/inspector-a11y-flip-clamped.png",
-    "side": "below",
-    "clamped": false,
-    "left": 920,
-    "top": 227,
-    "close": {
-      "w": 44,
-      "h": 44
+    {
+      "name": "inspector-a11y-contrast-targets",
+      "width": 300,
+      "height": 900,
+      "zoom": 0.85,
+      "screen": "home",
+      "edit": true,
+      "file": "evidence/inspector-a11y-contrast-targets.png",
+      "side": "right",
+      "clamped": false,
+      "left": 259,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": {
+          "w": 254,
+          "h": 44
+        },
+        "destination": {
+          "w": 254,
+          "h": 44
+        },
+        "done": {
+          "w": 254,
+          "h": 44
+        }
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "danger text on inspector surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        },
+        {
+          "label": "danger on danger-surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(253, 236, 234)",
+          "ratio": 5.72
+        },
+        {
+          "label": "warning on warning-surface",
+          "fg": "rgb(138, 75, 0)",
+          "bg": "rgb(255, 244, 229)",
+          "ratio": 6.26
+        },
+        {
+          "label": "primary Add step",
+          "fg": "rgb(10, 99, 209)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 5.65
+        },
+        {
+          "label": "failed status",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "tabStops": 1
     },
-    "summary": {
-      "w": 254,
-      "h": 44
+    {
+      "name": "inspector-a11y-clamped",
+      "width": 300,
+      "height": 520,
+      "zoom": 0.85,
+      "screen": "home",
+      "edit": false,
+      "clamp": true,
+      "file": "evidence/inspector-a11y-clamped.png",
+      "side": "right",
+      "clamped": true,
+      "left": 112,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": null,
+        "destination": {
+          "w": 0,
+          "h": 0
+        },
+        "done": null
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "danger text on inspector surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        },
+        {
+          "label": "danger on danger-surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(253, 236, 234)",
+          "ratio": 5.72
+        },
+        {
+          "label": "warning on warning-surface",
+          "fg": "rgb(138, 75, 0)",
+          "bg": "rgb(255, 244, 229)",
+          "ratio": 6.26
+        },
+        {
+          "label": "primary Add step",
+          "fg": "rgb(10, 99, 209)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 5.65
+        },
+        {
+          "label": "failed status",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "tabStops": 1
     },
-    "primary": "#0a63d1",
-    "danger": "#b3261e",
-    "dangerSurface": "#fdecea",
-    "warning": "#8a4b00",
-    "warningSurface": "#fff4e5",
-    "focusOutline": "rgb(10, 132, 255) solid 3px"
-  },
-  {
-    "name": "inspector-a11y-zoom-fixed",
-    "width": 300,
-    "height": 900,
-    "zoom": 0.5,
-    "screen": "profile",
-    "edit": false,
-    "file": "evidence/inspector-a11y-zoom-fixed.png",
-    "side": "right",
-    "clamped": false,
-    "left": 347,
-    "top": 164,
-    "close": {
-      "w": 44,
-      "h": 44
+    {
+      "name": "inspector-a11y-keyboard-journey",
+      "width": 300,
+      "height": 900,
+      "zoom": 0.85,
+      "screen": "home",
+      "edit": false,
+      "file": "evidence/inspector-a11y-keyboard-journey.png",
+      "side": "right",
+      "clamped": false,
+      "left": 259,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": null,
+        "destination": {
+          "w": 0,
+          "h": 0
+        },
+        "done": null
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "danger text on inspector surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        },
+        {
+          "label": "danger on danger-surface",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(253, 236, 234)",
+          "ratio": 5.72
+        },
+        {
+          "label": "warning on warning-surface",
+          "fg": "rgb(138, 75, 0)",
+          "bg": "rgb(255, 244, 229)",
+          "ratio": 6.26
+        },
+        {
+          "label": "primary Add step",
+          "fg": "rgb(10, 99, 209)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 5.65
+        },
+        {
+          "label": "failed status",
+          "fg": "rgb(179, 38, 30)",
+          "bg": "rgb(255, 255, 255)",
+          "ratio": 6.54
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "tabStops": 1,
+      "keyboard": [
+        {
+          "step": "focus list stop",
+          "active": "Edit Check 1",
+          "tabStops": 1,
+          "rows": 2,
+          "editing": false,
+          "destination": "profile"
+        },
+        {
+          "step": "ArrowDown to next row",
+          "active": "Edit Action 1",
+          "tabStops": 1,
+          "rows": 2,
+          "editing": false,
+          "destination": "profile"
+        },
+        {
+          "step": "Enter to edit",
+          "active": "Edit Action 1",
+          "tabStops": 1,
+          "rows": 2,
+          "editing": true,
+          "destination": "profile"
+        },
+        {
+          "step": "Tab toward Destination",
+          "active": "Cancel",
+          "tabStops": 1,
+          "rows": 2,
+          "editing": true,
+          "destination": "profile"
+        },
+        {
+          "step": "Esc cancel edit",
+          "active": "Edit Action 1",
+          "tabStops": 1,
+          "rows": 2,
+          "editing": false,
+          "destination": "profile"
+        },
+        {
+          "step": "create: open Add step",
+          "active": "INPUT",
+          "tabStops": 1,
+          "rows": 2,
+          "editing": false,
+          "destination": "profile"
+        },
+        {
+          "step": "create: choose Tap",
+          "active": "Action 2 selector",
+          "tabStops": 1,
+          "rows": 3,
+          "editing": true,
+          "destination": "profile"
+        },
+        {
+          "step": "link: set Destination to Profile",
+          "active": "Edit Action 2",
+          "tabStops": 1,
+          "rows": 3,
+          "editing": false,
+          "destination": "profile"
+        },
+        {
+          "step": "reorder: ArrowRight to ⋯ then Move down",
+          "active": "Edit Check 1",
+          "tabStops": 1,
+          "rows": 3,
+          "editing": false,
+          "destination": "profile"
+        },
+        {
+          "step": "delete: open ⋯ and Delete last focused row",
+          "active": "Edit Check 1",
+          "tabStops": 1,
+          "rows": 2,
+          "editing": false,
+          "destination": "profile"
+        }
+      ]
+    }
+  ],
+  "keyboard": [
+    {
+      "step": "focus list stop",
+      "active": "Edit Check 1",
+      "tabStops": 1,
+      "rows": 2,
+      "editing": false,
+      "destination": "profile"
     },
-    "summary": {
-      "w": 254,
-      "h": 44
+    {
+      "step": "ArrowDown to next row",
+      "active": "Edit Action 1",
+      "tabStops": 1,
+      "rows": 2,
+      "editing": false,
+      "destination": "profile"
     },
-    "primary": "#0a63d1",
-    "danger": "#b3261e",
-    "dangerSurface": "#fdecea",
-    "warning": "#8a4b00",
-    "warningSurface": "#fff4e5",
-    "focusOutline": "rgb(10, 132, 255) solid 3px"
-  },
-  {
-    "name": "inspector-a11y-contrast-targets",
-    "width": 300,
-    "height": 900,
-    "zoom": 0.85,
-    "screen": "home",
-    "edit": true,
-    "file": "evidence/inspector-a11y-contrast-targets.png",
-    "side": "right",
-    "clamped": false,
-    "left": 259,
-    "top": 164,
-    "close": {
-      "w": 44,
-      "h": 44
+    {
+      "step": "Enter to edit",
+      "active": "Edit Action 1",
+      "tabStops": 1,
+      "rows": 2,
+      "editing": true,
+      "destination": "profile"
     },
-    "summary": {
-      "w": 254,
-      "h": 44
+    {
+      "step": "Tab toward Destination",
+      "active": "Cancel",
+      "tabStops": 1,
+      "rows": 2,
+      "editing": true,
+      "destination": "profile"
     },
-    "primary": "#0a63d1",
-    "danger": "#b3261e",
-    "dangerSurface": "#fdecea",
-    "warning": "#8a4b00",
-    "warningSurface": "#fff4e5",
-    "focusOutline": "rgb(10, 132, 255) solid 3px"
-  }
-]
+    {
+      "step": "Esc cancel edit",
+      "active": "Edit Action 1",
+      "tabStops": 1,
+      "rows": 2,
+      "editing": false,
+      "destination": "profile"
+    },
+    {
+      "step": "create: open Add step",
+      "active": "INPUT",
+      "tabStops": 1,
+      "rows": 2,
+      "editing": false,
+      "destination": "profile"
+    },
+    {
+      "step": "create: choose Tap",
+      "active": "Action 2 selector",
+      "tabStops": 1,
+      "rows": 3,
+      "editing": true,
+      "destination": "profile"
+    },
+    {
+      "step": "link: set Destination to Profile",
+      "active": "Edit Action 2",
+      "tabStops": 1,
+      "rows": 3,
+      "editing": false,
+      "destination": "profile"
+    },
+    {
+      "step": "reorder: ArrowRight to ⋯ then Move down",
+      "active": "Edit Check 1",
+      "tabStops": 1,
+      "rows": 3,
+      "editing": false,
+      "destination": "profile"
+    },
+    {
+      "step": "delete: open ⋯ and Delete last focused row",
+      "active": "Edit Check 1",
+      "tabStops": 1,
+      "rows": 2,
+      "editing": false,
+      "destination": "profile"
+    }
+  ]
+}

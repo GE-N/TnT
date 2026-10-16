@@ -150,7 +150,7 @@ test('step list stays one tab stop; arrows move; deleting the last focused row k
   row.querySelector<HTMLButtonElement>('[aria-label^="Delete "]')!.click();
   await settle();
  });
- assert.equal(summaries().some(item=>item.closest('[data-operation-id]')?.dataset.operationId===lastId),false);
+ assert.equal(summaries().some(item=>item.closest<HTMLElement>('[data-operation-id]')?.dataset.operationId===lastId),false);
  assert.equal(summaries().filter(item=>item.tabIndex===0).length,1,'surviving rows keep exactly one list tab stop');
 }));
 

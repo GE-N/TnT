@@ -31,7 +31,7 @@ Reviewed with the real `CanvasEditor` fixture via Vite + Chrome headless (`scrip
 | Check | Result |
 | --- | --- |
 | Placement / flip | Home opens to the **right** at 1440×900 and 1280×800. Settings at 1.15× zoom **flips below**. |
-| Clamping | Narrow 480×700 viewport with Home panned so left/right ideals overflow; recorded `data-inspector-clamped` and in-window left/top in the clamped shot. |
+| Clamping | Fixture `clamp=1` parks Home far right/bottom in a 420×520 window so the placer must clamp; metrics record `data-inspector-clamped` and in-window left/top. |
 | Fixed size at zoom | Inspector width stayed **300px** at 0.5×, 0.85× and 1.15× zoom. |
 | Contrast | Metrics include **rendered** foreground/background samples and WCAG ratios for danger text, warning notice, primary Add step, and failed status (not tokens alone). |
 | 44px targets | Close, step summary, Add step, YAML, Pick, Destination, and Done sizes recorded when present. |

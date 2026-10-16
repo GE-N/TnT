@@ -326,12 +326,16 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
    const current=path&&visitId?routeVisits(graph!,path).findIndex(visit=>visit.id===visitId):-1;
    const ids=current>=0?visitOperations(graph!,path!,current):[];const position=ids.indexOf(test.id);
    const screenId=graph!.screens.find(screen=>screen.tests.some(item=>item.id===test.id))!.id;
+   const onScreen=(id:string)=>graph!.screens.find(screen=>screen.id===screenId)!.tests.some(item=>item.id===id);
    const surviving=ids.filter(id=>id!==test.id);
-   const nextFocus=ids.slice(position+1).find(id=>surviving.includes(id))??surviving.at(-1);
+   // DOM focus: next editable on this screen after the deleted row (skip repair ids); undefined → Add step.
+   const nextFocus=ids.slice(position+1).find(id=>surviving.includes(id)&&onScreen(id));
+   // List tab stop: prefer that row, else any surviving on-screen row so the composite stop remains.
+   const listFocus=nextFocus??surviving.find(onScreen)??surviving.at(-1);
    commitRemoval(planCanvasDeletion(graph!,{kind:'operation',id:test.id,...(visitId?{pathId,visitId}: {})}).graph,visitId?{pathId,visitId,id:test.id,position:position+1,screenId}:undefined);
    if(visitId){
     focusStep.current={visitId,id:nextFocus};
-    setStepListFocus(nextFocus?{visitId,id:nextFocus}:undefined);
+    setStepListFocus(listFocus?{visitId,id:listFocus}:undefined);
    }
    setExpandedRow('');
   });

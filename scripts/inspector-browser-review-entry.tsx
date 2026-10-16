@@ -26,11 +26,19 @@ const zoom=Number(params.get('zoom')||'0.85');
 const screen=params.get('screen')||'home';
 const edit=params.get('edit')==='1';
 const focus=params.get('focus')==='1';
+const clamp=params.get('clamp')==='1';
+const scrollLeft=Number(params.get('scrollLeft')||'0');
+const scrollTop=Number(params.get('scrollTop')||'0');
 
 function Host(){
- const [graph,setGraph]=useState(()=>refreshChecks(canvas,yaml));
+ const [graph,setGraph]=useState(()=>{
+  const base=refreshChecks(canvas,yaml);
+  if(!clamp)return base;
+  // Park Home far right/bottom so the live placer must clamp every ideal side.
+  return {...base,screens:base.screens.map(item=>item.id==='home'?{...item,x:2100,y:1600}:item)};
+ });
  const [source,setSource]=useState(yaml);
- const initialView=useMemo(()=>({zoom,scrollLeft:0,scrollTop:0,selectedScreenId:screen,selectedVisitId:screen==='home'?'v1':screen==='profile'?'v2':'v3'}),[]);
+ const initialView=useMemo(()=>({zoom,scrollLeft:clamp?1800:scrollLeft,scrollTop:clamp?1400:scrollTop,selectedScreenId:screen,selectedVisitId:screen==='home'?'v1':screen==='profile'?'v2':'v3'}),[]);
  return createElement('div',{className:'workbench'},createElement(CanvasEditor,{
   graph,onChange:next=>setGraph(next??graph),yaml:source,onYamlChange:setSource,catalog:[],diagnostics:[],
   pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode:true,scenarioId:'main',

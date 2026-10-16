@@ -206,7 +206,10 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       assert.equal([...page.document.querySelectorAll('.floating-inspector button')].some(button=>(button.getAttribute('aria-label')??button.textContent)==='Picker'),false);
       await page.choose('id');
       const pick=page.row().querySelector<HTMLButtonElement>('button.pick-from-screen')!;
-      assert.equal(pick.closest('.element-field')?.querySelector<HTMLInputElement>('input[aria-label$=" selector"]')!=null,true);
+      const fields=pick.closest('.visit-inline-fields')!;
+      assert.ok(fields.querySelector('.element-field input[aria-label$=" selector"]'),'Pick stays in the Element edit flow');
+      const destination=fields.querySelector('[aria-label$=" destination"]');
+      assert.ok(destination&&(destination.compareDocumentPosition(pick)&page.window.Node.DOCUMENT_POSITION_FOLLOWING),'Destination precedes Pick for Tab');
       assert.match(pick.title,/element/);
       assert.match(pick.title,/id/);
       await act(async()=>pick.click());

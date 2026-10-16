@@ -69,12 +69,14 @@ const measureScript=()=>{
  const yaml=inspector.querySelector('.visit-yaml-link');
  const pick=inspector.querySelector('.pick-from-screen');
  const destination=inspector.querySelector('[aria-label$=" destination"]');
- const done=[...inspector.querySelectorAll('button')].find(button=>button.textContent==='Done');
- // Probe AA tokens on rendered surfaces used by the inspector.
+ const done=[...inspector.querySelectorAll('.visit-inline-fields:not([hidden]) button')].find(button=>button.textContent==='Done');
+ // Probe rendered fg/bg on the surfaces the inspector actually uses.
  const probe=document.createElement('div');
- probe.style.cssText='position:fixed;left:-9999px;top:0;display:grid;gap:8px';
+ probe.className='floating-inspector';
+ probe.style.cssText='position:fixed;left:-9999px;top:0;display:grid;gap:8px;width:300px;padding:12px;background:var(--surface)';
  probe.innerHTML=[
   '<p class="visit-step-error" role="alert">Failed step detail</p>',
+  '<p class="notice error" role="alert">Danger on danger-surface</p>',
   '<p class="inspector-draft-notice" role="status">⚠ Draft kept, not valid yet</p>',
   '<button class="add-visit-step">+ Add step</button>',
   '<span class="run-status-badge failed" role="status">Failed</span>',
@@ -82,8 +84,9 @@ const measureScript=()=>{
  document.body.appendChild(probe);
  const styles=getComputedStyle(document.documentElement);
  const contrasts=[
-  sampleContrast(probe.querySelector('.visit-step-error'),'danger text on surface'),
-  sampleContrast(probe.querySelector('.inspector-draft-notice'),'warning notice'),
+  sampleContrast(probe.querySelector('.visit-step-error'),'danger text on inspector surface'),
+  sampleContrast(probe.querySelector('.notice.error'),'danger on danger-surface'),
+  sampleContrast(probe.querySelector('.inspector-draft-notice'),'warning on warning-surface'),
   sampleContrast(probe.querySelector('.add-visit-step'),'primary Add step'),
   sampleContrast(probe.querySelector('.run-status-badge.failed'),'failed status'),
  ].filter(Boolean);
@@ -145,41 +148,32 @@ try{
   await page.close();
  }
 
- // Real clamp: narrow viewport + pan Home so right/left ideal positions both overflow.
+ // Real clamp: narrow+short viewport, pan Home to bottom-center so every ideal side moves.
  {
   const page=await browser.newPage();
-  await page.setViewport({width:480,height:700,deviceScaleFactor:1});
-  await page.goto(`http://127.0.0.1:${port}/scripts/inspector-review.html?zoom=1&screen=home&focus=1`,{waitUntil:'networkidle0',timeout:60_000});
+  await page.setViewport({width:420,height:520,deviceScaleFactor:1});
+  await page.goto(`http://127.0.0.1:${port}/scripts/inspector-review.html?zoom=0.85&screen=home&focus=1&clamp=1`,{waitUntil:'networkidle0',timeout:60_000});
   await page.waitForSelector('.floating-inspector',{timeout:15_000});
-  await page.evaluate(async()=>{
-   const viewport=document.querySelector('.canvas-viewport');
-   const node=document.querySelector('[data-screen-id="home"]');
-   if(!viewport||!node)return;
-   const vr=viewport.getBoundingClientRect();
-   const nr=node.getBoundingClientRect();
-   // Center the node so neither left nor right ideal fits inside the narrow bounds.
-   viewport.scrollLeft+=(nr.left+nr.width/2)-(vr.left+vr.width/2);
-   await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-  });
-  await new Promise(r=>setTimeout(r,600));
+  await new Promise(r=>setTimeout(r,900));
   let metrics=await page.evaluate(measureScript);
   if(!metrics.clamped){
-   // Fall back: push the node mostly past the right edge.
    await page.evaluate(async()=>{
     const viewport=document.querySelector('.canvas-viewport');
     const node=document.querySelector('[data-screen-id="home"]');
     if(!viewport||!node)return;
     const vr=viewport.getBoundingClientRect();
     const nr=node.getBoundingClientRect();
-    viewport.scrollLeft+=nr.left-(vr.right-40);
+    viewport.scrollLeft+=(nr.left+nr.width/2)-(vr.left+vr.width/2);
+    viewport.scrollTop+=nr.bottom-(vr.bottom-20);
+    window.dispatchEvent(new Event('resize'));
     await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
    });
-   await new Promise(r=>setTimeout(r,600));
+   await new Promise(r=>setTimeout(r,700));
    metrics=await page.evaluate(measureScript);
   }
   const file=resolve(evidence,'inspector-a11y-clamped.png');
   await page.screenshot({path:file,fullPage:false});
-  results.push({name:'inspector-a11y-clamped',width:480,height:700,zoom:1,screen:'home',edit:false,file:'evidence/inspector-a11y-clamped.png',...metrics});
+  results.push({name:'inspector-a11y-clamped',width:420,height:520,zoom:0.85,screen:'home',edit:false,clamp:true,file:'evidence/inspector-a11y-clamped.png',...metrics});
   console.log('inspector-a11y-clamped',metrics);
   await page.close();
  }
