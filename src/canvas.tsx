@@ -326,8 +326,14 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
    const current=path&&visitId?routeVisits(graph!,path).findIndex(visit=>visit.id===visitId):-1;
    const ids=current>=0?visitOperations(graph!,path!,current):[];const position=ids.indexOf(test.id);
    const screenId=graph!.screens.find(screen=>screen.tests.some(item=>item.id===test.id))!.id;
+   const surviving=ids.filter(id=>id!==test.id);
+   const nextFocus=ids.slice(position+1).find(id=>surviving.includes(id))??surviving.at(-1);
    commitRemoval(planCanvasDeletion(graph!,{kind:'operation',id:test.id,...(visitId?{pathId,visitId}: {})}).graph,visitId?{pathId,visitId,id:test.id,position:position+1,screenId}:undefined);
-   if(visitId)focusStep.current={visitId,id:ids.slice(position+1).find(id=>graph!.screens.find(screen=>screen.id===screenId)!.tests.some(test=>test.id===id))};setExpandedRow('');
+   if(visitId){
+    focusStep.current={visitId,id:nextFocus};
+    setStepListFocus(nextFocus?{visitId,id:nextFocus}:undefined);
+   }
+   setExpandedRow('');
   });
  }
  function announceDestination(before:CanvasGraph,next:CanvasGraph,screenId:string,testId:string,visitId:string|undefined,to:string,previous:string){
@@ -454,9 +460,15 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   if(command==='back'){test.tap=undefined;test.back=true;test.backSelector={target:'text',match:'exact',value:'Back'};}
   if(command.startsWith('assert')){test.tap=undefined;test.role='assertion';test.label='Screen check';test.check={target:'text',match:'exact',value:'',visibility:command==='assertVisible'?'visible':'absent'};}
   // Validate limits now, but keep the new step out of graph/source until its first valid commit.
-  appendVisitStep(graph!,pathId,visitId,test);setNewStep({pathId,visitId,test});setExpandedRow(test.id);
+  appendVisitStep(graph!,pathId,visitId,test);setNewStep({pathId,visitId,test});setExpandedRow(test.id);setStepListFocus({visitId,id:test.id});
  }
- function discardVisitStep(visitId:string){discardedVisit.current=visitId;setNewStep(undefined);setExpandedRow('');}
+ function discardVisitStep(visitId:string){
+  discardedVisit.current=visitId;setNewStep(undefined);setExpandedRow('');
+  const current=path?routeVisits(graph!,path).findIndex(visit=>visit.id===visitId):-1;
+  const ids=current>=0?visitOperations(graph!,path!,current):[];
+  const fallback=ids.at(-1);
+  setStepListFocus(fallback?{visitId,id:fallback}:undefined);
+ }
  function saveVisitStep(screenId:string,visitId:string,test:CanvasTest,to:string,connectionName?:string,newScreenTitle?:string){
   if(newStep?.test.id===test.id){
    const selector=test.check??test.tap??backControl(test);if(selector&&!isCommittableSelector(selector.value))return;
@@ -491,7 +503,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  {operations.map((test,index)=>{const selector=test.check??test.tap??backControl(test);const stepIndex=visitIds?(visitIds.includes(test.id)?visitIds.indexOf(test.id):visitIds.length):index;const name=edge&&!scenarioMode?edge.responseCondition+' action '+(index+1):(!test.check?'Action '+(taps.indexOf(test)+1):'Check '+(checks.indexOf(test)+1));if(visit)return <VisitStep key={test.id} graph={preview} pathId={pathId} visitId={visit.id} test={test} index={stepIndex} name={name} screenId={screenId} last={stepIndex>=(visitIds?.length??operations.length)-1} isNew={newStep?.test.id===test.id} moveDisabled={disabled||runLocked||!!newStep} editing={!runLocked&&expandedRow===test.id} onEdit={()=>{if(runLocked)return;if(!newStep||newStep.test.id===test.id){setExpandedRow(test.id);setStepListFocus({visitId:visit.id,id:test.id});}}} onClose={()=>setExpandedRow('')} onSave={(draft,to,connection,title)=>saveVisitStep(screenId,visit.id,draft,to,connection,title)} onDestinationChange={to=>destinationChange(screenId,test,visit.id,to)} onCreateDestination={title=>createDestination(screenId,test,visit.id,title)} onMoveAbove={()=>perform(()=>{const next=moveAboveNavigation(graph!,pathId,visit.id,test.id);changeChecks(next,true);setAnnouncement('Step moved to position '+(routeVisits(next,next.paths.find(item=>item.id===pathId)! ).find(item=>item.id===visit.id)!.operationIds!.indexOf(test.id)+1)+', above navigating actions.');})} onMove={direction=>{const neighbor=visitIds![stepIndex+direction];if(neighbor)moveOperation(screenId,test.id,neighbor,visit.id);}} onDelete={()=>newStep?.test.id===test.id?discardVisitStep(visit.id):deleteOperation(test,visit.id)} onDiscard={()=>perform(()=>discardVisitStep(visit.id))} dropPosition={dropTarget?.visitId===visit.id&&dropTarget.id===test.id?(dropTarget.after?'after':'before'):undefined} onDragStart={()=>{dragging.current={visitId:visit.id,id:test.id};}} onDragEnd={endDrag} onDragLeave={()=>setDropTarget(undefined)} onDragOver={after=>{if(disabled||runLocked||newStep||dragging.current?.visitId!==visit.id)return false;setDropTarget({visitId:visit.id,id:test.id,after});return true;}} onDrop={after=>{
  const source=dragging.current;endDrag();if(disabled||runLocked||newStep||!source||source.visitId!==visit.id)return;
  perform(()=>{const from=visitIds!.indexOf(source.id);const insertion=stepIndex+(after?1:0);const position=insertion-(from<insertion?1:0);const next=reorderVisitStep(graph!,pathId,visit.id,source.id,position);if(next===graph)return;changeChecks(next,true);focusStep.current={visitId:visit.id,id:source.id};setAnnouncement('Step '+(from+1)+' moved to position '+(position+1)+'.');});
- }} picker={picker} sourceYaml={yaml} cardPosition={cards?.picker} onCardPosition={position=>onCardPosition?.('picker',position)} runLocked={runLocked} runStatus={runView?.stepStatus(visit.id,test.id)} showDraftErrors={draftInvalid} listTabStop={!runLocked&&test.id===(stepListFocus?.visitId===visit.id?stepListFocus.id:(expandedRow&&operations.some(item=>item.id===expandedRow)?expandedRow:operations[0]?.id))} onListFocus={id=>setStepListFocus({visitId:visit.id,id})}/>;return <div key={test.id} className="canvas-operation" data-operation-id={test.id}>
+ }} picker={picker} sourceYaml={yaml} cardPosition={cards?.picker} onCardPosition={position=>onCardPosition?.('picker',position)} runLocked={runLocked} runStatus={runView?.stepStatus(visit.id,test.id)} showDraftErrors={draftInvalid} listTabStop={test.id===(stepListFocus?.visitId===visit.id&&operations.some(item=>item.id===stepListFocus.id)?stepListFocus.id:(expandedRow&&operations.some(item=>item.id===expandedRow)?expandedRow:operations[0]?.id))} onListFocus={id=>setStepListFocus({visitId:visit.id,id})}/>;return <div key={test.id} className="canvas-operation" data-operation-id={test.id}>
  {test.check&&!test.check.value&&<p className="field-hint">Screen condition: choose what must be visible or absent when this screen is reached.</p>}
  <details open={expandedRow===test.id?true:undefined} className="canvas-check-row"><summary>{canvasTestLabel(test)}</summary>
  {!test.check&&(!edge||scenarioMode)&&<DestinationSelect name={name} graph={graph!} value={graph!.edges.find(item=>item.from===screenId&&edgeActions(item).includes(test.id))?.to??''} onChange={to=>destinationChange(screenId,test,undefined,to)} onCreate={title=>createDestination(screenId,test,undefined,title)}/>}

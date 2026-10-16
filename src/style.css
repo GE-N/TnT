@@ -600,8 +600,19 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .visit-step{position:relative;padding:2px 0;border-bottom:1px solid var(--border)}
 .floating-inspector .visit-step-summary{display:block;width:100%;text-align:left;border:0;background:transparent;min-height:44px;padding:4px 44px 4px 0;color:var(--text);line-height:1.5}
 .step-command{color:var(--muted)}
-.visit-inline-fields{display:grid;gap:6px;padding:8px 0}
+.visit-inline-fields{display:flex;flex-direction:column;gap:6px;padding:8px 0}
 .visit-inline-fields input,.visit-inline-fields select{width:100%;box-sizing:border-box}
+/* Visual Element-field packing: Pick sits under the selector, while DOM order keeps Destination → Pick for Tab. */
+.visit-inline-fields > .element-field{order:1}
+.visit-inline-fields > .pick-from-screen{order:2}
+.visit-inline-fields > [aria-label$=" matching"]{order:3}
+.visit-inline-fields > [aria-label$=" visibility"]{order:3}
+.visit-inline-fields > [aria-label$=" text"]{order:3}
+.visit-inline-fields > [aria-label$=" type"]{order:4}
+.visit-inline-fields > .visit-destination-field{order:5}
+.visit-inline-fields > [aria-label="New screen title"]{order:6}
+.visit-inline-fields > button:not(.pick-from-screen){order:7}
+.visit-inline-fields > strong,.visit-inline-fields > .match-by,.visit-inline-fields > .connection-name,.visit-inline-fields > .visit-selector-error{order:0}
 .visit-step-actions{position:absolute;right:0;top:2px;background:var(--surface);z-index:2}
 .visit-step-actions[open]{box-shadow:0 4px 12px #25304129;max-width:180px}
 .visit-step-actions summary{display:grid;place-items:center;min-width:44px;min-height:44px}
