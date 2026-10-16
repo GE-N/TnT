@@ -2,7 +2,7 @@
   "shots": [
     {
       "name": "inspector-a11y-1440x900",
-      "width": 300,
+      "width": 1440,
       "height": 900,
       "zoom": 0.85,
       "screen": "home",
@@ -10,6 +10,11 @@
       "file": "evidence/inspector-a11y-1440x900.png",
       "side": "right",
       "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
       "left": 259,
       "top": 164,
       "targets": {
@@ -30,11 +35,13 @@
           "h": 44
         },
         "pick": null,
-        "destination": {
-          "w": 0,
-          "h": 0
-        },
-        "done": null
+        "destination": null,
+        "done": null,
+        "matchBy": null,
+        "delete": {
+          "w": 44,
+          "h": 57
+        }
       },
       "primary": "#0a63d1",
       "danger": "#b3261e",
@@ -43,42 +50,19 @@
       "warningSurface": "#fff4e5",
       "contrasts": [
         {
-          "label": "danger text on inspector surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
-        },
-        {
-          "label": "danger on danger-surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(253, 236, 234)",
-          "ratio": 5.72
-        },
-        {
-          "label": "warning on warning-surface",
-          "fg": "rgb(138, 75, 0)",
-          "bg": "rgb(255, 244, 229)",
-          "ratio": 6.26
-        },
-        {
           "label": "primary Add step",
-          "fg": "rgb(10, 99, 209)",
-          "bg": "rgb(255, 255, 255)",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
           "ratio": 5.65
-        },
-        {
-          "label": "failed status",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
         }
       ],
       "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focused": "Edit Check 1",
       "tabStops": 1
     },
     {
       "name": "inspector-a11y-1280x800",
-      "width": 300,
+      "width": 1280,
       "height": 800,
       "zoom": 0.85,
       "screen": "home",
@@ -86,6 +70,11 @@
       "file": "evidence/inspector-a11y-1280x800.png",
       "side": "right",
       "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
       "left": 259,
       "top": 164,
       "targets": {
@@ -106,11 +95,13 @@
           "h": 44
         },
         "pick": null,
-        "destination": {
-          "w": 0,
-          "h": 0
-        },
-        "done": null
+        "destination": null,
+        "done": null,
+        "matchBy": null,
+        "delete": {
+          "w": 44,
+          "h": 57
+        }
       },
       "primary": "#0a63d1",
       "danger": "#b3261e",
@@ -119,42 +110,19 @@
       "warningSurface": "#fff4e5",
       "contrasts": [
         {
-          "label": "danger text on inspector surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
-        },
-        {
-          "label": "danger on danger-surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(253, 236, 234)",
-          "ratio": 5.72
-        },
-        {
-          "label": "warning on warning-surface",
-          "fg": "rgb(138, 75, 0)",
-          "bg": "rgb(255, 244, 229)",
-          "ratio": 6.26
-        },
-        {
           "label": "primary Add step",
-          "fg": "rgb(10, 99, 209)",
-          "bg": "rgb(255, 255, 255)",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
           "ratio": 5.65
-        },
-        {
-          "label": "failed status",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
         }
       ],
       "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focused": "Edit Check 1",
       "tabStops": 1
     },
     {
       "name": "inspector-a11y-flip-below",
-      "width": 300,
+      "width": 1280,
       "height": 800,
       "zoom": 1.15,
       "screen": "settings",
@@ -162,6 +130,11 @@
       "file": "evidence/inspector-a11y-flip-below.png",
       "side": "below",
       "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
       "left": 920,
       "top": 227,
       "targets": {
@@ -183,7 +156,12 @@
         },
         "pick": null,
         "destination": null,
-        "done": null
+        "done": null,
+        "matchBy": null,
+        "delete": {
+          "w": 44,
+          "h": 57
+        }
       },
       "primary": "#0a63d1",
       "danger": "#b3261e",
@@ -192,42 +170,19 @@
       "warningSurface": "#fff4e5",
       "contrasts": [
         {
-          "label": "danger text on inspector surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
-        },
-        {
-          "label": "danger on danger-surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(253, 236, 234)",
-          "ratio": 5.72
-        },
-        {
-          "label": "warning on warning-surface",
-          "fg": "rgb(138, 75, 0)",
-          "bg": "rgb(255, 244, 229)",
-          "ratio": 6.26
-        },
-        {
           "label": "primary Add step",
-          "fg": "rgb(10, 99, 209)",
-          "bg": "rgb(255, 255, 255)",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
           "ratio": 5.65
-        },
-        {
-          "label": "failed status",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
         }
       ],
       "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focused": "Edit Check 1",
       "tabStops": 1
     },
     {
       "name": "inspector-a11y-zoom-fixed",
-      "width": 300,
+      "width": 1440,
       "height": 900,
       "zoom": 0.5,
       "screen": "profile",
@@ -235,6 +190,11 @@
       "file": "evidence/inspector-a11y-zoom-fixed.png",
       "side": "right",
       "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
       "left": 347,
       "top": 164,
       "targets": {
@@ -255,11 +215,13 @@
           "h": 44
         },
         "pick": null,
-        "destination": {
-          "w": 0,
-          "h": 0
-        },
-        "done": null
+        "destination": null,
+        "done": null,
+        "matchBy": null,
+        "delete": {
+          "w": 44,
+          "h": 57
+        }
       },
       "primary": "#0a63d1",
       "danger": "#b3261e",
@@ -268,49 +230,34 @@
       "warningSurface": "#fff4e5",
       "contrasts": [
         {
-          "label": "danger text on inspector surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
-        },
-        {
-          "label": "danger on danger-surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(253, 236, 234)",
-          "ratio": 5.72
-        },
-        {
-          "label": "warning on warning-surface",
-          "fg": "rgb(138, 75, 0)",
-          "bg": "rgb(255, 244, 229)",
-          "ratio": 6.26
-        },
-        {
           "label": "primary Add step",
-          "fg": "rgb(10, 99, 209)",
-          "bg": "rgb(255, 255, 255)",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
           "ratio": 5.65
-        },
-        {
-          "label": "failed status",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
         }
       ],
       "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focused": "Edit Check 1",
       "tabStops": 1
     },
     {
       "name": "inspector-a11y-contrast-targets",
-      "width": 300,
+      "width": 1440,
       "height": 900,
       "zoom": 0.85,
       "screen": "home",
       "edit": true,
+      "failed": true,
+      "draft": true,
+      "keyboard": false,
       "file": "evidence/inspector-a11y-contrast-targets.png",
       "side": "right",
       "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
       "left": 259,
       "top": 164,
       "targets": {
@@ -320,7 +267,7 @@
         },
         "summary": {
           "w": 254,
-          "h": 44
+          "h": 47
         },
         "addStep": {
           "w": 254,
@@ -341,6 +288,14 @@
         "done": {
           "w": 254,
           "h": 44
+        },
+        "matchBy": {
+          "w": 124,
+          "h": 44
+        },
+        "delete": {
+          "w": 104,
+          "h": 44
         }
       },
       "primary": "#0a63d1",
@@ -350,42 +305,31 @@
       "warningSurface": "#fff4e5",
       "contrasts": [
         {
-          "label": "danger text on inspector surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
-        },
-        {
-          "label": "danger on danger-surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(253, 236, 234)",
-          "ratio": 5.72
-        },
-        {
-          "label": "warning on warning-surface",
-          "fg": "rgb(138, 75, 0)",
-          "bg": "rgb(255, 244, 229)",
-          "ratio": 6.26
-        },
-        {
           "label": "primary Add step",
-          "fg": "rgb(10, 99, 209)",
-          "bg": "rgb(255, 255, 255)",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
           "ratio": 5.65
         },
         {
-          "label": "failed status",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
+          "label": "danger on failed step",
+          "foreground": "#b3261e",
+          "background": "#fdecea",
+          "ratio": 5.72
+        },
+        {
+          "label": "warning draft notice",
+          "foreground": "#8a4b00",
+          "background": "#fff4e5",
+          "ratio": 6.26
         }
       ],
-      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focusOutline": "",
+      "focused": "body",
       "tabStops": 1
     },
     {
       "name": "inspector-a11y-clamped",
-      "width": 300,
+      "width": 420,
       "height": 520,
       "zoom": 0.85,
       "screen": "home",
@@ -394,6 +338,11 @@
       "file": "evidence/inspector-a11y-clamped.png",
       "side": "right",
       "clamped": true,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 420,
+        "height": 520
+      },
       "left": 112,
       "top": 164,
       "targets": {
@@ -414,11 +363,13 @@
           "h": 44
         },
         "pick": null,
-        "destination": {
-          "w": 0,
-          "h": 0
-        },
-        "done": null
+        "destination": null,
+        "done": null,
+        "matchBy": null,
+        "delete": {
+          "w": 44,
+          "h": 57
+        }
       },
       "primary": "#0a63d1",
       "danger": "#b3261e",
@@ -427,42 +378,19 @@
       "warningSurface": "#fff4e5",
       "contrasts": [
         {
-          "label": "danger text on inspector surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
-        },
-        {
-          "label": "danger on danger-surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(253, 236, 234)",
-          "ratio": 5.72
-        },
-        {
-          "label": "warning on warning-surface",
-          "fg": "rgb(138, 75, 0)",
-          "bg": "rgb(255, 244, 229)",
-          "ratio": 6.26
-        },
-        {
           "label": "primary Add step",
-          "fg": "rgb(10, 99, 209)",
-          "bg": "rgb(255, 255, 255)",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
           "ratio": 5.65
-        },
-        {
-          "label": "failed status",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
         }
       ],
-      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focusOutline": "",
+      "focused": "body",
       "tabStops": 1
     },
     {
       "name": "inspector-a11y-keyboard-journey",
-      "width": 300,
+      "width": 1440,
       "height": 900,
       "zoom": 0.85,
       "screen": "home",
@@ -470,6 +398,11 @@
       "file": "evidence/inspector-a11y-keyboard-journey.png",
       "side": "right",
       "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
       "left": 259,
       "top": 164,
       "targets": {
@@ -490,11 +423,13 @@
           "h": 44
         },
         "pick": null,
-        "destination": {
-          "w": 0,
-          "h": 0
-        },
-        "done": null
+        "destination": null,
+        "done": null,
+        "matchBy": null,
+        "delete": {
+          "w": 44,
+          "h": 57
+        }
       },
       "primary": "#0a63d1",
       "danger": "#b3261e",
@@ -503,202 +438,189 @@
       "warningSurface": "#fff4e5",
       "contrasts": [
         {
-          "label": "danger text on inspector surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
-        },
-        {
-          "label": "danger on danger-surface",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(253, 236, 234)",
-          "ratio": 5.72
-        },
-        {
-          "label": "warning on warning-surface",
-          "fg": "rgb(138, 75, 0)",
-          "bg": "rgb(255, 244, 229)",
-          "ratio": 6.26
-        },
-        {
           "label": "primary Add step",
-          "fg": "rgb(10, 99, 209)",
-          "bg": "rgb(255, 255, 255)",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
           "ratio": 5.65
-        },
-        {
-          "label": "failed status",
-          "fg": "rgb(179, 38, 30)",
-          "bg": "rgb(255, 255, 255)",
-          "ratio": 6.54
         }
       ],
       "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focused": "+ Add step",
       "tabStops": 1,
       "keyboard": [
         {
-          "step": "focus list stop",
-          "active": "Edit Check 1",
-          "tabStops": 1,
-          "rows": 2,
-          "editing": false,
-          "destination": "profile"
+          "step": "step list",
+          "label": "Edit Check 1",
+          "className": "visit-step-summary",
+          "stops": 1
         },
         {
-          "step": "ArrowDown to next row",
-          "active": "Edit Action 1",
-          "tabStops": 1,
-          "rows": 2,
-          "editing": false,
-          "destination": "profile"
+          "step": "arrow down",
+          "label": "Edit Action 1",
+          "className": "visit-step-summary"
         },
         {
-          "step": "Enter to edit",
-          "active": "Edit Action 1",
-          "tabStops": 1,
-          "rows": 2,
-          "editing": true,
-          "destination": "profile"
+          "step": "arrow up",
+          "label": "Edit Check 1",
+          "className": "visit-step-summary"
         },
         {
-          "step": "Tab toward Destination",
-          "active": "Cancel",
-          "tabStops": 1,
-          "rows": 2,
-          "editing": true,
-          "destination": "profile"
+          "step": "end",
+          "label": "Edit Action 1",
+          "className": "visit-step-summary"
         },
         {
-          "step": "Esc cancel edit",
-          "active": "Edit Action 1",
-          "tabStops": 1,
-          "rows": 2,
-          "editing": false,
-          "destination": "profile"
+          "step": "add step dialog",
+          "label": "INPUT",
+          "className": ""
         },
         {
-          "step": "create: open Add step",
-          "active": "INPUT",
-          "tabStops": 1,
-          "rows": 2,
-          "editing": false,
-          "destination": "profile"
+          "step": "created step",
+          "label": "Action 2 selector",
+          "className": ""
         },
         {
-          "step": "create: choose Tap",
-          "active": "Action 2 selector",
-          "tabStops": 1,
-          "rows": 3,
-          "editing": true,
-          "destination": "profile"
+          "step": "tab order",
+          "order": [
+            "Action 2 selector",
+            "Action 2 matching",
+            "Action 2 type",
+            "Action 2 destination",
+            "Pick from screen"
+          ],
+          "destinationBeforePick": true,
+          "visual": {
+            "pickTop": 294,
+            "destinationTop": 462,
+            "selectorTop": 244,
+            "pickBesideSelector": true
+          }
         },
         {
-          "step": "link: set Destination to Profile",
-          "active": "Edit Action 2",
-          "tabStops": 1,
-          "rows": 3,
-          "editing": false,
-          "destination": "profile"
+          "step": "link",
+          "before": "",
+          "after": "profile",
+          "changed": true
         },
         {
-          "step": "reorder: ArrowRight to ⋯ then Move down",
-          "active": "Edit Check 1",
-          "tabStops": 1,
-          "rows": 3,
-          "editing": false,
-          "destination": "profile"
+          "step": "committed step",
+          "label": "Edit Action 2",
+          "className": "visit-step-summary"
         },
         {
-          "step": "delete: open ⋯ and Delete last focused row",
-          "active": "Edit Check 1",
-          "tabStops": 1,
-          "rows": 2,
-          "editing": false,
-          "destination": "profile"
+          "step": "reorder",
+          "beforeOrder": [
+            "home-ready",
+            "avatar",
+            "0c679d04-159e-4ad0-8ef9-2984e9b393e7"
+          ],
+          "afterOrder": [
+            "home-ready",
+            "0c679d04-159e-4ad0-8ef9-2984e9b393e7",
+            "avatar"
+          ],
+          "changed": true
+        },
+        {
+          "step": "delete",
+          "target": "Delete action 2",
+          "afterDelete": {
+            "count": 2,
+            "stops": 1,
+            "labels": [
+              "Edit Check 1",
+              "Edit Action 1"
+            ]
+          }
         }
       ]
     }
   ],
   "keyboard": [
     {
-      "step": "focus list stop",
-      "active": "Edit Check 1",
-      "tabStops": 1,
-      "rows": 2,
-      "editing": false,
-      "destination": "profile"
+      "step": "step list",
+      "label": "Edit Check 1",
+      "className": "visit-step-summary",
+      "stops": 1
     },
     {
-      "step": "ArrowDown to next row",
-      "active": "Edit Action 1",
-      "tabStops": 1,
-      "rows": 2,
-      "editing": false,
-      "destination": "profile"
+      "step": "arrow down",
+      "label": "Edit Action 1",
+      "className": "visit-step-summary"
     },
     {
-      "step": "Enter to edit",
-      "active": "Edit Action 1",
-      "tabStops": 1,
-      "rows": 2,
-      "editing": true,
-      "destination": "profile"
+      "step": "arrow up",
+      "label": "Edit Check 1",
+      "className": "visit-step-summary"
     },
     {
-      "step": "Tab toward Destination",
-      "active": "Cancel",
-      "tabStops": 1,
-      "rows": 2,
-      "editing": true,
-      "destination": "profile"
+      "step": "end",
+      "label": "Edit Action 1",
+      "className": "visit-step-summary"
     },
     {
-      "step": "Esc cancel edit",
-      "active": "Edit Action 1",
-      "tabStops": 1,
-      "rows": 2,
-      "editing": false,
-      "destination": "profile"
+      "step": "add step dialog",
+      "label": "INPUT",
+      "className": ""
     },
     {
-      "step": "create: open Add step",
-      "active": "INPUT",
-      "tabStops": 1,
-      "rows": 2,
-      "editing": false,
-      "destination": "profile"
+      "step": "created step",
+      "label": "Action 2 selector",
+      "className": ""
     },
     {
-      "step": "create: choose Tap",
-      "active": "Action 2 selector",
-      "tabStops": 1,
-      "rows": 3,
-      "editing": true,
-      "destination": "profile"
+      "step": "tab order",
+      "order": [
+        "Action 2 selector",
+        "Action 2 matching",
+        "Action 2 type",
+        "Action 2 destination",
+        "Pick from screen"
+      ],
+      "destinationBeforePick": true,
+      "visual": {
+        "pickTop": 294,
+        "destinationTop": 462,
+        "selectorTop": 244,
+        "pickBesideSelector": true
+      }
     },
     {
-      "step": "link: set Destination to Profile",
-      "active": "Edit Action 2",
-      "tabStops": 1,
-      "rows": 3,
-      "editing": false,
-      "destination": "profile"
+      "step": "link",
+      "before": "",
+      "after": "profile",
+      "changed": true
     },
     {
-      "step": "reorder: ArrowRight to ⋯ then Move down",
-      "active": "Edit Check 1",
-      "tabStops": 1,
-      "rows": 3,
-      "editing": false,
-      "destination": "profile"
+      "step": "committed step",
+      "label": "Edit Action 2",
+      "className": "visit-step-summary"
     },
     {
-      "step": "delete: open ⋯ and Delete last focused row",
-      "active": "Edit Check 1",
-      "tabStops": 1,
-      "rows": 2,
-      "editing": false,
-      "destination": "profile"
+      "step": "reorder",
+      "beforeOrder": [
+        "home-ready",
+        "avatar",
+        "0c679d04-159e-4ad0-8ef9-2984e9b393e7"
+      ],
+      "afterOrder": [
+        "home-ready",
+        "0c679d04-159e-4ad0-8ef9-2984e9b393e7",
+        "avatar"
+      ],
+      "changed": true
+    },
+    {
+      "step": "delete",
+      "target": "Delete action 2",
+      "afterDelete": {
+        "count": 2,
+        "stops": 1,
+        "labels": [
+          "Edit Check 1",
+          "Edit Action 1"
+        ]
+      }
     }
   ]
 }

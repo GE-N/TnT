@@ -2,7 +2,8 @@ import {createElement,useMemo,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {CanvasEditor} from '../src/canvas.js';
 import {refreshChecks,writeChecks} from '../shared/canvas-authoring.js';
-import type {CanvasGraph,CanvasTest} from '../server/canvas.js';
+import type {CanvasGraph,CanvasResult,CanvasTest} from '../server/canvas.js';
+import type {InspectorRunFeed} from '../src/inspector-run-state.js';
 import '../src/style.css';
 
 const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
@@ -27,8 +28,18 @@ const screen=params.get('screen')||'home';
 const edit=params.get('edit')==='1';
 const focus=params.get('focus')==='1';
 const clamp=params.get('clamp')==='1';
+const failed=params.get('failed')==='1';
+const draft=params.get('draft')==='1';
 const scrollLeft=Number(params.get('scrollLeft')||'0');
 const scrollTop=Number(params.get('scrollTop')||'0');
+const failedRun:InspectorRunFeed|undefined=failed?{status:'failed',canvas:{
+ pathId:'route',note:'',
+ tests:[{id:'home-ready',status:'failed',detail:'Expected Home to be visible'}],
+ screens:[{id:'home',status:'failed'}],
+ edges:[],
+ visits:[{id:'v1',screenId:'home',status:'failed',checkIds:['home-ready']}],
+ occurrences:[{id:'occ-home',visitId:'v1',testId:'home-ready',status:'failed',detail:'Expected Home to be visible'}],
+} satisfies CanvasResult}:undefined;
 
 function Host(){
  const [graph,setGraph]=useState(()=>{
@@ -43,6 +54,7 @@ function Host(){
   graph,onChange:next=>setGraph(next??graph),yaml:source,onYamlChange:setSource,catalog:[],diagnostics:[],
   pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode:true,scenarioId:'main',
   scenarios:[{id:'main',name:'Main',pathId:'route'}],initialView,
+  run:failedRun,draftInvalid:draft,
  }));
 }
 

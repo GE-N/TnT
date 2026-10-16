@@ -55,47 +55,38 @@ const measureScript=()=>{
   const box=el.getBoundingClientRect();
   return {w:Math.round(box.width),h:Math.round(box.height)};
  };
+ const hex=color=>'#'+[color.r,color.g,color.b].map(value=>Math.round(value).toString(16).padStart(2,'0')).join('');
  const sampleContrast=(el,label)=>{
   if(!el)return null;
   const fg=parseColor(getComputedStyle(el).color);
   const bg=resolvedBackground(el);
-  return {label,fg:getComputedStyle(el).color,bg:`rgb(${bg.r}, ${bg.g}, ${bg.b})`,ratio:contrast(fg,bg)};
+  if(!fg||!bg)return null;
+  return {label,foreground:hex(fg),background:hex(bg),ratio:contrast(fg,bg)};
  };
  const inspector=document.querySelector('.floating-inspector');
  if(!inspector)return {error:'missing inspector'};
- const close=inspector.querySelector('.floating-inspector-close');
- const summary=inspector.querySelector('.visit-step-summary');
- const add=inspector.querySelector('.add-visit-step');
- const yaml=inspector.querySelector('.visit-yaml-link');
- const pick=inspector.querySelector('.pick-from-screen');
- const destination=inspector.querySelector('[aria-label$=" destination"]');
- const done=[...inspector.querySelectorAll('.visit-inline-fields:not([hidden]) button')].find(button=>button.textContent==='Done');
- // Probe rendered fg/bg on the surfaces the inspector actually uses.
- const probe=document.createElement('div');
- probe.className='floating-inspector';
- probe.style.cssText='position:fixed;left:-9999px;top:0;display:grid;gap:8px;width:300px;padding:12px;background:var(--surface)';
- probe.innerHTML=[
-  '<p class="visit-step-error" role="alert">Failed step detail</p>',
-  '<p class="notice error" role="alert">Danger on danger-surface</p>',
-  '<p class="inspector-draft-notice" role="status">⚠ Draft kept, not valid yet</p>',
-  '<button class="add-visit-step">+ Add step</button>',
-  '<span class="run-status-badge failed" role="status">Failed</span>',
- ].join('');
- document.body.appendChild(probe);
+ const visible=selector=>[...inspector.querySelectorAll(selector)].find(element=>element.getBoundingClientRect().height>=44)||null;
+ const close=visible('.floating-inspector-close');
+ const summary=visible('.visit-step-summary');
+ const add=visible('.add-visit-step');
+ const yaml=visible('.visit-yaml-link');
+ const pick=visible('.pick-from-screen');
+ const destination=visible('[aria-label$=" destination"]');
+ const done=[...inspector.querySelectorAll('.visit-inline-fields:not([hidden]) button')].find(button=>button.textContent==='Done'&&button.getBoundingClientRect().height>=44);
+ const matchBy=visible('.match-by label');
+ const remove=visible('.visit-step-delete');
  const styles=getComputedStyle(document.documentElement);
+ const active=document.activeElement;
  const contrasts=[
-  sampleContrast(probe.querySelector('.visit-step-error'),'danger text on inspector surface'),
-  sampleContrast(probe.querySelector('.notice.error'),'danger on danger-surface'),
-  sampleContrast(probe.querySelector('.inspector-draft-notice'),'warning on warning-surface'),
-  sampleContrast(probe.querySelector('.add-visit-step'),'primary Add step'),
-  sampleContrast(probe.querySelector('.run-status-badge.failed'),'failed status'),
+  sampleContrast(add,'primary Add step'),
+  sampleContrast(inspector.querySelector('.visit-step-failed .visit-step-summary')||inspector.querySelector('.visit-step-error'),'danger on failed step'),
+  sampleContrast(inspector.querySelector('.inspector-draft-notice'),'warning draft notice'),
  ].filter(Boolean);
- probe.remove();
- summary?.focus();
  return {
   side:inspector.dataset.inspectorSide??null,
   clamped:inspector.dataset.inspectorClamped==='true',
-  width:Math.round(inspector.getBoundingClientRect().width),
+  inspectorWidth:Math.round(inspector.getBoundingClientRect().width),
+  viewport:{width:window.innerWidth,height:window.innerHeight},
   left:Math.round(inspector.getBoundingClientRect().left),
   top:Math.round(inspector.getBoundingClientRect().top),
   targets:{
@@ -106,6 +97,8 @@ const measureScript=()=>{
    pick:sizeOf(pick),
    destination:sizeOf(destination),
    done:sizeOf(done),
+   matchBy:sizeOf(matchBy),
+   delete:sizeOf(remove),
   },
   primary:styles.getPropertyValue('--inspector-primary').trim(),
   danger:styles.getPropertyValue('--danger').trim(),
@@ -113,7 +106,8 @@ const measureScript=()=>{
   warning:styles.getPropertyValue('--warning').trim(),
   warningSurface:styles.getPropertyValue('--warning-surface').trim(),
   contrasts,
-  focusOutline:summary?getComputedStyle(summary).outline:'',
+  focusOutline:active&&inspector.contains(active)?getComputedStyle(active).outline:'',
+  focused:active&&active!==document.body?(active.getAttribute('aria-label')||(active.textContent||'').replace(/\s+/g,' ').trim().slice(0,80)||active.tagName):'body',
   tabStops:inspector.querySelectorAll('.visit-step-summary[tabindex="0"]').length,
  };
 };
@@ -123,8 +117,32 @@ const shots=[
  {name:'inspector-a11y-1280x800',width:1280,height:800,zoom:0.85,screen:'home',edit:false},
  {name:'inspector-a11y-flip-below',width:1280,height:800,zoom:1.15,screen:'settings',edit:false},
  {name:'inspector-a11y-zoom-fixed',width:1440,height:900,zoom:0.5,screen:'profile',edit:false},
- {name:'inspector-a11y-contrast-targets',width:1440,height:900,zoom:0.85,screen:'home',edit:true},
+ {name:'inspector-a11y-contrast-targets',width:1440,height:900,zoom:0.85,screen:'home',edit:true,failed:true,draft:true,keyboard:false},
 ];
+
+async function focused(page){
+ return page.evaluate(()=>{
+  const element=document.activeElement;
+  if(!element||element===document.body)return {label:'body',className:''};
+  const label=element.getAttribute('aria-label')||(element.textContent??'').replace(/\s+/g,' ').trim().slice(0,80)||element.tagName;
+  return {label,className:typeof element.className==='string'?element.className:''};
+ });
+}
+async function tabUntil(page,ready,max=40){
+ const seen=[];
+ for(let step=0;step<max;step++){
+  const info=await focused(page);
+  seen.push(info.label);
+  if(ready(info))return seen;
+  await page.keyboard.press('Tab');
+ }
+ throw new Error('Tab did not reach a target: '+seen.join(' | '));
+}
+async function openScreen(page,title){
+ await tabUntil(page,info=>info.label==='Screen '+title);
+ await page.keyboard.press('Enter');
+ await page.waitForFunction(name=>document.querySelector('.floating-inspector h3')?.textContent===name,{},title);
+}
 
 const results=[];
 const keyboardLog=[];
@@ -133,12 +151,17 @@ try{
  for(const shot of shots){
   const page=await browser.newPage();
   await page.setViewport({width:shot.width,height:shot.height,deviceScaleFactor:1});
-  const url=`http://127.0.0.1:${port}/scripts/inspector-review.html?zoom=${shot.zoom}&screen=${shot.screen}&edit=${shot.edit?1:0}&focus=1`;
+  const url=`http://127.0.0.1:${port}/scripts/inspector-review.html?zoom=${shot.zoom}&screen=${shot.screen}&edit=${shot.edit?1:0}&failed=${shot.failed?1:0}&draft=${shot.draft?1:0}`;
   await page.goto(url,{waitUntil:'networkidle0',timeout:60_000});
   await page.waitForSelector('.floating-inspector',{timeout:15_000});
   await new Promise(r=>setTimeout(r,700));
   if(shot.edit){
    await page.waitForSelector('.visit-inline-fields:not([hidden]) .pick-from-screen, .visit-inline-fields:not([hidden]) [aria-label$=" destination"]',{timeout:5_000}).catch(()=>{});
+   await page.evaluate(()=>{const menu=document.querySelector('.visit-step-actions');if(menu)menu.open=true;});
+  }else{
+   const title={home:'Home',profile:'Profile',settings:'Settings'}[shot.screen]??'Home';
+   await openScreen(page,title);
+   await tabUntil(page,info=>info.className.includes('visit-step-summary'),8);
   }
   const metrics=await page.evaluate(measureScript);
   const file=resolve(evidence,shot.name+'.png');
@@ -152,7 +175,7 @@ try{
  {
   const page=await browser.newPage();
   await page.setViewport({width:420,height:520,deviceScaleFactor:1});
-  await page.goto(`http://127.0.0.1:${port}/scripts/inspector-review.html?zoom=0.85&screen=home&focus=1&clamp=1`,{waitUntil:'networkidle0',timeout:60_000});
+  await page.goto(`http://127.0.0.1:${port}/scripts/inspector-review.html?zoom=0.85&screen=home&clamp=1`,{waitUntil:'networkidle0',timeout:60_000});
   await page.waitForSelector('.floating-inspector',{timeout:15_000});
   await new Promise(r=>setTimeout(r,900));
   let metrics=await page.evaluate(measureScript);
@@ -178,108 +201,122 @@ try{
   await page.close();
  }
 
- // Keyboard-only create → link → reorder → delete journey on the live fixture.
+ // Keyboard-only create → link → reorder → delete. No element.focus() and no scripted clicks.
  {
   const page=await browser.newPage();
   await page.setViewport({width:1440,height:900,deviceScaleFactor:1});
-  await page.goto(`http://127.0.0.1:${port}/scripts/inspector-review.html?zoom=0.85&screen=home&focus=1`,{waitUntil:'networkidle0',timeout:60_000});
+  await page.goto(`http://127.0.0.1:${port}/scripts/inspector-review.html?zoom=0.85&screen=home`,{waitUntil:'networkidle0',timeout:60_000});
   await page.waitForSelector('.floating-inspector',{timeout:15_000});
   await new Promise(r=>setTimeout(r,500));
-
-  const step=async(label,action)=>{
-   await action();
-   await new Promise(r=>setTimeout(r,250));
-   const snap=await page.evaluate(()=>{
-    const card=document.querySelector('.floating-inspector');
-    const active=document.activeElement;
-    return {
-     active:active?(active.getAttribute('aria-label')||active.textContent||active.tagName).trim().slice(0,80):null,
-     tabStops:card?card.querySelectorAll('.visit-step-summary[tabindex="0"]').length:0,
-     rows:card?card.querySelectorAll('.visit-step-summary').length:0,
-     editing:!!card?.querySelector('.visit-step-summary[aria-expanded="true"]'),
-     destination:card?.querySelector('[aria-label$=" destination"]')?.value??null,
-    };
-   });
-   keyboardLog.push({step:label,...snap});
-   console.log('keyboard',label,snap);
-  };
-
-  await step('focus list stop',async()=>{
-   await page.evaluate(()=>document.querySelector('.visit-step-summary')?.focus());
+  const note=async(step,extra={})=>{const info=await focused(page);keyboardLog.push({step,...info,...extra});console.log('keyboard',step,info.label,extra);};
+  const shiftTab=async()=>{await page.keyboard.down('Shift');await page.keyboard.press('Tab');await page.keyboard.up('Shift');};
+  const ids=()=>page.evaluate(()=>[...document.querySelectorAll('.floating-inspector .visit-step')].map(item=>item.getAttribute('data-operation-id')));
+  await openScreen(page,'Home');
+  await tabUntil(page,info=>info.className.includes('visit-step-summary'),8);
+  const stopsBefore=await page.evaluate(()=>document.querySelectorAll('.floating-inspector .visit-step-summary[tabindex="0"]').length);
+  if(stopsBefore!==1)throw new Error('Expected one list tab stop, got '+stopsBefore);
+  await note('step list',{stops:stopsBefore});
+  await page.keyboard.press('ArrowDown');
+  await note('arrow down');
+  await page.keyboard.press('ArrowUp');
+  await note('arrow up');
+  await page.keyboard.press('End');
+  await note('end');
+  await page.keyboard.press('Home');
+  await tabUntil(page,info=>info.className.includes('add-visit-step')||info.label.includes('Add step'),6);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(()=>document.querySelector('.add-step-dialog input')===document.activeElement);
+  await note('add step dialog');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(()=>{
+   const field=document.querySelector('.floating-inspector .visit-inline-fields:not([hidden]) input[aria-label$=" selector"]');
+   return !!field&&document.activeElement===field;
   });
-  await step('ArrowDown to next row',async()=>{
-   await page.keyboard.press('ArrowDown');
+  await note('created step');
+  await shiftTab();
+  await page.keyboard.press('ArrowRight');
+  await page.waitForSelector('.floating-inspector .visit-inline-fields:not([hidden]) .pick-from-screen');
+  await page.keyboard.press('Tab');
+  await page.waitForFunction(()=>{
+   const field=document.querySelector('.floating-inspector .visit-inline-fields:not([hidden]) input[aria-label$=" selector"]');
+   return !!field&&document.activeElement===field;
   });
-  await step('Enter to edit',async()=>{
-   await page.keyboard.press('Enter');
+  await page.keyboard.type('created-id');
+  const order=[];
+  for(let step=0;step<12;step++){
+   order.push((await focused(page)).label);
+   if(order.at(-1)?.includes('Pick from screen'))break;
+   await page.keyboard.press('Tab');
+  }
+  const destinationAt=order.findIndex(label=>label.endsWith('destination'));
+  const pickAt=order.findIndex(label=>label.includes('Pick from screen'));
+  const visual=await page.evaluate(()=>{
+   const fields=document.querySelector('.floating-inspector .visit-inline-fields:not([hidden])');
+   const pick=fields?.querySelector('.pick-from-screen')?.getBoundingClientRect();
+   const destination=fields?.querySelector('[aria-label$=" destination"]')?.getBoundingClientRect();
+   const selector=fields?.querySelector('[aria-label$=" selector"]')?.getBoundingClientRect();
+   if(!pick||!destination||!selector)return null;
+   return {pickTop:Math.round(pick.top),destinationTop:Math.round(destination.top),selectorTop:Math.round(selector.top),pickBesideSelector:Math.abs(pick.top-(selector.top+selector.height))<80};
   });
-  await step('Tab toward Destination',async()=>{
-   for(let i=0;i<8;i++)await page.keyboard.press('Tab');
+  keyboardLog.push({step:'tab order',order,destinationBeforePick:destinationAt>=0&&pickAt>destinationAt,visual});
+  if(destinationAt<0||pickAt<=destinationAt)throw new Error('Destination did not precede Pick: '+order.join(' | '));
+  if(!visual?.pickBesideSelector||!(visual.pickTop<visual.destinationTop))throw new Error('Pick is not packed with the element field above Destination: '+JSON.stringify(visual));
+  for(let step=0;step<6&&!(await focused(page)).label.endsWith('destination');step++)await shiftTab();
+  const destinationValue=()=>page.evaluate(()=>{
+   const active=document.activeElement;
+   return active&&active.tagName==='SELECT'&&(active.getAttribute('aria-label')??'').endsWith(' destination')?active.value:'';
   });
-  await step('Esc cancel edit',async()=>{
-   await page.keyboard.press('Escape');
+  if(!(await focused(page)).label.endsWith('destination'))throw new Error('Destination select was not focused: '+(await focused(page)).label);
+  const before=await destinationValue();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await new Promise(r=>setTimeout(r,100));
+  const after=await destinationValue();
+  keyboardLog.push({step:'link',before,after,changed:before!==after&&after.length>0});
+  if(!after||before===after)throw new Error('Destination did not change from the keyboard ('+before+' -> '+after+')');
+  await tabUntil(page,info=>info.label==='Done',8);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(()=>{
+   const active=document.activeElement;
+   return !!active&&active.classList.contains('visit-step-summary')&&active.getAttribute('aria-expanded')==='false';
   });
-  await step('create: open Add step',async()=>{
-   await page.evaluate(()=>document.querySelector('.add-visit-step')?.focus());
-   await page.keyboard.press('Enter');
-   await page.waitForSelector('[role=dialog][aria-label="Add step"]',{timeout:5_000});
+  await note('committed step');
+  const beforeOrder=await ids();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Enter');
+  await tabUntil(page,info=>info.label.startsWith('Move ')&&info.label.endsWith(' up'),6);
+  await page.keyboard.press('Enter');
+  try{
+   await page.waitForFunction(previous=>JSON.stringify([...document.querySelectorAll('.floating-inspector .visit-step')].map(item=>item.getAttribute('data-operation-id')))!==previous,{timeout:4000},JSON.stringify(beforeOrder));
+  }catch(error){
+   throw new Error('Reorder did not change step ids. before='+beforeOrder.join(' | ')+' after='+(await ids()).join(' | ')+' focus='+(await focused(page)).label+' '+(error instanceof Error?error.message:''));
+  }
+  const afterOrder=await ids();
+  keyboardLog.push({step:'reorder',beforeOrder,afterOrder,changed:true});
+  for(let step=0;step<8&&!(await focused(page)).className.includes('visit-step-summary');step++)await shiftTab();
+  if(!(await focused(page)).className.includes('visit-step-summary')){
+   for(let step=0;step<8&&!(await focused(page)).className.includes('visit-step-summary');step++)await page.keyboard.press('Tab');
+  }
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Enter');
+  await tabUntil(page,info=>info.label.startsWith('Delete '),6);
+  const deleted=(await focused(page)).label;
+  const countBeforeDelete=(await page.evaluate(()=>document.querySelectorAll('.floating-inspector .visit-step-summary').length));
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(previous=>{
+   const summaries=[...document.querySelectorAll('.floating-inspector .visit-step-summary')];
+   return summaries.length===previous-1&&summaries.filter(item=>item.tabIndex===0).length===1;
+  },{},countBeforeDelete);
+  const afterDelete=await page.evaluate(()=>{
+   const summaries=[...document.querySelectorAll('.floating-inspector .visit-step-summary')];
+   return {count:summaries.length,stops:summaries.filter(item=>item.tabIndex===0).length,labels:summaries.map(item=>item.getAttribute('aria-label'))};
   });
-  await step('create: choose Tap',async()=>{
-   const option=await page.$('[role=option]');
-   await option?.click();
-   await page.waitForSelector('.visit-step-summary[aria-expanded="true"]',{timeout:5_000});
-  });
-  await step('link: set Destination to Profile',async()=>{
-   await page.evaluate(()=>{
-    const select=document.querySelector('.visit-inline-fields:not([hidden]) [aria-label$=" destination"]');
-    if(!select)return;
-    select.focus();
-    select.value='profile';
-    select.dispatchEvent(new Event('change',{bubbles:true}));
-   });
-   // Commit the new step so the link persists.
-   await page.evaluate(()=>{
-    const input=document.querySelector('.visit-inline-fields:not([hidden]) [aria-label$=" selector"]');
-    if(input){
-     const setter=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value')?.set;
-     setter?.call(input,'New tap');
-     input.dispatchEvent(new Event('input',{bubbles:true}));
-    }
-    [...document.querySelectorAll('.visit-inline-fields:not([hidden]) button')].find(button=>button.textContent==='Done')?.click();
-   });
-  });
-  await step('reorder: ArrowRight to ⋯ then Move down',async()=>{
-   await page.evaluate(()=>{
-    const summaries=[...document.querySelectorAll('.visit-step-summary')];
-    const stop=summaries.find(item=>item.tabIndex===0)||summaries[0];
-    stop?.focus();
-   });
-   await page.keyboard.press('ArrowRight');
-   await page.evaluate(()=>{
-    const menu=document.activeElement?.closest('details');
-    if(menu)menu.open=true;
-   });
-   await page.evaluate(()=>{
-    const down=[...document.querySelectorAll('.visit-step-actions button')].find(button=>/Move .+ down/i.test(button.getAttribute('aria-label')||''));
-    down?.click();
-   });
-  });
-  await step('delete: open ⋯ and Delete last focused row',async()=>{
-   await page.evaluate(()=>{
-    const summaries=[...document.querySelectorAll('.visit-step-summary')];
-    const last=summaries.at(-1);
-    last?.focus();
-    const row=last?.closest('.visit-step');
-    const menu=row?.querySelector('.visit-step-actions');
-    if(menu)menu.open=true;
-    row?.querySelector('[aria-label^="Delete "]')?.click();
-   });
-  });
-
-  const after=await page.evaluate(measureScript);
+  keyboardLog.push({step:'delete',target:deleted,afterDelete});
+  const afterMetrics=await page.evaluate(measureScript);
   const file=resolve(evidence,'inspector-a11y-keyboard-journey.png');
   await page.screenshot({path:file,fullPage:false});
-  results.push({name:'inspector-a11y-keyboard-journey',width:1440,height:900,zoom:0.85,screen:'home',edit:false,file:'evidence/inspector-a11y-keyboard-journey.png',...after,keyboard:keyboardLog});
+  results.push({name:'inspector-a11y-keyboard-journey',width:1440,height:900,zoom:0.85,screen:'home',edit:false,file:'evidence/inspector-a11y-keyboard-journey.png',...afterMetrics,keyboard:keyboardLog});
   await page.close();
  }
 }finally{
