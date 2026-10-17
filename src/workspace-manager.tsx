@@ -1,12 +1,12 @@
 import {WorkspaceTransfer,isFileDrag,type ExportOptions,type PackageResult} from './workspace-transfer.js';
 import type {WorkspacePackage} from '../server/workspace-package.js';
-import {useEffect,useRef,useState,type ReactNode} from 'react';
+import {useEffect,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {runnerClient} from './runner-client.js';
 import type {Workspace} from '../server/scenarios.js';
 import type {WorkspaceLibrary} from '../server/workspace-store.js';
 
 type Action={kind:'trash';id:string;name:string}|{kind:'restore';id:string}|{kind:'import';name:string;package:WorkspacePackage}|{kind:'open';id:string}|{kind:'new'|'copy';name:string}|{kind:'rename';name:string};
-type IconName='document'|'search'|'chevron'|'arrow'|'copy'|'save'|'plus'|'close'|'check'|'more';
+type IconName='document'|'search'|'chevron'|'arrow'|'copy'|'save'|'plus'|'close'|'check'|'more'|'warning';
 function WorkspaceIcon({name}:{name:IconName}){
  const paths:Record<IconName,ReactNode>={
   document:<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></>,
@@ -16,6 +16,7 @@ function WorkspaceIcon({name}:{name:IconName}){
   save:<><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></>,
   more:<><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></>,
   plus:<path d="M12 5v14M5 12h14"/>,close:<path d="m6 6 12 12M6 18 18 6"/>,check:<path d="m5 12 4 4L19 6"/>,
+  warning:<><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9v5"/><path d="M12 17h.01"/></>,
  };
  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -23,7 +24,7 @@ function workspaceDate(value:string){
  const date=new Date(value);const today=new Date();const yesterday=new Date(today);yesterday.setDate(today.getDate()-1);
  return date.toDateString()===today.toDateString()?'Today':date.toDateString()===yesterday.toDateString()?'Yesterday':date.toLocaleDateString(undefined,{month:'short',day:'numeric',...(date.getFullYear()!==today.getFullYear()?{year:'numeric' as const}:{})});
 }
-export function WorkspaceManager({token,id,name,status,statusNote,busy,blocked,dirty,onAction,onSave,onPrepare,recovery,notice,openSignal,onExport,empty=false}:{token:string;id:string;name:string;status:string;statusNote?:string;busy:boolean;blocked:boolean;dirty:boolean;onAction:(action:Action,saved?:Workspace,options?:{discard?:boolean})=>Promise<void>;onSave:()=>Promise<Workspace>;onPrepare:(action:Action)=>Promise<Workspace|undefined>;recovery:boolean;notice?:string;openSignal?:number;onExport:(options:ExportOptions)=>Promise<PackageResult>;empty?:boolean}){
+export function WorkspaceManager({token,id,name,status,statusNote,busy,blocked,dirty,onAction,onSave,onPrepare,recovery,notice,openSignal,onExport,empty=false,onRecover,recoveryOpen=false}:{token:string;id:string;name:string;status:string;statusNote?:string;busy:boolean;blocked:boolean;dirty:boolean;onAction:(action:Action,saved?:Workspace,options?:{discard?:boolean})=>Promise<void>;onSave:()=>Promise<Workspace>;onPrepare:(action:Action)=>Promise<Workspace|undefined>;recovery:boolean;notice?:string;openSignal?:number;onExport:(options:ExportOptions)=>Promise<PackageResult>;empty?:boolean;onRecover?:(button:HTMLButtonElement)=>void;recoveryOpen?:boolean}){
  const [panel,setPanel]=useState<'compact'|'library'|'rename'|'new'|'copy'|'export'|'import'|'trash'|'delete'>();
  const [droppedFiles,setDroppedFiles]=useState<File[]|undefined>();const [fileDrag,setFileDrag]=useState(false);
  const [deleteTarget,setDeleteTarget]=useState<{id:string;name:string}>();
@@ -34,7 +35,16 @@ export function WorkspaceManager({token,id,name,status,statusNote,busy,blocked,d
  const [switchFailure,setSwitchFailure]=useState<Action>();const [confirmDiscard,setConfirmDiscard]=useState(false);const [retry,setRetry]=useState(0);
  const deleteOrigin=useRef<{panel:'compact'|'library';label:string}|undefined>(undefined);const returnDeleteFocus=useRef(false);
  const trigger=useRef<HTMLButtonElement>(null);const surface=useRef<HTMLDivElement>(null);const switchOpener=useRef<HTMLElement|null>(null);const failurePhase=useRef<'closed'|'failure'|'confirm'>('closed');
+ const titleBox=useRef<HTMLDivElement>(null);const recoveryGap=useRef<HTMLSpanElement>(null);const recoveryHost=useRef<HTMLSpanElement>(null);
  const close=()=>{switchOpener.current=null;setPanel(undefined);setDroppedFiles(undefined);setSwitchFailure(undefined);setConfirmDiscard(false);setError('');setActionError('');trigger.current?.focus();};
+ useLayoutEffect(()=>{
+  const gap=recoveryGap.current,host=recoveryHost.current,box=titleBox.current;
+  if(!onRecover||!gap||!host||!box)return;
+  const place=()=>{const boxRect=box.getBoundingClientRect();const gapRect=gap.getBoundingClientRect();host.style.left=`${gapRect.left-boxRect.left}px`;host.style.top=`${gapRect.top-boxRect.top+(gapRect.height-host.offsetHeight)/2}px`;};
+  place();
+  const observer=new ResizeObserver(place);observer.observe(box);window.addEventListener('resize',place);
+  return()=>{observer.disconnect();window.removeEventListener('resize',place);};
+ },[onRecover,status,name,recoveryOpen]);
  useEffect(()=>{if(openSignal){setQuery('');setPanel('compact');}},[openSignal]);
  useEffect(()=>{
   if(panel!=='compact'&&panel!=='library'&&panel!=='trash')return;
@@ -125,9 +135,12 @@ export function WorkspaceManager({token,id,name,status,statusNote,busy,blocked,d
  const startCopy=()=>{setTitle((name.slice(0,115)+' copy').slice(0,120));setPanel('copy');};
  return <div className="workspace-manager">
   {undo&&<div className="workspace-trash-notice" role="status"><span>Moved “{undo.name}” to Trash.</span><button disabled={busy||blocked||working} aria-label={'Undo deletion of '+undo.name} onClick={()=>void restore(undo)}>Undo</button></div>}
-  <button ref={trigger} className="workspace-title" aria-label="Manage workspace" disabled={working} aria-expanded={!!panel} title={name} onClick={()=>{if(panel)close();else{setQuery('');setPanel('compact');}}}>
-   <WorkspaceIcon name="document"/><span className="workspace-identity"><strong>{name}</strong><span className={'workspace-save-status '+statusTone} role={statusTone==='danger'?'alert':'status'} aria-live={statusTone==='danger'?'assertive':'polite'} aria-label={status} title={statusNote||status} {...(statusNote?{'aria-description':statusNote}:{})}><span className="workspace-save-icon" aria-hidden="true">{statusIcon}</span><span className="workspace-save-text">{status}</span></span></span><WorkspaceIcon name="chevron"/>
-  </button>
+  <div ref={titleBox} className="workspace-title">
+   <button ref={trigger} className="workspace-title-open" aria-label="Manage workspace" disabled={working} aria-expanded={!!panel} title={name} onClick={()=>{if(panel)close();else{setQuery('');setPanel('compact');}}}>
+    <WorkspaceIcon name="document"/><span className="workspace-identity"><strong>{name}</strong><span className={'workspace-save-status '+statusTone} role={statusTone==='danger'?'alert':'status'} aria-live={statusTone==='danger'?'assertive':'polite'} aria-label={status} title={statusNote||status} {...(statusNote?{'aria-description':statusNote}:{})}><span className="workspace-save-icon" aria-hidden="true">{statusIcon}</span><span className="workspace-save-text">{status}</span>{onRecover&&<span ref={recoveryGap} className="workspace-draft-warning-gap" aria-hidden="true"/>}</span></span><WorkspaceIcon name="chevron"/>
+   </button>
+   {onRecover&&<span ref={recoveryHost} className="workspace-draft-warning-host"><button type="button" className="workspace-draft-warning" aria-label="Recovered draft" aria-haspopup="dialog" aria-expanded={recoveryOpen} title="Recovered draft" onClick={event=>{event.stopPropagation();onRecover(event.currentTarget);}}><WorkspaceIcon name="warning"/></button></span>}
+  </div>
   {panel&&<><div className={'workspace-management-backdrop '+(panel==='library'||panel==='trash'||panel==='delete'||formPanel||transferPanel||switchFailure?'dimmed':'')} onPointerDown={()=>{if(panel==='compact'&&!switchFailure)close();}}/><div ref={surface} role="dialog" aria-modal="true" aria-label={panel==='library'?'All workspaces':'Workspace manager'} className={'workspace-management-surface '+(panel==='library'||panel==='trash'||transferPanel?'expanded':'compact')} onDragOver={event=>{if(panel==='library'&&isFileDrag(event)){event.preventDefault();event.dataTransfer.dropEffect='copy';setFileDrag(true);}}} onDragLeave={()=>setFileDrag(false)} onDrop={event=>{if(panel==='library'&&isFileDrag(event)){event.preventDefault();setFileDrag(false);setDroppedFiles(Array.from(event.dataTransfer.files));setPanel('import');}}} onKeyDown={event=>{
    if(event.key==='Escape'){if(busy||working)return;event.preventDefault();event.stopPropagation();if(confirmDiscard){setConfirmDiscard(false);setError('');}else if(switchFailure){setSwitchFailure(undefined);setError('');}else if(panel==='delete'){cancelDelete();}else close();}
    if(event.key==='Tab'){const controls=Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled):not([type=file]),summary'));const first=controls[0],last=controls.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}

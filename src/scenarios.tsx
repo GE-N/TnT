@@ -13,6 +13,7 @@ import {canvasAfterDeletion,restoreDeletionReferences} from './yaml-forms.js';
 import {YamlDraftProvider,YamlEditor} from './yaml-editor.js';
 import { runnerClient,RunnerRequestError } from './runner-client.js';
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import type { Run, Workspace } from '../server/scenarios.js';
 import type {WorkspaceDraft} from '../server/workspace-store.js';
 import {CanvasEditor,emptyCanvas} from './canvas.js';
@@ -142,6 +143,19 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   warnOnLeaveRef.current=!persistedClean&&!draftAcked;
   const showRecovery=draftRevisionShown>0&&draftRevisionShown>dismissedDraft&&!draftError;
   const staleDraft=showRecovery&&draftBase<savedRevision;
+  const [recoveryOpen,setRecoveryOpen]=useState(false);
+  const recoveryButtonRef=useRef<HTMLButtonElement|null>(null);
+  const recoveryNoteRef=useRef<HTMLDivElement|null>(null);
+  useEffect(()=>{if(!showRecovery)setRecoveryOpen(false);},[showRecovery]);
+  useEffect(()=>{
+    if(!recoveryOpen)return;
+    const close=(event:Event)=>{const target=event.target;if(!(target instanceof Node)||recoveryNoteRef.current?.contains(target)||recoveryButtonRef.current?.contains(target))return;setRecoveryOpen(false);};
+    const onKey=(event:KeyboardEvent)=>{if(event.key==='Escape')setRecoveryOpen(false);};
+    document.addEventListener('pointerdown',close);
+    document.addEventListener('keydown',onKey);
+    return()=>{document.removeEventListener('pointerdown',close);document.removeEventListener('keydown',onKey);};
+  },[recoveryOpen]);
+  const recoveryBox=recoveryOpen&&recoveryButtonRef.current?.isConnected?recoveryButtonRef.current.getBoundingClientRect():null;
   const storedCanvas=viewRef.current.canvas;
   const initialCanvasView=storedCanvas&&typeof storedCanvas==='object'&&!Array.isArray(storedCanvas)?storedCanvas as {zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string}:undefined;
   const storedCards=viewRef.current.cards;
@@ -553,6 +567,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       setFlows(JSON.stringify(nextFlows,null,2));setYaml(docs[0].toString()+docs[1].toString());setError('');
     } catch(error){setError(error instanceof Error?error.message:'Cannot add assertion.');}
   }
+  const recoveryNote=showRecovery&&recoveryOpen&&<div ref={recoveryNoteRef} className="recovery-note" role="dialog" aria-label="Recovered draft" data-recovery-for="workspace" style={recoveryBox?{top:Math.max(8,Math.min(recoveryBox.bottom+6,window.innerHeight-8)),left:Math.max(8,Math.min(recoveryBox.left,window.innerWidth-288))}:undefined}><p>Unsaved changes from <time dateTime={draftSavedAt}>{draftSavedAt?new Date(draftSavedAt).toLocaleString():'earlier'}</time> were recovered.{staleDraft?' Based on an older version.':''}</p><div className="recovery-note-actions">{staleDraft?<button type="button" className="primary" onClick={()=>void copyWithDraft()}>Restore as a copy</button>:<button type="button" className="primary" onClick={()=>draftRecord.current&&restoreDraft(draftRecord.current)}>Restore draft</button>}<button type="button" onClick={()=>void keepSaved()}>Keep saved version</button></div></div>;
   return <WorkspaceDrafts.Provider value={reportDraft}><RecoveredFields.Provider value={recoveredFields}><YamlDraftProvider resetToken={loadRevision} yaml={yaml}><section className="panel scenario-panel" aria-labelledby="scenario-heading">
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Scenario workspace</h2><p>Design scenarios on the shared canvas. Connect a simulator when ready to run.</p></div></div>
     {!!lastValid.current?.omittedValues?.length&&missingValues({...lastValid.current,scenarios:definitions,automation}).length>0&&<aside className="draft-banner" role="status"><p>Imported values need repair before execution: {missingValues({...lastValid.current,scenarios:definitions,automation}).join(' ')}</p><button onClick={()=>{if(advanced.current)advanced.current.open=true;}}>Review required values</button></aside>}
@@ -561,13 +576,13 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       if(!savedOnly&&!running&&!launchBusy){source=await manualSave();}
       if(!source?.id)throw new Error('Save valid authored work before exporting. Repair incomplete drafts first.');
       return api('/api/workspaces/export',{id:source.id,expectedRevision:source.metadata?.revision??0,includeValues});
-    }} recovery={conflict} notice={chooserNotice} openSignal={chooserSignal}/>
+    }} recovery={conflict} notice={chooserNotice} openSignal={chooserSignal} onRecover={showRecovery?(button)=>{recoveryButtonRef.current=button;setRecoveryOpen(open=>!open);}:undefined} recoveryOpen={recoveryOpen}/>
     <div className="run-toolbar" role="toolbar" aria-label="Scenario run controls"><span role="status">{simulatorConnected?'● Simulator connected':'○ Simulator not connected'}</span>{autosavePaused&&!!token&&pickerBusy&&<button type="button" className="primary" onClick={()=>void manualSave()}>Save</button>}{running&&!batchRunning?<button type="button" className="primary" aria-label="Stop scenario" onClick={()=>void cancel()}>Stop</button>:<button className="primary" aria-label={runBlockedReason?'Run scenario — '+runBlockedReason:'Run scenario'} title={runBlockedReason||undefined} onClick={()=>void submit(true)} disabled={!simulatorConnected||noWorkspace||submitting||running||launchBusy||pickerBusy||draftInvalid}>{submitting?'Preparing…':'Run scenario'}</button>}</div>
     {noWorkspace?<div className="empty-state"><h3>No workspace open</h3><p>Open a saved workspace, create new work, or restore from Trash.</p></div>:<>
     {pendingDraft&&<button type="button" className="confirm go-to-issue" onClick={goToFirstIssue}>Go to first issue</button>}
     <p className="field-hint" hidden>Drafts are kept on this computer's runner store (.tnt), excluding confidential runtime inputs.</p>
     {draftError&&<div className="draft-banner danger" role="alert"><p>A recovered draft couldn't be read.</p>{confirmCorrupt?<><p>Discard the unreadable draft? This can't be undone.</p><button type="button" className="workspace-danger" onClick={()=>void discardCorrupt()}>Discard</button><button type="button" ref={corruptCancelButton} onClick={()=>setConfirmCorrupt(false)}>Cancel</button></>:<button type="button" ref={discardDraftButton} onClick={()=>setConfirmCorrupt(true)}>Discard draft</button>}</div>}
-    {showRecovery&&<div className="draft-banner" role="status"><p>Unsaved changes from <time dateTime={draftSavedAt}>{draftSavedAt?new Date(draftSavedAt).toLocaleString():'earlier'}</time> were recovered.{staleDraft?' Based on an older version.':''}</p>{staleDraft?<button type="button" className="primary" onClick={()=>void copyWithDraft()}>Restore as a copy</button>:<button type="button" className="primary" onClick={()=>draftRecord.current&&restoreDraft(draftRecord.current)}>Restore draft</button>}<button type="button" onClick={()=>void keepSaved()}>Keep saved version</button></div>}
+    {recoveryNote&&createPortal(recoveryNote,document.body)}
     {conflictBar&&<div className="draft-banner conflict-bar" role="status"><p>This workspace was changed in another tab.</p><button type="button" className="primary" onClick={()=>void loadLatest()}>Load latest</button><button type="button" onClick={()=>void (pendingDraft?copyWithDraft():copyConflict())}>Restore as a copy</button></div>}
     <CanvasEditor yamlDeletionWarnings={yamlDeletionWarnings} onYamlDelete={deleteYamlStep} initialView={initialCanvasView} cards={cardPositions} onCardPosition={(card,position)=>rememberView({cards:{[card]:position}})} picker={{token,deviceId,disabled:running||submitting||launchBusy,onBusy:setPickerBusy}} onViewChange={next=>rememberView({canvas:next})} onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={simulatorConnected&&!draftInvalid?()=>void submit(true):undefined} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));rememberView({pathId:id});}} disabled={submitting||pickerBusy||launchBusy} run={run?.snapshot.workspaceId===workspaceId?{status:run.status,canvas:run.canvas}:undefined} draftInvalid={draftInvalid}/>
     </>}

@@ -511,9 +511,11 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 /* Title popover: shared document identity and quiet, grouped workspace actions. */
 .workspace-manager{position:relative;z-index:12;margin-bottom:18px;max-width:100%;font-size:14px;line-height:1.5}
 .workspace-manager svg{width:17px;height:17px;flex-shrink:0}
-.workspace-title{display:flex;align-items:center;gap:12px;width:max-content;min-width:280px;max-width:min(350px,100%);min-height:52px;padding:8px 12px;border:1px solid #e2e5e9;border-radius:16px;background:var(--surface);color:var(--text);box-shadow:0 4px 20px #2430430c;text-align:left}
-.workspace-title>svg:first-child{color:var(--muted);width:20px;height:20px}
-.workspace-title>svg:last-child{margin-left:6px;color:var(--muted)}
+.workspace-title{position:relative;display:flex;width:max-content;min-width:280px;max-width:min(350px,100%);border:1px solid #e2e5e9;border-radius:16px;background:var(--surface);color:var(--text);box-shadow:0 4px 20px #2430430c}
+.workspace-title-open{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:8px 12px;border:0;border-radius:16px;background:transparent;color:inherit;font:inherit;text-align:left;box-shadow:none}
+.workspace-title-open:hover:not(:disabled){background:transparent}
+.workspace-title-open>svg:first-child{color:var(--muted);width:20px;height:20px}
+.workspace-title-open>svg:last-child{margin-left:6px;color:var(--muted)}
 .workspace-identity{display:flex;flex-direction:column;min-width:0;flex:1;gap:1px}
 .workspace-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:500}
 .workspace-identity [role="status"],.workspace-identity small{font-size:12px;color:var(--muted);font-weight:400}
@@ -522,7 +524,7 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .workspace-management-surface button{display:inline-flex;align-items:center;gap:12px;min-height:44px;margin:0;padding:8px 10px;border:0;border-radius:9px;background:transparent;color:var(--text);font:inherit;text-align:left;box-shadow:none}
 .workspace-management-surface button:hover:not(:disabled),.workspace-title:hover{background:var(--selected)}
 .workspace-management-surface button:disabled{color:var(--muted);opacity:.55;cursor:not-allowed}
-.workspace-management-surface button:focus-visible,.workspace-title:focus-visible,.workspace-management-surface input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.workspace-management-surface button:focus-visible,.workspace-title-open:focus-visible,.workspace-draft-warning:focus-visible,.workspace-management-surface input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .workspace-manager-heading{display:flex;align-items:center;gap:4px;margin-bottom:14px}
 .workspace-manager-heading h3{margin:0;font-size:14px;line-height:1.5;font-weight:500;overflow-wrap:anywhere;letter-spacing:0}
 .workspace-management-surface.expanded h3{font-size:17px}
@@ -575,11 +577,23 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 @media(max-width:760px),(pointer:coarse){.workspace-row-details summary{width:44px}.workspace-library .workspace-duplicate>button{padding-right:48px}}
 .workspace-search:focus-within{box-shadow:0 0 0 2px var(--accent)}
 .workspace-management-surface .workspace-search input:focus-visible{outline:none;box-shadow:none}
+.workspace-save-status{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%}
 .workspace-save-status.success{color:var(--success)}
 .workspace-save-status.warning{color:var(--warning)}
 .workspace-save-status.danger{color:var(--danger)}
 .workspace-save-status.muted{color:var(--muted)}
 .workspace-save-icon{display:none}
+.workspace-draft-warning-gap{width:22px;height:16px;flex:none}
+.workspace-draft-warning-host{position:absolute;z-index:1;display:flex}
+.workspace-draft-warning{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;min-height:22px;min-width:22px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--warning)}
+.workspace-draft-warning svg{width:16px;height:16px}
+.workspace-draft-warning:hover,.workspace-draft-warning[aria-expanded="true"]{background:#f6e4c4}
+.recovery-note{position:fixed;z-index:30;display:flex;flex-direction:column;align-items:stretch;gap:8px;width:min(260px,calc(100vw - 16px));margin:0;padding:10px;border:1px solid var(--warning-border);border-radius:8px;background:var(--warning-surface);font-size:12px;line-height:1.4;box-sizing:border-box;box-shadow:0 8px 20px #24304318}
+.recovery-note p{margin:0}
+.recovery-note-actions{display:flex;flex-wrap:nowrap;gap:6px}
+.recovery-note button{flex:1 1 auto;width:auto;min-height:36px;min-width:0;margin:0;padding:6px 8px;font-size:12px;line-height:1.2;white-space:normal;justify-content:center;text-align:center}
+.recovery-note .primary{width:auto;border:0;background:var(--accent);color:#fff;justify-content:center}
+.recovery-note button:not(.primary){background:transparent;border:1px solid var(--warning-border);color:var(--text)}
 .draft-banner{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px;padding:12px;border:1px solid var(--warning-border);border-radius:8px;background:var(--warning-surface)}
 .draft-banner p{margin:0;flex:1 1 200px}
 .workspace-danger{color:var(--danger)}
@@ -681,7 +695,7 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .workbench .canvas-toolbar>span:first-child{display:none}
 .workbench .canvas-toolbar>span{font-size:12px}
 .workbench .canvas-toolbar button,.run-toolbar button{min-width:44px;min-height:44px;margin:0;font-size:12px;color:#0a63d1;border-color:#0a84ff}
-.workbench .canvas-toolbar button:focus-visible,.run-toolbar button:focus-visible,.workbench summary:focus-visible,.workspace-title:focus-visible{outline:2px solid #0a84ff;outline-offset:3px}
+.workbench .canvas-toolbar button:focus-visible,.run-toolbar button:focus-visible,.workbench summary:focus-visible,.workspace-title-open:focus-visible,.workspace-draft-warning:focus-visible{outline:2px solid #0a84ff;outline-offset:3px}
 .run-toolbar{position:fixed;top:24px;right:24px;z-index:6;display:flex;align-items:center;gap:12px;padding:4px 8px 4px 16px;background:var(--surface);border:1px solid var(--border);border-radius:28px;box-shadow:var(--shadow);font-size:12px}
 .run-toolbar .primary{width:auto;background:#0a63d1;color:white;flex:none;border-radius:22px}
 .run-toolbar .primary:hover:not(:disabled){background:#084fa8}

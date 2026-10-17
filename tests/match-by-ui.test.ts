@@ -358,6 +358,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       await page.settle();
       const restoredDeadline=Date.now()+8000;
       while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<restoredDeadline){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
+      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Recovered draft"]')!.click());
       const restore=[...page.document.querySelectorAll('button')].find(item=>item.textContent==='Restore draft');
       assert.ok(restore);
       await act(async()=>restore.click());
@@ -413,6 +414,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       await page.settle();
       const restoredDeadline=Date.now()+8000;
       while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<restoredDeadline){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
+      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Recovered draft"]')!.click());
       await act(async()=>[...page.document.querySelectorAll('button')].find(item=>item.textContent==='Restore draft')!.click());
       const afterRestore=Date.now()+8000;
       while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<afterRestore){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
@@ -463,6 +465,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       await page.settle();
       const restoredDeadline=Date.now()+8000;
       while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<restoredDeadline){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
+      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Recovered draft"]')!.click());
       await act(async()=>[...page.document.querySelectorAll('button')].find(item=>item.textContent==='Restore draft')!.click());
       const afterRestore=Date.now()+8000;
       while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<afterRestore){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
