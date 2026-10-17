@@ -252,10 +252,29 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  useWorkspaceDraft(!!newStep);
  useWorkspaceDraft(Object.values(canvasDraft).some(Boolean),'canvas-authoring',JSON.stringify(canvasDraft));
  const viewport=useRef({zoom:initialView?.zoom??.85,scrollLeft:initialView?.scrollLeft??0,scrollTop:initialView?.scrollTop??0});
+ const sequenceBar=useRef<HTMLElement>(null);
  const skipSelectedReport=useRef(true);
  useEffect(()=>{if(skipSelectedReport.current){skipSelectedReport.current=false;return;}onViewChange?.({...viewport.current,selectedScreenId:selected,selectedVisitId:selectedVisit});},[selected,selectedVisit]);
  const infoScreen=graph?.screens.find(screen=>screen.id===nodeInfoId);
  const screen=graph?.screens.find(screen=>screen.id===selected);const path=graph?.paths.find(path=>path.id===pathId);
+ useLayoutEffect(()=>{
+  const bar=sequenceBar.current;if(!bar?.closest('.workbench'))return;
+  const place=()=>{
+   const workspace=document.querySelector<HTMLElement>('.workbench .workspace-title');
+   const device=document.querySelector<HTMLElement>('.workbench .device-toolbar');
+   if(!workspace||!device)return;
+   const gap=16;
+   const left=workspace.getBoundingClientRect().right+gap;
+   const rightEdge=device.getBoundingClientRect().left-gap;
+   if(rightEdge-left<180){bar.style.top='88px';bar.style.left='300px';bar.style.right='16px';return;}
+   bar.style.top='24px';bar.style.left=`${Math.round(left)}px`;bar.style.right=`${Math.round(window.innerWidth-rightEdge)}px`;
+  };
+  place();
+  const observer=new ResizeObserver(place);
+  document.querySelectorAll('.workbench .workspace-title,.workbench .device-toolbar').forEach(node=>observer.observe(node));
+  window.addEventListener('resize',place);
+  return()=>{observer.disconnect();window.removeEventListener('resize',place);};
+ },[scenarioMode,path?.id,scenarios.find(item=>item.id===scenarioId)?.name]);
  const runLocked=run?.status==='running';
  const runView=inspectorRunView(graph,pathId,run);
  const canvasResult=run?.canvas?.pathId===pathId?run.canvas:undefined;
@@ -593,9 +612,16 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  return <section className="canvas-editor" aria-labelledby="canvas-heading"><div className="label-row"><div><h2 id="canvas-heading">Screen test canvas</h2><p className="field-hint">Add nodes on the canvas. Select a node, or press Enter on it, to edit its actions and checks in the inspector. Right-click a node for info.</p></div>{!scenarioMode&&<button className="confirm" disabled={disabled} onClick={()=>{onChange(graph?undefined:emptyCanvas());onPathChange('');}}>{graph?'Disable canvas':'Create screen canvas'}</button>}</div>
  {graph&&<>
  {!scenarioMode&&<div className="canvas-route-bar"><label htmlFor={apiId+'-path'}>Scenario path</label><select id={apiId+'-path'} value={pathId} disabled={disabled} onChange={event=>onPathChange(event.target.value)}><option value="">Explicitly select a route</option>{graph.paths.map(path=><option key={path.id} value={path.id}>{path.name}</option>)}</select><span>{path?.edgeIds.length??0} selected transitions</span></div>}
- {scenarioMode&&path&&<section className="scenario-sequence-bar" aria-label="Sequence builder">
- <ol aria-label="Scenario sequence">{path.screenId&&routeVisits(graph,path).map((visit,index)=>{const id=visitScreenId(graph!,path,index);const title=graph!.screens.find(screen=>screen.id===id)?.title??'Missing screen';return <li key={visit.id}><button aria-label={'Visit '+(index+1)+' · '+title} aria-pressed={selectedVisit===visit.id} onClick={()=>{setSelected(id??'');setSelectedVisit(visit.id);}}>{index+1} · {title}</button></li>;})}</ol>
- <button disabled={disabled||!path.screenId} onClick={()=>onChange({...graph,paths:graph.paths.map(item=>item.id===pathId?{...item,finished:!item.finished}:item)})}>{path.finished?'Resume sequence':'Finish sequence'}</button><span>{path.finished?'Finished · finite end saved':'Choose the next connection at the current end'}</span>
+ {scenarioMode&&path&&<section ref={sequenceBar} className="scenario-sequence-bar" aria-label="Sequence builder">
+ <svg className="sequence-scenario-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg>
+ <div className="sequence-scenario-copy">
+ <p className="sequence-scenario-name">{scenarios.find(item=>item.id===scenarioId)?.name??path.name}</p>
+ <div className="sequence-trail">
+ <ol aria-label="Scenario sequence">{path.screenId&&routeVisits(graph,path).map((visit,index)=>{const id=visitScreenId(graph!,path,index);const title=graph!.screens.find(screen=>screen.id===id)?.title??'Missing screen';return <li key={visit.id}><button className="sequence-step" aria-label={'Visit '+(index+1)+' · '+title} aria-pressed={selectedVisit===visit.id} onClick={()=>{setSelected(id??'');setSelectedVisit(visit.id);}}>{index+1} · {title}</button></li>;})}</ol>
+ {path.screenId&&routeVisits(graph,path).length>0&&<span className="sequence-separator" aria-hidden="true">&gt;</span>}
+ <button className="sequence-finish" title={path.finished?'Finished · finite end saved':'Choose the next connection at the current end'} disabled={disabled||!path.screenId} onClick={()=>onChange({...graph,paths:graph.paths.map(item=>item.id===pathId?{...item,finished:!item.finished}:item)})}>{path.finished?'Resume sequence':'Finish sequence'}</button>
+ </div>
+ </div>
  </section>}
  <CanvasBoard initialView={initialView} onViewportChange={next=>{viewport.current=next;onViewChange?.({...next,selectedScreenId:selected,selectedVisitId:selectedVisit});}} highlightedEdgeId={highlightedEdge?.id} inspectorNote={highlightNote||undefined} onCloseInspector={()=>{setSelected('');setSelectedVisit('');}} onAppend={scenarioMode&&path?.screenId&&!path.finished&&!disabled&&!runLocked?id=>perform(()=>appendScreen(id)):undefined} graph={boardGraph!} pathId={pathId} result={scenarioMode?undefined:canvasResult} selected={selected} onRun={disabled||runLocked?undefined:onRun} onAdd={disabled||runLocked?undefined:(x,y)=>perform(()=>addScreen('New screen',x,y))} onRename={disabled||runLocked?undefined:(id,title)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,title}:screen)})} onInfo={disabled?undefined:id=>{setNodeInfoId(id);setSelected(id);setError('');}} onDelete={disabled||runLocked?undefined:deleteScreen} onSelect={id=>{setSelected(id);setSelectedVisit(path?routeVisits(graph,path).find((visit,index)=>visitScreenId(graph,path,index)===id)?.id??'':'');setRepairTest('');}} renderInspector={yaml!==undefined&&onYamlChange?renderVisitSections:undefined} onMove={disabled||runLocked?undefined:(id,x,y)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,x,y}:screen)})} onRemoveCapture={disabled||runLocked?undefined:id=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,referenceScreenshot:undefined}:screen)})}/>
  {!scenarioMode&&<p className="field-hint">The selected route runs initial checks, ordered connection actions, then destination checks. Other branches are not selected automatically. Unassociated YAML commands remain in execution. Results map after the run; live per-step reporting remains unavailable. Declared setup and checkpoint-specific handler outcomes map after completion.</p>}
