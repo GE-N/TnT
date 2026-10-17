@@ -246,6 +246,21 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
     }finally{await page.close();}
   });
 
+  test('Tab from Destination focuses Pick from screen',async()=>{
+    const page=await openWorkspace('tap');
+    try{
+      await page.edit();
+      await page.choose('id');
+      const destination=page.row().querySelector<HTMLSelectElement>('[aria-label$=" destination"]')!;
+      const pick=page.row().querySelector<HTMLButtonElement>('button.pick-from-screen')!;
+      destination.focus();
+      await page.press(destination,'Tab');
+      assert.equal(page.document.activeElement,pick);
+      await page.press(pick,'Tab');
+      assert.equal(page.document.activeElement?.textContent,'Done');
+    }finally{await page.close();}
+  });
+
   test('YAML and Pick from screen cards drag, move from the keyboard, snap, persist and return focus',async()=>{
     const page=await openWorkspace('tap');
     try{

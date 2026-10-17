@@ -1,0 +1,660 @@
+{
+  "shots": [
+    {
+      "name": "inspector-a11y-1440x900",
+      "width": 1440,
+      "height": 900,
+      "zoom": 0.85,
+      "screen": "home",
+      "edit": false,
+      "file": "evidence/inspector-a11y-1440x900.png",
+      "side": "right",
+      "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "left": 259,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": null,
+        "destination": null,
+        "done": null,
+        "matchBy": null,
+        "delete": {
+          "w": 44,
+          "h": 57
+        }
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "primary Add step",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
+          "ratio": 5.65
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focused": "Edit Check 1",
+      "tabStops": 1
+    },
+    {
+      "name": "inspector-a11y-1280x800",
+      "width": 1280,
+      "height": 800,
+      "zoom": 0.85,
+      "screen": "home",
+      "edit": false,
+      "file": "evidence/inspector-a11y-1280x800.png",
+      "side": "right",
+      "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "left": 259,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": null,
+        "destination": null,
+        "done": null,
+        "matchBy": null,
+        "delete": {
+          "w": 44,
+          "h": 57
+        }
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "primary Add step",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
+          "ratio": 5.65
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focused": "Edit Check 1",
+      "tabStops": 1
+    },
+    {
+      "name": "inspector-a11y-flip-below",
+      "width": 1280,
+      "height": 800,
+      "zoom": 1.15,
+      "screen": "settings",
+      "edit": false,
+      "file": "evidence/inspector-a11y-flip-below.png",
+      "side": "below",
+      "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "left": 920,
+      "top": 227,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": null,
+        "destination": null,
+        "done": null,
+        "matchBy": null,
+        "delete": {
+          "w": 44,
+          "h": 57
+        }
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "primary Add step",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
+          "ratio": 5.65
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focused": "Edit Check 1",
+      "tabStops": 1
+    },
+    {
+      "name": "inspector-a11y-zoom-fixed",
+      "width": 1440,
+      "height": 900,
+      "zoom": 0.5,
+      "screen": "profile",
+      "edit": false,
+      "file": "evidence/inspector-a11y-zoom-fixed.png",
+      "side": "right",
+      "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "left": 347,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": null,
+        "destination": null,
+        "done": null,
+        "matchBy": null,
+        "delete": {
+          "w": 44,
+          "h": 57
+        }
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "primary Add step",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
+          "ratio": 5.65
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focused": "Edit Check 1",
+      "tabStops": 1
+    },
+    {
+      "name": "inspector-a11y-contrast-targets",
+      "width": 1440,
+      "height": 900,
+      "zoom": 0.85,
+      "screen": "home",
+      "edit": true,
+      "failed": true,
+      "draft": true,
+      "keyboard": false,
+      "file": "evidence/inspector-a11y-contrast-targets.png",
+      "side": "right",
+      "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "left": 259,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 47
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": {
+          "w": 254,
+          "h": 44
+        },
+        "destination": {
+          "w": 254,
+          "h": 44
+        },
+        "done": {
+          "w": 254,
+          "h": 44
+        },
+        "matchBy": {
+          "w": 124,
+          "h": 44
+        },
+        "delete": {
+          "w": 104,
+          "h": 44
+        }
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "primary Add step",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
+          "ratio": 5.65
+        },
+        {
+          "label": "danger on failed step",
+          "foreground": "#b3261e",
+          "background": "#fdecea",
+          "ratio": 5.72
+        },
+        {
+          "label": "warning draft notice",
+          "foreground": "#8a4b00",
+          "background": "#fff4e5",
+          "ratio": 6.26
+        }
+      ],
+      "focusOutline": "",
+      "focused": "body",
+      "tabStops": 1
+    },
+    {
+      "name": "inspector-a11y-clamped",
+      "width": 420,
+      "height": 520,
+      "zoom": 0.85,
+      "screen": "home",
+      "edit": false,
+      "clamp": true,
+      "file": "evidence/inspector-a11y-clamped.png",
+      "side": "right",
+      "clamped": true,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 420,
+        "height": 520
+      },
+      "left": 112,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": null,
+        "destination": null,
+        "done": null,
+        "matchBy": null,
+        "delete": {
+          "w": 44,
+          "h": 57
+        }
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "primary Add step",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
+          "ratio": 5.65
+        }
+      ],
+      "focusOutline": "",
+      "focused": "body",
+      "tabStops": 1
+    },
+    {
+      "name": "inspector-a11y-keyboard-journey",
+      "width": 1440,
+      "height": 900,
+      "zoom": 0.85,
+      "screen": "home",
+      "edit": false,
+      "file": "evidence/inspector-a11y-keyboard-journey.png",
+      "side": "right",
+      "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "left": 259,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 254,
+          "h": 44
+        },
+        "addStep": {
+          "w": 254,
+          "h": 48
+        },
+        "yaml": {
+          "w": 86,
+          "h": 44
+        },
+        "pick": null,
+        "destination": null,
+        "done": null,
+        "matchBy": null,
+        "delete": {
+          "w": 44,
+          "h": 57
+        }
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "primary Add step",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
+          "ratio": 5.65
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focused": "Edit Check 1",
+      "tabStops": 1,
+      "keyboard": [
+        {
+          "step": "step list",
+          "label": "Edit Check 1",
+          "className": "visit-step-summary",
+          "stops": 1
+        },
+        {
+          "step": "arrow down",
+          "label": "Edit Action 1",
+          "className": "visit-step-summary"
+        },
+        {
+          "step": "arrow up",
+          "label": "Edit Check 1",
+          "className": "visit-step-summary"
+        },
+        {
+          "step": "end",
+          "label": "Edit Action 1",
+          "className": "visit-step-summary"
+        },
+        {
+          "step": "add step dialog",
+          "label": "INPUT",
+          "className": ""
+        },
+        {
+          "step": "created step",
+          "label": "Action 2 selector",
+          "className": ""
+        },
+        {
+          "step": "tab order",
+          "order": [
+            "Action 2 selector",
+            "Action 2 matching",
+            "Action 2 type",
+            "Action 2 destination",
+            "Pick from screen"
+          ],
+          "destinationBeforePick": true,
+          "visual": {
+            "pickTop": 294,
+            "destinationTop": 462,
+            "selectorTop": 244,
+            "pickBesideSelector": true
+          }
+        },
+        {
+          "step": "link",
+          "before": "",
+          "after": "profile",
+          "changed": true
+        },
+        {
+          "step": "committed step",
+          "label": "Edit Action 2",
+          "className": "visit-step-summary"
+        },
+        {
+          "step": "linked step",
+          "id": "cadfed88-be9f-4ba8-bb7a-224f6f6f6798",
+          "text": "3 tapOn \"created-id\" → Profile",
+          "orderedIds": [
+            "home-ready",
+            "avatar",
+            "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+          ]
+        },
+        {
+          "step": "reorder",
+          "beforeOrder": [
+            "home-ready",
+            "avatar",
+            "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+          ],
+          "afterOrder": [
+            "home-ready",
+            "cadfed88-be9f-4ba8-bb7a-224f6f6f6798",
+            "avatar"
+          ],
+          "changed": true
+        },
+        {
+          "step": "delete",
+          "target": "Delete action 2",
+          "afterDelete": {
+            "count": 2,
+            "stops": 1,
+            "labels": [
+              "Edit Check 1",
+              "Edit Action 1"
+            ]
+          },
+          "remaining": [
+            "home-ready",
+            "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+          ],
+          "focusImmediately": "+ Add step",
+          "focusAfter": "Edit Check 1",
+          "stops": 1
+        }
+      ]
+    }
+  ],
+  "keyboard": [
+    {
+      "step": "step list",
+      "label": "Edit Check 1",
+      "className": "visit-step-summary",
+      "stops": 1
+    },
+    {
+      "step": "arrow down",
+      "label": "Edit Action 1",
+      "className": "visit-step-summary"
+    },
+    {
+      "step": "arrow up",
+      "label": "Edit Check 1",
+      "className": "visit-step-summary"
+    },
+    {
+      "step": "end",
+      "label": "Edit Action 1",
+      "className": "visit-step-summary"
+    },
+    {
+      "step": "add step dialog",
+      "label": "INPUT",
+      "className": ""
+    },
+    {
+      "step": "created step",
+      "label": "Action 2 selector",
+      "className": ""
+    },
+    {
+      "step": "tab order",
+      "order": [
+        "Action 2 selector",
+        "Action 2 matching",
+        "Action 2 type",
+        "Action 2 destination",
+        "Pick from screen"
+      ],
+      "destinationBeforePick": true,
+      "visual": {
+        "pickTop": 294,
+        "destinationTop": 462,
+        "selectorTop": 244,
+        "pickBesideSelector": true
+      }
+    },
+    {
+      "step": "link",
+      "before": "",
+      "after": "profile",
+      "changed": true
+    },
+    {
+      "step": "committed step",
+      "label": "Edit Action 2",
+      "className": "visit-step-summary"
+    },
+    {
+      "step": "linked step",
+      "id": "cadfed88-be9f-4ba8-bb7a-224f6f6f6798",
+      "text": "3 tapOn \"created-id\" → Profile",
+      "orderedIds": [
+        "home-ready",
+        "avatar",
+        "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+      ]
+    },
+    {
+      "step": "reorder",
+      "beforeOrder": [
+        "home-ready",
+        "avatar",
+        "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+      ],
+      "afterOrder": [
+        "home-ready",
+        "cadfed88-be9f-4ba8-bb7a-224f6f6f6798",
+        "avatar"
+      ],
+      "changed": true
+    },
+    {
+      "step": "delete",
+      "target": "Delete action 2",
+      "afterDelete": {
+        "count": 2,
+        "stops": 1,
+        "labels": [
+          "Edit Check 1",
+          "Edit Action 1"
+        ]
+      },
+      "remaining": [
+        "home-ready",
+        "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+      ],
+      "focusImmediately": "+ Add step",
+      "focusAfter": "Edit Check 1",
+      "stops": 1
+    }
+  ]
+}
