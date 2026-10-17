@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {JSDOM} from 'jsdom';
@@ -87,14 +88,29 @@ test('the simulator state button names the connected app and opens the simulator
   await act(async()=>{app.value='com.apple.Preferences';app.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
   assert.equal(summary().textContent,'iPhone 16 connected for Settings');
   assert.equal(summary().querySelector('.simulator-state-dot')?.classList.contains('connected'),true);
+  assert.doesNotMatch(document.body.textContent!,/User-installed and system/);
+  const refreshDevices=document.querySelector('button[aria-label="Refresh devices"]');
+  assert.ok(refreshDevices);
+  assert.equal(refreshDevices.textContent?.trim(),'');
   await act(async()=>{summary().click();});
   const device=document.querySelector<HTMLDetailsElement>('.device-toolbar')!;
   assert.ok(device.open,'Tapping the simulator state button opens the simulator popup');
   assert.ok(device.querySelector('#device'));
   assert.ok(device.querySelector('.launch-tools'));
+  const css=readFileSync(new URL('../src/style.css',import.meta.url),'utf8');
+  assert.match(css,/\.simulator-state-dot\.connected\{[^}]*background:#1f9d55/);
+  assert.match(css,/\.simulator-select select\{[^}]*right 16px center/);
+  assert.match(css,/\.device-toolbar\[open\]\{[^}]*width:max-content/);
+  assert.match(css,/\.simulator-state\{[^}]*width:fit-content/);
+  assert.match(css,/\.simulator-state\{[^}]*margin:0 0 0 auto/);
+  assert.doesNotMatch(css,/\.simulator-state\{[^}]*max-width:100%/);
   await act(async()=>{[...document.querySelectorAll('button')].find(button=>button.textContent==='Enter bundle ID manually')!.click();});
   const bundle=document.querySelector<HTMLInputElement>('#bundle')!;
   await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(bundle,'com.example.Manual');bundle.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
   assert.equal(summary().textContent,'iPhone 16 connected for com.example.Manual');
+  const close=document.querySelector<HTMLButtonElement>('button[aria-label="Close"]');
+  assert.ok(close);
+  await act(async()=>{close.click();});
+  assert.equal(device.open,false,'The close button dismisses the simulator popup');
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
