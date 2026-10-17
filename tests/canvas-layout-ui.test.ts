@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {JSDOM} from 'jsdom';
@@ -8,20 +9,50 @@ import {Scenarios} from '../src/scenarios.js';
 import type {CanvasGraph,CanvasResult} from '../server/canvas.js';
 
 const graph:CanvasGraph={screens:[{id:'home',title:'Home',x:40,y:40,referenceScreenshot:'data:image/png;base64,YQ==',tests:[{id:'check',label:'Visible Home',role:'assertion',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'stored'}}]}],edges:[],paths:[]};
-test('screen cards retain only stored capture, title and nonidle symbolic outcome',()=>{
- const idle=new JSDOM(renderToStaticMarkup(createElement(CanvasBoard,{graph}))).window.document;
+test('screen cards fit a stored capture, offer delete, and keep title plus nonidle symbolic outcome',()=>{
+ const idle=new JSDOM(renderToStaticMarkup(createElement(CanvasBoard,{graph,onRemoveCapture:()=>{}}))).window.document;
  const card=idle.querySelector('[data-screen-id="home"]')!;
  assert.equal(card.querySelector('img')?.getAttribute('src'),graph.screens[0].referenceScreenshot);
+ assert.equal(card.querySelector('img')?.getAttribute('draggable'),'false');
+ assert.ok(card.querySelector('.screen-reference-frame'));
+ assert.ok(card.querySelector('[aria-label="Delete capture for Home"] svg'));
  assert.match(card.textContent!,/Home/);
- assert.match(card.textContent!,/✓ Captured/);
+ assert.doesNotMatch(card.textContent!,/✓ Captured/);
+ assert.equal(card.querySelector('.screen-capture-label'),null);
  assert.equal(card.querySelector('.node-outcome'),null);
  assert.doesNotMatch(card.textContent!,/Visible Home|linked|Not run|Partly run|1 step/);
+ const css=readFileSync(new URL('../src/style.css',import.meta.url),'utf8');
+ assert.match(css,/\.screen-reference\{[^}]*width:100%[^}]*height:auto/);
+ assert.doesNotMatch(css,/\.screen-reference\{[^}]*max-height/);
+ assert.match(css,/\.screen-reference-delete\{[^}]*position:absolute[^}]*right:/);
  const result:CanvasResult={pathId:'',note:'',screens:[{id:'home',status:'passed'}],tests:[],edges:[]};
- const completed=new JSDOM(renderToStaticMarkup(createElement(CanvasBoard,{graph,result}))).window.document;
+ const completed=new JSDOM(renderToStaticMarkup(createElement(CanvasBoard,{graph,onRemoveCapture:()=>{},result}))).window.document;
  assert.equal(completed.querySelector('.node-outcome')?.textContent,'✓ passed');
  const empty=new JSDOM(renderToStaticMarkup(createElement(CanvasBoard,{graph:{...graph,screens:[{...graph.screens[0],referenceScreenshot:undefined}]}}))).window.document;
  assert.match(empty.querySelector('[data-screen-id]')!.textContent!,/No capture yet/);
  assert.equal(empty.querySelector('img'),null);
+ assert.equal(empty.querySelector('.screen-reference-delete'),null);
+});
+test('dragging a capture moves the node and delete removes only that capture',async()=>{
+ const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/'});
+ const keys=['window','document','HTMLElement','Event','PointerEvent','IS_REACT_ACT_ENVIRONMENT'];
+ const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:Reflect.get(dom.window,key),configurable:true});
+ const {act}=await import('react');
+ const {createRoot}=await import('react-dom/client');
+ const root=createRoot(dom.window.document.getElementById('root')!);
+ const moved:Array<[string,number,number]>=[];
+ const removed:string[]=[];
+ try{
+  await act(async()=>root.render(createElement(CanvasBoard,{graph,initialView:{zoom:1},onMove:(id:string,x:number,y:number)=>moved.push([id,x,y]),onRemoveCapture:(id:string)=>removed.push(id)})));
+  const frame=dom.window.document.querySelector('.screen-reference-frame')!;
+  const pointer=(type:string,x:number,y:number)=>frame.dispatchEvent(new dom.window.PointerEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:y,button:0,pointerId:1}));
+  await act(async()=>{pointer('pointerdown',0,0);pointer('pointermove',10,20);pointer('pointerup',10,20);});
+  assert.deepEqual(moved,[['home',50,60]]);
+  await act(async()=>dom.window.document.querySelector<HTMLButtonElement>('[aria-label="Delete capture for Home"]')!.click());
+  assert.deepEqual(removed,['home']);
+  assert.deepEqual(moved,[['home',50,60]]);
+ }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
 test('scenario authoring does not host the simulator state or a floating Run control',()=>{
  const document=new JSDOM(renderToStaticMarkup(createElement(Scenarios,{token:'',deviceId:'',bundleId:'',launchBusy:false,onRunning:()=>{}}))).window.document;
@@ -87,14 +118,29 @@ test('the simulator state button names the connected app and opens the simulator
   await act(async()=>{app.value='com.apple.Preferences';app.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
   assert.equal(summary().textContent,'iPhone 16 connected for Settings');
   assert.equal(summary().querySelector('.simulator-state-dot')?.classList.contains('connected'),true);
+  assert.doesNotMatch(document.body.textContent!,/User-installed and system/);
+  const refreshDevices=document.querySelector('button[aria-label="Refresh devices"]');
+  assert.ok(refreshDevices);
+  assert.equal(refreshDevices.textContent?.trim(),'');
   await act(async()=>{summary().click();});
   const device=document.querySelector<HTMLDetailsElement>('.device-toolbar')!;
   assert.ok(device.open,'Tapping the simulator state button opens the simulator popup');
   assert.ok(device.querySelector('#device'));
   assert.ok(device.querySelector('.launch-tools'));
+  const css=readFileSync(new URL('../src/style.css',import.meta.url),'utf8');
+  assert.match(css,/\.simulator-state-dot\.connected\{[^}]*background:#1f9d55/);
+  assert.match(css,/\.simulator-select select\{[^}]*right 16px center/);
+  assert.match(css,/\.device-toolbar\[open\]\{[^}]*width:max-content/);
+  assert.match(css,/\.simulator-state\{[^}]*width:fit-content/);
+  assert.match(css,/\.simulator-state\{[^}]*margin:0 0 0 auto/);
+  assert.doesNotMatch(css,/\.simulator-state\{[^}]*max-width:100%/);
   await act(async()=>{[...document.querySelectorAll('button')].find(button=>button.textContent==='Enter bundle ID manually')!.click();});
   const bundle=document.querySelector<HTMLInputElement>('#bundle')!;
   await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(bundle,'com.example.Manual');bundle.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
   assert.equal(summary().textContent,'iPhone 16 connected for com.example.Manual');
+  const close=document.querySelector<HTMLButtonElement>('button[aria-label="Close"]');
+  assert.ok(close);
+  await act(async()=>{close.click();});
+  assert.equal(device.open,false,'The close button dismisses the simulator popup');
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
