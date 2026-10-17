@@ -237,7 +237,7 @@ test('canvas Run scenario uses the selected path and shows blocked runs in a dis
   await runFromMenu();assert.ok(document.querySelector('.run-error-toast'));
   await act(async()=>{const label=[...document.querySelectorAll('label')].find(node=>node.textContent==='Scenario path')!;const select=document.getElementById(label.htmlFor) as HTMLSelectElement;select.value='route';select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
   rejectRun=false;await runFromMenu();assert.equal(requests.at(-1)!.pathId,'route');assert.equal(requests.at(-1)!.deviceId,'device');assert.equal(document.querySelector('.run-error-toast'),null);assert.match(document.querySelector('.result-tag')!.textContent!,/passed/);
-  await render('');await context();assert.equal(document.querySelectorAll('[role=menu] button').length,1,'Offline canvas only offers Add node');const offlineRun=document.querySelector<HTMLButtonElement>('[aria-label="Run scenario — Simulator not connected"]')!;assert.ok(offlineRun.disabled);assert.equal(requests.length,3,'Missing device does not submit a run');
+  await render('');await context();assert.equal(document.querySelectorAll('[role=menu] button').length,1,'Offline canvas only offers Add node');assert.equal(document.querySelector('[aria-label="Run scenario"]'),null,'Offline work does not offer an enabled Run scenario control');assert.equal(requests.length,3,'Missing device does not submit a run');
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
 

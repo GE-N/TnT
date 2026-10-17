@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { InstalledApp } from '../server/runner.js';
 
-export function AppPicker({ deviceId, token, value, onChange, onReady, disabled }: { deviceId: string; token: string; value: string; onChange: (value: string) => void; onReady: (ready: boolean) => void; disabled: boolean }) {
+export function AppPicker({ deviceId, token, value, onChange, onReady, onAppLabel, disabled }: { deviceId: string; token: string; value: string; onChange: (value: string) => void; onReady: (ready: boolean) => void; onAppLabel?: (label: string) => void; disabled: boolean }) {
   const [manual, setManual] = useState(false);
   const [revision, setRevision] = useState(0);
   const [list, setList] = useState<{ apps: InstalledApp[]; loading: boolean; error: string; deviceId?:string; token?:string }>({ apps: [], loading: true, error: '' });
@@ -19,6 +19,12 @@ export function AppPicker({ deviceId, token, value, onChange, onReady, disabled 
   const revalidated=list.deviceId===deviceId&&list.token===token;
   const selected = revalidated&&list.apps.some(app => app.bundleId === value) ? value : '';
   useEffect(() => { onReady(manual || (!list.loading && !!selected)); }, [manual, list.loading, selected, onReady]);
+  useEffect(() => {
+    if (!onAppLabel) return;
+    if (manual) { onAppLabel(value.trim()); return; }
+    const app = revalidated ? list.apps.find(item => item.bundleId === value) : undefined;
+    onAppLabel(app ? app.name.trim() || app.bundleId : '');
+  }, [manual, value, revalidated, list.apps, onAppLabel]);
   useEffect(() => { if (!manual && revalidated && !list.loading && value && !selected) onChange(''); }, [manual, revalidated, list.loading, value, selected, onChange]);
   return <>
     <div className="label-row"><label htmlFor={manual ? 'bundle' : 'installed-app'}>{manual ? 'App bundle identifier' : 'Installed app'}</label><button type="button" className="text-button" disabled={disabled || !deviceId || !token || list.loading} onClick={() => setRevision(current => current + 1)}>↻ Refresh apps</button></div>

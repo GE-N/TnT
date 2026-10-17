@@ -65,7 +65,7 @@ test('an offline author creates a draft, adds ordered contextual checks, reopens
   assert.equal(document.querySelector<HTMLImageElement>('[aria-label="Screen Welcome"] img')?.getAttribute('src'),'data:image/png;base64,'+png);
   assert.equal((field('Check 1 selector') as HTMLInputElement).value,'Home');assert.equal((field('Check 2 visibility') as HTMLSelectElement).value,'absent');
   assert.equal(document.querySelector('select[aria-label="Scenario path"]')?.closest('details')?.open,false,'The default journey requires no route form');
-  assert.equal([...document.querySelectorAll('button')].find(button=>button.textContent==='Run scenario')!.disabled,true,'Execution requires a device while authoring remains available');
+  assert.equal([...document.querySelectorAll('button')].find(button=>button.getAttribute('aria-label')==='Run scenario — Simulator not connected')!.disabled,true,'Execution requires a device while authoring remains available');
   await render(deviceId);await click('Run scenario');
   assert.ok(document.querySelector('.result-tag'),document.body.textContent??'');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
   assert.match(document.querySelector('.scenario-result')!.textContent!,/Home scenario/);assert.match(document.querySelector('.scenario-result')!.textContent!,/Visible text · Home: passed/);assert.match(document.querySelector('.scenario-result')!.textContent!,/Absent text · Error: passed/);

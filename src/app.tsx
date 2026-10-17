@@ -13,6 +13,9 @@ export function App() {
   const setBundleId = useCallback((bundleId: string) => setAppSelection({ deviceId, bundleId }), [deviceId]);
   useEffect(()=>{try{localStorage.setItem('tnt-device',deviceId);localStorage.setItem('tnt-app',JSON.stringify(appSelection));}catch{}},[deviceId,appSelection]);
   const [pickerReady, setPickerReady] = useState(false);
+  const [appChoice, setAppChoice] = useState({ deviceId: '', label: '' });
+  const reportAppLabel = useCallback((label: string) => setAppChoice(current => current.deviceId === deviceId && current.label === label ? current : { deviceId, label }), [deviceId]);
+  const appLabel = appChoice.deviceId === deviceId ? appChoice.label : '';
   const [busy, setBusy] = useState(false);
   const [scenarioBusy, setScenarioBusy] = useState(false);
   const [error, setError] = useState('');
@@ -73,15 +76,18 @@ export function App() {
   }
   const ready = status?.ready && deviceId;
   const devNoRunner = import.meta.env?.DEV === true && new URLSearchParams(window.location.search).has('no-runner');
+  const simulator = status?.devices.find(device => device.id === deviceId);
+  const simulatorReady = !!(status?.ready && status.token && simulator?.name && appLabel);
+  const simulatorState = simulatorReady ? `${simulator!.name} connected for ${appLabel}` : 'Simulator not ready';
 
   return <div className="workbench">
     <header className="topbar" hidden><a className="brand" href="/">tnt<span className="brand-dot">.</span></a><span className="product">MOBILE TEST WORKBENCH</span><span className={'connection ' + (status?.ready ? 'connected' : '')}><i />{status?.ready ? 'Local runner connected' : status ? 'Runner needs attention' : 'Connecting to runner'}</span></header>
     <main>
-      <details className="device-toolbar"><summary>Simulator &amp; app</summary><div className="workspace-device-controls">
+      <details className="device-toolbar"><summary className="simulator-state" title={simulatorState}><i className={simulatorReady ? 'simulator-state-dot connected' : 'simulator-state-dot'} aria-hidden="true" /><span role="status">{simulatorState}</span></summary><div className="simulator-popover"><div className="workspace-device-controls">
         <label htmlFor="device">Simulator</label><select id="device" value={deviceId} disabled={busy||scenarioBusy} onChange={event=>setDeviceId(event.target.value)}><option value="">Design offline</option>{status?.devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select>
         <button className="text-button" disabled={busy||scenarioBusy} onClick={()=>void refresh()}>Refresh devices</button>
-        <AppPicker key={deviceId+status?.token} deviceId={deviceId} token={status?.token??''} value={bundleId} onChange={setBundleId} onReady={setPickerReady} disabled={busy||scenarioBusy}/>
-      </div>{(error||status?.error)&&<div className="notice error" role="alert">{error||status?.error}</div>}<details className="launch-tools"><summary>Advanced launch tools</summary><form onSubmit={launch}><button className="confirm" disabled={!ready||!pickerReady||busy||scenarioBusy}>Launch app</button></form>{result&&<><p>{result.bundleId} · {result.status}</p>{result.status==='awaiting-confirmation'&&<button onClick={()=>void confirm()} disabled={busy||!screen}>I can see the app</button>}<pre>{result.log}</pre></>}</details></details>
+        <AppPicker key={deviceId+status?.token} deviceId={deviceId} token={status?.token??''} value={bundleId} onChange={setBundleId} onReady={setPickerReady} onAppLabel={reportAppLabel} disabled={busy||scenarioBusy}/>
+      </div>{(error||status?.error)&&<div className="notice error" role="alert">{error||status?.error}</div>}<details className="launch-tools"><summary>Advanced launch tools</summary><form onSubmit={launch}><button className="confirm" disabled={!ready||!pickerReady||busy||scenarioBusy}>Launch app</button></form>{result&&<><p>{result.bundleId} · {result.status}</p>{result.status==='awaiting-confirmation'&&<button onClick={()=>void confirm()} disabled={busy||!screen}>I can see the app</button>}<pre>{result.log}</pre></>}</details></div></details>
       <Scenarios token={devNoRunner?'':status?.token??''} deviceId={deviceId} bundleId={bundleId} launchBusy={busy} onRunning={setScenarioBusy} recoverSession simulatorConnected={!!ready}/>
 
       <footer hidden><span>iOS first · Local execution</span><span>Pick reviewed steps from the simulator · Isolated mock scenarios and reusable assertions.</span></footer>

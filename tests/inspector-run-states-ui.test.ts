@@ -140,7 +140,7 @@ test('running locks the inspector, shows spinner progress, Stop, and edge highli
  holdNext();
  await act(async()=>{document.querySelector<HTMLButtonElement>('[aria-label="Run scenario"]')!.click();await settle();});
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,50));await settle();});
- assert.ok(document.querySelector('[aria-label="Stop scenario"]'),'Stop lives in the global run control');
+ assert.ok(document.querySelector('.scenario-row [aria-label="Stop scenario"]'),'Stop replaces the running scenario play button');
  assert.equal(document.querySelector('.add-visit-step'),null);
  assert.equal(document.querySelector('.visit-step-drag'),null);
  assert.equal(document.querySelector('.visit-step-actions'),null);
@@ -195,12 +195,12 @@ test('invalid draft shows the warning, inline field errors, and disables Run wit
  const field=document.querySelector('[aria-label$="selector"][aria-invalid="true"], .visit-step-summary[aria-describedby]');
  assert.ok(field);
  assert.ok(field.getAttribute('aria-describedby')||document.querySelector('[aria-describedby]'));
- const run=document.querySelector<HTMLButtonElement>('.run-toolbar [aria-label^="Run scenario"]')!;
+ const run=document.querySelector<HTMLButtonElement>('[aria-label^="Run scenario"]')!;
  assert.ok(run.disabled);
  assert.equal(run.getAttribute('aria-label'),'Run scenario — Draft kept, not valid yet');
 }));
 
-test('autosave paused by the picker shows a primary Save button',()=>journey(async({document,click,fill,holdPicker,settle})=>{
+test('autosave paused by the picker keeps the workspace status without a floating Save button',()=>journey(async({document,click,fill,holdPicker,settle})=>{
  await inspectScreen(document,{title:'Home'},{number:1});
  await click('Add action to Home');
  await fill('Action 2 selector','Gear');
@@ -218,9 +218,7 @@ test('autosave paused by the picker shows a primary Save button',()=>journey(asy
  });
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,80));await settle();});
  assert.match(document.querySelector('.picker button.confirm')?.textContent??'',/Inspecting/);
- const save=[...document.querySelectorAll<HTMLButtonElement>('.run-toolbar button')].find(button=>button.textContent==='Save');
- assert.ok(save,'Primary Save appears while the picker pauses autosave');
- assert.ok(save.classList.contains('primary'));
+ assert.equal([...document.querySelectorAll('button')].some(button=>button.textContent==='Save'),false,'Save stays off the simulator state control while the picker pauses autosave');
  assert.match(document.querySelector('.workspace-save-status')?.getAttribute('title')??'',/while the picker is open/);
  assert.equal(document.querySelector('.workspace-save-text')?.textContent,'Unsaved changes · Autosave paused');
 }));
@@ -234,7 +232,7 @@ test('autosave paused without a runner keeps edits in-tab with leave warning and
  assert.equal(status.querySelector('.workspace-save-text')?.textContent,'Unsaved changes · Autosave paused');
  assert.match(status.getAttribute('title')??'',/Changes are kept in this tab/);
  assert.match(status.getAttribute('title')??'',/Autosave resumes automatically/);
- assert.equal([...document.querySelectorAll('.run-toolbar button')].some(button=>button.textContent==='Save'),false);
+ assert.equal([...document.querySelectorAll('button')].some(button=>button.textContent==='Save'),false);
  let warned=false;
  const leave=document.createEvent('BeforeUnloadEvent');
  leave.initEvent('beforeunload',false,true);

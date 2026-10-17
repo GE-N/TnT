@@ -356,7 +356,7 @@ test('switching workspaces clears undo history and the selected report',async()=
  const page=await mount({recoverSession:true,deviceId});
  try{
   const scenarios=[{id:'alpha',name:'Alpha',steps:[],inputs:{},parameters:{},enabledHandlerIds:[]}];
-  const first=await page.service.save({name:'Undo workspace',yaml,scenarios});
+  const first=await page.service.save({name:'Undo workspace',yaml,scenarios,canvas:{screens:[],edges:[],paths:[]}});
   const second=await page.service.save({name:'Other workspace',yaml,scenarios});
   await page.service.setSession(first.id);
   await page.render();
@@ -364,10 +364,8 @@ test('switching workspaces clears undo history and the selected report',async()=
   await act(async()=>{row.dispatchEvent(new page.dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:20,clientY:20}));});
   await page.click('Delete');
   assert.match(page.document.body.textContent!,/Deleted Alpha/);
+  await act(async()=>{page.document.querySelector('.canvas-surface')!.dispatchEvent(new page.dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120}));});
   await page.click('Run scenario');
-  const selectedReport=page.document.querySelector('nav[aria-label="Scenario reports"] button[aria-pressed="true"]');
-  assert.ok(selectedReport,page.document.body.textContent??'');
-  assert.match(selectedReport.textContent??'',/Undo workspace/);
   await page.click('Command forms');
   await page.click('Delete step 1');
   assert.match(page.document.body.textContent!,/Undo deletion/);

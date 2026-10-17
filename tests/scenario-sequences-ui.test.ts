@@ -136,7 +136,7 @@ test('a node action keeps its destination picker in the default canvas',()=>jour
 test('a new blank check stays local, exposes its inline error and blocks execution until valid',()=>journey(async({document,click,fill})=>{
  await click('New scenario');await fill('Scenario name','Repair journey');await click('Use Home as scenario start');await click('Add check to Home');
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
- const run=document.querySelector<HTMLButtonElement>('.run-toolbar [aria-label^="Run scenario"]')!;
+ const run=document.querySelector<HTMLButtonElement>('[aria-label^="Run scenario"]')!;
  assert.ok(run.disabled);assert.equal(run.getAttribute('aria-label'),'Run scenario — Draft kept, not valid yet');
  const input=document.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;assert.equal(input.getAttribute('aria-invalid'),'true');assert.match(input.closest('.visit-step')!.textContent!,/Enter text|selector/);assert.equal(document.querySelector('.result-tag'),null);
  await fill('Check 1 selector','Home');

@@ -23,17 +23,14 @@ test('screen cards retain only stored capture, title and nonidle symbolic outcom
  assert.match(empty.querySelector('[data-screen-id]')!.textContent!,/No capture yet/);
  assert.equal(empty.querySelector('img'),null);
 });
-test('offline simulator status stays in the toolbar and Run exposes the disabled reason',()=>{
+test('scenario authoring does not host the simulator state or a floating Run control',()=>{
  const document=new JSDOM(renderToStaticMarkup(createElement(Scenarios,{token:'',deviceId:'',bundleId:'',launchBusy:false,onRunning:()=>{}}))).window.document;
- const toolbar=document.querySelector('[aria-label="Scenario run controls"]')!;
- assert.match(toolbar.textContent!,/○ Simulator not connected/);
- const run=toolbar.querySelector('button')!;
- assert.ok(run.hasAttribute('disabled'));
- assert.equal(run.getAttribute('aria-label'),'Run scenario — Simulator not connected');
- assert.equal(document.querySelectorAll('[role="status"]').length,2);
+ assert.equal(document.querySelector('.run-toolbar'),null);
+ assert.equal(document.querySelector('[aria-label="Scenario run controls"]'),null);
+ assert.doesNotMatch(document.body.textContent!,/Simulator connected|Simulator not ready/);
  assert.equal(document.querySelector('.picker'),null);
  const stale=new JSDOM(renderToStaticMarkup(createElement(Scenarios,{token:'',deviceId:'remembered-device',bundleId:'',launchBusy:false,onRunning:()=>{},simulatorConnected:true}))).window.document;
- assert.ok(stale.querySelector('[aria-label="Run scenario — Simulator not connected"]')!.hasAttribute('disabled'),'A remembered connection without a runner token must remain offline');
+ assert.equal(stale.querySelector('[aria-label="Run scenario"]'),null,'A remembered connection without a runner token must not offer Run scenario');
 });
 
 test('opening a floating control closes the previous floating popover',async()=>{
@@ -49,7 +46,8 @@ test('opening a floating control closes the previous floating popover',async()=>
   await act(async()=>root.render(createElement(App)));
   const scenarios=dom.window.document.querySelector<HTMLDetailsElement>('.scenario-controls')!;
   const device=dom.window.document.querySelector<HTMLDetailsElement>('.device-toolbar')!;
-  assert.equal(device.querySelector('[role="alert"]')?.textContent,'Runner unavailable','Runner details belong inside Simulator & app, clear of authoring controls');
+  assert.match(device.querySelector('summary')?.textContent??'',/Simulator not ready/);
+  assert.equal(device.querySelector('[role="alert"]')?.textContent,'Runner unavailable','Runner details belong inside the simulator popup, clear of authoring controls');
   assert.equal(dom.window.document.querySelector('.workbench>main>.notice'),null);
   await act(async()=>{scenarios.open=true;scenarios.dispatchEvent(new dom.window.Event('toggle'));});
   assert.ok(scenarios.open);
@@ -61,5 +59,42 @@ test('opening a floating control closes the previous floating popover',async()=>
   await act(async()=>{launch.open=true;launch.dispatchEvent(new dom.window.Event('toggle'));});
   assert.ok(device.open,'Opening nested launch tools must keep its simulator popover open');
   assert.ok(launch.open);
+ }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
+});
+
+test('the simulator state button names the connected app and opens the simulator popup',async()=>{
+ const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/'});
+ const keys=['window','document','HTMLElement','Event','IS_REACT_ACT_ENVIRONMENT','fetch','localStorage'];
+ const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ const fetch=async(path:string)=>{
+  if(path==='/api/status')return Response.json({ready:true,devices:[{id:'sim',name:'iPhone 16',runtime:'iOS'}],token:'tok',tool:'test'});
+  if(path.endsWith('/apps'))return Response.json({deviceId:'sim',apps:[{bundleId:'com.apple.Preferences',name:'Settings',type:'system'}]});
+  return Response.json({});
+ };
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='fetch'?fetch:Reflect.get(dom.window,key),configurable:true});
+ const {act}=await import('react');
+ const {App}=await import('../src/app.js');
+ const {createRoot}=await import('react-dom/client');
+ const root=createRoot(dom.window.document.getElementById('root')!);
+ const document=dom.window.document;
+ try{
+  await act(async()=>root.render(createElement(App)));
+  const summary=()=>document.querySelector<HTMLElement>('.simulator-state')!;
+  assert.equal(summary().textContent,'Simulator not ready');
+  assert.equal(document.querySelector('.run-toolbar'),null);
+  assert.equal([...document.querySelectorAll('summary')].some(node=>node.textContent==='Simulator & app'),false);
+  const app=document.querySelector<HTMLSelectElement>('#installed-app')!;
+  await act(async()=>{app.value='com.apple.Preferences';app.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
+  assert.equal(summary().textContent,'iPhone 16 connected for Settings');
+  assert.equal(summary().querySelector('.simulator-state-dot')?.classList.contains('connected'),true);
+  await act(async()=>{summary().click();});
+  const device=document.querySelector<HTMLDetailsElement>('.device-toolbar')!;
+  assert.ok(device.open,'Tapping the simulator state button opens the simulator popup');
+  assert.ok(device.querySelector('#device'));
+  assert.ok(device.querySelector('.launch-tools'));
+  await act(async()=>{[...document.querySelectorAll('button')].find(button=>button.textContent==='Enter bundle ID manually')!.click();});
+  const bundle=document.querySelector<HTMLInputElement>('#bundle')!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(bundle,'com.example.Manual');bundle.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
+  assert.equal(summary().textContent,'iPhone 16 connected for com.example.Manual');
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
