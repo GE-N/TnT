@@ -41,6 +41,8 @@ gitq() { git -c core.quotePath=false "$@"; }
 
 # Reads a git diff on stdin and writes one file per "diff --git" section into $work.
 # Prints "path<TAB>source<TAB>section file" for each section.
+# Trailing blank lines at end of a section are dropped so an extra newline at EOF
+# of a patch is not a false mismatch (git diffs do not include those blanks).
 # Exit 3: text precedes the first section. Exit 4: a quoted path was written to $work/quoted.
 # File paths are passed through ENVIRON so awk -v cannot interpret backslash escapes.
 split_sections() {
@@ -54,6 +56,13 @@ split_sections() {
       tag = ENVIRON["CONTRACT_SPLIT_TAG"]
       src = ENVIRON["CONTRACT_SPLIT_SRC"]
       quoted_file = ENVIRON["CONTRACT_SPLIT_QUOTED"]
+    }
+    function flush(  i, j) {
+      if (file == "") return
+      for (i = nlines; i >= 1 && (lines[i] == "" || lines[i] == "\r"); i--);
+      for (j = 1; j <= i; j++) print lines[j] > file
+      close(file)
+      nlines = 0
     }
     function unquote_from(s, start,  i, n, c, out, oct, nacc, k) {
       n = length(s)
@@ -112,15 +121,20 @@ split_sections() {
         close(quoted_file)
         exit 4
       }
-      if (file != "") close(file)
+      flush()
       file = out "/" tag "." (++seq)
       printf "%s\t%s\t%s\n", path_of(h), src, file
-      print > file
+      lines[++nlines] = $0
       next
     }
-    file == "" { if ($0 != "") { bad = 1; exit } next }
-    { print > file }
-    END { if (file != "") close(file); if (bad) exit 3 }
+    file == "" {
+      line = $0
+      sub(/\r$/, "", line)
+      if (line != "") { bad = 1; exit }
+      next
+    }
+    { lines[++nlines] = $0 }
+    END { flush(); if (bad) exit 3 }
   '
 }
 
@@ -146,6 +160,14 @@ i=0
 shopt -s nullglob
 for patch in "$exception"/*.patch; do
   i=$((i + 1))
+  # Fail closed on CR bytes rather than normalizing. Patches are marked -text, so git
+  # will not convert CRLF, and stripping CR here would hide a non-LF file behind a
+  # successful cmp against git's LF diff. Name the patch so the author can re-save as LF.
+  cr_bytes=$(LC_ALL=C tr -cd '\r' < "$patch" | wc -c)
+  if (( cr_bytes > 0 )); then
+    echo "Canvas authoring contract failed: $patch has CRLF line endings. Exception patches must use LF bytes (.gitattributes marks $exception/*.patch -text, so git will not convert them)." >&2
+    exit 1
+  fi
   set +e
   split_sections "e$i" "$patch" < "$patch" >> "$work/expected.idx"
   status=$?
