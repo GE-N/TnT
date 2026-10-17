@@ -9,6 +9,7 @@ import {tmpdir} from 'node:os';
 import {Scenarios} from '../src/scenarios.js';
 import {createScenarios} from '../server/scenarios.js';
 import {createRunner} from '../server/runner.js';
+import {waitForUi} from './workspace-ui-helpers.js';
 
 test('workspace manager creates independent named copies and preserves unapplied drafts',async()=>{
  const directory=await mkdtemp(join(tmpdir(),'tnt-canvas-journey-'));
@@ -35,28 +36,28 @@ test('workspace manager creates independent named copies and preserves unapplied
  const fetch=(path:string,options?:{body?:string})=>{const response=request(path,options);pendingRequests.push(response);return response;};
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetch:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);const document=dom.window.document;
+ const settle=async()=>{do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);};
+ function waitForLibrary<T>(read:()=>T|undefined,description:string){return waitForUi(document,read,description,settle);}
+ const openNamed=async(name:string)=>{const button=await waitForLibrary(()=>[...document.querySelectorAll<HTMLButtonElement>('.workspace-library button')].find(item=>item.getAttribute('aria-label')?.startsWith('Open '+name+' ·')),name+' in the workspace library');await act(async()=>{button.click();await settle();});};
  const render=async(device='')=>act(async()=>root.render(createElement(Scenarios,{token:'local',deviceId:device,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));
- const click=async(label:string)=>{if(label==='Save workspace'){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await Promise.all(pendingRequests.splice(0));});return;}return act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});};
+ const click=async(label:string)=>{if(label==='Save workspace'){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await Promise.all(pendingRequests.splice(0));});return;}return act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();await settle();});};
  const field=(label:string)=>document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');
  const fill=async(label:string,value:string)=>act(async()=>{const node=field(label) as HTMLInputElement;assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const select=async(label:string,value:string)=>act(async()=>{const node=field(label) as HTMLSelectElement;assert.ok(node,label);node.value=value;node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
  try{
   await render();await click('Manage workspace');await act(async()=>{await Promise.all(pendingRequests.splice(0));});assert.match(document.body.textContent!,/No saved workspaces yet/);await click('Close workspace manager');
   for(let i=0;i<7;i++)await service.save({name:'Library item '+i,yaml:'appId: com.example.App\n---\n- launchApp\n'});
-  await render();await click('Manage workspace');await act(async()=>{await Promise.all(pendingRequests.splice(0));});assert.equal(document.querySelectorAll('.workspace-library button[aria-label^="Open "]').length,5);await fill('Find workspace','Library item 0');await act(async()=>{await Promise.all(pendingRequests.splice(0));});assert.equal(document.querySelectorAll('.workspace-library button[aria-label^="Open "]').length,1);await click('View all workspaces');await fill('Find workspace','');await act(async()=>{await Promise.all(pendingRequests.splice(0));});assert.equal(document.querySelectorAll('.workspace-library button[aria-label^="Open "]').length,7);await fill('Find workspace','Missing name');await act(async()=>{await Promise.all(pendingRequests.splice(0));});assert.match(document.body.textContent!,/No matching workspaces/);
-  const {chmod}=await import('node:fs/promises');await chmod(join(directory,'workspaces'),0o000);try{await fill('Find workspace','Unavailable');await act(async()=>{await Promise.all(pendingRequests.splice(0));});assert.match(document.body.textContent!,/local workspace store is unavailable/);}finally{await chmod(join(directory,'workspaces'),0o700);}
+  await render();await click('Manage workspace');await act(async()=>{await Promise.all(pendingRequests.splice(0));});assert.equal(document.querySelectorAll('.workspace-library button[aria-label^="Open "]').length,5);await fill('Find workspace','Library item 0');assert.equal(await waitForLibrary(()=>document.querySelectorAll('.workspace-library button[aria-label^="Open "]').length===1?1:undefined,'one matching library item'),1);await click('View all workspaces');await fill('Find workspace','');assert.equal(await waitForLibrary(()=>document.querySelectorAll('.workspace-library button[aria-label^="Open "]').length===7?7:undefined,'all library items'),7);await fill('Find workspace','Missing name');await waitForLibrary(()=>document.body.textContent?.includes('No matching workspaces')||undefined,'no matching workspaces');
+  const {chmod}=await import('node:fs/promises');await chmod(join(directory,'workspaces'),0o000);try{await fill('Find workspace','Unavailable');await waitForLibrary(()=>document.body.textContent?.includes('local workspace store is unavailable')||undefined,'library unavailable');}finally{await chmod(join(directory,'workspaces'),0o700);}
   await click('Retry library');assert.match(document.body.textContent!,/No matching workspaces/);assert.ok(!document.body.textContent?.includes('local workspace store is unavailable'));await click('Close workspace manager');
   await click('New scenario');await click('Manage workspace');await click('Rename workspace');await fill('Workspace title','Original');await click('Done');
   await click('Manage workspace');await click('Save workspace');assert.ok(document.body.textContent?.includes('Saved locally'),document.body.textContent??'');
   await click('Save a copy');await fill('Copy title','Independent');await click('Create copy');
   assert.ok(document.body.textContent?.includes('Independent'));
   await click('New scenario');await click('Manage workspace');await click('Save workspace');
-  await fill('Find workspace','Original');await act(async()=>{await Promise.all(pendingRequests.splice(0));});
-  const open=()=>[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.getAttribute('aria-label')?.startsWith('Open Original ·'))!;
-  await act(async()=>{open().click();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});
+  await fill('Find workspace','Original');await openNamed('Original');
   assert.equal(document.querySelectorAll('[aria-label="Scenario list"] .scenario-select').length,1);
-  await click('Manage workspace');await fill('Find workspace','Independent');await act(async()=>{await Promise.all(pendingRequests.splice(0));});
-  await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.getAttribute('aria-label')?.startsWith('Open Independent ·'))!.click();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});
+  await click('Manage workspace');await fill('Find workspace','Independent');await openNamed('Independent');
   assert.equal(document.querySelectorAll('[aria-label="Scenario list"] .scenario-select').length,2);
   await click('Command forms');await fill('New command value','pending command');
   await click('Manage workspace');await click('Save a copy');await click('Create copy');
@@ -80,7 +81,7 @@ test('workspace manager creates independent named copies and preserves unapplied
   await act(async()=>{releaseSave();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});
   assert.match(document.body.textContent!,/Newer edits are still unsaved/);assert.match(yamlInput.value,/Newer edit/);assert.match(document.querySelector('[aria-label="Manage workspace"]')!.textContent!,/Fresh/);await click('Cancel');await click('Close workspace manager');
   const configured=await service.save({name:'Checkpoint workspace',yaml:'appId: com.example.App\n---\n- tapOn: Next\n',flows:{'setup.yaml':'appId: com.example.App\n---\n- launchApp\n'},automation:{setup:{file:'setup.yaml',parameters:{}},actions:[],checkpoints:[]}});
-  await click('Manage workspace');await fill('Find workspace','Checkpoint workspace');await act(async()=>{await Promise.all(pendingRequests.splice(0));});await act(async()=>{document.querySelector<HTMLButtonElement>('.workspace-library button')!.click();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});
+  await click('Manage workspace');await fill('Find workspace','Checkpoint workspace');await openNamed('Checkpoint workspace');
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,300));await Promise.all(pendingRequests.splice(0));});
   const checkpoint=[...document.querySelectorAll('label')].find(label=>label.textContent?.startsWith('Checkpoint step'))!.querySelector('select')!;
   await act(async()=>{checkpoint.value='0';checkpoint.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
@@ -90,8 +91,8 @@ test('workspace manager creates independent named copies and preserves unapplied
   const sourceRecord=(await service.listWorkspaces('Unsaved source')).items.find(item=>item.name==='Unsaved source')!;const copiedRecord=(await service.listWorkspaces('Unsaved source')).items.find(item=>item.name==='Unsaved source copy')!;
   assert.equal((await service.workspace(copiedRecord.id)).yaml,(await service.workspace(sourceRecord.id)).yaml,'copy uses the acknowledged source content after normalization');assert.match(document.querySelector('[aria-label="Manage workspace"]')!.textContent!,/Unsaved source copy/);
   const duplicateA=await service.save({name:'Same title',yaml:'appId: com.example.App\n---\n- launchApp\n'});const duplicateB=await service.save({name:'Same title',yaml:'appId: com.example.App\n---\n- launchApp\n'});
-  await click('Manage workspace');await fill('Find workspace','Same title');await act(async()=>{await Promise.all(pendingRequests.splice(0));});
-  const diagnosticControls=[...document.querySelectorAll<HTMLElement>('summary[aria-label="Diagnostic details for Same title"]')];assert.equal(diagnosticControls.length,2);
+  await click('Manage workspace');await fill('Find workspace','Same title');
+  const diagnosticControls=await waitForLibrary(()=>{const controls=[...document.querySelectorAll<HTMLElement>('summary[aria-label="Diagnostic details for Same title"]')];return controls.length===2?controls:undefined;},'duplicate Same title diagnostic details');assert.equal(diagnosticControls.length,2);
   await act(async()=>{diagnosticControls[0].click();diagnosticControls[1].click();});const details=[...document.querySelectorAll('details[open]')].map(detail=>detail.textContent).join(' ');assert.ok(details.includes(duplicateA.id));assert.ok(details.includes(duplicateB.id),'same-name copies have accessible distinct diagnostic identities');
   await click('Close workspace manager');
   const title=()=>document.querySelector('[aria-label="Manage workspace"]')!.textContent!;
@@ -132,15 +133,14 @@ test('workspace manager creates independent named copies and preserves unapplied
   assert.equal(await readFile(draftPath,'utf8'),draftBytes);
   const {draftCleared:ignored,...returned}=other as typeof other & {draftCleared?:boolean};void ignored;
   assert.deepEqual(await service.workspace(current.id),returned);
-  await click('Manage workspace');await fill('Find workspace','Other editor version');await act(async()=>{await Promise.all(pendingRequests.splice(0));});
-  await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.getAttribute('aria-label')?.startsWith('Open Other editor version ·'))!.click();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});
+  await click('Manage workspace');await fill('Find workspace','Other editor version');await openNamed('Other editor version');
   const reloaded=await service.workspace(current.id);await service.save({...reloaded,name:'Other editor version'});
   await click('New scenario');await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await Promise.all(pendingRequests.splice(0));});
   assert.match(document.querySelector('.conflict-bar')!.textContent!,/another tab/);assert.equal(title().includes('another tab'),false);
   await click('Load latest');
   assert.equal(await readFile(draftPath,'utf8'),draftBytes,'Load latest and Restore as a copy leave the other tab draft in place');
   await assert.rejects(readFile(join(directory,'workspaces',recovered.id,'draft.json')));
-  await click('Manage workspace');await fill('Find workspace',recovered.name);await act(async()=>{await Promise.all(pendingRequests.splice(0));});await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.getAttribute('aria-label')?.startsWith('Open '+recovered.name+' ·'))!.click();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});
+  await click('Manage workspace');await fill('Find workspace',recovered.name);await openNamed(recovered.name);
   assert.equal(document.querySelectorAll('.scenario-select').length,newerCount+1);
   const raw=document.getElementById('scenario-yaml') as HTMLTextAreaElement;const validCode=raw.value;
   const editCode=async(value:string)=>act(async()=>{Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype,'value')!.set!.call(raw,value);raw.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
@@ -151,10 +151,51 @@ test('workspace manager creates independent named copies and preserves unapplied
   const unload=new dom.window.Event('beforeunload',{cancelable:true});dom.window.dispatchEvent(unload);assert.equal(unload.defaultPrevented,false);
   await click('Manage workspace');await click('New workspace');await fill('New workspace title','Guarded');await click('Create workspace');
   assert.match(title(),/Guarded/);assert.match(String((await service.workspaceDetail(recovered.id)).draft?.content.yaml),/missing/);
-  await click('Manage workspace');await fill('Find workspace',recovered.name);await act(async()=>{await Promise.all(pendingRequests.splice(0));});await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.getAttribute('aria-label')?.startsWith('Open '+recovered.name+' ·'))!.click();do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);});
+  await click('Manage workspace');await fill('Find workspace',recovered.name);await openNamed(recovered.name);
   // Run must check the revision even when this editor has made no further edits.
   const opened=await service.workspace(recovered.id);await service.save({...opened,name:'Newer external content'});
   await render(deviceId);const runButton=[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.getAttribute('aria-label')?.startsWith('Run Scenario '));assert.ok(runButton);
   await click(runButton.getAttribute('aria-label')!);assert.match(document.body.textContent!,/Cannot run scenario/);assert.equal(title().includes('another tab'),false);assert.match(document.querySelector('.conflict-bar')!.textContent!,/another tab/);
+ }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
+});
+
+test('workspace library search waits for a later-tick fetch before using the matching row',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'tnt-search-wait-'));
+ const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
+ const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=>'2.11.0',run:async({directory})=>{
+  await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+  await writeFile(join(directory,'commands.json'),JSON.stringify([{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}}]));
+  return {code:0,log:'Fixture',cleanup:{verified:true,detail:'Fixture process exited'}};
+ }}});
+ const dom=new JSDOM('<div id="root"></div>');
+ const keys=['window','document','HTMLElement','Event','FileReader','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];
+ const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ class ResizeObserver{observe(){}disconnect(){}}
+ const pendingRequests:Promise<Response>[]=[];let delaySearch=false;
+ const request=async(path:string,options?:{body?:string})=>{
+  const body=options?.body?JSON.parse(options.body):undefined;const id=path.split('/')[3];
+  const data=path==='/api/session'?await service.session():path==='/api/workspaces'?(body?await service.save(body):await service.listWorkspaces()):path.startsWith('/api/workspaces?q=')?await service.listWorkspaces(decodeURIComponent(path.split('q=')[1])):path.endsWith('/open')?await service.openWorkspace(id):path==='/api/canvas/references'?await service.references(body):/^\/api\/workspaces\/[0-9a-f-]{36}$/.test(path)?await service.workspaceDetail(id):undefined;
+  return Response.json(data);
+ };
+ const fetch=(path:string,options?:{body?:string})=>{
+  if(delaySearch&&path.startsWith('/api/workspaces?q='))return new Promise<Response>((resolve,reject)=>setImmediate(()=>setImmediate(()=>{const response=request(path,options);pendingRequests.push(response);response.then(resolve,reject);})));
+  const response=request(path,options);pendingRequests.push(response);return response;
+ };
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetch:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
+ const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);const document=dom.window.document;
+ const settle=async()=>{do{await Promise.all(pendingRequests.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pendingRequests.length);};
+ const render=async()=>act(async()=>root.render(createElement(Scenarios,{token:'local',deviceId:'',bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));
+ const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();await settle();});
+ const field=(label:string)=>document.querySelector(`[aria-label="${label}"]`)??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');
+ const fill=async(label:string,value:string)=>act(async()=>{const node=field(label) as HTMLInputElement;assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
+ try{
+  for(let i=0;i<7;i++)await service.save({name:'Library item '+i,yaml:'appId: com.example.App\n---\n- launchApp\n'});
+  await service.save({name:'Checkpoint workspace',yaml:'appId: com.example.App\n---\n- tapOn: Next\n'});
+  await render();await click('Manage workspace');
+  delaySearch=true;
+  await fill('Find workspace','Checkpoint workspace');
+  const button=await waitForUi(document,()=>[...document.querySelectorAll<HTMLButtonElement>('.workspace-library button')].find(item=>item.getAttribute('aria-label')?.startsWith('Open Checkpoint workspace ·')),'Checkpoint workspace in the workspace library',settle);
+  await act(async()=>{button.click();await settle();});
+  assert.match(document.querySelector('[aria-label="Manage workspace"]')!.textContent!,/Checkpoint workspace/);
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
 });
