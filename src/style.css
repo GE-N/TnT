@@ -374,11 +374,21 @@ textarea:focus{outline:1px solid var(--accent)}
 .unused-operations>summary{cursor:pointer;padding:8px 0}
 .unused-operations p{margin:8px 0 4px}
 
-.scenario-sequence-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;font-size:12px}
-.scenario-sequence-bar ol{display:flex;gap:8px;flex-wrap:wrap;list-style:none;margin:0;padding:0}
-.scenario-sequence-bar button,.canvas-checks>button{background:var(--subtle);color:var(--text);border:1px solid var(--border);border-radius:5px;padding:6px 9px}
-.scenario-sequence-bar button[aria-pressed=true]{border-color:var(--accent);background:var(--selected);color:var(--accent)}
-.scenario-sequence-bar>span{color:var(--muted)}
+.scenario-sequence-bar{display:flex;flex-direction:row;align-items:center;gap:12px;min-width:0;min-height:54px;margin-bottom:16px;padding:8px 12px;font-size:14px;line-height:1.5}
+.sequence-scenario-icon{width:20px;height:20px;flex:none;color:var(--muted)}
+.sequence-scenario-copy{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+.sequence-scenario-name{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:500;line-height:1.5;color:var(--text)}
+.sequence-trail{display:flex;align-items:center;min-width:0;overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap;overscroll-behavior-x:contain;color:var(--muted);font-size:12px;font-weight:400;line-height:1.5}
+.scenario-sequence-bar ol{display:flex;flex:none;flex-wrap:nowrap;gap:0;list-style:none;margin:0;padding:0}
+.scenario-sequence-bar ol li{display:flex;align-items:center;flex:none}
+.scenario-sequence-bar ol li+li::before,.sequence-separator,.scenario-sequence-bar .sequence-finish{flex:none}
+.scenario-sequence-bar ol li+li::before,.sequence-separator{margin:0 4px;color:var(--muted);font-size:12px;font-weight:400;line-height:1.5}
+.scenario-sequence-bar ol li+li::before{content:">"}
+.scenario-sequence-bar .sequence-step,.scenario-sequence-bar .sequence-finish{background:transparent;color:var(--muted);border:0;border-radius:0;box-shadow:none;padding:0;min-height:0;min-width:0;font-size:12px;font-weight:400;line-height:1.5;white-space:nowrap;text-decoration:none}
+.scenario-sequence-bar .sequence-step:hover:not(:disabled),.scenario-sequence-bar .sequence-finish:hover:not(:disabled){background:transparent;color:var(--text);text-decoration:underline;text-underline-offset:2px}
+.scenario-sequence-bar .sequence-step[aria-pressed="true"]{background:transparent;border:0;color:var(--text);font-weight:800;font-synthesis:weight;text-decoration:underline;text-underline-offset:2px}
+.scenario-sequence-bar .sequence-finish:disabled{background:transparent;border:0;color:var(--muted);text-decoration:none}
+.canvas-checks>button{background:var(--subtle);color:var(--text);border:1px solid var(--border);border-radius:5px;padding:6px 9px}
 .canvas-visit-numbers{display:flex;gap:6px;flex-wrap:wrap;padding:5px 10px;color:var(--accent);font-size:11px}
 .canvas-visit-numbers:empty{display:none}
 .unselected-transition{opacity:.55}
@@ -717,9 +727,8 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .device-toolbar button,.scenario-controls button{min-width:44px;min-height:44px;font-size:12px}
 .device-toolbar button:focus-visible,.scenario-controls button:focus-visible{outline:2px solid #0a84ff;outline-offset:2px}
 .workbench .workspace-advanced[open],.report-tools[open],.launch-tools[open],.screenshot-tools[open]{max-height:calc(100dvh - 190px);width:min(760px,60vw);overflow:auto;padding:16px}
-.workbench .scenario-sequence-bar{position:fixed;top:92px;left:310px;right:220px;max-height:56px;overflow:auto;margin:0;z-index:5;background:var(--surface);border-radius:18px;font-size:12px}
-.workbench .scenario-sequence-bar button{min-height:44px;min-width:44px;color:#0a63d1;font-size:12px}
-.workbench .scenario-sequence-bar button:focus-visible{outline:2px solid #0a84ff;outline-offset:-3px}
+.workbench .scenario-sequence-bar{position:fixed;top:24px;left:390px;right:280px;z-index:6;max-height:none;overflow:hidden;margin:0;background:var(--surface);border:1px solid #e2e5e9;border-radius:16px;box-shadow:0 4px 20px #2430430c}
+.workbench .scenario-sequence-bar button:focus-visible{outline:2px solid #0a84ff;outline-offset:2px}
 .workbench .canvas-route-bar{position:fixed;top:92px;left:310px;z-index:5;background:var(--surface);padding:8px;border-radius:12px}
 .workbench .screen-node-heading small,.screen-capture-label,.node-outcome{font-size:12px}
 .screen-capture-label,.node-outcome{margin:10px 12px;color:var(--muted)}
