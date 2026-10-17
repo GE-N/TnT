@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Device, LaunchResult } from '../server/runner.js';
 import { Scenarios } from './scenarios.js';
 import { AppPicker } from './app-picker.js';
@@ -21,6 +21,7 @@ export function App() {
   const [error, setError] = useState('');
   const [result, setResult] = useState<LaunchResult>();
   const [screen, setScreen] = useState('');
+  const simulatorPanel = useRef<HTMLDetailsElement>(null);
   useEffect(()=>{
     const workbench=document.querySelector('.workbench');
     const toggle=(event:Event)=>{
@@ -83,9 +84,8 @@ export function App() {
   return <div className="workbench">
     <header className="topbar" hidden><a className="brand" href="/">tnt<span className="brand-dot">.</span></a><span className="product">MOBILE TEST WORKBENCH</span><span className={'connection ' + (status?.ready ? 'connected' : '')}><i />{status?.ready ? 'Local runner connected' : status ? 'Runner needs attention' : 'Connecting to runner'}</span></header>
     <main>
-      <details className="device-toolbar"><summary className="simulator-state" title={simulatorState}><i className={simulatorReady ? 'simulator-state-dot connected' : 'simulator-state-dot'} aria-hidden="true" /><span role="status">{simulatorState}</span></summary><div className="simulator-popover"><div className="workspace-device-controls">
-        <label htmlFor="device">Simulator</label><select id="device" value={deviceId} disabled={busy||scenarioBusy} onChange={event=>setDeviceId(event.target.value)}><option value="">Design offline</option>{status?.devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select>
-        <button className="text-button" disabled={busy||scenarioBusy} onClick={()=>void refresh()}>Refresh devices</button>
+      <details className="device-toolbar" ref={simulatorPanel}><summary className="simulator-state" title={simulatorState}><i className={simulatorReady ? 'simulator-state-dot connected' : 'simulator-state-dot'} aria-hidden="true" /><span role="status">{simulatorState}</span></summary><div className="simulator-popover"><button type="button" className="simulator-close" aria-label="Close" onClick={()=>{ if(simulatorPanel.current) simulatorPanel.current.open=false; }}><CloseIcon /></button><div className="workspace-device-controls">
+        <div className="simulator-device-row"><label htmlFor="device">Simulator</label><span className="simulator-select"><select id="device" value={deviceId} disabled={busy||scenarioBusy} onChange={event=>setDeviceId(event.target.value)}><option value="">Design offline</option>{status?.devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></span><button type="button" className="simulator-icon-button" aria-label="Refresh devices" disabled={busy||scenarioBusy} onClick={()=>void refresh()}><ReloadIcon /></button></div>
         <AppPicker key={deviceId+status?.token} deviceId={deviceId} token={status?.token??''} value={bundleId} onChange={setBundleId} onReady={setPickerReady} onAppLabel={reportAppLabel} disabled={busy||scenarioBusy}/>
       </div>{(error||status?.error)&&<div className="notice error" role="alert">{error||status?.error}</div>}<details className="launch-tools"><summary>Advanced launch tools</summary><form onSubmit={launch}><button className="confirm" disabled={!ready||!pickerReady||busy||scenarioBusy}>Launch app</button></form>{result&&<><p>{result.bundleId} · {result.status}</p>{result.status==='awaiting-confirmation'&&<button onClick={()=>void confirm()} disabled={busy||!screen}>I can see the app</button>}<pre>{result.log}</pre></>}</details></div></details>
       <Scenarios token={devNoRunner?'':status?.token??''} deviceId={deviceId} bundleId={bundleId} launchBusy={busy} onRunning={setScenarioBusy} recoverSession simulatorConnected={!!ready}/>
@@ -96,3 +96,11 @@ export function App() {
 }
 
 function describe(error: unknown) { return error instanceof Error ? error.message : 'An unexpected error occurred.'; }
+
+function ReloadIcon() {
+  return <svg className="simulator-glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 8a5.2 5.2 0 1 1-1.5-3.6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M13.5 2.2V5h-2.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+}
+
+function CloseIcon() {
+  return <svg className="simulator-glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>;
+}

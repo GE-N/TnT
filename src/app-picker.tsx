@@ -26,15 +26,16 @@ export function AppPicker({ deviceId, token, value, onChange, onReady, onAppLabe
     onAppLabel(app ? app.name.trim() || app.bundleId : '');
   }, [manual, value, revalidated, list.apps, onAppLabel]);
   useEffect(() => { if (!manual && revalidated && !list.loading && value && !selected) onChange(''); }, [manual, revalidated, list.loading, value, selected, onChange]);
-  return <>
+  const hint = !deviceId ? 'Choose a running simulator to view installed apps.' : list.loading ? 'Loading apps from the selected simulator…' : !list.error && !list.apps.length ? 'No installed apps found. Install an app, then refresh.' : manual ? 'Enter the bundle ID of an app installed on this simulator.' : '';
+  return <div className="simulator-app">
     <div className="label-row"><label htmlFor={manual ? 'bundle' : 'installed-app'}>{manual ? 'App bundle identifier' : 'Installed app'}</label><button type="button" className="text-button" disabled={disabled || !deviceId || !token || list.loading} onClick={() => setRevision(current => current + 1)}>↻ Refresh apps</button></div>
-    {manual ? <input id="bundle" value={value} onChange={event => onChange(event.target.value)} placeholder="com.example.App" autoComplete="off" spellCheck={false} disabled={disabled} required maxLength={255} /> : <select id="installed-app" value={selected} required disabled={disabled || list.loading || !deviceId || !list.apps.length} onChange={event => onChange(event.target.value)}>
+    {manual ? <input id="bundle" value={value} onChange={event => onChange(event.target.value)} placeholder="com.example.App" autoComplete="off" spellCheck={false} disabled={disabled} required maxLength={255} /> : <span className="simulator-select"><select id="installed-app" value={selected} required disabled={disabled || list.loading || !deviceId || !list.apps.length} onChange={event => onChange(event.target.value)}>
       <option value="">{list.loading ? 'Loading installed apps…' : 'Choose an installed app'}</option>
       <optgroup label="User-installed apps">{list.apps.filter(app => app.type === 'user').map(app => <option key={app.bundleId} value={app.bundleId}>{app.name} · {app.bundleId}</option>)}</optgroup>
       <optgroup label="System apps">{list.apps.filter(app => app.type === 'system').map(app => <option key={app.bundleId} value={app.bundleId}>{app.name} · {app.bundleId}</option>)}</optgroup>
-    </select>}
-    <p className="field-hint" role="status">{!deviceId ? 'Choose a running simulator to view installed apps.' : list.loading ? 'Loading apps from the selected simulator…' : !list.error && !list.apps.length ? 'No installed apps found. Install an app, then refresh.' : manual ? 'Enter the bundle ID of an app installed on this simulator.' : 'User-installed and system apps are grouped separately.'}</p>
+    </select></span>}
+    {hint && <p className="field-hint" role="status">{hint}</p>}
     {list.error && <div className="notice error" role="alert">{list.error} Use Refresh apps to retry.</div>}
     <button type="button" className="text-button" disabled={disabled} onClick={() => { setManual(current => !current); onChange(''); }}>{manual ? 'Choose from installed apps' : 'Enter bundle ID manually'}</button>
-  </>;
+  </div>;
 }
