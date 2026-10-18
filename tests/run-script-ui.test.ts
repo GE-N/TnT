@@ -148,8 +148,18 @@ test('an unsafe import filename is recorded as null',()=>{
   assert.equal(importFilenameClaim('shop-v3.tnt'),'shop-v3.tnt');
   assert.equal(importFilenameClaim('shop\u202E.tnt'),null);
   assert.equal(importFilenameClaim('shop\n.tnt'),null);
+  assert.equal(importFilenameClaim('shop\u200B.tnt'),null);
+  assert.equal(importFilenameClaim('a\uFEFFb.tnt'),null);
+  assert.equal(importFilenameClaim('shop\u200C.tnt'),null);
+  assert.equal(importFilenameClaim('shop\u061C.tnt'),null);
+  assert.equal(importFilenameClaim('shop\u2028.tnt'),null);
+  assert.equal(importFilenameClaim('shop\u2029.tnt'),null);
+  assert.equal(importFilenameClaim('shop\u200D.tnt'),'shop\u200D.tnt');
   assert.equal(importFilenameClaim('../shop.tnt'),null);
   assert.equal(importFilenameClaim(undefined),null);
+  const server=readFileSync(new URL('../server/workspace-store.ts',import.meta.url),'utf8').match(/const claimControls=(\/.*\/);/)?.[1];
+  const client=readFileSync(new URL('../src/workspace-transfer.tsx',import.meta.url),'utf8').match(/const claimControls=(\/.*\/);/)?.[1];
+  assert.equal(client,server);
 });
 
 test('import and copy source lines stay plain',()=>{
@@ -451,6 +461,54 @@ test('a failed trust load keeps rows read-only and offers Retry',async()=>{
     await click(page.document,'[data-testid="trust-load-retry"]');
     assert.equal(page.retries(),1);
   }finally{await page.close();}
+});
+
+test('at 1024x700 the editor takes the inspector spot and stays inside the window',async()=>{
+  const page=await mount([row('paid',0,fingerprint,{source:'1+1'})]);
+  const proto=page.window.HTMLElement.prototype;
+  const original=proto.getBoundingClientRect;
+  const box=(left:number,top:number,width:number,height:number)=>({x:left,y:top,left,top,width,height,right:left+width,bottom:top+height,toJSON(){return {};}});
+  proto.getBoundingClientRect=function(this:HTMLElement){
+    const el=this;
+    if(el.classList.contains('floating-inspector')){
+      if(el.getAttribute('data-inspector-yielded')==='true')return box(-4000,80,300,400) as DOMRect;
+      return box(Number(el.getAttribute('data-slot-left')??362),Number(el.getAttribute('data-slot-top')??80),300,420) as DOMRect;
+    }
+    if(el.classList.contains('script-editor')){
+      const left=parseFloat(el.style.left||'0');const top=parseFloat(el.style.top||'0');
+      return box(left,top,parseFloat(el.style.width||'360'),parseFloat(el.style.maxHeight||'400')) as DOMRect;
+    }
+    if(el.classList.contains('screen-node'))return box(100,80,250,180) as DOMRect;
+    if(el.classList.contains('canvas-viewport')||el.classList.contains('canvas-surface'))return box(0,0,page.window.innerWidth,page.window.innerHeight) as DOMRect;
+    return original.call(el);
+  };
+  try{
+    Object.defineProperty(page.window,'innerWidth',{value:1024,configurable:true});Object.defineProperty(page.window,'innerHeight',{value:700,configurable:true});
+    await act(async()=>page.window.dispatchEvent(new page.window.Event('resize')));
+    const opener=page.document.querySelector<HTMLButtonElement>('[data-script-id="paid"] .script-row-summary')!;
+    assert.ok(opener);
+    opener.focus();
+    await click(page.document,'[data-script-id="paid"] .script-row-summary');
+    const editor=page.document.querySelector<HTMLElement>('.script-editor')!;
+    const inspector=page.document.querySelector<HTMLElement>('.floating-inspector')!;
+    assert.ok(editor);
+    assert.ok(inspector.isConnected);
+    assert.equal(inspector.getAttribute('data-inspector-yielded'),'true');
+    assert.equal(inspector.style.visibility,'hidden');
+    assert.notEqual(editor.style.visibility,'hidden');
+    const editorBox=editor.getBoundingClientRect();
+    const inspectorBox=inspector.getBoundingClientRect();
+    const hits=editorBox.left<inspectorBox.right&&editorBox.right>inspectorBox.left&&editorBox.top<inspectorBox.bottom&&editorBox.bottom>inspectorBox.top;
+    assert.equal(hits,false);
+    assert.ok(editorBox.width>0&&editorBox.bottom<=700);
+    assert.ok(parseFloat(editor.style.top)+parseFloat(editor.style.maxHeight)<=700);
+    await click(page.document,'[aria-label="Close script editor"]');
+    assert.equal(page.document.querySelector('.script-editor'),null);
+    assert.equal(page.document.querySelector('.floating-inspector')?.getAttribute('data-inspector-yielded'),null);
+    assert.equal(page.document.activeElement,opener);
+    await act(async()=>opener.dispatchEvent(new page.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+    assert.equal(page.document.querySelector('.floating-inspector'),null);
+  }finally{proto.getBoundingClientRect=original;await page.close();}
 });
 
 test('a setup-only visit omits Run script from the add menu',async()=>{

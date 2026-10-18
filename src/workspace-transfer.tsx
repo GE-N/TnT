@@ -2,7 +2,7 @@ import {useEffect,useRef,useState,type DragEvent} from 'react';
 import {runnerClient} from './runner-client.js';
 import type {WorkspacePackage,PackageReview} from '../server/workspace-package.js';
 export type PackageResult={package:WorkspacePackage;review:PackageReview;filename?:string};
-const claimControls=/[\u0000-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/;
+const claimControls=/[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069\uFEFF]/;
 /** Control, bidi, path, or overlong names are recorded as null so the import still opens. */
 export function importFilenameClaim(filename:string|undefined):string|null{
   if(typeof filename!=='string'||!filename.trim()||filename.length>255||/[\\/]/.test(filename)||claimControls.test(filename))return null;

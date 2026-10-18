@@ -127,7 +127,16 @@ export function placeInspector({
 export const scriptEditorWidth = 360;
 export const scriptEditorGap = 12;
 
-/** Puts the script editor on a free side of the inspector so the two cards do not overlap. */
+export type ScriptEditorPlace = {
+  left: number;
+  top: number;
+  /** Viewport height minus the editor's top minus 8px. The card scrolls inside this. */
+  maxHeight: number;
+  /** No free side: the editor takes the inspector's spot and the inspector hides. */
+  yieldsInspector: boolean;
+};
+
+/** Puts the script editor beside the inspector, or in its spot when neither side fits. */
 export function placeScriptEditor(
   inspector: Rect,
   viewport: { width: number; height: number },
@@ -135,7 +144,7 @@ export function placeScriptEditor(
     width: scriptEditorWidth,
     height: 480,
   },
-): { left: number; top: number } {
+): ScriptEditorPlace {
   const margin = inspectorMargin;
   const leftOf = inspector.left - scriptEditorGap - size.width;
   const rightOf = inspector.left + inspector.width + scriptEditorGap;
@@ -151,28 +160,25 @@ export function placeScriptEditor(
         : fits(leftOf)
           ? leftOf
           : undefined;
-  const topFor = (top: number) =>
-    clamp(
-      top,
-      margin,
-      Math.max(margin, viewport.height - margin - Math.min(size.height, 160)),
-    );
-  if (beside !== undefined)
-    return { left: Math.round(beside), top: Math.round(topFor(inspector.top)) };
-  const below = inspector.top + inspector.height + scriptEditorGap;
-  const above = inspector.top - scriptEditorGap - Math.min(size.height, 320);
-  const top =
-    below + 160 <= viewport.height - margin
-      ? below
-      : above >= margin
-        ? above
-        : topFor(inspector.top);
-  const left = clamp(
-    inspector.left,
+  const top = clamp(
+    inspector.top,
     margin,
-    Math.max(margin, viewport.width - margin - size.width),
+    Math.max(margin, viewport.height - margin - 8),
   );
-  return { left: Math.round(left), top: Math.round(top) };
+  const maxHeight = Math.max(0, viewport.height - top - 8);
+  if (beside !== undefined)
+    return {
+      left: Math.round(beside),
+      top: Math.round(top),
+      maxHeight,
+      yieldsInspector: false,
+    };
+  return {
+    left: Math.round(inspector.left),
+    top: Math.round(top),
+    maxHeight,
+    yieldsInspector: true,
+  };
 }
 
 export function visibleBounds(

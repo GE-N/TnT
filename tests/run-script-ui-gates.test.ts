@@ -117,6 +117,8 @@ test('a failed trust load blocks Run until Retry succeeds',async()=>{
     const runAll=[...document.querySelectorAll('button')].find(item=>item.textContent==='Run all');
     assert.equal(sidebarRun?.disabled,true);
     assert.equal(runAll?.disabled,true);
+    assert.equal(runAll?.getAttribute('title'),"Trust couldn't be loaded");
+    assert.equal(runAll?.getAttribute('aria-label'),"Run all — Trust couldn't be loaded");
     assert.equal(document.querySelector('.workspace-imported')?.textContent,'↓ Imported workspace');
     assert.deepEqual(page.runs,[]);
     await act(async()=>{document.querySelector<HTMLButtonElement>('[data-testid="trust-load-retry"]')!.click();for(let i=0;i<8;i++)await new Promise(resolve=>setImmediate(resolve));});
