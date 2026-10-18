@@ -55,6 +55,10 @@ test('script error precedence uses structured marker, then log; Graal syntax fai
    const commands=[first,{command:{runScriptCommand:{}},metadata:{depth:0,status:'FAILED',error:{message}}}];
    const mapped=mapScriptResults(plan,commands,log,false);assert.equal(mapped.failure,expected);assert.deepEqual(mapped.notRunIndexes,[1,2]);
   }
+  const glued=mapScriptResults(plan,[first,{command:{runScriptCommand:{}},metadata:{depth:0,status:'FAILED',error:{message:'TNT_SCRIPT_FAILED row=script-oneX not this row'}}}],'',false);
+  assert.equal(glued.failure,undefined);assert.equal(glued.scriptSteps[f.row.id].status,'not-run');
+  const otherRow=mapScriptResults(plan,[first,{command:{runScriptCommand:{}},metadata:{depth:0,status:'FAILED',error:{message:'TNT_SCRIPT_FAILED row=other boom'}}}],'TNT_SCRIPT_FAILED row=script-oneX glued line',false);
+  assert.equal(otherRow.failure,undefined);assert.equal(otherRow.scriptSteps[f.row.id].status,'not-run');
   const unmarked=mapScriptResults(plan,[first,{command:{runScriptCommand:{}},metadata:{depth:0,status:'FAILED',error:{message:'SyntaxError: Graal rejects this'}}}],'',false);
   assert.equal(unmarked.failure,undefined);assert.equal(unmarked.toolFailure,'SyntaxError: Graal rejects this');assert.equal(unmarked.scriptSteps[f.row.id].status,'not-run');
  }finally{await f.cleanup();}
@@ -219,4 +223,21 @@ test('ordinary scenarios do not depend on another scenario\'s script trust state
   const result=await f.service.wait((await f.service.start({workspaceId:f.workspace.id,deviceId,scenarioId:'plain'})).id);assert.equal(result.status,'passed');assert.equal(result.mock,undefined);assert.equal(f.stats().mockCount,0);assert.equal(f.calls[0].scriptEnv,undefined);
   await assert.rejects(f.start(),/trust state is unreadable/);assert.equal(f.stats().acquisitions,1);
  }finally{await f.cleanup();}
+});
+test('duplicate re-checks that the workspace is idle after reading it',async()=>{
+ const fState:{run?:Promise<{id:string}>;release:()=>void;gap:boolean}={release:()=>{},gap:false};
+ let arm=false;let entered!:()=>void;const enteredRead=new Promise<void>(resolve=>{entered=resolve;});
+ const f=await scriptFixture({
+  faults:{beforeRead:async()=>{if(!arm)return;arm=false;entered();await new Promise<void>(resolve=>{fState.release=resolve;});}},
+  afterDuplicateRead:async()=>{fState.gap=true;fState.release();const started=await fState.run;if(started)await f.service.wait(started.id);},
+ });
+ try{
+  arm=true;
+  const duplicate=f.service.duplicateScenario({workspaceId:f.workspace.id,scenarioId:'one',expectedRevision:f.workspace.metadata!.revision});
+  await enteredRead;
+  fState.run=f.service.start({workspaceId:f.workspace.id,deviceId,scenarioId:'one'});
+  fState.release();
+  await assert.rejects(duplicate,/Active execution blocks duplication/);
+  assert.equal(fState.gap,false,'A run that begins during the read is rejected before later duplicate work');
+ }finally{fState.release();if(fState.run)await fState.run.then(run=>f.service.wait(run.id)).catch(()=>{});await f.cleanup();}
 });

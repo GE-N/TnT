@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,symlink} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,symlink,access} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:net';
@@ -69,4 +69,56 @@ test('startup recovery refuses symlink substitutions without deleting external f
   await rm(join(root,'runs'),{recursive:true});await symlink(outside,join(root,'private'));
   await assert.rejects(sweepUnfinishedRuns(root),/Evidence root changed/);assert.equal(await readFile(join(outside,'keep'),'utf8'),'external');
  }finally{await rm(root,{recursive:true,force:true});await rm(outside,{recursive:true,force:true});}
+});
+test('startup skips plain files in runs and private without aborting the sweep',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-recovery-plain-'));
+ try{
+  const done=join(root,'runs','done');const unfinished=join(root,'runs','interrupted');
+  await mkdir(join(done,'raw'),{recursive:true});await mkdir(unfinished,{recursive:true});
+  await writeFile(join(done,'result.json'),JSON.stringify({status:'passed'}));
+  await writeFile(join(unfinished,'.tnt-execution.yaml'),'short-lived-secret');
+  await writeFile(join(root,'runs','.DS_Store'),'x');await writeFile(join(root,'runs','notes.txt'),'x');
+  await mkdir(join(root,'private'),{recursive:true});await writeFile(join(root,'private','.DS_Store'),'x');
+  await sweepUnfinishedRuns(root);
+  assert.deepEqual((await readdir(join(root,'runs'))).sort(),['.DS_Store','done','notes.txt']);
+  assert.equal(await readFile(join(done,'result.json'),'utf8'),JSON.stringify({status:'passed'}));
+  assert.deepEqual(await readdir(join(root,'private')),['.DS_Store']);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+async function deadOwner(root:string,processes:unknown[]){
+ const child=spawn(process.execPath,['-e','']);await new Promise<void>((resolve,reject)=>{child.once('error',reject);child.once('close',()=>resolve());});
+ await writeFile(join(root,'device-ownership.lock'),JSON.stringify({pid:child.pid,processes}));
+}
+test('startup does not kill a reused PID and skips an already-exited recorded process',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-recovery-reuse-'));
+ try{
+  await mkdir(join(root,'runs','interrupted'),{recursive:true});
+  const reused={role:'mockoon',pid:11,command:'mockoon',startedAt:'Sun Oct 18 12:00:45 2026'};
+  const restarted={role:'maestro',pid:13,command:'maestro test',startedAt:'Sun Oct 18 12:00:46 2026'};
+  const exited={role:'maestro',pid:12,command:'maestro',startedAt:'Sun Oct 18 12:00:47 2026'};
+  await deadOwner(root,[reused,restarted,exited,{role:'other',pid:14,command:'nope',startedAt:'x'}]);
+  const killed:number[]=[];
+  await sweepUnfinishedRuns(root,{
+   lookup:async pid=>pid===reused.pid?{command:'unrelated',startedAt:reused.startedAt}:pid===restarted.pid?{command:restarted.command,startedAt:'Sun Oct 18 12:01:00 2026'}:undefined,
+   kill:async pid=>{killed.push(pid);},
+  });
+  assert.deepEqual(killed,[]);
+  assert.deepEqual(await readdir(join(root,'runs')),[]);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+test('startup stops a live recorded Maestro or Mockoon process before sweeping its folder',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-recovery-kill-'));
+ try{
+  const unfinished=join(root,'runs','interrupted');await mkdir(unfinished,{recursive:true});
+  const mockoon={role:'mockoon',pid:21,command:'node mockoon',startedAt:'Sun Oct 18 12:00:45 2026'};
+  const maestro={role:'maestro',pid:22,command:'maestro test',startedAt:'Sun Oct 18 12:00:46 2026'};
+  await deadOwner(root,[mockoon,maestro]);
+  const killed:number[]=[];
+  await sweepUnfinishedRuns(root,{
+   lookup:async pid=>pid===mockoon.pid?{command:mockoon.command,startedAt:mockoon.startedAt}:pid===maestro.pid?{command:maestro.command,startedAt:maestro.startedAt}:undefined,
+   kill:async pid=>{await access(unfinished);killed.push(pid);},
+  });
+  assert.deepEqual(killed,[mockoon.pid,maestro.pid]);
+  assert.deepEqual(await readdir(join(root,'runs')),[]);
+ }finally{await rm(root,{recursive:true,force:true});}
 });

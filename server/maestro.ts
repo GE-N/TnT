@@ -8,7 +8,7 @@ import type { Maestro } from './scenarios.js';
 import { InspectionCleanupError, type Inspector } from './picker.js';
 
 const exec = promisify(execFile);
-export type MaestroDependencies={spawn?:typeof spawn;kill?:typeof process.kill;schedule?:typeof setTimeout;unschedule?:typeof clearTimeout;pause?:typeof delay;environment?:()=>Promise<NodeJS.ProcessEnv>;file?:string};
+export type MaestroDependencies={spawn?:typeof spawn;kill?:typeof process.kill;schedule?:typeof setTimeout;unschedule?:typeof clearTimeout;pause?:typeof delay;environment?:()=>Promise<NodeJS.ProcessEnv>;file?:string;noteProcess?:(pid:number)=>Promise<void>|void};
 export function createMaestro(dependencies:MaestroDependencies={}): Maestro & Inspector {
   const spawnProcess=dependencies.spawn??spawn;const kill=dependencies.kill??process.kill;const schedule=dependencies.schedule??setTimeout;const unschedule=dependencies.unschedule??clearTimeout;const pause=dependencies.pause??delay;
   const file = dependencies.file??process.env.MAESTRO_BIN ?? resolve('.tnt/tools/maestro/bin/maestro');
@@ -48,6 +48,7 @@ export function createMaestro(dependencies:MaestroDependencies={}): Maestro & In
       let result: { code: number | null; log: string; stdout: string; cleanup: import('./scenarios.js').Cleanup }|undefined;
       try{return result=await new Promise<{ code: number | null; log: string; stdout: string; cleanup: import('./scenarios.js').Cleanup }>(resolveRun => {
         const child = spawnProcess(file, args, { cwd: directory, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        if(child.pid&&dependencies.noteProcess)void Promise.resolve(dependencies.noteProcess(child.pid)).catch(()=>{});
         let log = '';
         let stdout = '';
         let timedOut = false;

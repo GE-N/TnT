@@ -134,3 +134,18 @@ for(const edit of ['edit-step','reorder-step'] as const)test('PR #84 mid-scenari
   assert.deepEqual((await f.service.workspace(workspace.id)).scenarios![0].scripts,[row],'Editing/reordering a step must not silently relink the saved script');
  }finally{await f.cleanup();}
 });
+test('a script anchored on an uncaptured draft step blocks with draft-anchor before launch',async()=>{
+ const f=await scriptFixture();try{
+  const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'first',label:'First',role:'assertion',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:'First'}}]}],edges:[],paths:[{id:'path',name:'One',scenarioId:'one',screenId:'home',edgeIds:[],visits:[{id:'visit',operationIds:['first']}]}]};
+  const yaml=writeChecks('appId: com.example.HybridApp\n---\n- launchApp\n',{screens:[],edges:[],paths:[]},canvas).replace('- launchApp\n','');
+  const script={...f.row,beforeStep:{index:0,fingerprint:'draft'}};
+  await f.service.save({...f.workspace,yaml,canvas,scenarios:[{...f.scenario,authoring:'canvas',pathId:'path',steps:[],scripts:[script]}]});
+  const before=f.stats();
+  await assert.rejects(f.start(),(error:unknown)=>{
+   assert.ok(error instanceof ScriptBlocked);
+   assert.deepEqual(error.blocked,[{kind:'draft-anchor',rowId:script.id,message:'Step not captured yet · capture it before running'}]);
+   return true;
+  });
+  assert.deepEqual(f.stats(),before);
+ }finally{await f.cleanup();}
+});

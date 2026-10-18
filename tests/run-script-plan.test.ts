@@ -75,6 +75,17 @@ test('empty scenario end anchor is exactly index zero and end; adding its first 
  const populated=buildRunPlan({yaml,scripts:[final],trust});assert.equal(populated.blocked[0].kind,'stale-anchor');assert.deepEqual(populated.scriptFiles,[]);
  const wrongIndex=buildRunPlan({yaml:empty,scripts:[{...final,beforeStep:{index:1,fingerprint:'end'}}],trust});assert.equal(wrongIndex.blocked[0].kind,'stale-anchor');
 });
+test('an anchor on an uncaptured draft step blocks as draft-anchor, not stale-anchor',()=>{
+ const message='Step not captured yet · capture it before running';
+ const stored=buildRunPlan({yaml,scripts:[{...row,beforeStep:{index:1,fingerprint:'draft'}}],trust});
+ assert.deepEqual(stored.blocked.filter(item=>item.kind==='draft-anchor'||item.kind==='stale-anchor'),[{kind:'draft-anchor',rowId:row.id,message}]);
+ assert.deepEqual(stored.scriptFiles,[]);
+ const current=buildRunPlan({yaml,scripts:[{...row,beforeStep:{index:0,fingerprint:row.beforeStep.fingerprint}}],trust,anchorSteps:[{index:0,fingerprint:'draft'}]});
+ assert.equal(current.blocked.find(item=>'rowId' in item&&item.rowId===row.id)?.kind,'draft-anchor');
+ assert.equal(current.blocked.some(item=>item.kind==='stale-anchor'),false);
+ const end=buildRunPlan({yaml,scripts:[{...row,beforeStep:{index:1,fingerprint:'draft:end'}}],trust,anchorSteps:[{index:0,fingerprint:'draft'}]});
+ assert.equal(end.blocked[0].kind,'draft-anchor');assert.equal(end.blocked[0].message,message);
+});
 test('run plan stably sorts by index while saved rows, ties and other anchors stay unchanged',()=>{
  const rows=[{...row,id:'end',beforeStep:{index:3,fingerprint:anchor(2).fingerprint+':end'}},{...row,id:'later-a',beforeStep:anchor(2)},{...row,id:'early-a',beforeStep:anchor(0)},{...row,id:'later-b',beforeStep:anchor(2)},{...row,id:'early-b',beforeStep:anchor(0)}];
  const input=freeze({yaml,scripts:rows,trust:rows.map(row=>({...trust[0],rowId:row.id}))});

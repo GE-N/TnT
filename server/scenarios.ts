@@ -4,7 +4,7 @@ import {EVIDENCE_SCRUB_FAILED,type ScriptRunResults} from './run-script-contract
 import type {EvidenceScrubber} from './run-script-evidence.js';
 import {homedir} from 'node:os';
 import {createScriptTrustStore,workspaceScripts} from './script-trust-store.js';
-import {buildRunPlan,scriptExecutionYaml,canvasScriptAnchors} from './run-script-plan.js';
+import {buildRunPlan,scriptExecutionYaml,canvasScriptAnchors,draftAnchorBlocks} from './run-script-plan.js';
 import {ScriptBlocked} from './script-validation.js';
 import {assertReservedInputs,assertAuthoredVariables,assertAutomationVariables} from './script-validation.js';
 import {parsePackage,portableContent,packageReview,readOmittedValues,missingValues,type OmittedValue,type WorkspacePackage} from './workspace-package.js';
@@ -42,7 +42,7 @@ export type Maestro = {
 };
 const validId = (id: string) => { if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new Error('Invalid workspace/run identifier.'); return id; };
 
-export function createScenarios(options: { root: string; runner: ReturnType<typeof createRunner>; maestro: Maestro; faults?: WorkspaceStoreFaults; now?: () => Date; trustDirectory?:string; createMockSession?:typeof createMockSession; scrubber?:EvidenceScrubber }) {
+export function createScenarios(options: { root: string; runner: ReturnType<typeof createRunner>; maestro: Maestro; faults?: WorkspaceStoreFaults; now?: () => Date; trustDirectory?:string; createMockSession?:typeof createMockSession; scrubber?:EvidenceScrubber; noteProcess?:(pid:number)=>Promise<void>|void; afterDuplicateRead?:()=>Promise<void> }) {
   const trustStore=createScriptTrustStore(options.trustDirectory??join(homedir(),'Library','Application Support','TnT','script-trust'));
   const activeWorkspaces=new Set<string>();
   const deleting=new Set<string>();
@@ -125,6 +125,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       assertIdle();
       const workspace=await workspaceStore.read(input.workspaceId);
       assertIdle();
+      await options.afterDuplicateRead?.();
       if(workspace.metadata!.revision!==input.expectedRevision)throw new WorkspaceConflict();
       const source=workspace.scenarios?.find(scenario=>scenario.id===input.scenarioId);
       if(!source)throw new Error('Unknown scenario.');
@@ -240,6 +241,8 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       let canvas=rawCanvas?refreshChecks(rawCanvas,workspace.yaml):undefined;
 
       let automation=readAutomation(workspace.automation,workspace.flows??{},workspace.yaml);
+      const draftBlocked=draftAnchorBlocks(selection?.scenario.scripts,canvas,selectedPathId);
+      if(draftBlocked.length)throw new ScriptBlocked(draftBlocked);
       if(canvas){const projection=projectCanvasRoute(canvas,workspace.yaml,workspace.flows??{},selectedPathId,automation);canvas=projection.canvas;workspace={...workspace,yaml:projection.yaml};automation=projection.automation;}
       const canvasPath=canvas?selectedCanvasPath(canvas,workspace.yaml,workspace.flows??{},selectedPathId,automation):undefined;
       const { appId, steps } = validate(workspace.yaml, workspace.flows,[],new Set(),undefined,!!selection?.scenario.scripts?.length);
@@ -309,7 +312,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
             for(const file of scriptPlan.scriptFiles){const name=join(executionDirectory,file.name);scriptPaths.push(name);await writeFile(name,file.content,{mode:0o600});}
             let scriptEnv:Record<string,string>|undefined;
             if (startMock&&workspace.mock) {
-              mock = (options.createMockSession??createMockSession)(workspace.mock, executionDirectory,{overrideResponse:selection?!!selection.scenario.mockResponseId:true});
+              mock = (options.createMockSession??createMockSession)(workspace.mock, executionDirectory,{overrideResponse:selection?!!selection.scenario.mockResponseId:true,...options.noteProcess?{noteProcess:options.noteProcess}:{}});
               const access=mock.scriptAccess();token=access.token;
               if(hasScripts)scriptEnv={TNT_MOCK_URL:access.url,TNT_MOCK_TOKEN:access.token};
               run.mock = mock.result;

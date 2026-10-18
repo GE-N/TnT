@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createScenarios} from '../server/scenarios.js';
 import {createRunner} from '../server/runner.js';
-import {ScriptTrustConflict} from '../server/script-trust-store.js';
+import {importedTombstoneCap,ScriptTrustConflict} from '../server/script-trust-store.js';
 const yaml='appId: com.example.App\n---\n- launchApp\n';
 async function fixture(){
  const root=await mkdtemp(join(tmpdir(),'tnt-trust-'));const trustDirectory=join(root,'trust');
@@ -168,7 +168,7 @@ for(const destination of ['same-scenario','other-scenario'] as const)test('one s
   await assert.rejects(restarted.start({workspaceId:imported.id,deviceId:'not-used',scenarioId:scenario.id}),/Script needs trust/);
  }finally{await rm(f.root,{recursive:true,force:true});}
 });
-test('scenario-switch view saves retire only closed-scenario tombstones and retain active imported rows',async()=>{
+test('scenario-switch retires local tombstones and keeps imported ones, including active rows',async()=>{
  const f=await fixture();try{
   const saved=await f.service.save({...f.workspace,scenarios:[...f.workspace.scenarios!,{...f.workspace.scenarios![0],id:'other',scripts:[{...f.workspace.scenarios![0].scripts![0],id:'other-row'}]}]});
   const exported=await f.service.exportWorkspace({id:saved.id,expectedRevision:2,includeValues:true});const imported=await f.service.importWorkspace({package:exported.package,name:'Tombstone lifecycle'});
@@ -178,7 +178,7 @@ test('scenario-switch view saves retire only closed-scenario tombstones and reta
   assert.equal((await readEntries()).one.origin,'imported');assert.equal((await readEntries())['other-row'].origin,'imported');
   await f.service.saveView(imported.id,{panels:{advanced:true}});assert.ok((await readEntries()).one,'Unrelated view saves leave the Undo window open');
   const restarted=createScenarios(f.options);await restarted.saveView(imported.id,{scenarioId:'other'});
-  const entries=await readEntries();assert.equal(entries.one,undefined);assert.equal(entries['other-row'].origin,'imported','An unrelated scenario tombstone remains');
+  const entries=await readEntries();assert.equal(entries.one.origin,'imported','An imported tombstone survives the scenario switch');assert.equal(entries['other-row'].origin,'imported','An unrelated scenario tombstone remains');
   assert.equal(entries.two.origin,'imported','Active imported IDs are never retired');
   assert.ok((await restarted.scriptTrust(imported.id)).scripts.every(row=>row.origin==='imported'&&!row.trusted));
  }finally{await rm(f.root,{recursive:true,force:true});}
@@ -212,5 +212,68 @@ test('copy never transfers imported approvals and unknown rows in a source-aware
   const input=structuredClone(f.workspace);input.scenarios![0].scripts![0].source='output.changedInCopy = 102938';input.scenarios![0].scripts!.push({...input.scenarios![0].scripts![0],id:'unknown',source:'output.unseen = 918273'});
   const extra=await f.service.copyWorkspace({...input,id:undefined,sourceWorkspaceId:f.workspace.id});const trust=(await f.service.scriptTrust(extra.id)).scripts.find(item=>item.rowId==='unknown')!;assert.equal(trust.origin,'imported');assert.equal(trust.trusted,false);
   const copiedTrust=(await f.service.scriptTrust(extra.id)).scripts;assert.equal(copiedTrust.find(item=>item.rowId==='one')!.trusted,false);assert.equal(copiedTrust.find(item=>item.rowId==='one')!.origin,'imported');assert.equal(copiedTrust.find(item=>item.rowId==='two')!.origin,'local');
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('a returning imported row id stays imported after a scenario switch',async()=>{
+ const f=await fixture();const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';try{
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});
+  const imported=await f.service.importWorkspace({package:pkg.package,name:'Imp',filename:'x.json'});
+  const base=imported.scenarios![0];const row=base.scripts![0];const other={...base,id:'b',name:'B',scripts:[] as typeof base.scripts};
+  await f.service.saveView(imported.id,{scenarioId:base.id});
+  const emptied=await f.service.save({...imported,scenarios:[{...base,scripts:[]},other]});
+  await f.service.saveView(emptied.id,{scenarioId:'b'});
+  await f.service.saveView(emptied.id,{scenarioId:base.id});
+  const same=await f.service.save({...await f.service.workspace(emptied.id),scenarios:[{...base,scripts:[row]},other]});
+  const trust=(await f.service.scriptTrust(same.id)).scripts.find(item=>item.rowId===row.id)!;
+  assert.equal(trust.origin,'imported');assert.equal(trust.trusted,false);
+  await assert.rejects(f.service.start({workspaceId:same.id,deviceId,scenarioId:base.id}),/Script needs trust/);
+  const moved=await f.service.save({...await f.service.workspace(same.id),scenarios:[{...base,scripts:[]},{...other,scripts:[row]}]});
+  const elsewhere=(await f.service.scriptTrust(moved.id)).scripts.find(item=>item.rowId===row.id)!;
+  assert.equal(elsewhere.origin,'imported');assert.equal(elsewhere.trusted,false);
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('scenario switch still retires a local tombstone, and imported tombstones are capped per workspace',async()=>{
+ const f=await fixture();try{
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});
+  const second=await f.service.save({...f.workspace,scenarios:[...f.workspace.scenarios!,{...f.workspace.scenarios![0],id:'b',name:'B',scripts:[]}]});
+  await f.service.saveView(second.id,{scenarioId:'first'});
+  const cleared=await f.service.save({...second,scenarios:second.scenarios!.map(scenario=>({...scenario,scripts:[]}))});
+  await f.service.saveView(cleared.id,{scenarioId:'b'});
+  const localEntries=JSON.parse(await readFile(join(f.trustDirectory,'state.json'),'utf8')).workspaces[cleared.id];
+  assert.equal(localEntries.one,undefined,'A local tombstone retires when its scenario closes');
+  const restored=await f.service.save({...await f.service.workspace(cleared.id),scenarios:[{...f.workspace.scenarios![0],scripts:f.workspace.scenarios![0].scripts}, {...f.workspace.scenarios![0],id:'b',name:'B',scripts:[]}]});
+  assert.equal((await f.service.scriptTrust(restored.id)).scripts.find(item=>item.rowId==='one')!.origin,'local');
+  const imported=await f.service.importWorkspace({package:pkg.package,name:'Capped'});
+  const emptied=await f.service.save({...imported,scenarios:[{...imported.scenarios![0],scripts:[]},{...imported.scenarios![0],id:'b',name:'B',scripts:[]}]});
+  await f.service.saveView(emptied.id,{scenarioId:'first'});
+  const file=join(f.trustDirectory,'state.json');const state=JSON.parse(await readFile(file,'utf8'));
+  const entries=state.workspaces[imported.id];
+  for(let index=0;index<importedTombstoneCap+2;index++)entries['old-'+String(index).padStart(4,'0')]={origin:'imported',scenarioId:'first'};
+  await writeFile(file,JSON.stringify(state));
+  await f.service.saveView(imported.id,{scenarioId:'b'});
+  const kept=JSON.parse(await readFile(file,'utf8')).workspaces[imported.id];
+  const tombstones=Object.keys(kept).filter(id=>id.startsWith('old-'));
+  assert.equal(tombstones.length,importedTombstoneCap);
+  assert.equal(kept['old-0000'],undefined);assert.equal(kept['old-0001'],undefined);
+  assert.equal(kept['old-'+String(importedTombstoneCap+1).padStart(4,'0')].origin,'imported');
+  const survivor='old-'+String(importedTombstoneCap+1).padStart(4,'0');
+  const row={...imported.scenarios![0].scripts![0],id:survivor};
+  const back=await f.service.save({...await f.service.workspace(imported.id),scenarios:[{...imported.scenarios![0],scripts:[row]},{...imported.scenarios![0],id:'b',name:'B',scripts:[]}]});
+  const trust=(await f.service.scriptTrust(back.id)).scripts.find(item=>item.rowId===survivor)!;
+  assert.equal(trust.origin,'imported');assert.equal(trust.trusted,false);
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('import rejects control characters and right-to-left overrides in the claimed name and filename',async()=>{
+ const f=await fixture();try{
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});
+  const filenames=['a\u0001b.json','a\nb.json','a\rb.json','a\tb.json','a\u001b[31mb.json','a\u007fb.json','a\u0085b.json','\u202Enosj.exe','\u2067x.json','a\u200Eb.json'];
+  for(const filename of filenames)await assert.rejects(f.service.importWorkspace({package:pkg.package,name:'Dest',filename}),/import filename/);
+  for(const name of ['A\u0001B','\u202EA','A\nB']){
+   const claimed=structuredClone(pkg.package);claimed.workspace.name=name;
+   await assert.rejects(f.service.importWorkspace({package:claimed,name:'Dest',filename:'ok.json'}),/source workspace name/);
+  }
+  const thai=structuredClone(pkg.package);thai.workspace.name='ชื่อ ไทย';
+  const accepted=await f.service.importWorkspace({package:thai,name:'Dest',filename:'ชื่อ.json'});
+  assert.deepEqual(accepted.metadata!.sourceWorkspace,{kind:'import',name:'ชื่อ ไทย',filename:'ชื่อ.json'});
  }finally{await rm(f.root,{recursive:true,force:true});}
 });

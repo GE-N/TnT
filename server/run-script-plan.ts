@@ -1,5 +1,6 @@
 import {parseAllDocuments,stringify} from 'yaml';
-import {referenceCatalog,type CanvasExecution} from './canvas.js';
+import {routeVisits,visitOperations,visitScreenId} from '../shared/canvas-authoring.js';
+import {referenceCatalog,type CanvasExecution,type CanvasGraph} from './canvas.js';
 import type {ExecutionItem} from './default-actions.js';
 import type {ScriptAnchor,ScriptBlockReason,ScriptRow,ScriptTrust,ScriptExecutionReference} from './run-script-contract.js';
 import {scriptHash} from './script-trust-store.js';
@@ -10,6 +11,35 @@ export type RunPlan={executionYaml:string;scriptFiles:{name:string;content:strin
 /** Setup/handler occurrences are system work, never authored step indexes or anchors. */
 export function canvasScriptAnchors(execution:CanvasExecution|undefined):ScriptAnchor[]|undefined{
   return execution?.occurrences.filter(item=>item.reference.kind==='step').map(item=>({index:item.reference.index!,fingerprint:item.reference.fingerprint}));
+}
+const draftAnchorMessage='Step not captured yet · capture it before running' as const;
+function anchorsScript(test:{role?:string;reference?:{kind?:string;fingerprint?:string}}|undefined){
+  return !!test&&test.role!=='setup'&&test.role!=='handler'&&test.reference?.kind==='step'&&typeof test.reference.fingerprint==='string';
+}
+/** Visit-operation fingerprints, including an uncaptured `draft` step. Setup and handlers are not anchors. */
+export function canvasOperationFingerprints(graph:CanvasGraph,pathId:string):string[]{
+  const path=graph.paths.find(item=>item.id===pathId);
+  if(!path?.screenId)return [];
+  const steps:string[]=[];
+  routeVisits(graph,path).forEach((_visit,visitIndex)=>{
+    const screen=graph.screens.find(item=>item.id===visitScreenId(graph,path,visitIndex));
+    for(const id of visitOperations(graph,path,visitIndex)){
+      const test=screen?.tests.find(item=>item.id===id);
+      if(anchorsScript(test))steps.push(test!.reference.fingerprint);
+    }
+  });
+  return steps;
+}
+function targetsDraft(row:ScriptRow,steps:readonly {fingerprint:string}[]){
+  const stored=row.beforeStep.fingerprint==='draft'||row.beforeStep.fingerprint==='draft:end';
+  const current=row.beforeStep.index===steps.length?steps.at(-1)?.fingerprint:steps[row.beforeStep.index]?.fingerprint;
+  return stored||current==='draft';
+}
+/** Run block for a script sitting on a step that has not been captured yet. */
+export function draftAnchorBlocks(rows:readonly ScriptRow[]|undefined,graph?:CanvasGraph,pathId?:string):Extract<ScriptBlockReason,{kind:'draft-anchor'}>[]{
+  if(!rows?.length)return [];
+  const steps=(graph&&pathId?canvasOperationFingerprints(graph,pathId):[]).map(fingerprint=>({fingerprint}));
+  return rows.filter(row=>targetsDraft(row,steps)).map(row=>({kind:'draft-anchor',rowId:row.id,message:draftAnchorMessage}));
 }
 /** Compile alone, never invoke. This gate prevents source escaping the wrapper's braces. */
 export function checkScriptSyntax(source:string):{message:string}|undefined {
@@ -40,7 +70,8 @@ export function buildRunPlan(input:{yaml:string;flows?:Record<string,string>;scr
     if(!row.source.trim())blocked.push({kind:'empty',rowId:row.id,message:'Script is empty · add code or delete the row'});
     const target=anchorSteps[row.beforeStep.index];
     const validAnchor=row.beforeStep.index===anchorSteps.length?row.beforeStep.fingerprint===endFingerprint:target?.fingerprint===row.beforeStep.fingerprint&&steps.some(ref=>ref.index===target.index&&ref.fingerprint===target.fingerprint);
-    if(!validAnchor)blocked.push({kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'});
+    if(targetsDraft(row,anchorSteps))blocked.push({kind:'draft-anchor',rowId:row.id,message:draftAnchorMessage});
+    else if(!validAnchor)blocked.push({kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'});
     const syntax=checkScriptSyntax(row.source);
     if(syntax)blocked.push({kind:'syntax',rowId:row.id,...syntax});
     if(!input.trust?.some(trust=>trust.rowId===row.id&&trust.trusted&&trust.hash===scriptHash(row.source)))blocked.push({kind:'untrusted',rowId:row.id,message:'Script needs trust'});

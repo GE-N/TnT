@@ -5,6 +5,8 @@ import type {Workspace} from './scenarios.js';
 import type {ScriptOrigin,ScriptRow,ScriptTrust} from './run-script-contract.js';
 
 export class ScriptTrustConflict extends Error { constructor(){super('Script source changed. Review the current source before trusting it.');} }
+/** Inactive imported row ids kept per workspace after scenario switches. Older ones are dropped first. */
+export const importedTombstoneCap=128;
 export const scriptHash=(source:string)=>createHash('sha256').update(source).digest('hex');
 export const workspaceScripts=(workspace:Pick<Workspace,'scenarios'>):ScriptRow[]=>workspace.scenarios?.flatMap(scenario=>scenario.scripts??[])??[];
 type Entry={origin:ScriptOrigin;approved?:string;scenarioId?:string};
@@ -31,6 +33,12 @@ export function createScriptTrustStore(directory:string){
   }finally{await handle?.close();await rm(temporary,{force:true});}
  }
  function decisions(state:State,workspace:Pick<Workspace,'id'|'scenarios'>):ScriptTrust[]{return workspaceScripts(workspace).map(row=>{const entries=state.workspaces[workspace.id];const entry=entries&&Object.hasOwn(entries,row.id)?entries[row.id]:undefined;const hash=scriptHash(row.source);return {rowId:row.id,origin:entry?.origin??'imported',trusted:entry?.origin==='local'||entry?.approved===hash,hash};});}
+ function trimImportedTombstones(entries:Record<string,Entry>,active:Set<string>){
+  const tombstones=Object.keys(entries).filter(id=>entries[id].origin==='imported'&&!active.has(id));
+  let changed=false;
+  while(tombstones.length>importedTombstoneCap){delete entries[tombstones.shift()!];changed=true;}
+  return changed;
+ }
  return {
   list:(workspace:Pick<Workspace,'id'|'scenarios'>)=>serialize(async()=>workspaceScripts(workspace).length?decisions(await read(),workspace):[]),
   register:(workspace:Workspace,previous?:Workspace,origins?:Record<string,ScriptOrigin>)=>serialize(async()=>{
@@ -47,12 +55,15 @@ export function createScriptTrustStore(directory:string){
     if(!Object.hasOwn(entries,row.id))entries[row.id]={origin:origins&&Object.hasOwn(origins,row.id)?origins[row.id]:oldIds.has(row.id)||removedImportedHashes.has(scriptHash(row.source))?'imported':'local'};
     entries[row.id].scenarioId=scenario.id;
    }
+   trimImportedTombstones(entries,nextIds);
    await write(state);
   }),
   closeScenario:(workspace:Workspace,scenarioId:string)=>serialize(async()=>{
    const state=await read();const entries=state.workspaces[workspace.id];if(!entries)return;
    const active=new Set(workspaceScripts(workspace).map(row=>row.id));let changed=false;
-   for(const [id,entry] of Object.entries(entries))if(entry.scenarioId===scenarioId&&!active.has(id)){delete entries[id];changed=true;}
+   // Local Undo ends with the scenario. Imported ids stay, so a returning draft fails closed.
+   for(const [id,entry] of Object.entries(entries))if(entry.scenarioId===scenarioId&&!active.has(id)&&entry.origin!=='imported'){delete entries[id];changed=true;}
+   if(trimImportedTombstones(entries,active))changed=true;
    if(changed)await write(state);
   }),
   approve:(workspace:Workspace,rowId:string,hash:string)=>serialize(async()=>{

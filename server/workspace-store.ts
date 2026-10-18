@@ -20,12 +20,14 @@ export type WorkspaceView=Record<string,unknown> & {
  allocatedDraftRevision?:number;
 };
 export type WorkspaceSession={lastActiveId:string|null;updatedAt:string;unavailable?:boolean};
+// C0/C1 controls (including LF) and bidi overrides that can spoof a displayed claim.
+const claimControls=/[\u0000-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/;
 function readSourceWorkspace(value:unknown):ScriptSourceWorkspace|undefined{
  if(value===undefined)return;
- if(!value||typeof value!=='object'||!('name' in value)||typeof value.name!=='string'||!value.name.trim()||value.name.length>120)throw new Error('Unreadable source workspace name.');
+ if(!value||typeof value!=='object'||!('name' in value)||typeof value.name!=='string'||!value.name.trim()||value.name.length>120||claimControls.test(value.name))throw new Error('Unreadable source workspace name.');
  if('kind' in value&&value.kind==='copy')return {kind:'copy',name:value.name};
- if('kind' in value&&value.kind==='import'&&'filename' in value&&(value.filename===null||typeof value.filename==='string'&&!!value.filename.trim()&&value.filename.length<=255&&!/[\\/\0]/.test(value.filename)))return {kind:'import',name:value.name,filename:value.filename};
- throw new Error('Provide an import filename of 1–255 characters without path separators, or omit it.');
+ if('kind' in value&&value.kind==='import'&&'filename' in value&&(value.filename===null||typeof value.filename==='string'&&!!value.filename.trim()&&value.filename.length<=255&&!/[\\/]/.test(value.filename)&&!claimControls.test(value.filename)))return {kind:'import',name:value.name,filename:value.filename};
+ throw new Error('Provide an import filename of 1–255 characters without path separators or control characters, or omit it.');
 }
 export type WorkspaceStoreFaults={
  /** Awaited before a temp file is created. Tests hold this to queue a write. */
@@ -36,6 +38,8 @@ export type WorkspaceStoreFaults={
  failBeforeRename?:()=>unknown;
  /** Return an error for session or draft cleanup after workspace.json has been renamed. */
  failAfterCommit?:()=>unknown;
+ /** Awaited at the end of a workspace read, while that read still holds the store queue. */
+ beforeRead?:()=>Promise<void>;
 };
 export class WorkspaceConflict extends Error { constructor(){super('Another editor saved a newer revision. Current edits are retained. Save a copy to recover them, and keep the saved version intact.');} }
 export class DraftConflict extends Error { constructor(){super('This workspace was changed in another tab.');} }
@@ -133,6 +137,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   const date=(value:unknown,fallback:string)=>typeof value==='string'&&Number.isFinite(Date.parse(value))?value:fallback;
   const metadata:WorkspaceMetadata={createdAt:date(raw.metadata?.createdAt,dates.birthtime.toISOString()),updatedAt:date(raw.metadata?.updatedAt,dates.mtime.toISOString()),openedAt:date(raw.metadata?.openedAt,dates.birthtime.toISOString()),revision:Number.isSafeInteger(raw.metadata?.revision)&&raw.metadata.revision>=0?raw.metadata.revision:0};
   const sourceWorkspace=readSourceWorkspace(raw.metadata?.sourceWorkspace);if(sourceWorkspace)metadata.sourceWorkspace=sourceWorkspace;
+  await faults?.beforeRead?.();
   return {...content,metadata};
  }
  async function write(value:Workspace){const path=await file(value.id,true);await writeJson(path,{...value,canvasDiagnostics:undefined},recordLimit,'Workspace record exceeds the supported size.');return value;}

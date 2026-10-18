@@ -15,6 +15,7 @@ export type ScriptSourceWorkspace =
 export type ScriptBlockReason =
   | { kind: 'empty'; rowId: string; message: 'Script is empty · add code or delete the row' }
   | { kind: 'stale-anchor'; rowId: string; message: 'Step changed · relink before running' }
+  | { kind: 'draft-anchor'; rowId: string; message: 'Step not captured yet · capture it before running' }
   | { kind: 'syntax'; rowId: string; message: string; line?: number; column?: number }
   | { kind: 'untrusted'; rowId: string; message: 'Script needs trust' }
   | { kind: 'reserved-variable'; message: 'Reserved TnT variable'; line?: number }
