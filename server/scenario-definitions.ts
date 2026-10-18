@@ -1,4 +1,5 @@
-import type {ScriptRow} from './run-script-contract.js';
+import {scriptHash} from './script-trust-store.js';
+import type {ScriptRow,ScriptTrust} from './run-script-contract.js';
 import {assertReservedInputs,assertAuthoredVariables,readScriptRows} from './script-validation.js';
 import {attachLeadingComments} from '../shared/canvas-authoring.js';
 import {isSeq,parseAllDocuments} from 'yaml';
@@ -36,14 +37,14 @@ export function readScenarios(value:unknown):ScenarioDefinition[]|undefined{
  });
 }
 // Selection references the authored commands; the execution projection never edits them.
-export function selectScenario(workspace:{yaml:string;flows?:Record<string,string>;canvas?:CanvasGraph;automation?:Automation;mock?:MockPlan;scenarios?:ScenarioDefinition[]},id:unknown,runtime:Record<string,string>){
+export function selectScenario(workspace:{yaml:string;flows?:Record<string,string>;canvas?:CanvasGraph;automation?:Automation;mock?:MockPlan;scenarios?:ScenarioDefinition[]},id:unknown,runtime:Record<string,string>,scriptTrust:readonly ScriptTrust[]=[]){
  const definitions=readScenarios(workspace.scenarios);
  if(!definitions?.length){if(id!==undefined)throw new Error('Unknown scenario.');return;}
  const scenario=definitions.find(item=>item.id===id);if(!scenario)throw new Error('Explicitly select a saved scenario.');
  const flows=workspace.flows??{};const source=referenceCatalog(workspace.yaml,flows,workspace.automation);
  const canvasAuthored=scenario.authoring==='canvas';
  const selectedSteps=canvasAuthored?source.references.filter(ref=>ref.kind==='step'):scenario.steps;
- if(!canvasAuthored&&!selectedSteps.length)throw new Error('Draft scenario: add executable steps before running.');
+ if(!canvasAuthored&&!selectedSteps.length&&!scenario.scripts?.length)throw new Error('Draft scenario: add executable steps before running.');
  for(const ref of canvasAuthored?[]:selectedSteps)if(!source.references.some(entry=>entry.kind==='step'&&entry.index===ref.index&&entry.fingerprint===ref.fingerprint))throw new Error('Broken or stale scenario step reference. Explicitly relink its selected steps.');
  const inputs=namedInputs({...scenario.inputs,...runtime});
  for(const [name,rule] of Object.entries(scenario.parameters)){
@@ -86,7 +87,8 @@ export function selectScenario(workspace:{yaml:string;flows?:Record<string,strin
  }
  if(!canvasAuthored)validateFlowInputs(automation?instrument(yaml,automation).yaml:yaml,flows,inputs);
  if(scenario.mockResponseId&&!workspace.mock)throw new Error('Configure the shared mock environment before choosing a response.');
- let mock=workspace.mock?validateMock({...workspace.mock,...(scenario.mockResponseId?{responseId:scenario.mockResponseId}:{})}):undefined;
+ const trustedScript=scenario.scripts?.some(row=>scriptTrust.some(trust=>trust.rowId===row.id&&trust.trusted&&trust.hash===scriptHash(row.source)));
+ let mock=workspace.mock&&(scenario.mockResponseId||trustedScript)?validateMock({...workspace.mock,...(scenario.mockResponseId?{responseId:scenario.mockResponseId}:{})}):undefined;
  if(mock&&canvas&&scenario.pathId){const path=canvas.paths.find(path=>path.id===scenario.pathId);const edges=path?.edgeIds.map(id=>canvas.edges.find(edge=>edge.id===id));const first=edges?.[0];const last=edges?.at(-1);if(first&&last)mock={...mock,fromScreen:canvas.screens.find(screen=>screen.id===first.from)!.title,toScreen:canvas.screens.find(screen=>screen.id===last.to)!.title};}
  if(canvasAuthored&&!canvas)throw new Error('Draft scenario: add a screen and choose its start before running.');
  if(canvas&&!scenario.pathId)throw new Error('Select a canvas path for this scenario.');

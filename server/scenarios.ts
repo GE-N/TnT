@@ -93,7 +93,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       let yaml=selection?.yaml??input.yaml;let automation=selection?.automation??configured;
       const rawCanvas=selection?.canvas??readCanvas(input.canvas);
       if(rawCanvas){const canvas=refreshChecks(rawCanvas,yaml);const pathId=selection?.scenario.pathId??input.pathId;const projection=projectCanvasRoute(canvas,yaml,flows??{},pathId,automation);yaml=projection.yaml;automation=projection.automation;selectedCanvasPath(projection.canvas,yaml,flows??{},pathId,automation);}
-      const root=validate(yaml,flows);
+      const root=validate(yaml,flows,[],new Set(),undefined,!!selection?.scenario.scripts?.length);
       for(const flow of Object.values(flows??{}))if(validate(flow,flows).appId!==root.appId)throw new Error('Reusable flows must declare the same appId as the scenario.');
       const executionYaml=automation?instrument(yaml,automation,input.resetApp??false).yaml:yaml;
       validateFlowInputs(executionYaml,flows??{},selection?.inputs??validateInputs(input.runtimeInputs));
@@ -136,12 +136,13 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     async copyWorkspace(input:Parameters<typeof authoredWorkspace>[0]&{sourceWorkspaceId?:string}){
       const content=authoredWorkspace({...input,id:undefined});
       const incomplete=content.canvas?.screens.flatMap(screen=>screen.tests).find(test=>operationProblem(test));if(incomplete)throw new Error('Repair incomplete canvas content before copying. '+operationProblem(incomplete));
-      validate(content.yaml,content.flows);
+      validate(content.yaml,content.flows,[],new Set(),undefined,workspaceScripts(content).length>0);
       for(const flow of Object.values(content.flows??{}))validate(flow,content.flows);
       const sourceId=input.sourceWorkspaceId??input.id;
-      const source=sourceId?await workspaceStore.read(sourceId):undefined;
+      let source:Workspace|undefined;
+      if(sourceId)try{source=await workspaceStore.read(sourceId);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
       const sourceTrust=source?await trustStore.list(source):[];
-      const origins=source?Object.fromEntries(workspaceScripts(content).flatMap(row=>{const trust=sourceTrust.find(item=>item.rowId===row.id);const original=workspaceScripts(source).find(item=>item.id===row.id);return trust&&(trust.origin==='imported'||original?.source===row.source)?[[row.id,trust.origin]]:[];})):Object.fromEntries(workspaceScripts(content).map(row=>[row.id,'imported' as const]));
+      const origins=Object.fromEntries(workspaceScripts(content).map(row=>{const trust=sourceTrust.find(item=>item.rowId===row.id);const original=source&&workspaceScripts(source).find(item=>item.id===row.id);return [row.id,trust?.origin==='local'&&original?.source===row.source?'local' as const:'imported' as const];}));
       return workspaceStore.importCopy(content,next=>trustStore.register(next,undefined,origins));
     },
     async exportWorkspace(input:{id:string;expectedRevision:number;includeValues?:boolean}){
@@ -150,7 +151,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       if(workspace.metadata!.revision!==input.expectedRevision)throw new WorkspaceConflict();
       const incomplete=workspace.canvas?.screens.flatMap(screen=>screen.tests).find(test=>operationProblem(test));
       if(incomplete)throw new Error('Repair incomplete authored content before export. '+operationProblem(incomplete));
-      validate(workspace.yaml,workspace.flows);
+      validate(workspace.yaml,workspace.flows,[],new Set(),undefined,workspaceScripts(workspace).length>0);
       const content=portableContent(workspace,input.includeValues===true);
       const pkg:WorkspacePackage={dependencies:packageReview(content,[]).dependencies,format:'tnt-workspace',version:1,source:{revision:workspace.metadata!.revision,savedAt:workspace.metadata!.updatedAt},workspace:content};
       if(Buffer.byteLength(JSON.stringify(pkg,null,2)+'\n')>1_100_000)throw new Error('Formatted workspace package exceeds 1.1 MB. Reduce embedded images or authored content.');
@@ -161,7 +162,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const pkg=parsePackage(input.package);
       const missing:string[]=[];
       const content=authoredWorkspace({...pkg.workspace,id:undefined},missing);
-      validate(content.yaml,content.flows,[],new Set(),missing);
+      validate(content.yaml,content.flows,[],new Set(),missing,workspaceScripts(content).length>0);
       if(!content.scenarios?.length)try{await service.preview(content);}catch(error){missing.push(error instanceof Error?error.message:'Repair missing YAML inputs.');}
       for(const scenario of content.scenarios??[])try{await service.preview({...content,scenarioId:scenario.id});}catch(error){missing.push(scenario.name+': '+(error instanceof Error?error.message:'Repair scenario.'));}
       const review=packageReview(content,[...missing,...(content.canvasDiagnostics??[]).map(item=>item.detail??`${item.code}:${item.actionId}`)]);
@@ -200,7 +201,8 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const confidential = Object.keys(runtimeInputs).length > 0;
       if(input.resetApp!==undefined&&typeof input.resetApp!=='boolean')throw new Error('Reset app must be a boolean.');
       assertAuthoredVariables(authored.yaml);assertAutomationVariables(authored.automation);assertAutomationVariables(authored.scenarios);
-      const selection=selectScenario(authored,input.scenarioId,runtimeInputs);
+      const scriptTrust=await trustStore.list({id:authored.id,scenarios:authored.scenarios?.filter(scenario=>scenario.id===input.scenarioId)});
+      const selection=selectScenario(authored,input.scenarioId,runtimeInputs,scriptTrust);
       const omitted=missingValues({...authored,automation:selection?.automation??authored.automation},{runtime:runtimeInputs,scenarioId:input.scenarioId});if(omitted.length)throw new Error('Repair imported workspace before execution. '+omitted.join(' '));
       let workspace=selection?{...authored,...selection,name:selection.scenario.name}:authored;
       const selectedPathId=selection?.scenario.pathId??input.pathId;
@@ -214,15 +216,16 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       let automation=readAutomation(workspace.automation,workspace.flows??{},workspace.yaml);
       if(canvas){const projection=projectCanvasRoute(canvas,workspace.yaml,workspace.flows??{},selectedPathId,automation);canvas=projection.canvas;workspace={...workspace,yaml:projection.yaml};automation=projection.automation;}
       const canvasPath=canvas?selectedCanvasPath(canvas,workspace.yaml,workspace.flows??{},selectedPathId,automation):undefined;
-      const { appId, steps } = validate(workspace.yaml, workspace.flows);
+      const { appId, steps } = validate(workspace.yaml, workspace.flows,[],new Set(),undefined,!!selection?.scenario.scripts?.length);
       const derived=automation?instrument(workspace.yaml,automation,resetApp):undefined;
       validateFlowInputs(derived?.yaml??workspace.yaml,workspace.flows??{},selection?.inputs??runtimeInputs);
       for (const flow of Object.values(workspace.flows ?? {})) { if (validate(flow, workspace.flows).appId !== appId) throw new Error('Reusable flows must declare the same appId as the scenario.'); }
       if ((input.captureId === undefined) !== (input.pickerReviewId === undefined)) throw new Error('Provide both capture and reviewed step identity.');
-      const scriptPlan=buildRunPlan({yaml:workspace.yaml,flows:workspace.flows,scripts:selection?.scenario.scripts,trust:await trustStore.list(authored),automation:derived,mockAvailable:!!workspace.mock});
+      const scriptPlan=buildRunPlan({yaml:workspace.yaml,flows:workspace.flows,scripts:selection?.scenario.scripts,trust:scriptTrust,automation:derived,mockAvailable:!!workspace.mock});
       if(scriptPlan.blocked.length)throw new ScriptBlocked(scriptPlan.blocked);
       if(scriptPlan.scriptFiles.length)validateFlowInputs(scriptPlan.executionYaml,workspace.flows??{},selection?.inputs??runtimeInputs,[],true);
       const hasScripts=scriptPlan.scriptFiles.length>0;
+      const startMock=!!workspace.mock&&(!selection||!!selection.scenario.mockResponseId||hasScripts);
       const executionYaml=hasScripts?scriptPlan.executionYaml:derived?.yaml;
       const pickerReference = input.captureId ? options.runner.picker.assertReview(input.captureId, input.pickerReviewId!, workspace.yaml) : undefined;
       const release = await options.runner.acquireDevice(input.deviceId, input.captureId, input.pickerReviewId);
@@ -266,7 +269,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
             for (const [name, yaml] of Object.entries(workspace.flows ?? {})) await writeFile(join(executionDirectory, name), yaml);
             for(const file of scriptPlan.scriptFiles){const name=join(executionDirectory,file.name);scriptPaths.push(name);await writeFile(name,file.content,{mode:0o600});}
             let scriptEnv:Record<string,string>|undefined;
-            if (workspace.mock) {
+            if (startMock&&workspace.mock) {
               mock = (options.createMockSession??createMockSession)(workspace.mock, executionDirectory,{overrideResponse:selection?!!selection.scenario.mockResponseId:true});
               const access=mock.scriptAccess();token=access.token;
               if(hasScripts)scriptEnv={TNT_MOCK_URL:access.url,TNT_MOCK_TOKEN:access.token};
@@ -383,7 +386,7 @@ function validateInputs(value: unknown): Record<string, string> {
   return Object.fromEntries(entries);
 }
 
-function validate(yaml: string, flows: Record<string,string> = {}, ancestors: string[] = [], verified = new Set<string>(),unresolved?:string[]) {
+function validate(yaml: string, flows: Record<string,string> = {}, ancestors: string[] = [], verified = new Set<string>(),unresolved?:string[],allowEmpty=false) {
   assertAuthoredVariables(yaml);
   const documents = parseAllDocuments(yaml);
   if (documents.length !== 2 || documents.some(doc => doc.errors.length)) throw new Error('Invalid Maestro YAML: use an appId header, --- separator, and command list.');
@@ -391,7 +394,7 @@ function validate(yaml: string, flows: Record<string,string> = {}, ancestors: st
   const commands = documents[1].toJS();
   rejectFileReferences(config, flows, ancestors, verified,unresolved);
   rejectFileReferences(commands, flows, ancestors, verified,unresolved);
-  if (typeof config?.appId !== 'string' || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(config.appId) || !Array.isArray(commands) || !commands.length) throw new Error('Provide a literal installed appId and at least one Maestro command.');
+  if (typeof config?.appId !== 'string' || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(config.appId) || !Array.isArray(commands) || (!commands.length&&!allowEmpty)) throw new Error('Provide a literal installed appId and at least one Maestro command.');
   const steps: Step[] = commands.map((value, index) => {
     const command = typeof value === 'string' ? value : value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value)[0] : undefined;
     if (!command) throw new Error('Each step must be a Maestro command.');

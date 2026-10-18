@@ -67,3 +67,22 @@ test('copy preserves verified local origin; copied imported sources under new ro
   const noScripts=await f.service.save({...f.workspace,scenarios:[]});await writeFile(join(f.trustDirectory,'state.json'),'unreadable');assert.deepEqual(await f.service.scriptTrust(noScripts.id),{scripts:[]});
  }finally{await rm(f.root,{recursive:true,force:true});}
 });
+for(const state of ['missing','trashed'] as const)test('copy with '+state+' source context falls back to untrusted imported rows',async()=>{
+ const f=await fixture();try{
+  if(state==='trashed')await f.service.trashWorkspace(f.workspace.id);
+  const sourceWorkspaceId=state==='trashed'?f.workspace.id:'00000000-0000-4000-8000-000000000000';
+  const copy=await f.service.copyWorkspace({...f.workspace,id:undefined,sourceWorkspaceId,name:'Conservative copy'});
+  assert.notEqual(copy.id,f.workspace.id);assert.deepEqual(copy.scenarios![0].scripts,f.workspace.scenarios![0].scripts);
+  const scripts=(await f.service.scriptTrust(copy.id)).scripts;assert.ok(scripts.every(item=>item.origin==='imported'&&!item.trusted));
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('copy never transfers imported approvals and unknown rows in a source-aware copy are untrusted',async()=>{
+ const f=await fixture();try{
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});const imported=await f.service.importWorkspace({package:pkg.package,name:'Approved import'});
+  for(const trust of (await f.service.scriptTrust(imported.id)).scripts)await f.service.trustScript({workspace:imported.id,rowId:trust.rowId,hash:trust.hash});
+  assert.ok((await f.service.scriptTrust(imported.id)).scripts.every(item=>item.trusted));
+  const copy=await f.service.copyWorkspace({...imported,id:undefined,sourceWorkspaceId:imported.id});assert.ok((await f.service.scriptTrust(copy.id)).scripts.every(item=>item.origin==='imported'&&!item.trusted));
+  const input=structuredClone(f.workspace);input.scenarios![0].scripts!.push({...input.scenarios![0].scripts![0],id:'unknown',source:'output.unseen = 918273'});
+  const extra=await f.service.copyWorkspace({...input,id:undefined,sourceWorkspaceId:f.workspace.id});const trust=(await f.service.scriptTrust(extra.id)).scripts.find(item=>item.rowId==='unknown')!;assert.equal(trust.origin,'imported');assert.equal(trust.trusted,false);
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});

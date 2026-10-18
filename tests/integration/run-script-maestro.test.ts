@@ -19,10 +19,10 @@ if(!deviceId)throw new Error('Set TNT_REAL_DEVICE for this explicitly invoked re
 const environment=JSON.parse(await readFile(new URL('../fixtures/mockoon.json',import.meta.url),'utf8'));
 async function walk(path:string):Promise<string[]>{try{const entries=await readdir(path,{withFileTypes:true});return (await Promise.all(entries.map(entry=>entry.isDirectory()?walk(join(path,entry.name)):entry.isFile()?[join(path,entry.name)]:[]))).flat();}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return [];throw error;}}
 async function fixture(withMock=false){
- const root=await mkdtemp(join(tmpdir(),'tnt-real-script-'));let ownedPid:number|undefined;const maestro=createMaestro({spawn:((...args:Parameters<typeof spawn>)=>{const child=spawn(...args);ownedPid=child.pid;return child;}) as typeof spawn});
+ const root=await mkdtemp(join(tmpdir(),'tnt-real-script-'));const runInputs:Parameters<ReturnType<typeof createMaestro>['run']>[0][]=[];let ownedPid:number|undefined;const maestro=createMaestro({spawn:((...args:Parameters<typeof spawn>)=>{const child=spawn(...args);ownedPid=child.pid;return child;}) as typeof spawn});
  const runner=createRunner({artifactDirectory:join(root,'launches'),ownershipDirectory:process.env.TNT_REAL_OWNERSHIP_DIR??root,execute:async(file,args)=>exec(file,args,{encoding:'utf8',timeout:30000})});
  const tokens:string[]=[];const {createMockSession}=await import('../../server/mockoon.js');
- const service=createScenarios({root,trustDirectory:join(root,'trust'),runner,maestro,createMockSession:(...args)=>{const mock=createMockSession(...args);tokens.push(mock.scriptAccess().token);return mock;}});
+ const service=createScenarios({root,trustDirectory:join(root,'trust'),runner,maestro:{...maestro,run:async input=>{runInputs.push(input);return maestro.run(input);}},createMockSession:(...args)=>{const mock=createMockSession(...args);tokens.push(mock.scriptAccess().token);return mock;}});
  const probe=createServer();await new Promise<void>(res=>probe.listen(0,'127.0.0.1',res));const address=probe.address();if(!address||typeof address==='string')throw new Error('No port');const port=address.port;await new Promise<void>(res=>probe.close(()=>res()));
  const mock=withMock?{environment,port,routeId:environment.routes[0].uuid,responseId:environment.routes[0].responses[0].uuid,backendUrl:'http://127.0.0.1:4321',passthroughRouteIds:[],fromScreen:'Home',toScreen:'Home',failureSemantics:'Fixture response'}:undefined;
  const yaml='appId: '+(process.env.TNT_REAL_APP??'com.example.HybridApp')+'\n---\n- launchApp\n- evalScript: ${if (output.X !== "ไทย quote") throw new Error("output did not round-trip")}\n';
@@ -34,7 +34,7 @@ async function fixture(withMock=false){
   return service.save({name:'Real script',yaml:authored,scenarios:[{id:'real',name:'Real',steps,inputs:{},parameters:{},enabledHandlerIds:[],scripts:[{...row,source,...(end?{beforeStep:{index:steps.length,fingerprint:steps.length?steps.at(-1)!.fingerprint+':end':'end'}}:{})}]}],mock});
  }
  async function scan(){for(const path of [...await walk(root),...await walk(join(homedir(),'.maestro','tests'))]){const bytes=await readFile(path);for(const token of tokens)for(const form of tokenForms(token))assert.equal(bytes.includes(Buffer.from(form)),false,'Token in '+path);}assert.equal((await walk(join(root,'runs'))).some(path=>/\.tnt-script-\d+\.js$/.test(path)),false);}
- return {root,service,runner,save,tokens,port,scan,pid:()=>ownedPid};
+ return {root,service,runner,save,tokens,port,scan,runInputs,pid:()=>ownedPid};
 }
 test('real Maestro output/escaping happy path and 20 consecutive fresh Mockoon sessions',async t=>{
  const f=await fixture(true);try{
@@ -96,5 +96,27 @@ test('real end anchor executes after the final step without mock variables',asyn
    await f.service.save({...workspace,metadata:(await f.service.workspace(workspace.id)).metadata,yaml,scenarios:workspace.scenarios!.map(scenario=>({...scenario,steps}))});
    const pid=f.pid();await assert.rejects(f.service.start({workspaceId:workspace.id,deviceId:deviceId!,scenarioId:'real'}),/Step changed · relink before running/);assert.equal(f.pid(),pid);
   }
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+
+test('real empty scenario executes same-anchor end rows in saved order',async()=>{
+ const f=await fixture();try{
+  const base=await f.save();const yaml='appId: '+(process.env.TNT_REAL_APP??'com.example.HybridApp')+'\n---\n[]\n';
+  const scripts=[{id:'end-second',label:'Second',beforeStep:{index:0,fingerprint:'end'},source:'output.order = "second"'},{id:'end-first',label:'First',beforeStep:{index:0,fingerprint:'end'},source:'output.order += ",first"; if (output.order !== "second,first") throw new Error("end order wrong")'}];
+  const workspace=await f.service.save({...base,yaml,scenarios:base.scenarios!.map(scenario=>({...scenario,steps:[],scripts}))});
+  const result=await f.service.wait((await f.service.start({workspaceId:workspace.id,deviceId:deviceId!,scenarioId:'real'})).id);assert.equal(result.status,'passed',JSON.stringify(result));assert.deepEqual(result.steps,[]);assert.deepEqual(Object.keys(result.scriptSteps!),['end-second','end-first']);assert.equal(f.runInputs[0].scriptEnv,undefined);await f.scan();
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+for(const scope of ['chosen-response','trusted-script','neither'] as const)test('real Mockoon startup scope: '+scope,async()=>{
+ const f=await fixture(true);try{
+  const base=await f.save();const yaml=base.yaml.replace('if (output.X !== "ไทย quote") throw new Error("output did not round-trip")','output.X = "ไทย quote"');
+  const steps=(await f.service.references({yaml})).references.filter(ref=>ref.kind==='step');
+  const scenarios=base.scenarios!.map(scenario=>({...scenario,steps,scripts:scope==='trusted-script'?scenario.scripts!.map(row=>({...row,beforeStep:{index:1,fingerprint:steps[1].fingerprint}})):[],mockResponseId:scope==='chosen-response'?base.mock!.responseId:undefined}));
+  const workspace=await f.service.save({...base,yaml,scenarios});const result=await f.service.wait((await f.service.start({workspaceId:workspace.id,deviceId:deviceId!,scenarioId:'real'})).id);
+  assert.equal(result.status,'passed',JSON.stringify(result));assert.equal(f.tokens.length,scope==='neither'?0:1);
+  if(scope==='neither'){assert.equal(Object.hasOwn(result,'mock'),false);assert.equal(result.snapshot.mock,undefined);}
+  else assert.equal(result.mock?.intent.status,'acknowledged');
+  if(scope==='trusted-script')assert.equal(f.runInputs[0].scriptEnv?.TNT_MOCK_TOKEN,f.tokens[0]);else assert.equal(f.runInputs[0].scriptEnv,undefined);
+  await f.scan();
  }finally{await rm(f.root,{recursive:true,force:true});}
 });

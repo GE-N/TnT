@@ -142,3 +142,40 @@ test('changed end anchors block before acquisition when the selected scenario gr
   }finally{await f.cleanup();}
  }
 });
+test('empty scenario runs end rows in saved array order and remains portable without executing on preview/export/import',async()=>{
+ const f=await scriptFixture();try{
+  const yaml='appId: com.example.HybridApp\n---\n[]\n';
+  const scripts=[{...f.row,id:'end-second',beforeStep:{index:0,fingerprint:'end'},source:'output.order = "second"'},{...f.row,id:'end-first',beforeStep:{index:0,fingerprint:'end'},source:'output.order += ",first"'}];
+  const workspace=await f.service.save({...f.workspace,yaml,scenarios:[{...f.scenario,steps:[],scripts}]});
+  await f.service.preview({...workspace,scenarioId:'one'});assert.equal(f.calls.length,0);
+  const result=await f.service.wait((await f.start()).id);assert.equal(result.status,'passed');assert.deepEqual(result.steps,[]);assert.equal(f.outputs[0].order,'second,first');assert.deepEqual(Object.keys(result.scriptSteps!),['end-second','end-first']);assert.deepEqual(result.executionOrder,[{kind:'runScript',rowId:'end-second'},{kind:'runScript',rowId:'end-first'}]);assert.equal(f.calls[0].scriptEnv,undefined);
+  const pkg=await f.service.exportWorkspace({id:workspace.id,expectedRevision:2,includeValues:true});const imported=await f.service.importWorkspace({package:pkg.package,name:'Empty copy'});assert.deepEqual(imported.scenarios![0].scripts,scripts);assert.equal(f.calls.length,1);
+  await assert.rejects(f.service.start({workspaceId:imported.id,deviceId,scenarioId:'one'}),/Script needs trust/);assert.equal(f.calls.length,1);
+ }finally{await f.cleanup();}
+});
+for(const scope of ['chosen-response','trusted-script','neither'] as const)test('Mockoon startup scope: '+scope,async()=>{
+ const f=await scriptFixture({mock:true});try{
+  await f.service.save({...f.workspace,scenarios:[{...f.scenario,scripts:scope==='trusted-script'?[f.row]:[],mockResponseId:scope==='chosen-response'?f.workspace.mock!.responseId:undefined}]});
+  const result=await f.service.wait((await f.start()).id);assert.equal(result.status,'passed');
+  assert.equal(f.stats().mockCount,scope==='neither'?0:1);assert.equal(f.stats().cleanupCount,scope==='neither'?0:1);
+  if(scope==='neither'){assert.equal(Object.hasOwn(result,'mock'),false);assert.equal(result.snapshot.mock,undefined);assert.equal(result.snapshot.toolVersions.mockoon,undefined);}
+  else {assert.equal(result.mock?.intent.status,'acknowledged');assert.deepEqual(f.mockOptions,[{overrideResponse:scope==='chosen-response'}]);assert.equal(result.mock?.intent.responseId,scope==='chosen-response'?f.workspace.mock!.responseId:f.workspace.mock!.environment.routes[0].responses.find(response=>response.default)!.uuid);}
+  if(scope==='trusted-script')assert.equal(f.calls[0].scriptEnv?.TNT_MOCK_TOKEN,f.tokens[0]);else assert.equal(f.calls[0].scriptEnv,undefined);
+ }finally{await f.cleanup();}
+});
+test('an untrusted script alone never starts Mockoon; its own approval enables mock access',async()=>{
+ const f=await scriptFixture({mock:true});try{
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});const imported=await f.service.importWorkspace({package:pkg.package,name:'Imported'});
+  await assert.rejects(f.service.start({workspaceId:imported.id,deviceId,scenarioId:'one'}),/Script needs trust/);assert.equal(f.stats().mockCount,0);assert.equal(f.stats().acquisitions,0);assert.equal(f.calls.length,0);
+  const [trust]=(await f.service.scriptTrust(imported.id)).scripts;await f.service.trustScript({workspace:imported.id,rowId:trust.rowId,hash:trust.hash});
+  const result=await f.service.wait((await f.service.start({workspaceId:imported.id,deviceId,scenarioId:'one'})).id);assert.equal(result.status,'passed');assert.equal(f.stats().mockCount,1);assert.equal(f.calls[0].scriptEnv?.TNT_MOCK_TOKEN,f.tokens[0]);
+ }finally{await f.cleanup();}
+});
+test('ordinary scenarios do not depend on another scenario\'s script trust state or mock scope',async()=>{
+ const f=await scriptFixture({mock:true});try{
+  await f.service.save({...f.workspace,scenarios:[f.scenario,{...f.scenario,id:'plain',scripts:[]}]});
+  await writeFile(join(f.options.trustDirectory,'state.json'),'{unreadable');
+  const result=await f.service.wait((await f.service.start({workspaceId:f.workspace.id,deviceId,scenarioId:'plain'})).id);assert.equal(result.status,'passed');assert.equal(result.mock,undefined);assert.equal(f.stats().mockCount,0);assert.equal(f.calls[0].scriptEnv,undefined);
+  await assert.rejects(f.start(),/trust state is unreadable/);assert.equal(f.stats().acquisitions,1);
+ }finally{await f.cleanup();}
+});
