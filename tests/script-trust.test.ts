@@ -82,7 +82,8 @@ test('copy never transfers imported approvals and unknown rows in a source-aware
   for(const trust of (await f.service.scriptTrust(imported.id)).scripts)await f.service.trustScript({workspace:imported.id,rowId:trust.rowId,hash:trust.hash});
   assert.ok((await f.service.scriptTrust(imported.id)).scripts.every(item=>item.trusted));
   const copy=await f.service.copyWorkspace({...imported,id:undefined,sourceWorkspaceId:imported.id});assert.ok((await f.service.scriptTrust(copy.id)).scripts.every(item=>item.origin==='imported'&&!item.trusted));
-  const input=structuredClone(f.workspace);input.scenarios![0].scripts!.push({...input.scenarios![0].scripts![0],id:'unknown',source:'output.unseen = 918273'});
+  const input=structuredClone(f.workspace);input.scenarios![0].scripts![0].source='output.changedInCopy = 102938';input.scenarios![0].scripts!.push({...input.scenarios![0].scripts![0],id:'unknown',source:'output.unseen = 918273'});
   const extra=await f.service.copyWorkspace({...input,id:undefined,sourceWorkspaceId:f.workspace.id});const trust=(await f.service.scriptTrust(extra.id)).scripts.find(item=>item.rowId==='unknown')!;assert.equal(trust.origin,'imported');assert.equal(trust.trusted,false);
+  const copiedTrust=(await f.service.scriptTrust(extra.id)).scripts;assert.equal(copiedTrust.find(item=>item.rowId==='one')!.trusted,false);assert.equal(copiedTrust.find(item=>item.rowId==='one')!.origin,'imported');assert.equal(copiedTrust.find(item=>item.rowId==='two')!.origin,'local');
  }finally{await rm(f.root,{recursive:true,force:true});}
 });
