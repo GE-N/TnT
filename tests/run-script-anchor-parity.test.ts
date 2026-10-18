@@ -53,3 +53,36 @@ for(const mode of ['inserted-launch','existing-launch','empty','repeated-visit']
   }
  }finally{await f.cleanup();}
 });
+
+for(const edit of ['edit-step','reorder-step'] as const)test('PR #84 mid-scenario canvas anchor goes stale: '+edit,async()=>{
+ const f=await scriptFixture();try{
+  const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:['first','middle','last'].map(id=>({id,label:id,role:'assertion',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:id}}))}],edges:[],paths:[{id:'path',name:'One',scenarioId:'one',screenId:'home',edgeIds:[],visits:[{id:'visit',operationIds:['first','middle','last']}]}]};
+  async function author(graph:CanvasGraph){
+   const yaml=writeChecks('appId: com.example.HybridApp\n---\n- launchApp\n',{screens:[],edges:[],paths:[]},graph).replace('- launchApp\n','');
+   const refs=(await f.service.references({yaml})).references;
+   for(const check of authoredChecks(yaml))graph.screens[0].tests.find(test=>test.id===check.id)!.reference=refs.find(ref=>ref.kind==='step'&&ref.index===check.index)!;
+   return yaml;
+  }
+  const yaml=await author(canvas);const steps=orderedScenarioSteps(canvas,'path');const target=steps[1];
+  const row={...f.row,id:'before-middle',beforeStep:{index:target.globalIndex,fingerprint:target.fingerprint}};
+  assert.equal(anchorMatches(row.beforeStep,steps),true);
+  const workspace=await f.service.save({...f.workspace,yaml,canvas,scenarios:[{...f.scenario,authoring:'canvas',pathId:'path',steps:[],scripts:[row]}]});
+  const baseline=await f.service.wait((await f.start()).id);assert.equal(baseline.status,'passed');assert.equal(baseline.scriptSteps![row.id].status,'passed');
+  const commands=parseAllDocuments(await readFile(f.calls[0].flow,'utf8'))[1].toJS();
+  assert.deepEqual(commands.map((command:any)=>typeof command==='string'?command:Object.keys(command)[0]),['launchApp','assertVisible','runScript','assertVisible','assertVisible']);
+  const changed=structuredClone(canvas);
+  if(edit==='edit-step')changed.screens[0].tests.find(test=>test.id==='middle')!.check!.value='Edited middle';
+  else changed.paths[0].visits![0].operationIds=['middle','first','last'];
+  const changedYaml=await author(changed);const changedSteps=orderedScenarioSteps(changed,'path');
+  assert.equal(anchorMatches(row.beforeStep,changedSteps),false);
+  assert.deepEqual(anchorForNewScript(changedSteps,0),anchorForNewScript(steps,0),'The end anchor stays valid; only the mid-scenario anchor is under test');
+  await f.service.save({...await f.service.workspace(workspace.id),yaml:changedYaml,canvas:changed});
+  const before=f.stats();
+  await assert.rejects(f.start(),(error:unknown)=>{
+   assert.ok(error instanceof ScriptBlocked);
+   assert.deepEqual(error.blocked,[{kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'}]);return true;
+  });
+  assert.deepEqual(f.stats(),before,'Stale rows must block before acquiring a device or calling app, mock or Maestro tools');assert.equal(f.calls.length,1);
+  assert.deepEqual((await f.service.workspace(workspace.id)).scenarios![0].scripts,[row],'Editing/reordering a step must not silently relink the saved script');
+ }finally{await f.cleanup();}
+});
