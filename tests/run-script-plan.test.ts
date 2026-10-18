@@ -42,3 +42,11 @@ test('same-anchor scripts keep row order after checkpoint with fixed automation 
  assert.deepEqual(plan.scriptFiles.map(file=>file.rowId),['first','second']);
  assert.doesNotMatch(plan.executionYaml,/TNT_MOCK/);
 });
+test('end sentinel always stays after final step; scripts never shift anchors or checkpoint fingerprints',()=>{
+ const final={...row,id:'last',beforeStep:{index:3,fingerprint:'end'}};
+ const inputs={yaml,scripts:[final,row],trust:[...trust,{...trust[0],rowId:'last'}]};
+ const plan=buildRunPlan(inputs);assert.deepEqual(plan.executionItems.map(item=>item.kind),['step','runScript','step','step','runScript']);
+ const changed=buildRunPlan({...inputs,yaml:yaml+'- tapOn: Another\n'});assert.deepEqual(changed.blocked,[]);assert.equal(changed.executionItems.at(-1)?.kind,'runScript');
+ assert.equal(referenceCatalog(yaml).references[1].fingerprint,row.beforeStep.fingerprint);
+ const reversed=buildRunPlan({...inputs,scripts:[row,final]});assert.equal(reversed.executionItems[2].kind,'step');assert.deepEqual(inputs.scripts[1].beforeStep,anchor(1));
+});

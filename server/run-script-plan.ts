@@ -20,7 +20,7 @@ export function buildRunPlan(input:{yaml:string;flows?:Record<string,string>;scr
   const blocked:ScriptBlockReason[]=[];
   for(const row of rows){
     if(!row.source.trim())blocked.push({kind:'empty',rowId:row.id,message:'Script is empty · add code or delete the row'});
-    if(!catalog.references.some(ref=>ref.kind==='step'&&ref.index===row.beforeStep.index&&ref.fingerprint===row.beforeStep.fingerprint))blocked.push({kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'});
+    if(row.beforeStep.fingerprint!=='end'&&!catalog.references.some(ref=>ref.kind==='step'&&ref.index===row.beforeStep.index&&ref.fingerprint===row.beforeStep.fingerprint))blocked.push({kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'});
     const syntax=checkScriptSyntax(row.source);
     if(syntax)blocked.push({kind:'syntax',rowId:row.id,...syntax});
     if(!input.trust?.some(trust=>trust.rowId===row.id&&trust.trusted))blocked.push({kind:'untrusted',rowId:row.id,message:'Script needs trust'});
@@ -30,18 +30,22 @@ export function buildRunPlan(input:{yaml:string;flows?:Record<string,string>;scr
   const original:ExecutionItem[]=input.automation?.plan??commands.map((_,index)=>({kind:'step',index}));
   if(commands.length!==original.length)throw new Error('Execution plan does not match generated commands.');
   const executionItems:ScriptExecutionItem[]=[];const generated:unknown[]=[];const scriptFiles:RunPlan['scriptFiles']=[];const authoredStepMap:RunPlan['authoredStepMap']=[];
-  commands.forEach((command,position)=>{
-    const item=original[position];
-    if(item.kind==='step')for(const row of rows.filter(row=>row.beforeStep.index===item.index)){
+  function append(row:ScriptRow,index:number){
       // Never emit executable wrapper content when prelaunch validation failed.
-      if(blocked.length)continue;
+      if(blocked.length)return;
       const name=`.tnt-script-${String(scriptFiles.length+1).padStart(4,'0')}.js`;
       scriptFiles.push({name,rowId:row.id,content:'try {\n'+row.source+'\n} catch (e) { throw new Error('+JSON.stringify('TNT_SCRIPT_FAILED row='+row.id+' ')+' + (e && e.message)) }\n'});
       generated.push({runScript:{file:name,...(input.mockAvailable?{env:{TNT_MOCK_URL:'${TNT_MOCK_URL}',TNT_MOCK_TOKEN:'${TNT_MOCK_TOKEN}'}}:{})}});
-      executionItems.push({kind:'runScript',rowId:row.id,beforeStep:item.index!,file:name});
+      executionItems.push({kind:'runScript',rowId:row.id,beforeStep:index,file:name});
+  }
+  commands.forEach((command,position)=>{
+    const item=original[position];
+    if(item.kind==='step')for(const row of rows.filter(row=>row.beforeStep.fingerprint!=='end'&&row.beforeStep.index===item.index)){
+      append(row,item.index!);
     }
     if(item.kind==='step')authoredStepMap.push({index:item.index!,executionIndex:executionItems.length});
     executionItems.push({...item});generated.push(command);
   });
+  for(const row of rows.filter(row=>row.beforeStep.fingerprint==='end'))append(row,catalog.references.filter(ref=>ref.kind==='step').length);
   return {executionYaml:scriptFiles.length?docs[0].toString()+'---\n'+stringify(generated,{aliasDuplicateObjects:false,lineWidth:0}):input.automation?.yaml??input.yaml,scriptFiles,executionItems,authoredStepMap,blocked};
 }
