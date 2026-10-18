@@ -1,4 +1,4 @@
-import {workspaceCommand,singleWorkspaceLibrary} from './workspace-ui-helpers.js';
+import {workspaceCommand,singleWorkspaceLibrary,openScenarioPanel} from './workspace-ui-helpers.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
@@ -11,7 +11,7 @@ test('authors can create and switch independent scenario inputs and explicitly r
  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);const document=dom.window.document;
  const catalog=[{kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'a'.repeat(64),label:'Step 1 · tapOn',command:'tapOn',assertion:false,preview:'tapOn: Load'}];
  function Host(){const [items,setItems]=useState<ScenarioDefinition[]>([]);const [selected,setSelected]=useState('');return createElement(ScenarioLibrary,{items,onChange:setItems,selected,onSelect:setSelected,catalog,files:['setup.yaml'],disabled:false,onError:()=>{}});}
- const click=async(name:string)=>{if(name==='Open saved workspace'||name==='Save workspace')return workspaceCommand(document,name==='Save workspace'?'save':'open');return act(async()=>{const button=[...document.querySelectorAll('button')].find(item=>(item.getAttribute('aria-label')??item.textContent)===name);assert.ok(button);button.click();})};
+ const click=async(name:string)=>{if(name==='Open saved workspace'||name==='Save workspace')return workspaceCommand(document,name==='Save workspace'?'save':'open');const ready=()=>[...document.querySelectorAll('button')].some(item=>item.getAttribute('data-testid')!=='scenario-bar-trigger'&&(item.getAttribute('aria-label')??item.textContent)===name);if(!ready())await openScenarioPanel(document,act);return act(async()=>{const button=[...document.querySelectorAll('button')].find(item=>item.getAttribute('data-testid')!=='scenario-bar-trigger'&&(item.getAttribute('aria-label')??item.textContent)===name);assert.ok(button,name);button.click();})};
  const fill=async(id:string,value:string)=>act(async()=>{const node=document.getElementById(id) as HTMLInputElement|HTMLTextAreaElement;assert.ok(node);Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?dom.window.HTMLTextAreaElement.prototype:dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  try{
   await act(async()=>root.render(createElement(Host)));

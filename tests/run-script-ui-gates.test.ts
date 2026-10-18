@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {JSDOM} from 'jsdom';
 import {act,createElement} from 'react';
-import {singleWorkspaceLibrary,workspaceCommand} from './workspace-ui-helpers.js';
+import {singleWorkspaceLibrary,openScenarioPanel,workspaceCommand} from './workspace-ui-helpers.js';
 import {sha256} from '../src/run-script.js';
 
 const fingerprint='ab'.repeat(32);
@@ -80,6 +80,7 @@ test('Run does not start while a script row blocks the scenario',async()=>{
 test('Run All does not post a batch while every scenario is script-blocked',async()=>{
   const page=await openWorkspace({mock:false,trusted:false});
   try{
+    await openScenarioPanel(page.dom.window.document,act);
     const button=[...page.dom.window.document.querySelectorAll('button')].find(item=>item.textContent==='Run all');
     assert.ok(button);
     assert.equal(button.disabled,false);
@@ -113,6 +114,7 @@ test('a failed trust load blocks Run until Retry succeeds',async()=>{
     await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Visit 1 · Home"]')?.click());
     assert.equal(document.querySelector('[data-testid="trust-unknown"]')?.textContent,'⚠ Trust unknown');
     assert.equal(document.querySelector('[role="alertdialog"]'),null);
+    await openScenarioPanel(document,act);
     const sidebarRun=document.querySelector<HTMLButtonElement>('[aria-label="Run scenario — Trust couldn\'t be loaded"]');
     const runAll=[...document.querySelectorAll('button')].find(item=>item.textContent==='Run all');
     assert.equal(sidebarRun?.disabled,true);
@@ -132,6 +134,7 @@ test('duplicate posts the saved revision and adopts the server ids',async()=>{
   const page=await openWorkspace({mock:false,trusted:false});
   try{
     const document=page.dom.window.document;
+    await openScenarioPanel(document,act);
     const row=document.querySelector<HTMLElement>('[aria-label="Scenario list"] [aria-pressed="true"]')!;
     assert.equal(row.textContent,'Paid');
     await act(async()=>row.parentElement!.dispatchEvent(new page.dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:20,clientY:20})));
@@ -139,6 +142,7 @@ test('duplicate posts the saved revision and adopts the server ids',async()=>{
     assert.ok(duplicate);
     await act(async()=>{duplicate.click();for(let i=0;i<12;i++)await new Promise(resolve=>setImmediate(resolve));});
     assert.deepEqual(page.duplicates,[{workspaceId:'saved',scenarioId:'paid',expectedRevision:1}]);
+    await openScenarioPanel(document,act);
     assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'From server');
     await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Visit 1 · Home"]')?.click());
     assert.equal(document.querySelector('[data-script-id="script-server"]')?.getAttribute('data-script-id'),'script-server');

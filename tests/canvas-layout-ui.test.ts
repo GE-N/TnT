@@ -75,16 +75,17 @@ test('opening a floating control closes the previous floating popover',async()=>
  const root=createRoot(dom.window.document.getElementById('root')!);
  try{
   await act(async()=>root.render(createElement(App)));
-  const scenarios=dom.window.document.querySelector<HTMLDetailsElement>('.scenario-controls')!;
   const device=dom.window.document.querySelector<HTMLDetailsElement>('.device-toolbar')!;
   assert.match(device.querySelector('summary')?.textContent??'',/Simulator not ready/);
   assert.equal(device.querySelector('[role="alert"]')?.textContent,'Runner unavailable','Runner details belong inside the simulator popup, clear of authoring controls');
   assert.equal(dom.window.document.querySelector('.workbench>main>.notice'),null);
-  await act(async()=>{scenarios.open=true;scenarios.dispatchEvent(new dom.window.Event('toggle'));});
-  assert.ok(scenarios.open);
+  await act(async()=>dom.window.document.querySelector<HTMLButtonElement>('[data-testid="scenario-bar-trigger"]')!.click());
+  assert.ok(dom.window.document.querySelector('[data-testid="scenario-panel"]'));
+  assert.equal(dom.window.document.querySelector('.floating-inspector:not([data-inspector-yielded="true"])'),null);
+  await act(async()=>device.querySelector('summary')!.dispatchEvent(new dom.window.PointerEvent('pointerdown',{bubbles:true})));
+  assert.equal(dom.window.document.querySelector('[data-testid="scenario-panel"]'),null,'A press outside the panel closes it');
   await act(async()=>{device.open=true;device.dispatchEvent(new dom.window.Event('toggle'));});
   assert.ok(device.open);
-  assert.equal(scenarios.open,false,'The old floating popover closes so controls cannot crowd the inspector');
   const launch=device.querySelector<HTMLDetailsElement>('.launch-tools')!;
   assert.ok(launch,'Advanced launch controls remain reachable inside Simulator & app');
   await act(async()=>{launch.open=true;launch.dispatchEvent(new dom.window.Event('toggle'));});

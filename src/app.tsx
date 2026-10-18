@@ -26,8 +26,8 @@ export function App() {
     const workbench=document.querySelector('.workbench');
     const toggle=(event:Event)=>{
       const opened=event.target as HTMLDetailsElement;
-      if(!workbench?.contains(opened)||!opened.open||!opened.matches('.device-toolbar,.scenario-controls,.workspace-advanced,.report-tools'))return;
-      workbench.querySelectorAll<HTMLDetailsElement>('.device-toolbar,.scenario-controls,.workspace-advanced,.report-tools').forEach(panel=>{if(panel!==opened)panel.open=false;});
+      if(!workbench?.contains(opened)||!opened.open||!opened.matches('.device-toolbar,.workspace-advanced,.report-tools'))return;
+      workbench.querySelectorAll<HTMLDetailsElement>('.device-toolbar,.workspace-advanced,.report-tools').forEach(panel=>{if(panel!==opened)panel.open=false;});
     };
     document.addEventListener('toggle',toggle,true);
     return()=>document.removeEventListener('toggle',toggle,true);
