@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile,readdir,writeFile,mkdir} from 'node:fs/promises';
+import {readFile,readdir,writeFile,mkdir,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {scriptFixture,deviceId,assertTokenFree} from './run-script-helpers.js';
 import {mapScriptResults} from '../server/run-script-results.js';
@@ -91,4 +91,11 @@ test('authored runScript stays rejected in root, nested and reusable flows',asyn
   await assert.rejects(f.service.save({...await f.service.workspace(f.workspace.id),flows:{'nested.yaml':'appId: com.example.HybridApp\n---\n- runScript: private.js'}}),/External file references/);
   assert.equal(f.calls.length,0);
  }finally{await f.cleanup();}
+});
+
+test('generated script removal failure deletes unsafe evidence and retains a safe final record',async()=>{
+ const f=await scriptFixture({customRun:async({directory})=>{
+  const script=join(directory,'.tnt-script-0001.js');await rm(script);await mkdir(script);await writeFile(join(script,'partial'),'not a script file');
+  return {code:0,log:'cleanup must fail closed',cleanup:{verified:true,detail:'Stopped'}};
+ }});try{const result=await f.service.wait((await f.start()).id);assert.equal(result.status,'error');assert.equal(result.error,'Evidence scrub failed');assert.deepEqual(await readdir(join(f.root,'runs',result.id)),['result.json']);}finally{await f.cleanup();}
 });

@@ -30,3 +30,9 @@ for(const mode of ['throw','leftover','binary','malformed-json','symlink'] as co
 test('no-mock runs take the same scrub path and remove generated files',async()=>{
  const root=await mkdtemp(join(tmpdir(),'tnt-scrub-nomock-'));try{const script=join(root,'.tnt-script-0001.js');await writeFile(script,'output.X=1');const result=await protectRunEvidence({directories:[root],value:{log:'hello'},scriptFiles:[script]});assert.equal(result.ok,true);assert.deepEqual(await readdir(root),[]);}finally{await rm(root,{recursive:true,force:true});}
 });
+test('independent parsed JSON scan catches escaped token values and keys left by a no-op scrubber',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-scrub-escaped-'));try{
+  const escaped='secret"\\escape';await writeFile(join(root,'commands.json'),JSON.stringify({[escaped]:{message:escaped}}));
+  const result=await protectRunEvidence({directories:[root],token:escaped,value:{log:'safe'},scriptFiles:[]},async()=>{});assert.deepEqual(result,{ok:false,removed:true});
+ }finally{await rm(root,{recursive:true,force:true});}
+});
