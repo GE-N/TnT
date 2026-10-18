@@ -158,14 +158,16 @@ test('a draft step is not an anchor and an existing row uses the usual block lin
   assert.equal(anchorTargetsDraft({index:1,fingerprint:'draft:end'},[drafted]),true);
   assert.equal(anchorTargetsDraft(anchorForNewScript([step(0)],0),[step(0)]),false);
   const view=scriptRowView(current,[current],[drafted],[{rowId:'paid',origin:'local',trusted:true,hash:current.hash}],[],false,false);
-  assert.equal(view.block?.kind,'stale-anchor');
+  assert.equal(view.block?.kind,'draft-anchor');
+  assert.equal(view.block?.message,DRAFT_STEP_TEXT);
   assert.equal(view.blockText,DRAFT_STEP_TEXT);
   const reason=scriptBlock(current,[drafted],[])!;
-  assert.equal(reason.kind,'stale-anchor');
-  assert.equal(reason.message,'Step changed · relink before running');
-  assert.equal(blockDisplayMessage(reason,current,[drafted]),DRAFT_STEP_TEXT);
-  const lines=batchWithScriptBlocks(['main'],[],new Map([['main',{kind:reason.kind,message:blockDisplayMessage(reason,current,[drafted])}]]),new Map([['main','Main']]));
+  assert.equal(reason.kind,'draft-anchor');
+  assert.equal(reason.message,DRAFT_STEP_TEXT);
+  assert.equal(blockDisplayMessage(reason),DRAFT_STEP_TEXT);
+  const lines=batchWithScriptBlocks(['main'],[],new Map([['main',{kind:reason.kind,message:blockDisplayMessage(reason)}]]),new Map([['main','Main']]));
   assert.equal(lines[0].reason,DRAFT_STEP_TEXT);
+  assert.notEqual(lines[0].reason,'Step changed · relink before running');
 });
 
 test('a blank script is left out of the save payload',()=>{
@@ -362,6 +364,7 @@ test('Run script is omitted before a draft step and an existing row shows the ca
     await click(page.document,'.add-visit-step');
     assert.equal(page.document.querySelector('[data-testid="add-run-script"]'),null);
     const error=page.document.querySelector('[data-script-id="paid"] .script-inline-error')!;
+    assert.equal(page.document.querySelector('[data-script-id="paid"]')!.getAttribute('data-block-kind'),'draft-anchor');
     assert.equal(error.textContent,'✕ '+DRAFT_STEP_TEXT);
     assert.equal(error.className,'script-inline-error');
   }finally{await page.close();}

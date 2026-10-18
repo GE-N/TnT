@@ -267,7 +267,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       const records=recordsFor(item.id,item.scripts,scriptTrust);
       const reasons=blocksFor(records,steps,scriptTrust);
       const reason=reasons.find(entry=>entry.kind==='untrusted')??reasons[0];
-      if(reason)map.set(item.id,{kind:reason.kind,message:blockDisplayMessage(reason,'rowId' in reason?records.find(entry=>entry.id===reason.rowId):undefined,steps)});
+      if(reason)map.set(item.id,{kind:reason.kind,message:blockDisplayMessage(reason)});
     }
     return map;
   }

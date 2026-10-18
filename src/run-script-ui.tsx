@@ -19,7 +19,7 @@ export function ReservedInline({reason}:{reason:Extract<ScriptBlockReason,{kind:
 export function ScriptStepRow({row,view,reveal,open,runLocked,stepNumber,afterLast=false,canMoveUp,canMoveDown,onOpen,onMove,onDelete}:{row:ScriptRecord;view:ScriptRowView;reveal:boolean;open:boolean;runLocked:boolean;stepNumber:number;afterLast?:boolean;canMoveUp:boolean;canMoveDown:boolean;onOpen:()=>void;onMove:(direction:-1|1)=>void;onDelete:()=>void}){
   const preview=scriptFirstLine(row.source);
   const failed=view.tone==='failed';
-  const showBlock=!!view.block&&(reveal||view.block.kind==='untrusted'||view.block.kind==='stale-anchor');
+  const showBlock=!!view.block&&(reveal||view.block.kind==='untrusted'||view.block.kind==='stale-anchor'||view.block.kind==='draft-anchor');
   const place=afterLast?'after the last step':'before step '+stepNumber;
   return <div className={'script-row'+(failed?' script-row-failed':'')+(open?' script-row-open':'')+(view.tone==='not-run'?' script-row-muted':'')} data-testid={showBlock?'script-blocks-run':'script-row'} data-script-id={row.id} data-block-kind={view.block?.kind} data-open={open?'true':undefined}>
     <button type="button" className="script-row-summary" aria-expanded={open} aria-label={'Run script · '+row.label+' '+place} onClick={onOpen}>

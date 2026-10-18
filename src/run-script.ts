@@ -64,7 +64,7 @@ export const SCRIPT_EXAMPLE=[
 ].join('\n');
 
 export const SCRIPT_TIMEOUT='◷ No per-script timeout · the run stops at its 300s cap';
-export const DRAFT_STEP_TEXT='Step not captured yet · capture it before running';
+export const DRAFT_STEP_TEXT='Step not captured yet · capture it before running' as const;
 export const TRUST_LOAD_TEXT="⚠ Trust couldn't be loaded";
 export const TRUST_UNKNOWN_TEXT='⚠ Trust unknown';
 
@@ -170,15 +170,15 @@ export function importedNeedsTrust(row:Pick<ScriptRecord,'id'|'hash'>,approvals:
   return recorded&&!trustFor(row,approvals).trusted;
 }
 
-/** Row and Run All text. An uncaptured anchor keeps the contract kind and shows the capture sentence. */
-export function blockDisplayMessage(reason:ScriptBlockReason,row:{beforeStep:ScriptAnchor}|undefined,steps:OrderedStep[]){
-  if(reason.kind==='stale-anchor'&&row&&anchorTargetsDraft(row.beforeStep,steps))return DRAFT_STEP_TEXT;
+/** Run All text. A draft anchor uses the capture sentence instead of the stale-anchor line. */
+export function blockDisplayMessage(reason:ScriptBlockReason){
+  if(reason.kind==='draft-anchor')return DRAFT_STEP_TEXT;
   return reason.message;
 }
 
-/** Before-launch block for one row. Empty wins, then a stale anchor, then syntax, then trust. */
+/** Before-launch block for one row. A draft anchor wins, then empty, then a stale anchor, then syntax, then trust. */
 export function scriptBlock(row:ScriptRecord,steps:OrderedStep[],approvals:ScriptTrust[]):ScriptBlockReason|undefined{
-  if(anchorTargetsDraft(row.beforeStep,steps))return {kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'};
+  if(anchorTargetsDraft(row.beforeStep,steps))return {kind:'draft-anchor',rowId:row.id,message:DRAFT_STEP_TEXT};
   if(!row.source.trim())return {kind:'empty',rowId:row.id,message:'Script is empty · add code or delete the row'};
   if(!anchorMatches(row.beforeStep,steps))return {kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'};
   const syntax=compileScript(row.source);
