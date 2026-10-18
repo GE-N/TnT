@@ -6,6 +6,7 @@ import {
   inspectorWidth,
   placeInspector,
   placeScriptEditor,
+  scriptEditorBottomReserve,
   scriptEditorGap,
   scriptEditorWidth,
   visibleBounds,
@@ -30,8 +31,9 @@ test("the script editor sits beside the inspector without covering it", () => {
   });
   assert.equal(placed.left + scriptEditorWidth + scriptEditorGap, inspector.left);
   assert.equal(placed.yieldsInspector, false);
-  assert.equal(placed.maxHeight, bounds.height - placed.top - 8);
-  assert.ok(placed.top + placed.maxHeight <= bounds.height);
+  assert.equal(placed.maxHeight, bounds.height - placed.top - scriptEditorBottomReserve);
+  assert.ok(placed.top + placed.maxHeight <= bounds.height - 8);
+  assert.ok(placed.top + placed.maxHeight <= bounds.height - scriptEditorBottomReserve);
   assert.ok(placed.left >= inspectorMargin);
   const onLeft = { left: 40, top: 100, width: inspectorWidth, height: 400 };
   const rightSide = placeScriptEditor(onLeft, {
@@ -49,8 +51,9 @@ test("a narrow window gives the editor the inspector's spot", () => {
   assert.equal(placed.yieldsInspector, true);
   assert.equal(placed.left, inspector.left);
   assert.equal(placed.top, inspector.top);
-  assert.equal(placed.maxHeight, viewport.height - placed.top - 8);
-  assert.ok(placed.top + placed.maxHeight <= viewport.height);
+  assert.equal(placed.maxHeight, viewport.height - placed.top - scriptEditorBottomReserve);
+  assert.ok(placed.top + placed.maxHeight <= viewport.height - 8);
+  assert.ok(placed.top + placed.maxHeight <= viewport.height - scriptEditorBottomReserve);
 });
 
 test("the inspector opens to the right of its screen by default", () => {

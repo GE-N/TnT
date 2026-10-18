@@ -787,7 +787,7 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .yaml-line-note{height:calc(13px * 1.7);display:flex;align-items:center;justify-content:flex-end}
 .yaml-line-note .script-inline-error{margin:0;padding:0 4px;background:#fff}
 .script-row-actions{top:4px}
-.script-editor{position:fixed;z-index:41;top:108px;right:24px;width:360px;max-height:calc(100dvh - 116px);overflow:auto;box-sizing:border-box;padding:0 14px 14px;background:#fff;border-radius:12px;box-shadow:0 12px 32px #25304129,0 1px 3px #2530411f;font-size:13px}
+.script-editor{position:fixed;z-index:41;top:108px;right:24px;width:360px;max-height:calc(100dvh - 196px);overflow:auto;box-sizing:border-box;padding:0 14px 14px;background:#fff;border-radius:12px;box-shadow:0 12px 32px #25304129,0 1px 3px #2530411f;font-size:13px}
 .script-editor-header{position:sticky;top:0;z-index:3;display:flex;align-items:center;justify-content:space-between;margin:0 -14px;padding:4px 4px 4px 14px;background:#fff;border-bottom:1px solid var(--border)}
 .script-editor-header h3{margin:0;font-size:16px}
 .script-editor-header button{min-width:44px;min-height:44px;border:0;background:transparent}
@@ -817,6 +817,7 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .sequence-trust .primary{min-height:44px}
 .workspace-imported{color:#596579;font-size:12px;font-weight:600}
 .script-running{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+.script-running-title,.script-running-hint{grid-column:1 / -1}
 .script-running-label{color:#0a63d1;font-weight:700}
 .script-stop{color:#b3261e;border-color:#b3261e;min-height:44px}
 .script-passed{color:#256747;font-weight:700}

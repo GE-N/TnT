@@ -3,7 +3,7 @@ import type {ScriptAnchor,ScriptBlockReason,ScriptRow,ScriptSourceWorkspace,Scri
 import {REDACTED} from '../server/run-script-contract.js';
 import {RunStatusBadge} from './visit-steps.js';
 import {SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,TRUST_UNKNOWN_TEXT,scriptFirstLine,scriptSourcePieces,type ScriptRecord,type ScriptRowView} from './run-script.js';
-import {placeScriptEditor,scriptEditorWidth,inspectorWidth,type ScriptEditorPlace} from './inspector-placement.js';
+import {placeScriptEditor,scriptEditorBottomReserve,scriptEditorWidth,inspectorWidth,type ScriptEditorPlace} from './inspector-placement.js';
 import type {ScriptExecutionReference} from '../server/run-script-contract.js';
 
 export function RedactedText({text}:{text:string}){
@@ -54,7 +54,10 @@ export function ScriptEditor({row,view,sourceWorkspace,stepNumber,afterLast=fals
   const onYieldRef=useRef(onYieldInspector);
   onYieldRef.current=onYieldInspector;
   const [beside,setBeside]=useState<ScriptEditorPlace>();
-  useEffect(()=>{if(!readOnly)nameRef.current?.focus();},[row.id,readOnly]);
+  useEffect(()=>{
+    if(beside?.yieldsInspector){editorRef.current?.querySelector<HTMLElement>('button,input,textarea,select,a[href]')?.focus();return;}
+    if(!readOnly)nameRef.current?.focus();
+  },[row.id,readOnly,beside?.yieldsInspector]);
   useLayoutEffect(()=>{
     const place=()=>{
       const inspector=document.querySelector<HTMLElement>('.floating-inspector');
@@ -80,7 +83,7 @@ export function ScriptEditor({row,view,sourceWorkspace,stepNumber,afterLast=fals
     document.addEventListener('keydown',onKey);
     return ()=>document.removeEventListener('keydown',onKey);
   },[onClose]);
-  const capped=beside?.maxHeight??Math.max(0,window.innerHeight-108-8);
+  const capped=beside?.maxHeight??Math.max(0,window.innerHeight-108-scriptEditorBottomReserve);
   return <aside ref={editorRef} className="script-editor" aria-label={title} data-script-editor={row.id} style={{maxHeight:capped,...(beside?{left:beside.left,top:beside.top,right:'auto',width:scriptEditorWidth}:{})}}>
     <header className="script-editor-header"><h3>{title}</h3><button type="button" aria-label="Close script editor" onClick={onClose}>✕</button></header>
     {readOnly&&<div className="script-trust">
@@ -92,7 +95,7 @@ export function ScriptEditor({row,view,sourceWorkspace,stepNumber,afterLast=fals
       {!trustUnknown&&<p className="script-trust-note">Each script is trusted on its own, after you've seen it in full. {remaining} of {untrustedLeft} left after this.</p>}
     </div>}
     {showResult&&!editing&&<div className="script-result">
-      {running&&<div className="script-running"><p>While running</p><p className="script-running-label"><span className="run-status-spinner" aria-hidden="true"/> Running</p>{onStop&&<button type="button" className="script-stop" onClick={onStop}>■ Stop</button>}<p className="field-hint">Result is shown after the run ends. No banners.</p></div>}
+      {running&&<div className="script-running"><p className="script-running-title">While running</p><p className="script-running-label"><span className="run-status-spinner" aria-hidden="true"/> Running</p>{onStop&&<button type="button" className="script-stop" onClick={onStop}>■ Stop</button>}<p className="field-hint script-running-hint">Result is shown after the run ends. No banners.</p></div>}
       {!running&&view.tone==='passed'&&<div><p>After the run</p><p className="script-passed">✓ Passed</p><p>{(afterLast?'Ran after the last step':'Ran before step '+stepNumber)+(view.took?' · took '+view.took:'')}.</p>{onOpenLog&&<button type="button" className="text-button" onClick={onOpenLog}>Open run log</button>}</div>}
       {!running&&view.tone==='failed'&&<div><p>Result</p><p className="script-inline-error">✕ Script failed</p><p className="script-error-box" data-testid="script-error-reason">Error: <RedactedText text={view.message||'Script failed'}/></p><p>Scenario stopped. ✕ Failed at Run script. Step {stepNumber} did not run.</p><div className="script-result-actions">{onOpenLog&&<button type="button" className="text-button" onClick={onOpenLog}>Open run log</button>}{onRunAgain&&<button type="button" onClick={onRunAgain}>↻ Run again</button>}</div></div>}
       {!running&&view.tone==='not-run'&&<p className="script-muted">○ Not run</p>}

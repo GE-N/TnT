@@ -284,7 +284,7 @@ async function mount(seed:ScriptRecord[]=[],granted:ScriptTrust[]=[]){
     const [trust,setTrust]=useState(granted);
     const [extra,setExtra]=useState(initial);
     replaceGraph=setGraph;updateExtra=patch=>setExtra(value=>({...value,...patch}));latest=rows;
-    const runScripts:RunScriptModel={scenarioId:'main',rows,trust,results:extra.results,executionOrder:extra.executionOrder,hasMock:extra.hasMock,revealBlocks:extra.revealBlocks,running:extra.running,passedRun:extra.passedRun,timedOut:extra.timedOut,scrubFailed:extra.scrubFailed,failedAtScript:extra.failedAtScript,trustBlockCount:untrustedCount(rows,trust),trustLoadFailed:extra.trustLoadFailed,sourceWorkspace:{kind:'copy',name:'Imported workspace'},onRetryTrust:()=>{retries+=1;},onAdd:anchor=>{const id=newScriptId();const source='';setRows(value=>[...value,{id,scenarioId:'main',origin:'imported',beforeStep:anchor,label:'Run script',source,hash:sha256(source)}]);return id;},onUpdate:(rowId,patch)=>setRows(value=>value.map(item=>item.id===rowId?{...item,...patch,hash:sha256(patch.source??item.source)}:item)),onMove:(rowId,direction,stepCount,fingerprintAt)=>setRows(value=>moveScript(value,rowId,direction,stepCount,fingerprintAt)??value),onDelete:rowId=>setRows(value=>value.filter(item=>item.id!==rowId)),onReplace:next=>setRows(next.map(item=>({...item,scenarioId:'main',origin:'imported' as const,hash:sha256(item.source)}))),onTrust:async rowId=>{const item=rows.find(entry=>entry.id===rowId);if(!item)return;const saved=await approveScriptTrust({workspace:'workspace',rowId,hash:item.hash,token:'token'});setTrust(value=>[...value.filter(entry=>entry.rowId!==saved.rowId),saved]);}};
+    const runScripts:RunScriptModel={scenarioId:'main',rows,trust,results:extra.results,executionOrder:extra.executionOrder,hasMock:extra.hasMock,revealBlocks:extra.revealBlocks,running:extra.running,passedRun:extra.passedRun,timedOut:extra.timedOut,scrubFailed:extra.scrubFailed,failedAtScript:extra.failedAtScript,trustBlockCount:untrustedCount(rows,trust),trustLoadFailed:extra.trustLoadFailed,sourceWorkspace:{kind:'copy',name:'Imported workspace'},onStop:()=>{},onRetryTrust:()=>{retries+=1;},onAdd:anchor=>{const id=newScriptId();const source='';setRows(value=>[...value,{id,scenarioId:'main',origin:'imported',beforeStep:anchor,label:'Run script',source,hash:sha256(source)}]);return id;},onUpdate:(rowId,patch)=>setRows(value=>value.map(item=>item.id===rowId?{...item,...patch,hash:sha256(patch.source??item.source)}:item)),onMove:(rowId,direction,stepCount,fingerprintAt)=>setRows(value=>moveScript(value,rowId,direction,stepCount,fingerprintAt)??value),onDelete:rowId=>setRows(value=>value.filter(item=>item.id!==rowId)),onReplace:next=>setRows(next.map(item=>({...item,scenarioId:'main',origin:'imported' as const,hash:sha256(item.source)}))),onTrust:async rowId=>{const item=rows.find(entry=>entry.id===rowId);if(!item)return;const saved=await approveScriptTrust({workspace:'workspace',rowId,hash:item.hash,token:'token'});setTrust(value=>[...value.filter(entry=>entry.rowId!==saved.rowId),saved]);}};
     return createElement('div',null,
       createElement(CanvasEditor,{graph:current,onChange:(next:CanvasGraph|undefined)=>{if(next)setGraph(next);},yaml:'appId: app\n---\n- assertVisible: Home\n',onYamlChange:()=>{},catalog:[],diagnostics:[],pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode:true,scenarioId:'main',scenarios:[{id:'main',name:'Main',pathId:'route'}],initialView:{selectedScreenId:'home',selectedVisitId:'v1'},runScripts}),
       createElement(RedactedText,{text:'token [redacted] hidden'}),
@@ -500,8 +500,8 @@ test('at 1024x700 the editor takes the inspector spot and stays inside the windo
     const inspectorBox=inspector.getBoundingClientRect();
     const hits=editorBox.left<inspectorBox.right&&editorBox.right>inspectorBox.left&&editorBox.top<inspectorBox.bottom&&editorBox.bottom>inspectorBox.top;
     assert.equal(hits,false);
-    assert.ok(editorBox.width>0&&editorBox.bottom<=700);
-    assert.ok(parseFloat(editor.style.top)+parseFloat(editor.style.maxHeight)<=700);
+    assert.ok(editorBox.width>0&&editorBox.bottom<=700-88);
+    assert.ok(parseFloat(editor.style.top)+parseFloat(editor.style.maxHeight)<=700-88);
     await click(page.document,'[aria-label="Close script editor"]');
     assert.equal(page.document.querySelector('.script-editor'),null);
     assert.equal(page.document.querySelector('.floating-inspector')?.getAttribute('data-inspector-yielded'),null);
@@ -509,6 +509,64 @@ test('at 1024x700 the editor takes the inspector spot and stays inside the windo
     await act(async()=>opener.dispatchEvent(new page.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
     assert.equal(page.document.querySelector('.floating-inspector'),null);
   }finally{proto.getBoundingClientRect=original;await page.close();}
+});
+
+test('a read-only editor takes focus when the inspector steps aside',async()=>{
+  const imported=row('paid',0,fingerprint,{source:'1+1',origin:'imported'});
+  const page=await mount([imported],[{rowId:imported.id,origin:'imported',trusted:false,hash:imported.hash}]);
+  const proto=page.window.HTMLElement.prototype;
+  const original=proto.getBoundingClientRect;
+  const box=(left:number,top:number,width:number,height:number)=>({x:left,y:top,left,top,width,height,right:left+width,bottom:top+height,toJSON(){return {};}});
+  proto.getBoundingClientRect=function(this:HTMLElement){
+    const el=this;
+    if(el.classList.contains('floating-inspector')){
+      if(el.getAttribute('data-inspector-yielded')==='true')return box(-4000,80,300,400) as DOMRect;
+      return box(Number(el.getAttribute('data-slot-left')??362),Number(el.getAttribute('data-slot-top')??80),300,420) as DOMRect;
+    }
+    if(el.classList.contains('script-editor')){
+      const left=parseFloat(el.style.left||'0');const top=parseFloat(el.style.top||'0');
+      return box(left,top,parseFloat(el.style.width||'360'),parseFloat(el.style.maxHeight||'400')) as DOMRect;
+    }
+    if(el.classList.contains('screen-node'))return box(100,80,250,180) as DOMRect;
+    if(el.classList.contains('canvas-viewport')||el.classList.contains('canvas-surface'))return box(0,0,page.window.innerWidth,page.window.innerHeight) as DOMRect;
+    return original.call(el);
+  };
+  try{
+    Object.defineProperty(page.window,'innerWidth',{value:1024,configurable:true});Object.defineProperty(page.window,'innerHeight',{value:700,configurable:true});
+    await act(async()=>page.window.dispatchEvent(new page.window.Event('resize')));
+    const opener=page.document.querySelector<HTMLButtonElement>('[data-script-id="paid"] .script-row-summary')!;
+    opener.focus();
+    await click(page.document,'[data-script-id="paid"] .script-row-summary');
+    const editor=page.document.querySelector<HTMLElement>('.script-editor')!;
+    const close=editor.querySelector<HTMLButtonElement>('[aria-label="Close script editor"]')!;
+    const trust=editor.querySelector<HTMLButtonElement>('[data-testid="trust-this-script"]')!;
+    assert.equal(page.document.querySelector('.floating-inspector')?.getAttribute('data-inspector-yielded'),'true');
+    assert.equal(page.document.querySelector('[aria-label="Script name"]'),null);
+    assert.ok(trust);
+    assert.ok(page.document.activeElement===close||page.document.activeElement===trust);
+    assert.notEqual(page.document.activeElement,page.document.body);
+    assert.ok(editor.contains(page.document.activeElement));
+  }finally{proto.getBoundingClientRect=original;await page.close();}
+});
+
+test('while running, the heading and hint span the status row',async()=>{
+  const page=await mount([row('paid',0,fingerprint,{source:'1+1'})]);
+  try{
+    await click(page.document,'[data-script-id="paid"] .script-row-summary');
+    await act(async()=>page.updateExtra({running:true}));
+    const running=page.document.querySelector('.script-running')!;
+    assert.equal(running.querySelector('.script-running-title')?.textContent,'While running');
+    assert.equal(running.querySelector('.script-running-label')?.textContent?.replace(/\s+/g,' ').trim(),'Running');
+    assert.equal(running.querySelector('.script-stop')?.textContent,'■ Stop');
+    assert.equal(running.querySelector('.script-running-hint')?.textContent,'Result is shown after the run ends. No banners.');
+    const title=running.querySelector('.script-running-title')!;
+    const hint=running.querySelector('.script-running-hint')!;
+    const label=running.querySelector('.script-running-label')!;
+    assert.equal(title.compareDocumentPosition(label)&page.window.Node.DOCUMENT_POSITION_FOLLOWING,page.window.Node.DOCUMENT_POSITION_FOLLOWING);
+    assert.equal(label.compareDocumentPosition(running.querySelector('.script-stop')!)&page.window.Node.DOCUMENT_POSITION_FOLLOWING,page.window.Node.DOCUMENT_POSITION_FOLLOWING);
+    assert.equal(running.querySelector('.script-stop')!.compareDocumentPosition(hint)&page.window.Node.DOCUMENT_POSITION_FOLLOWING,page.window.Node.DOCUMENT_POSITION_FOLLOWING);
+    assert.match(readFileSync(new URL('../src/style.css',import.meta.url),'utf8'),/\.script-running-title,\.script-running-hint\{grid-column:1 \/ -1\}/);
+  }finally{await page.close();}
 });
 
 test('a setup-only visit omits Run script from the add menu',async()=>{

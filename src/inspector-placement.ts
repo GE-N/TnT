@@ -126,11 +126,13 @@ export function placeInspector({
 
 export const scriptEditorWidth = 360;
 export const scriptEditorGap = 12;
+/** Workbench zoom controls and Advanced mode occupy this band at the bottom of the window. */
+export const scriptEditorBottomReserve = 88;
 
 export type ScriptEditorPlace = {
   left: number;
   top: number;
-  /** Viewport height minus the editor's top minus 8px. The card scrolls inside this. */
+  /** Shorter of the viewport cap (top + 8px) and the space above the bottom control band. */
   maxHeight: number;
   /** No free side: the editor takes the inspector's spot and the inspector hides. */
   yieldsInspector: boolean;
@@ -165,7 +167,12 @@ export function placeScriptEditor(
     margin,
     Math.max(margin, viewport.height - margin - 8),
   );
-  const maxHeight = Math.max(0, viewport.height - top - 8);
+  const viewportCap = Math.max(0, viewport.height - top - 8);
+  const aboveControls = Math.max(
+    0,
+    viewport.height - scriptEditorBottomReserve - top,
+  );
+  const maxHeight = Math.min(viewportCap, aboveControls);
   if (beside !== undefined)
     return {
       left: Math.round(beside),
