@@ -264,16 +264,16 @@ test('each workspace restores its own scenario, zoom, and screen, and a deleted 
   await page.service.setSession(first.id);
   await page.render();
   await openScenarioPanel(page.document,act);
-  assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'Beta');
+  assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')?.textContent,'Beta');
   assert.match(page.document.querySelector('.canvas-surface')?.getAttribute('style')??'',/scale\(1\.2\)/);
   assert.ok(page.document.querySelector('[data-screen-id="away"]')?.className.includes('selected-screen'));
   await page.openNamed('Workspace B');
   await openScenarioPanel(page.document,act);
-  assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'Alpha');
+  assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')?.textContent,'Alpha');
   assert.match(page.document.querySelector('.canvas-surface')?.getAttribute('style')??'',/scale\(0\.5\)/);
   await page.openNamed('Workspace A');
   await openScenarioPanel(page.document,act);
-  assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'Beta');
+  assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')?.textContent,'Beta');
   assert.ok(page.document.querySelector('[data-screen-id="away"]')?.className.includes('selected-screen'));
   await page.service.saveView(first.id,{scenarioId:'gone',scenarioName:'Gone'});
   await page.openNamed('Workspace A');
@@ -289,7 +289,7 @@ test('a workspace without view.json uses the first scenario and the default canv
   await page.service.setSession(saved.id);
   await page.render();
   await openScenarioPanel(page.document,act);
-  assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'Alpha');
+  assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')?.textContent,'Alpha');
   assert.match(page.document.querySelector('.canvas-surface')?.getAttribute('style')??'',/scale\(0\.85\)/);
   assert.equal(page.document.body.textContent!.includes('was deleted'),false);
   const empty=await page.service.save({name:'No scenarios',yaml,scenarios:[]});
@@ -392,7 +392,7 @@ test('an imported workspace opens with the first scenario and the default canvas
   await page.render();
   await page.openNamed('Imported workspace');
   await openScenarioPanel(page.document,act);
-  assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'Alpha');
+  assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')?.textContent,'Alpha');
   assert.match(page.document.querySelector('.canvas-surface')?.getAttribute('style')??'',/scale\(0\.85\)/);
   await assert.rejects(readFile(join(page.directory,'workspaces',imported.id,'view.json')));
  }finally{await page.close();}
