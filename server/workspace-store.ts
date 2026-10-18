@@ -78,7 +78,7 @@ export function createWriteFaults(){
 }
 
 /** The existing local workspace records, with serialized atomic metadata/content writes. */
-export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>Workspace,options?:{faults?:WorkspaceStoreFaults;now?:()=>Date}){
+export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>Workspace,options?:{faults?:WorkspaceStoreFaults;now?:()=>Date;beforePublish?:(next:Workspace,previous?:Workspace)=>Promise<void>}){
  const queueKey=resolve(root);
  const faults=options?.faults;
  const now=()=>(options?.now??(()=>new Date()))().toISOString();
@@ -253,10 +253,11 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   readDraft:(id:string)=>serialize(()=>readDraftOnce(id)),
   readView:(id:string)=>serialize(()=>readView(id)),
   bundle:(id:string)=>serialize(async()=>{const workspace=await read(id);const draftState=await readDraftOnce(id);const view=await readView(id);return {...workspace,draft:draftState.draft,draftError:draftState.draftError,view};}),
-  importCopy:(content:Workspace)=>serialize(async()=>{
+  withWorkspace:<T>(id:string,operation:(workspace:Workspace)=>Promise<T>)=>serialize(async()=>operation(await read(id))),
+  importCopy:(content:Workspace,beforePublish?:(next:Workspace)=>Promise<void>)=>serialize(async()=>{
    const stamp=now();const id=randomUUID();
    let written:Workspace;
-   try{written=await write({...content,id,metadata:{createdAt:stamp,updatedAt:stamp,openedAt:stamp,revision:1}});}
+   try{const next={...content,id,metadata:{createdAt:stamp,updatedAt:stamp,openedAt:stamp,revision:1}};await (beforePublish??options?.beforePublish)?.(next);written=await write(next);}
    catch(error){await rm(join(await base(),id),{recursive:true,force:true});throw error;}
    try{await writeSession({lastActiveId:id,updatedAt:stamp});}catch(error){console.error('Import committed; session update failed.',error);}
    return written;
@@ -265,7 +266,9 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
    const previous=content.id?await read(content.id):undefined;
    if(previous&&previous.metadata!.revision!==expectedRevision)throw new WorkspaceConflict();
    const stamp=now();
-   const written=await write({...content,id:content.id||randomUUID(),metadata:{createdAt:previous?.metadata?.createdAt??stamp,updatedAt:stamp,openedAt:previous?.metadata?.openedAt??stamp,revision:(previous?.metadata?.revision??0)+1}});
+   const next={...content,id:content.id||randomUUID(),metadata:{createdAt:previous?.metadata?.createdAt??stamp,updatedAt:stamp,openedAt:previous?.metadata?.openedAt??stamp,revision:(previous?.metadata?.revision??0)+1}};
+   await options?.beforePublish?.(next,previous);
+   const written=await write(next);
    let draftCleared=false;
    try{
     if(!previous||clearDraftRevision!==undefined){const failed=faults?.failAfterCommit?.();if(failed)throw toError(failed);}

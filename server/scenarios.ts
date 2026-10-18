@@ -1,3 +1,11 @@
+import {protectRunEvidence,verifyEvidence,redact} from './run-script-evidence.js';
+import {mapScriptResults} from './run-script-results.js';
+import {EVIDENCE_SCRUB_FAILED,type ScriptRunResults,type ScriptExecutionReference} from './run-script-contract.js';
+import type {EvidenceScrubber} from './run-script-evidence.js';
+import {homedir} from 'node:os';
+import {createScriptTrustStore,workspaceScripts} from './script-trust-store.js';
+import {buildRunPlan} from './run-script-plan.js';
+import {ScriptBlocked} from './script-validation.js';
 import {assertReservedInputs,assertAuthoredVariables,assertAutomationVariables} from './script-validation.js';
 import {parsePackage,portableContent,packageReview,readOmittedValues,missingValues,type OmittedValue,type WorkspacePackage} from './workspace-package.js';
 import {WorkspaceConflict,createWorkspaceStore,type WorkspaceMetadata,type WorkspaceStoreFaults} from './workspace-store.js';
@@ -16,11 +24,11 @@ import { createMockSession, validateMock, type MockPlan, type MockResult } from 
 import type { createRunner } from './runner.js';
 
 export type Workspace = { omittedValues?:OmittedValue[]; metadata?:WorkspaceMetadata; scenarios?:ScenarioDefinition[]; id: string; name: string; yaml: string; automation?:Automation; flows?: Record<string, string>; mock?: MockPlan; canvas?: CanvasGraph; canvasDiagnostics?: CanvasDiagnostic[] };
-export type Step = { id: string; command: string; expected?: unknown; actual?:unknown; detail?:string; artifacts?:string[]; assertionStatus?:Step['status']; status: 'unavailable' | 'passed' | 'failed' | 'skipped' };
+export type Step = { id: string; command: string; expected?: unknown; actual?:unknown; detail?:string; artifacts?:string[]; assertionStatus?:Step['status']; status: 'unavailable' | 'passed' | 'failed' | 'skipped' | 'not-run' };
 export type Cleanup = { verified: boolean; detail: string };
-export type Run = {
+export type Run = Partial<ScriptRunResults> & {
   id: string; deviceId: string; startedAt: string; finishedAt?: string;
-  status: 'running' | 'passed' | 'path-failed' | 'assertion-failed' | 'tool-error' | 'setup-error' | 'handler-error' | 'cancelled';
+  status: 'running' | 'passed' | 'path-failed' | 'assertion-failed' | 'tool-error' | 'setup-error' | 'handler-error' | 'cancelled' | 'script-error' | 'error';
   automation?:AutomationResult;
   mock?: MockResult; canvas?: CanvasResult;
   snapshot: { scenario?:ScenarioDefinition; resetApp?:boolean; authoredYaml?:string; automation?:Automation; executionYaml?:string; executionPlan?:ExecutionItem[]; canvas?: CanvasGraph; canvasPathId?: string; flows?: Record<string, string>; mock?: MockPlan; expectedPath?: { from: string; to: string }; id: string; workspaceId: string; name: string; yaml: string; steps: Step[]; toolVersions: { maestro: string; node: string; mockoon?: string }; runtimeInputPolicy: string; pickerReference?: { captureId: string; reviewId: string; capturedAt: string } };
@@ -30,11 +38,12 @@ export type Run = {
 export type RunInput = { workspaceId: string; deviceId: string; runtimeInputs?: unknown; captureId?: string; pickerReviewId?: string; pathId?: string; scenarioId?:string; resetApp?:boolean };
 export type Maestro = {
   version(): Promise<string>;
-  run(input: { directory: string; flow: string; deviceId: string; signal: AbortSignal; runtimeInputs?: Record<string, string> }): Promise<{ code: number | null; log: string; cleanup: Cleanup }>;
+  run(input: { directory: string; flow: string; deviceId: string; signal: AbortSignal; runtimeInputs?: Record<string, string>; scriptEnv?:Record<string,string> }): Promise<{ code: number | null; log: string; stdout?:string; cleanup: Cleanup }>;
 };
 const validId = (id: string) => { if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new Error('Invalid workspace/run identifier.'); return id; };
 
-export function createScenarios(options: { root: string; runner: ReturnType<typeof createRunner>; maestro: Maestro; faults?: WorkspaceStoreFaults; now?: () => Date }) {
+export function createScenarios(options: { root: string; runner: ReturnType<typeof createRunner>; maestro: Maestro; faults?: WorkspaceStoreFaults; now?: () => Date; trustDirectory?:string; createMockSession?:typeof createMockSession; scrubber?:EvidenceScrubber }) {
+  const trustStore=createScriptTrustStore(options.trustDirectory??join(homedir(),'Library','Application Support','TnT','script-trust'));
   const activeWorkspaces=new Set<string>();
   const deleting=new Set<string>();
   const pending = new Map<string, Promise<Run>>();
@@ -65,8 +74,13 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       return { omittedValues:readOmittedValues(input.omittedValues), scenarios, automation, flows, mock, canvas, canvasDiagnostics, id: input.id ? validId(input.id) : '', name: input.name.trim(), yaml: input.yaml };
 
   }
-  const workspaceStore=createWorkspaceStore(options.root,input=>authoredWorkspace(input,[]),{faults:options.faults,now:options.now});
+  const workspaceStore=createWorkspaceStore(options.root,input=>authoredWorkspace(input,[]),{faults:options.faults,now:options.now,beforePublish:(next,previous)=>trustStore.register(next,previous)});
   const service = {
+    async scriptTrust(id:string){return {scripts:await trustStore.list(await workspaceStore.read(id))};},
+    async trustScript(input:{workspace:string;rowId:string;hash:string}){
+      if(!input||Object.keys(input).some(key=>!['workspace','rowId','hash'].includes(key))||typeof input.rowId!=='string'||typeof input.hash!=='string')throw new Error('Trust exactly one script by workspace, rowId and current source hash.');
+      return workspaceStore.withWorkspace(input.workspace,async workspace=>({trust:await trustStore.approve(workspace,input.rowId,input.hash)}));
+    },
     async preview(input:{yaml:string;flows?:Record<string,string>;automation?:unknown;canvas?:unknown;mock?:unknown;scenarios?:unknown;scenarioId?:string;pathId?:string;runtimeInputs?:unknown;resetApp?:boolean}) {
       if(typeof input.yaml!=='string'||Buffer.byteLength(input.yaml)>100_000)throw new Error('Provide YAML up to 100 KB.');
       const flows=validateFlows(input.flows);
@@ -122,7 +136,10 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const incomplete=content.canvas?.screens.flatMap(screen=>screen.tests).find(test=>operationProblem(test));if(incomplete)throw new Error('Repair incomplete canvas content before copying. '+operationProblem(incomplete));
       validate(content.yaml,content.flows);
       for(const flow of Object.values(content.flows??{}))validate(flow,content.flows);
-      return workspaceStore.save(content);
+      const source=input.id?await workspaceStore.read(input.id):undefined;
+      const sourceTrust=source?await trustStore.list(source):[];
+      const origins=source?Object.fromEntries(workspaceScripts(content).flatMap(row=>{const trust=sourceTrust.find(item=>item.rowId===row.id);const original=workspaceScripts(source).find(item=>item.id===row.id);return trust&&(trust.origin==='imported'||original?.source===row.source)?[[row.id,trust.origin]]:[];})):Object.fromEntries(workspaceScripts(content).map(row=>[row.id,'imported' as const]));
+      return workspaceStore.importCopy(content,next=>trustStore.register(next,undefined,origins));
     },
     async exportWorkspace(input:{id:string;expectedRevision:number;includeValues?:boolean}){
       if(input.includeValues!==undefined&&typeof input.includeValues!=='boolean')throw new Error('Include values must be a boolean.');
@@ -149,7 +166,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     },
     async importWorkspace(input:{package:unknown;name:string}){
       const reviewed=await service.reviewWorkspacePackage(input);
-      return workspaceStore.importCopy(authoredWorkspace({...reviewed.package.workspace,name:input.name,id:undefined},[]));
+      return workspaceStore.importCopy(authoredWorkspace({...reviewed.package.workspace,name:input.name,id:undefined},[]),next=>trustStore.register(next,undefined,Object.fromEntries(workspaceScripts(next).map(row=>[row.id,'imported' as const]))));
     },
     async start(input: RunInput): Promise<Run> {
       if (batches.busy) throw new Error('A scenario batch is in progress. Wait for cleanup.');
@@ -199,6 +216,11 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       validateFlowInputs(derived?.yaml??workspace.yaml,workspace.flows??{},selection?.inputs??runtimeInputs);
       for (const flow of Object.values(workspace.flows ?? {})) { if (validate(flow, workspace.flows).appId !== appId) throw new Error('Reusable flows must declare the same appId as the scenario.'); }
       if ((input.captureId === undefined) !== (input.pickerReviewId === undefined)) throw new Error('Provide both capture and reviewed step identity.');
+      const scriptPlan=buildRunPlan({yaml:workspace.yaml,flows:workspace.flows,scripts:selection?.scenario.scripts,trust:await trustStore.list(authored),automation:derived,mockAvailable:!!workspace.mock});
+      if(scriptPlan.blocked.length)throw new ScriptBlocked(scriptPlan.blocked);
+      if(scriptPlan.scriptFiles.length)validateFlowInputs(scriptPlan.executionYaml,workspace.flows??{},selection?.inputs??runtimeInputs,[],true);
+      const hasScripts=scriptPlan.scriptFiles.length>0;
+      const executionYaml=hasScripts?scriptPlan.executionYaml:derived?.yaml;
       const pickerReference = input.captureId ? options.runner.picker.assertReview(input.captureId, input.pickerReviewId!, workspace.yaml) : undefined;
       const release = await options.runner.acquireDevice(input.deviceId, input.captureId, input.pickerReviewId);
       try {
@@ -210,10 +232,11 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
         const id = randomUUID();
         const path = await directory('runs', id);
         const runtimeInputPolicy = confidential ? 'Confidential runtime inputs supplied: values are omitted; raw logs, evaluated metadata, and images are withheld. Temporary tool artifacts are deleted on cleanup. Historical snapshots cannot replay omitted inputs.' : selection?'Saved non-confidential scenario inputs supplied; runtime values are scoped to this run. Keep secrets out of saved inputs/YAML. No inherited application environment is forwarded.':'No runtime inputs supplied. Keep secrets out of authored YAML. No inherited application environment is forwarded.';
-        const snapshot = { scenario:selection?.scenario, resetApp, authoredYaml:selection||canvas?authored.yaml:undefined, automation, executionYaml:derived?.yaml, executionPlan:derived?.plan, canvas, canvasPathId: canvasPath?.id, flows: workspace.flows, mock: workspace.mock, expectedPath: workspace.mock ? { from: workspace.mock.fromScreen, to: workspace.mock.toScreen } : undefined, id: createHash('sha256').update(JSON.stringify({ workspace, derived, steps, version, device, scenarioId:selection?.scenario.id,resetApp,pathId:canvasPath?.id, runtimeInputPolicy, pickerReference, node: process.version })).digest('hex'), workspaceId: workspace.id, name: workspace.name, yaml: workspace.yaml, steps, toolVersions: { maestro: version, node: process.version, mockoon: workspace.mock ? '9.9.0' : undefined }, runtimeInputPolicy, pickerReference };
+        const snapshot = { scenario:selection?.scenario, resetApp, authoredYaml:selection||canvas?authored.yaml:undefined, automation, executionYaml, executionPlan:derived?.plan, canvas, canvasPathId: canvasPath?.id, flows: workspace.flows, mock: workspace.mock, expectedPath: workspace.mock ? { from: workspace.mock.fromScreen, to: workspace.mock.toScreen } : undefined, id: createHash('sha256').update(JSON.stringify({ workspace, derived, steps, version, device, scenarioId:selection?.scenario.id,resetApp,pathId:canvasPath?.id, runtimeInputPolicy, pickerReference, node: process.version })).digest('hex'), workspaceId: workspace.id, name: workspace.name, yaml: workspace.yaml, steps, toolVersions: { maestro: version, node: process.version, mockoon: workspace.mock ? '9.9.0' : undefined }, runtimeInputPolicy, pickerReference };
         const run: Run = { id, deviceId: device.id, startedAt: new Date().toISOString(), status: 'running', canvas:canvas&&canvasPath?mapCanvas(canvas,canvasPath.id,workspace.yaml,steps,true,automation?{definition:automation,flows:workspace.flows}:undefined):undefined, snapshot, steps: structuredClone(steps), log: '', cleanup: { verified: false, detail: 'Pending' }, artifacts: [], mappingNote: 'Command outcomes will be mapped after execution; unsupported details remain unavailable.' };
+        if(hasScripts){run.scriptSteps=Object.fromEntries(scriptPlan.scriptFiles.map(file=>[file.rowId,{kind:'runScript',rowId:file.rowId,status:'not-run'}]));run.executionOrder=scriptPlan.executionItems.flatMap<ScriptExecutionReference>(item=>item.kind==='step'?[{kind:'step' as const,index:item.index!}]:item.kind==='runScript'?[{kind:'runScript' as const,rowId:item.rowId}]:[]);}
         await writeFile(join(path, 'flow.yaml'), workspace.yaml);
-        if(derived)await writeFile(join(path,'.tnt-execution.yaml'),derived.yaml);
+        if(executionYaml)await writeFile(join(path,'.tnt-execution.yaml'),executionYaml);
         await writeFile(join(path, 'snapshot.json'), JSON.stringify(snapshot, null, 2));
         await writeRecord(join(path, 'result.json'), run);
         const controller = new AbortController();
@@ -224,8 +247,11 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
         const done = (async () => {
           let privateDirectory: string | undefined;
           let mock: ReturnType<typeof createMockSession> | undefined;
+          let token:string|undefined;
+          let execution:Awaited<ReturnType<Maestro['run']>>|undefined;
           let phase: 'setup' | 'execution' = 'setup';
           run.cleanup = { verified: true, detail: 'No tool process allocated yet.' };
+          const scriptPaths:string[]=[];
           try {
             if (confidential) {
               const privateRoot = join(options.root, 'private');
@@ -233,58 +259,92 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
               privateDirectory = await mkdtemp(join(privateRoot, id + '-'));
             }
             const executionDirectory = privateDirectory ?? path;
-            if (privateDirectory) {await writeFile(join(executionDirectory, 'flow.yaml'), workspace.yaml);if(derived)await writeFile(join(executionDirectory,'.tnt-execution.yaml'),derived.yaml);}
+            if (privateDirectory) {await writeFile(join(executionDirectory, 'flow.yaml'), workspace.yaml);if(executionYaml)await writeFile(join(executionDirectory,'.tnt-execution.yaml'),executionYaml);}
             for (const [name, yaml] of Object.entries(workspace.flows ?? {})) await writeFile(join(executionDirectory, name), yaml);
+            for(const file of scriptPlan.scriptFiles){const name=join(executionDirectory,file.name);scriptPaths.push(name);await writeFile(name,file.content,{mode:0o600});}
+            let scriptEnv:Record<string,string>|undefined;
             if (workspace.mock) {
-              mock = createMockSession(workspace.mock, executionDirectory);
+              mock = (options.createMockSession??createMockSession)(workspace.mock, executionDirectory,{overrideResponse:selection?!!selection.scenario.mockResponseId:true});
+              const access=mock.scriptAccess();token=access.token;
+              if(hasScripts)scriptEnv={TNT_MOCK_URL:access.url,TNT_MOCK_TOKEN:access.token};
               run.mock = mock.result;
               await mock.prepare(controller.signal);
-              await writeRecord(join(path, 'result.json'), run);
             }
             if (controller.signal.aborted) throw new Error('Run cancelled before execution.');
             phase = 'execution';
-            const execution = await options.maestro.run({ directory: executionDirectory, flow: join(executionDirectory, derived?'.tnt-execution.yaml':'flow.yaml'), deviceId: device.id, signal: controller.signal, runtimeInputs:selection?.inputs??runtimeInputs });
+            execution = await options.maestro.run({ directory: executionDirectory, flow: join(executionDirectory, executionYaml?'.tnt-execution.yaml':'flow.yaml'), deviceId: device.id, signal: controller.signal, runtimeInputs:selection?.inputs??runtimeInputs,...(scriptEnv?{scriptEnv}:{}) });
             run.log = confidential ? 'Raw logs withheld because confidential runtime inputs were supplied.' : execution.log;
             run.cleanup = execution.cleanup;
-            const files = await listFiles(executionDirectory);
-            run.artifacts = confidential ? ['flow.yaml', 'snapshot.json'] : files.filter(file => file !== 'result.json');
-            const commandFile = files.find(file => file.endsWith('commands.json'));
-            const commands = commandFile ? JSON.parse(await readFile(join(executionDirectory, commandFile), 'utf8')) : [];
-            mapResults(run, commands,confidential);
-            const automationMapping=automation&&derived?mapAutomation(automation,derived.plan,commands):undefined;
-            run.automation=automationMapping?.result;
-            let report: any;
-            try { report = new XMLParser({ ignoreAttributes: false }).parse(await readFile(join(executionDirectory, 'report.xml'), 'utf8')); } catch { /* Missing report is a tool error, never a pass. */ }
-            const suite = report?.testsuites?.testsuite;
-            const failedAssertion = commands.find((entry: any) => entry.metadata?.status === 'FAILED' && entry.command?.assertConditionCommand);
-            run.status = controller.signal.aborted ? 'cancelled' : execution.code === 0 && Number(suite?.['@_tests']) === 1 && Number(suite?.['@_failures']) === 0 ? 'passed' : failedAssertion ? 'assertion-failed' : 'tool-error';
-            if(automationMapping?.failedPhase){run.status=controller.signal.aborted?'cancelled':automationMapping.failedPhase==='setup'?'setup-error':'handler-error';run.error=automationMapping.failedPhase==='setup'?'Independent setup failed; dependent authored steps did not run.':'Default action failed; dependent authored steps did not run.';}
-            if (failedAssertion) { run.error = confidential ? 'Assertion failed. Evaluated detail withheld for confidential inputs.' : failedAssertion.metadata.error?.message; run.expectedFailure = confidential ? run.steps.find(step => step.status === 'failed')?.expected : failedAssertion.command.assertConditionCommand.condition; }
-            else if (run.status === 'tool-error') run.error = 'Maestro did not report a successful scenario or a structured assertion failure. Inspect raw logs.';
           } catch (error) {
             run.status = controller.signal.aborted ? 'cancelled' : phase === 'setup' ? 'setup-error' : 'tool-error';
             run.error = confidential ? 'Tool execution failed. Detail withheld for confidential inputs.' : error instanceof Error ? error.message : 'Tool execution failed.';
             if (mock && phase === 'setup') mock.result.intent.status = 'failed';
             if (phase === 'execution') run.cleanup = { verified: false, detail: 'Tool adapter failed; cleanup could not be verified.' };
           } finally {
+            // Stop all writers first. Capture and cleanup exceptions must not bypass the scrub.
             if (mock) {
-              await mock.evidence(confidential);
-              const mockCleanup = await mock.cleanup();
-              run.cleanup = { verified: run.cleanup.verified && mockCleanup.verified, detail: run.cleanup.detail + ' ' + mockCleanup.detail };
+              try{await mock.evidence(confidential);}catch{run.status='tool-error';run.error='Mock evidence capture failed.';}
+              try{const cleaned=await mock.cleanup();run.cleanup={verified:run.cleanup.verified&&cleaned.verified,detail:run.cleanup.detail+' '+cleaned.detail};}
+              catch{run.cleanup={verified:false,detail:'Mock cleanup could not be verified; device ownership retained.'};run.status='tool-error';run.error='Mock cleanup failed.';}
             }
-            // Never expose the controller environment file through the artifact API.
-            run.artifacts = run.artifacts.filter(name => name !== 'mock-environment.json');
-            if (privateDirectory) {
-              try { await rm(privateDirectory, { recursive: true, force: true }); run.cleanup.detail += ' Confidential temporary artifacts removed.'; }
-              catch { run.cleanup = { verified: false, detail: 'Confidential temporary artifact removal could not be verified.' }; }
+            const directories=privateDirectory?[path,privateDirectory]:[path];
+            try{
+              const protection=await protectRunEvidence({directories,token,value:{run,execution},scriptFiles:scriptPaths},options.scrubber);
+              if(!protection.ok){
+                // Reconstruct from known-safe data only; the injected scrubber and tool errors are untrusted.
+                const safe:Run={id,deviceId:device.id,startedAt:run.startedAt,finishedAt:new Date().toISOString(),status:'error',error:EVIDENCE_SCRUB_FAILED,
+                  snapshot:{id:'evidence-removed',workspaceId:authored.id,name:'Evidence removed',yaml:'',steps:[],toolVersions:{maestro:version,node:process.version},runtimeInputPolicy:'Evidence scrub failed'},
+                  steps:[],log:'',artifacts:[],mappingNote:'Evidence removed to protect the token.',cleanup:{verified:run.cleanup.verified&&protection.removed,detail:protection.removed?'Unsafe evidence removed.':'Evidence removal could not be verified; ownership retained.'}};
+                Object.keys(run).forEach(key=>delete (run as any)[key]);Object.assign(run,safe);
+                // Include identifiers in the independent check too; no partially safe record is written.
+                await verifyEvidence({directories:[],token,value:run});
+              }else{
+                Object.assign(run,protection.value.run);execution=protection.value.execution;
+                if(!run.cleanup.verified){run.artifacts=[];if(run.status==='running')run.status='tool-error';run.error??='Owned-process cleanup is unverified; device reuse blocked.';}
+                else if(execution){
+                  const executionDirectory=privateDirectory??path;
+                  const files=await listFiles(executionDirectory);
+                  run.artifacts=confidential?['flow.yaml','snapshot.json']:files.filter(file=>file!=='result.json'&&file!=='mock-environment.json');
+                  // Maestro 2.11 emits a per-flow commands JSON under its debug output directory.
+                  const commandFile=files.find(file=>/(?:^|\/)commands(?:-[^/]*)?\.json$/.test(file));
+                  const commands=commandFile?JSON.parse(await readFile(join(executionDirectory,commandFile),'utf8')):[];
+                  const scripts=hasScripts?mapScriptResults(scriptPlan,commands,run.log,confidential):undefined;
+                  const authoredCommands=scripts?.commands??commands;
+                  mapResults(run,authoredCommands,confidential);
+                  if(scripts){run.scriptSteps=scripts.scriptSteps;for(const index of scripts.notRunIndexes){run.steps[index].status='not-run';run.steps[index].assertionStatus='not-run';run.steps[index].detail='Not executed after an earlier failure.';delete run.steps[index].actual;}}
+                  const automationMapping=automation&&derived?mapAutomation(automation,derived.plan,authoredCommands):undefined;
+                  run.automation=automationMapping?.result;
+                  let report:any;
+                  try{report=new XMLParser({ignoreAttributes:false}).parse(await readFile(join(executionDirectory,'report.xml'),'utf8'));}catch{/* Missing report never passes. */}
+                  const suite=report?.testsuites?.testsuite;
+                  const failedAssertion=commands.find((entry:any)=>entry.metadata?.status==='FAILED'&&entry.command?.assertConditionCommand);
+                  // Preserve earlier cleanup/capture failures instead of overwriting them with a passing report.
+                  if(run.status==='running'){
+                    run.status=controller.signal.aborted?'cancelled':execution.code===124?'tool-error':scripts?.failure?'script-error':execution.code===0&&Number(suite?.['@_tests'])===1&&Number(suite?.['@_failures'])===0&&!scripts?.ambiguous&&(!scripts||Object.values(scripts.scriptSteps).every(item=>item.status==='passed'))?'passed':failedAssertion?'assertion-failed':'tool-error';
+                    if(scripts?.failure)run.error=scripts.failure;
+                    if(automationMapping?.failedPhase){run.status=controller.signal.aborted?'cancelled':automationMapping.failedPhase==='setup'?'setup-error':'handler-error';run.error=automationMapping.failedPhase==='setup'?'Independent setup failed; dependent authored steps did not run.':'Default action failed; dependent authored steps did not run.';}
+                    if(failedAssertion&&run.status==='assertion-failed'){run.error=confidential?'Assertion failed. Evaluated detail withheld for confidential inputs.':failedAssertion.metadata.error?.message;run.expectedFailure=confidential?run.steps.find(step=>step.status==='failed')?.expected:failedAssertion.command.assertConditionCommand.condition;}
+                    else if(run.status==='tool-error')run.error=execution.code===124?'Run stopped at 300s cap':'Maestro did not report a successful scenario or a structured assertion failure. Inspect raw logs.';
+                  }
+                }
+                if(canvas&&canvasPath){
+                  run.canvas=mapCanvas(canvas,canvasPath.id,workspace.yaml,run.steps,false,automation?{definition:automation,result:run.automation,flows:workspace.flows}:undefined);
+                  if(run.status==='passed'&&(run.canvas.edges.some(edge=>canvasPath.edgeIds.includes(edge.id)&&edge.status!=='passed')||!!canvasPath.screenId&&run.canvas.screens.find(screen=>screen.id===canvasPath.screenId)?.status!=='passed')){run.status='path-failed';run.error='The selected scenario path was not verified: a required action or destination assertion did not report passed. No alternate route was followed.';}
+                }
+                await verifyEvidence({directories:[],token,value:run});
+              }
+            }catch{
+              run.status='error';run.error=EVIDENCE_SCRUB_FAILED;run.log='';run.artifacts=[];run.steps=[];delete run.mock;delete run.canvas;delete run.automation;delete run.scriptSteps;delete run.expectedFailure;
+              run.snapshot={id:'evidence-removed',workspaceId:authored.id,name:'Evidence removed',yaml:'',steps:[],toolVersions:{maestro:version,node:process.version},runtimeInputPolicy:'Evidence scrub failed'};
+              let removed=true;for(const directory of directories)try{for(const name of await readdir(directory))await rm(join(directory,name),{recursive:true,force:true});}catch{removed=false;}
+              if(!removed)run.cleanup={verified:false,detail:'Unsafe evidence removal unverified; ownership retained.'};
+              run.cleanup.detail=redact(run.cleanup.detail,token);
+            }finally{
+              if(privateDirectory)try{await rm(privateDirectory,{recursive:true,force:true});run.cleanup.detail+=' Confidential temporary artifacts removed.';}catch{run.cleanup={verified:false,detail:'Confidential temporary artifact removal could not be verified.'};run.artifacts=[];}
+              run.finishedAt=new Date().toISOString();
+              try{await verifyEvidence({directories:[],token,value:run});await writeRecord(join(path,'result.json'),run);}
+              finally{signal?.removeEventListener('abort',abort);controllers.delete(id);if(run.cleanup.verified)await release();}
             }
-            if(canvas&&canvasPath){
-              run.canvas=mapCanvas(canvas,canvasPath.id,workspace.yaml,run.steps,false,automation?{definition:automation,result:run.automation,flows:workspace.flows}:undefined);
-              if(run.status==='passed'&&(run.canvas.edges.some(edge=>canvasPath.edgeIds.includes(edge.id)&&edge.status!=='passed')||!!canvasPath.screenId&&run.canvas.screens.find(screen=>screen.id===canvasPath.screenId)?.status!=='passed')){run.status='path-failed';run.error='The selected scenario path was not verified: a required action or destination assertion did not report passed. No alternate route was followed.';}
-            }
-            run.finishedAt = new Date().toISOString();
-            try { await writeRecord(join(path, 'result.json'), run); }
-            finally { signal?.removeEventListener('abort', abort); controllers.delete(id); if (run.cleanup.verified) await release(); }
           }
           return run;
         })();

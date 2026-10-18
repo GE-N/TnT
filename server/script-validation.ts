@@ -12,9 +12,10 @@ export function assertReservedInputs(value:unknown) {
 }
 // Inspect parsed authored values, including nested env declarations and JS expressions.
 // ScriptRow.source is intentionally never passed here: trusted code may use the variables.
+const reservedReference=(value:string)=>value.includes('${')&&/\bTNT_MOCK_(?:URL|TOKEN)\b/.test(value.slice(value.indexOf('${')));
 export function assertAuthoredVariables(yaml:string) {
   const walk=(value:unknown):void=>{
-    if(typeof value==='string' && /\$\{[^}]*\bTNT_MOCK_(?:URL|TOKEN)\b/s.test(value))throw new ScriptBlocked([{kind:'reserved-variable',message:'Reserved TnT variable'}]);
+    if(typeof value==='string' && reservedReference(value))throw new ScriptBlocked([{kind:'reserved-variable',message:'Reserved TnT variable'}]);
     if(Array.isArray(value))value.forEach(walk);
     else if(value&&typeof value==='object')for(const [key,child] of Object.entries(value)){
       if(key==='env'||key==='parameters'||key==='inputs')assertReservedInputs(child);
@@ -28,7 +29,7 @@ export function assertAutomationVariables(value:unknown):void {
   for(const [key,child] of Object.entries(value)){
     if(key==='parameters'){
       assertReservedInputs(child);
-      if(child&&typeof child==='object'&&Object.values(child).some(v=>typeof v==='string'&&/\$\{[^}]*\bTNT_MOCK_(?:URL|TOKEN)\b/s.test(v)))throw new ScriptBlocked([{kind:'reserved-variable',message:'Reserved TnT variable'}]);
+      if(child&&typeof child==='object'&&Object.values(child).some(v=>typeof v==='string'&&reservedReference(v)))throw new ScriptBlocked([{kind:'reserved-variable',message:'Reserved TnT variable'}]);
     }else assertAutomationVariables(child);
   }
 }

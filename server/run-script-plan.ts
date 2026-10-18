@@ -2,6 +2,7 @@ import {parseAllDocuments,stringify} from 'yaml';
 import {referenceCatalog} from './canvas.js';
 import type {ExecutionItem} from './default-actions.js';
 import type {ScriptBlockReason,ScriptRow,ScriptTrust} from './run-script-contract.js';
+import {scriptHash} from './script-trust-store.js';
 import {readScriptRows} from './script-validation.js';
 
 export type ScriptExecutionItem=ExecutionItem|{kind:'runScript';rowId:string;beforeStep:number;file:string};
@@ -23,7 +24,7 @@ export function buildRunPlan(input:{yaml:string;flows?:Record<string,string>;scr
     if(row.beforeStep.fingerprint!=='end'&&!catalog.references.some(ref=>ref.kind==='step'&&ref.index===row.beforeStep.index&&ref.fingerprint===row.beforeStep.fingerprint))blocked.push({kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'});
     const syntax=checkScriptSyntax(row.source);
     if(syntax)blocked.push({kind:'syntax',rowId:row.id,...syntax});
-    if(!input.trust?.some(trust=>trust.rowId===row.id&&trust.trusted))blocked.push({kind:'untrusted',rowId:row.id,message:'Script needs trust'});
+    if(!input.trust?.some(trust=>trust.rowId===row.id&&trust.trusted&&(trust.origin==='local'||trust.hash===scriptHash(row.source))))blocked.push({kind:'untrusted',rowId:row.id,message:'Script needs trust'});
   }
   const docs=parseAllDocuments(input.automation?.yaml??input.yaml);
   const commands=docs[1].toJS() as unknown[];

@@ -1,0 +1,69 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createScenarios} from '../server/scenarios.js';
+import {createRunner} from '../server/runner.js';
+import {ScriptTrustConflict} from '../server/script-trust-store.js';
+const yaml='appId: com.example.App\n---\n- launchApp\n';
+async function fixture(){
+ const root=await mkdtemp(join(tmpdir(),'tnt-trust-'));const trustDirectory=join(root,'trust');
+ const options={root,trustDirectory,runner:createRunner({artifactDirectory:root,execute:async()=>{throw new Error('No device calls');}}),maestro:{version:async()=>{throw new Error('No Maestro');},run:async()=>{throw new Error('No Maestro');}}};
+ const service=createScenarios(options);const refs=(await service.references({yaml})).references;
+ const row={id:'one',label:'One',source:'globalThis.marker=true',beforeStep:{index:0,fingerprint:refs[0].fingerprint}};
+ const workspace=await service.save({name:'Scripts',yaml,scenarios:[{id:'first',name:'First',steps:refs,inputs:{},parameters:{},enabledHandlerIds:[],scripts:[row,{...row,id:'two'}]}]});
+ return {root,trustDirectory,options,service,workspace};
+}
+test('local trust, import per-workspace/per-row approval, durable hash invalidation and portable exclusion',async()=>{
+ const f=await fixture();try{
+  assert.ok((await f.service.scriptTrust(f.workspace.id)).scripts.every(item=>item.origin==='local'&&item.trusted));
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});assert.doesNotMatch(JSON.stringify(pkg.package),/trusted|approved|origin/);
+  const imported=await f.service.importWorkspace({package:pkg.package,name:'Imported'});
+  let list=(await f.service.scriptTrust(imported.id)).scripts;assert.ok(list.every(item=>item.origin==='imported'&&!item.trusted));
+  await assert.rejects(f.service.start({workspaceId:imported.id,deviceId:'not-used',scenarioId:'first'}),/Script needs trust/);
+  await f.service.trustScript({workspace:imported.id,rowId:'one',hash:list[0].hash});
+  list=(await createScenarios(f.options).scriptTrust(imported.id)).scripts;assert.deepEqual(list.map(item=>item.trusted),[true,false]);
+  const edited=structuredClone(imported);edited.scenarios![0].scripts![0].source+='; // edited';
+  const saved=await f.service.save(edited);
+  await assert.rejects(f.service.trustScript({workspace:imported.id,rowId:'one',hash:list[0].hash}),ScriptTrustConflict);
+  assert.equal((await f.service.scriptTrust(imported.id)).scripts[0].trusted,false);
+  const copy=await f.service.copyWorkspace(saved);assert.ok((await f.service.scriptTrust(copy.id)).scripts.every(item=>!item.trusted));
+  const locallyNew=await f.service.save({...saved,scenarios:saved.scenarios!.map(scenario=>({...scenario,scripts:[...scenario.scripts!,{...scenario.scripts![0],id:'new',source:'output.unique = 1037'}]}))});
+  assert.equal((await f.service.scriptTrust(locallyNew.id)).scripts.at(-1)!.origin,'local');
+  assert.equal((globalThis as any).marker,undefined);
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('trust remains through trash/restore; store loss and corruption cannot trust old rows',async()=>{
+ const f=await fixture();try{
+  await f.service.trashWorkspace(f.workspace.id);await f.service.restoreWorkspace(f.workspace.id);
+  assert.ok((await f.service.scriptTrust(f.workspace.id)).scripts.every(item=>item.trusted));
+  const file=join(f.trustDirectory,'state.json');await rm(file);
+  assert.ok((await f.service.scriptTrust(f.workspace.id)).scripts.every(item=>!item.trusted));
+  await f.service.save(await f.service.workspace(f.workspace.id));assert.ok((await f.service.scriptTrust(f.workspace.id)).scripts.every(item=>!item.trusted));
+  await writeFile(file,'{broken');await assert.rejects(f.service.scriptTrust(f.workspace.id),/unreadable/);
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('approval serializes against source edits and import publication failure is not runnable',async()=>{
+ const f=await fixture();try{
+  const list=(await f.service.scriptTrust(f.workspace.id)).scripts;
+  const edit=structuredClone(f.workspace);edit.scenarios![0].scripts![0].source='output.changed = true';
+  const [saved,approval]=await Promise.allSettled([f.service.save(edit),f.service.trustScript({workspace:f.workspace.id,rowId:'one',hash:list[0].hash})]);
+  assert.equal(saved.status,'fulfilled');assert.equal(approval.status,'rejected');
+  const faults={rejectWrite:()=>new Error('Publication failed')};const failing=createScenarios({...f.options,faults});
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:2,includeValues:true});
+  await assert.rejects(failing.importWorkspace({package:pkg.package,name:'Fail'}),/Publication failed/);
+  assert.equal((await f.service.listWorkspaces()).items.length,1);
+  assert.doesNotMatch(await readFile(join(f.root,'workspaces',f.workspace.id,'workspace.json'),'utf8'),/approved|trusted|origin/);
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('copy preserves verified local origin; copied imported sources under new row IDs remain imported',async()=>{
+ const f=await fixture();try{
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});
+  const imported=await f.service.importWorkspace({package:pkg.package,name:'Imported'});
+  const copiedLocal=await f.service.copyWorkspace(f.workspace);assert.ok((await f.service.scriptTrust(copiedLocal.id)).scripts.every(item=>item.origin==='local'&&item.trusted));
+  const edited=structuredClone(imported);edited.scenarios![0].scripts!.push({...edited.scenarios![0].scripts![0],id:'pasted'});
+  const saved=await f.service.save(edited);assert.equal((await f.service.scriptTrust(saved.id)).scripts.at(-1)!.origin,'imported');
+  const noScripts=await f.service.save({...f.workspace,scenarios:[]});await writeFile(join(f.trustDirectory,'state.json'),'unreadable');assert.deepEqual(await f.service.scriptTrust(noScripts.id),{scripts:[]});
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
