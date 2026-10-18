@@ -124,6 +124,70 @@ export function placeInspector({
   };
 }
 
+export const scriptEditorWidth = 360;
+export const scriptEditorGap = 12;
+/** Workbench zoom controls and Advanced mode occupy this band at the bottom of the window. */
+export const scriptEditorBottomReserve = 88;
+
+export type ScriptEditorPlace = {
+  left: number;
+  top: number;
+  /** Shorter of the viewport cap (top + 8px) and the space above the bottom control band. */
+  maxHeight: number;
+  /** No free side: the editor takes the inspector's spot and the inspector hides. */
+  yieldsInspector: boolean;
+};
+
+/** Puts the script editor beside the inspector, or in its spot when neither side fits. */
+export function placeScriptEditor(
+  inspector: Rect,
+  viewport: { width: number; height: number },
+  size: { width: number; height: number } = {
+    width: scriptEditorWidth,
+    height: 480,
+  },
+): ScriptEditorPlace {
+  const margin = inspectorMargin;
+  const leftOf = inspector.left - scriptEditorGap - size.width;
+  const rightOf = inspector.left + inspector.width + scriptEditorGap;
+  const fits = (left: number) =>
+    left >= margin && left + size.width <= viewport.width - margin;
+  const beside =
+    fits(leftOf) &&
+    (inspector.left + inspector.width / 2 >= viewport.width / 2 ||
+      !fits(rightOf))
+      ? leftOf
+      : fits(rightOf)
+        ? rightOf
+        : fits(leftOf)
+          ? leftOf
+          : undefined;
+  const top = clamp(
+    inspector.top,
+    margin,
+    Math.max(margin, viewport.height - margin - 8),
+  );
+  const viewportCap = Math.max(0, viewport.height - top - 8);
+  const aboveControls = Math.max(
+    0,
+    viewport.height - scriptEditorBottomReserve - top,
+  );
+  const maxHeight = Math.min(viewportCap, aboveControls);
+  if (beside !== undefined)
+    return {
+      left: Math.round(beside),
+      top: Math.round(top),
+      maxHeight,
+      yieldsInspector: false,
+    };
+  return {
+    left: Math.round(inspector.left),
+    top: Math.round(top),
+    maxHeight,
+    yieldsInspector: true,
+  };
+}
+
 export function visibleBounds(
   viewport: Rect,
   window: { width: number; height: number },

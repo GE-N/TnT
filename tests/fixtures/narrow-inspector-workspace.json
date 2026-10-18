@@ -1,0 +1,93 @@
+{
+  "format": "tnt-workspace",
+  "version": 1,
+  "source": {
+    "revision": 1,
+    "savedAt": "2026-10-18T00:00:00.000Z"
+  },
+  "dependencies": [
+    "Installed app: com.example.App",
+    "Recipient supplies a compatible installed app and running iOS simulator.",
+    "Maestro 2.11.0"
+  ],
+  "workspace": {
+    "name": "Narrow inspector",
+    "yaml": "appId: com.example.App\n---\n# tnt-check:checkout-ready\n- assertVisible: Checkout\n",
+    "scenarios": [
+      {
+        "id": "checkout",
+        "name": "Checkout",
+        "pathId": "route",
+        "steps": [
+          {
+            "kind": "step",
+            "file": "flow.yaml",
+            "index": 0,
+            "fingerprint": "13ea0e659281c85c71919525b1bab7573722051f156a45e4e562437b81831a6e"
+          }
+        ],
+        "inputs": {},
+        "parameters": {},
+        "enabledHandlerIds": [],
+        "scripts": [
+          {
+            "id": "script-paid",
+            "label": "Run script",
+            "source": "1+1",
+            "beforeStep": {
+              "index": 0,
+              "fingerprint": "13ea0e659281c85c71919525b1bab7573722051f156a45e4e562437b81831a6e"
+            }
+          }
+        ]
+      }
+    ],
+    "canvas": {
+      "screens": [
+        {
+          "id": "home",
+          "title": "Checkout",
+          "x": 800,
+          "y": 220,
+          "tests": [
+            {
+              "id": "checkout-ready",
+              "label": "Checkout",
+              "role": "assertion",
+              "reference": {
+                "kind": "step",
+                "file": "flow.yaml",
+                "index": 0,
+                "fingerprint": "13ea0e659281c85c71919525b1bab7573722051f156a45e4e562437b81831a6e"
+              },
+              "check": {
+                "visibility": "visible",
+                "target": "text",
+                "match": "regex",
+                "value": "Checkout"
+              }
+            }
+          ]
+        }
+      ],
+      "edges": [],
+      "paths": [
+        {
+          "id": "route",
+          "name": "Checkout",
+          "scenarioId": "checkout",
+          "screenId": "home",
+          "edgeIds": [],
+          "visits": [
+            {
+              "id": "v1",
+              "operationIds": [
+                "checkout-ready"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

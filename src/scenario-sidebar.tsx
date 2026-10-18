@@ -53,7 +53,7 @@ export function ScenarioSidebar({children,items,selected,disabled,canRun,runBloc
    </div>)}
   </div>
   {error&&<p role="alert">{error}</p>}
-  <div className="sidebar-run"><p aria-label="Run All inclusion" aria-live="polite">{included} included · {items.length-included} skipped</p><button className="primary" disabled={disabled||!canRun||!included} onClick={onRunAll}>Run all</button>{children}</div>
+  <div className="sidebar-run"><p aria-label="Run All inclusion" aria-live="polite">{included} included · {items.length-included} skipped</p><button className="primary" disabled={disabled||!canRun||!included} title={(disabled||!canRun||!included)&&(runBlockedReason||!included&&'No scenarios included')||'Run all'} aria-label={(disabled||!canRun)&&runBlockedReason?'Run all — '+runBlockedReason:'Run all'} onClick={onRunAll}>Run all</button>{children}</div>
   {target&&menu&&createPortal(<div className="scenario-context-menu" ref={menuRef} role="menu" aria-label={'Actions for '+target.name} style={{left:menu.x,top:menu.y}} onKeyDown={event=>{
    const buttons=[...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];const index=buttons.indexOf(document.activeElement as HTMLButtonElement);
    if(event.key==='Escape'||event.key==='Tab'){if(event.key==='Escape')event.preventDefault();closeMenu();}

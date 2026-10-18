@@ -5,6 +5,10 @@ import {
   inspectorMargin,
   inspectorWidth,
   placeInspector,
+  placeScriptEditor,
+  scriptEditorBottomReserve,
+  scriptEditorGap,
+  scriptEditorWidth,
   visibleBounds,
   type Rect,
 } from "../src/inspector-placement.js";
@@ -18,6 +22,39 @@ const node = (left: number, top: number): Rect => ({
   height: 200,
 });
 const right = (anchor: Rect) => anchor.left + anchor.width + inspectorGap;
+
+test("the script editor sits beside the inspector without covering it", () => {
+  const inspector = { left: 820, top: 120, width: inspectorWidth, height: 400 };
+  const placed = placeScriptEditor(inspector, {
+    width: bounds.width,
+    height: bounds.height,
+  });
+  assert.equal(placed.left + scriptEditorWidth + scriptEditorGap, inspector.left);
+  assert.equal(placed.yieldsInspector, false);
+  assert.equal(placed.maxHeight, bounds.height - placed.top - scriptEditorBottomReserve);
+  assert.ok(placed.top + placed.maxHeight <= bounds.height - 8);
+  assert.ok(placed.top + placed.maxHeight <= bounds.height - scriptEditorBottomReserve);
+  assert.ok(placed.left >= inspectorMargin);
+  const onLeft = { left: 40, top: 100, width: inspectorWidth, height: 400 };
+  const rightSide = placeScriptEditor(onLeft, {
+    width: bounds.width,
+    height: bounds.height,
+  });
+  assert.equal(rightSide.left, onLeft.left + inspectorWidth + scriptEditorGap);
+  assert.equal(rightSide.yieldsInspector, false);
+});
+
+test("a narrow window gives the editor the inspector's spot", () => {
+  const inspector = { left: 362, top: 80, width: inspectorWidth, height: 400 };
+  const viewport = { width: 1024, height: 700 };
+  const placed = placeScriptEditor(inspector, viewport);
+  assert.equal(placed.yieldsInspector, true);
+  assert.equal(placed.left, inspector.left);
+  assert.equal(placed.top, inspector.top);
+  assert.equal(placed.maxHeight, viewport.height - placed.top - scriptEditorBottomReserve);
+  assert.ok(placed.top + placed.maxHeight <= viewport.height - 8);
+  assert.ok(placed.top + placed.maxHeight <= viewport.height - scriptEditorBottomReserve);
+});
 
 test("the inspector opens to the right of its screen by default", () => {
   const anchor = node(100, 100);
