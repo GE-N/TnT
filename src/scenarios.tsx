@@ -47,7 +47,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   simulatorConnected=simulatorConnected&&!!deviceId&&!!token;
   const [definitions,setDefinitions]=useState<ScenarioDefinition[]>([]);
   const [scenarioId,setScenarioId]=useState('');
-  const [deletedScenario,setDeletedScenario]=useState<{name:string;restore:()=>void}>();
+  const [deletedScenario,setDeletedScenario]=useState<{id:string;index:number;name:string;restore:()=>void}>();
   const [definitionError,setDefinitionError]=useState('');
   const [resetApp,setResetApp]=useState(false);
   const selectedScenario=definitions.find(item=>item.id===scenarioId);
@@ -107,6 +107,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const latestDraftKey=useRef('');
   const warnOnLeaveRef=useRef(false);
   const fieldsRef=useRef(new Map<string,DraftReport>());
+  const persistDraftRef=useRef<()=>Promise<unknown>>(async()=>undefined);
   const sessionOnce=useRef(false);
   const [drafts,setDrafts]=useState<string[]>([]);
   const [fieldEpoch,setFieldEpoch]=useState(0);
@@ -308,11 +309,13 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     catch(error){setError(error instanceof Error?error.message:'Report unavailable.');}
   }
   function renameScenario(value:string,id=scenarioId){
+    setDeletedScenario(undefined);
     const target=definitions.find(item=>item.id===id);
     setDefinitions(current=>current.map(item=>item.id===id?{...item,name:value}:item));
     if(target?.authoring==='canvas')setCanvas(current=>current&&({...current,paths:current.paths.map(path=>path.id===target.pathId?{...path,name:value}:path)}));
   }
   async function duplicateScenario(targetId=scenarioId){
+    setDeletedScenario(undefined);
     if(!definitions.some(item=>item.id===targetId))return;
     setSubmitting(true);setError('');
     try{
@@ -335,7 +338,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     const memberships=canvas?.screens.flatMap(screen=>screen.tests.filter(test=>test.scenarioIds?.includes(targetId)).map(test=>({screenId:screen.id,testId:test.id,position:test.scenarioIds!.indexOf(targetId)})))??[];
     setDefinitions(current=>current.filter(item=>item.id!==targetId));
     setCanvas(current=>current&&({...current,screens:current.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.scenarioIds?{...test,scenarioIds:test.scenarioIds.filter(id=>id!==targetId)}:test)})),paths:current.paths.filter(path=>path.id!==removedPath?.id)}));
-    if(scenarioId===targetId){setScenarioId(definitions.find(item=>item.id!==targetId)?.id??'');setInputs('');}
+    if(scenarioId===targetId){const next=definitions[position+1]??definitions[position-1];setScenarioId(next?.id??'');setInputs('');setPathId(next?.pathId??'');rememberView({scenarioId:next?.id??'',scenarioName:next?.name??'',pathId:next?.pathId??''});}
     // Restoration only merges the references removed by this command.
     const restore=()=>{
       setScenarioId(current=>current||targetId);
@@ -350,7 +353,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
         })}))};
       });
     };
-    setDeletedScenario({name:target.name,restore});
+    setDeletedScenario({id:target.id,index:position,name:target.name,restore});
   }
   function loadWorkspace(workspace:Workspace&{draft?:WorkspaceDraft|null;draftError?:string;view?:Record<string,unknown>|null}){
     setNoWorkspace(false);
@@ -488,6 +491,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     saveQueue.current=operation.catch(()=>{});
     return operation;
   }
+  persistDraftRef.current=persistDraft;
   function rememberView(patch:Record<string,unknown>){
     const current=viewRef.current;
     const canvas=patch.canvas&&typeof patch.canvas==='object'&&!Array.isArray(patch.canvas)?{...(current.canvas&&typeof current.canvas==='object'&&!Array.isArray(current.canvas)?current.canvas as Record<string,unknown>:{}),...patch.canvas as Record<string,unknown>}:current.canvas;
@@ -514,7 +518,17 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       return changed&&previous?{...checkpoint,fingerprint:previous.fingerprint}:checkpoint;
     })}:current);};
   }
+  function dropScenarioRename(id:string){
+    const key='scenario-rename:'+id;
+    setRecoveredFields(current=>{if(!(key in current))return current;const next={...current};delete next[key];return next;});
+    const record=draftRecord.current;
+    const lived=[...fieldsRef.current.values()].some(report=>report.pending&&report.key===key);
+    const stored=!!record?.fields&&Object.prototype.hasOwnProperty.call(record.fields,key);
+    if(stored&&record?.fields){const fields={...record.fields};delete fields[key];draftRecord.current={...record,fields};}
+    if((lived||stored)&&persistence.current.id&&persistence.current.draftRevision)setTimeout(()=>{void persistDraftRef.current().catch(()=>{});},0);
+  }
   function selectScenario(id:string){
+    if(id!==scenarioId)setDeletedScenario(undefined);
     setScenarioId(id);setInputs('');
     const item=definitions.find(entry=>entry.id===id);
     setPathId(item?.pathId??'');
@@ -672,7 +686,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     {draftError&&<div className="draft-banner danger" role="alert"><p>A recovered draft couldn't be read.</p>{confirmCorrupt?<><p>Discard the unreadable draft? This can't be undone.</p><button type="button" className="workspace-danger" onClick={()=>void discardCorrupt()}>Discard</button><button type="button" ref={corruptCancelButton} onClick={()=>setConfirmCorrupt(false)}>Cancel</button></>:<button type="button" ref={discardDraftButton} onClick={()=>setConfirmCorrupt(true)}>Discard draft</button>}</div>}
     {recoveryNote&&createPortal(recoveryNote,document.body)}
     {conflictBar&&<div className="draft-banner conflict-bar" role="status"><p>This workspace was changed in another tab.</p><button type="button" className="primary" onClick={()=>void loadLatest()}>Load latest</button><button type="button" onClick={()=>void (pendingDraft?copyWithDraft():copyConflict())}>Restore as a copy</button></div>}
-    <CanvasEditor onScenarioPanelChange={open=>{if(!open)setDeletedScenario(undefined);}} scenarioPanel={<ScenarioDetails>{deletedScenario&&<p className="scenario-panel-undo" role="status">“{deletedScenario.name}” deleted · <button type="button" className="text-button" disabled={running||submitting||pickerBusy||launchBusy} onClick={()=>{deletedScenario.restore();setDeletedScenario(undefined);}}>Undo</button></p>}<ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={simulatorConnected&&!draftInvalid&&!trustBlocksRun} runBlockedReason={runBlockedReason}  runningId={run?.status==='running'&&!batchRunning?run.snapshot.scenario?.id:undefined} onStop={()=>void cancel()} onSelect={selectScenario} onCreate={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);rememberView({scenarioId:id,scenarioName:'Scenario '+(definitions.length+1),pathId:path});}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item))} key={'sidebar-'+loadRevision}>{run?.status==='running'&&!batchRunning&&!run.snapshot.scenario?.id&&<button className="confirm scenario-stop" aria-label="Stop scenario" onClick={()=>void cancel()}>Stop</button>}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</ScenarioSidebar></ScenarioDetails>} yamlDeletionWarnings={yamlDeletionWarnings} onYamlDelete={deleteYamlStep} initialView={initialCanvasView} cards={cardPositions} onCardPosition={(card,position)=>rememberView({cards:{[card]:position}})} picker={{token,deviceId,disabled:running||submitting||launchBusy,onBusy:setPickerBusy}} onViewChange={next=>rememberView({canvas:next})} onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={simulatorConnected&&!draftInvalid?()=>void submit(true):undefined} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));rememberView({pathId:id});}} disabled={submitting||pickerBusy||launchBusy} run={run?.snapshot.workspaceId===workspaceId?{status:run.status,canvas:run.canvas}:undefined} draftInvalid={draftInvalid} runScripts={runScripts} reservedLines={placements.filter(item=>item.target==='yaml'&&item.line).map(item=>item.line!)}/>
+    <CanvasEditor onScenarioPanelChange={open=>{if(!open)setDeletedScenario(undefined);}} scenarioPanel={<ScenarioDetails><ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={simulatorConnected&&!draftInvalid&&!trustBlocksRun} runBlockedReason={runBlockedReason}  running={running} runningId={batchRunning?batch?.entries.find(entry=>entry.status==='running')?.scenarioId:run?.status==='running'?run.snapshot.scenario?.id:undefined} onStop={()=>{if(batchRunning)void cancelBatch();else void cancel();}} stepCounts={Object.fromEntries(definitions.map(item=>[item.id,canvas&&item.pathId?orderedScenarioSteps(canvas,item.pathId).length:0]))} saveState={{status:saveFailed?'failed':saving||!persistedClean?'saving':persistedClean&&workspaceId?'saved':'idle',message:saveProblem||undefined,retry:()=>{failedKey.current='';failedDraftKey.current='';setSaveFailed(false);setDraftFailed(false);setRetrySave(value=>value+1);}}} deleted={deletedScenario} onDismissDeleted={()=>setDeletedScenario(undefined)} onRenameDropped={dropScenarioRename} onSelect={selectScenario} onCreate={()=>{setDeletedScenario(undefined);setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);rememberView({scenarioId:id,scenarioName:'Scenario '+(definitions.length+1),pathId:path});}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>{setDeletedScenario(undefined);setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item));}} key={'sidebar-'+loadRevision}></ScenarioSidebar></ScenarioDetails>} yamlDeletionWarnings={yamlDeletionWarnings} onYamlDelete={deleteYamlStep} initialView={initialCanvasView} cards={cardPositions} onCardPosition={(card,position)=>rememberView({cards:{[card]:position}})} picker={{token,deviceId,disabled:running||submitting||launchBusy,onBusy:setPickerBusy}} onViewChange={next=>rememberView({canvas:next})} onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={simulatorConnected&&!draftInvalid?()=>void submit(true):undefined} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));rememberView({pathId:id});}} disabled={submitting||pickerBusy||launchBusy} run={run?.snapshot.workspaceId===workspaceId?{status:run.status,canvas:run.canvas}:undefined} draftInvalid={draftInvalid} runScripts={runScripts} reservedLines={placements.filter(item=>item.target==='yaml'&&item.line).map(item=>item.line!)}/>
     </>}
     </div></div>
     {!noWorkspace&&<>
