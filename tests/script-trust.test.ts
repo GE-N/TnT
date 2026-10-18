@@ -34,6 +34,22 @@ test('local trust, import per-workspace/per-row approval, durable hash invalidat
   assert.equal((globalThis as any).marker,undefined);
  }finally{await rm(f.root,{recursive:true,force:true});}
 });
+test('server duplication assigns fresh script IDs and never transfers an imported approval',async()=>{
+ const f=await fixture();try{
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});
+  const imported=await f.service.importWorkspace({package:pkg.package,name:'Duplicate source'});
+  for(const trust of (await f.service.scriptTrust(imported.id)).scripts)await f.service.trustScript({workspace:imported.id,rowId:trust.rowId,hash:trust.hash});
+  const duplicated=await f.service.duplicateScenario({workspaceId:imported.id,scenarioId:'first',expectedRevision:1});
+  const copy=duplicated.scenarios!.at(-1)!;assert.notEqual(copy.id,'first');assert.equal(copy.scripts!.length,2);
+  const original=duplicated.scenarios![0];assert.deepEqual(original.scripts,imported.scenarios![0].scripts);
+  assert.ok(copy.scripts!.every(row=>!original.scripts!.some(source=>source.id===row.id)));
+  assert.deepEqual(copy.scripts!.map(({id,...row})=>row),original.scripts!.map(({id,...row})=>row));
+  const trust=(await f.service.scriptTrust(imported.id)).scripts;
+  assert.ok(trust.filter(item=>copy.scripts!.some(row=>row.id===item.rowId)).every(item=>item.origin==='imported'&&!item.trusted));
+  assert.ok(trust.filter(item=>original.scripts!.some(row=>row.id===item.rowId)).every(item=>item.trusted));
+  await assert.rejects(f.service.duplicateScenario({workspaceId:imported.id,scenarioId:'first',expectedRevision:1}),/changed|revision/i);
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
 test('trust remains through trash/restore; store loss and corruption cannot trust old rows',async()=>{
  const f=await fixture();try{
   await f.service.trashWorkspace(f.workspace.id);await f.service.restoreWorkspace(f.workspace.id);

@@ -1,16 +1,23 @@
 import {parseAllDocuments,stringify} from 'yaml';
 import {referenceCatalog} from './canvas.js';
 import type {ExecutionItem} from './default-actions.js';
-import type {ScriptAnchor,ScriptBlockReason,ScriptRow,ScriptTrust} from './run-script-contract.js';
+import type {ScriptAnchor,ScriptBlockReason,ScriptRow,ScriptTrust,ScriptExecutionReference} from './run-script-contract.js';
 import {scriptHash} from './script-trust-store.js';
 import {readScriptRows} from './script-validation.js';
 
 export type ScriptExecutionItem=ExecutionItem|{kind:'runScript';rowId:string;beforeStep:number;file:string};
-export type RunPlan={executionYaml:string;scriptFiles:{name:string;content:string;rowId:string}[];executionItems:ScriptExecutionItem[];authoredStepMap:{index:number;executionIndex:number}[];blocked:ScriptBlockReason[]};
+export type RunPlan={executionYaml:string;scriptFiles:{name:string;content:string;rowId:string}[];executionItems:ScriptExecutionItem[];executionOrder:ScriptExecutionReference[];authoredStepMap:{index:number;executionIndex:number}[];blocked:ScriptBlockReason[]};
 /** Compile alone, never invoke. This gate prevents source escaping the wrapper's braces. */
 export function checkScriptSyntax(source:string):{message:string}|undefined {
   try { new Function(source); return; }
   catch(error) { return {message:error instanceof Error?error.message:'Invalid JavaScript syntax'}; }
+}
+/** Materialize credentials only on our generated runScript commands, never in global flow env. */
+export function scriptExecutionYaml(plan:RunPlan,env:Record<string,string>){
+  const docs=parseAllDocuments(plan.executionYaml);const commands=docs[1].toJS() as any[];
+  const files=new Set(plan.scriptFiles.map(file=>file.name));
+  for(const command of commands)if(files.has(command?.runScript?.file))command.runScript.env={...env};
+  return docs[0].toString()+'---\n'+stringify(commands,{aliasDuplicateObjects:false,lineWidth:0});
 }
 /** Pure composition: automation's random namespace is supplied by the caller, not allocated here.
  * Canvas anchors count visit operations; anchorSteps maps those occurrences to projected commands.
@@ -32,7 +39,7 @@ export function buildRunPlan(input:{yaml:string;flows?:Record<string,string>;scr
     if(!validAnchor)blocked.push({kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'});
     const syntax=checkScriptSyntax(row.source);
     if(syntax)blocked.push({kind:'syntax',rowId:row.id,...syntax});
-    if(!input.trust?.some(trust=>trust.rowId===row.id&&trust.trusted&&(trust.origin==='local'||trust.hash===scriptHash(row.source))))blocked.push({kind:'untrusted',rowId:row.id,message:'Script needs trust'});
+    if(!input.trust?.some(trust=>trust.rowId===row.id&&trust.trusted&&trust.hash===scriptHash(row.source)))blocked.push({kind:'untrusted',rowId:row.id,message:'Script needs trust'});
   }
   const docs=parseAllDocuments(input.automation?.yaml??input.yaml);
   const commands=docs[1].toJS() as unknown[];
@@ -56,5 +63,10 @@ export function buildRunPlan(input:{yaml:string;flows?:Record<string,string>;scr
     executionItems.push({...item});generated.push(command);
   });
   for(const row of rows.filter(row=>row.beforeStep.index===anchorSteps.length))append(row,steps.length);
-  return {executionYaml:scriptFiles.length?docs[0].toString()+'---\n'+stringify(generated,{aliasDuplicateObjects:false,lineWidth:0}):input.automation?.yaml??input.yaml,scriptFiles,executionItems,authoredStepMap,blocked};
+  const executionOrder:ScriptExecutionReference[]=executionItems.map(item=>{
+    if(item.kind==='runScript')return {kind:'runScript',rowId:item.rowId};
+    const index=item.kind==='step'?(input.anchorSteps?anchorSteps.findIndex(step=>step.index===item.index):item.index!):-1;
+    return index>=0?{kind:'step',index}:{kind:'system'};
+  });
+  return {executionYaml:scriptFiles.length?docs[0].toString()+'---\n'+stringify(generated,{aliasDuplicateObjects:false,lineWidth:0}):input.automation?.yaml??input.yaml,scriptFiles,executionItems,executionOrder,authoredStepMap,blocked};
 }

@@ -68,6 +68,7 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         if (request.method === 'POST' && url.pathname === '/api/workspaces/import/review') return json(200, await scenarios.reviewWorkspacePackage(await readJson(request,2_300_000)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/import') return json(200, await scenarios.importWorkspace(await readJson(request,2_300_000)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/copy') return json(200, await scenarios.copyWorkspace(await readJson(request)));
+        if (request.method === 'POST' && url.pathname === '/api/scenarios/duplicate') return json(200, await scenarios.duplicateScenario(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/draft') return json(200, await scenarios.createDraftWorkspace(await readJson(request,17_000_000)));
         const draftDiscard = /^\/api\/workspaces\/([0-9a-f-]{36})\/draft\/discard$/.exec(url.pathname);
         if (request.method === 'POST' && draftDiscard) return json(200, await scenarios.discardDraft(draftDiscard[1],(await readJson(request)).expectedDraftRevision));

@@ -1,3 +1,4 @@
+import {scriptHash} from '../server/script-trust-store.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
@@ -16,7 +17,7 @@ test('subset anchors refer to projected selected steps and stale indexes do not 
   const projection=selectScenario({...f.workspace,scenarios:[scenario]},'one',{})!;
   const ref=referenceCatalog(projection.yaml).references[1];const row={...f.row,beforeStep:{index:1,fingerprint:ref.fingerprint}};
   await f.service.save({...f.workspace,scenarios:[{...scenario,scripts:[row]}]});const result=await f.service.wait((await f.start()).id);assert.equal(result.status,'passed');assert.deepEqual(result.steps.map(step=>step.command),['tapOn','assertVisible']);assert.deepEqual(result.executionOrder,[{kind:'step',index:0},{kind:'runScript',rowId:row.id},{kind:'step',index:1}]);
-  const plan=buildRunPlan({yaml:projection.yaml,scripts:[f.row],trust:[{rowId:f.row.id,origin:'local',trusted:true,hash:''}]});assert.equal(plan.blocked[0].kind,'stale-anchor');
+  const plan=buildRunPlan({yaml:projection.yaml,scripts:[f.row],trust:[{rowId:f.row.id,origin:'local',trusted:true,hash:scriptHash(f.row.source)}]});assert.equal(plan.blocked[0].kind,'stale-anchor');
  }finally{await f.cleanup();}
 });
 test('checkpoint injection and authored-only mapping remain aligned with multiple same-anchor scripts',async()=>{
@@ -31,6 +32,7 @@ test('checkpoint injection and authored-only mapping remain aligned with multipl
   const workspace=await f.service.save({...f.workspace,flows,automation,scenarios:[{...f.scenario,scripts:[f.row,{...f.row,id:'next'}]}]});
   const result=await f.service.wait((await f.service.start({workspaceId:workspace.id,deviceId,scenarioId:'one'})).id);
   assert.equal(result.status,'passed');assert.deepEqual(seen,['launch','TnT setup','TnT step 1','TnT checkpoint 2','script','script','TnT step 2','TnT step 3']);assert.deepEqual(result.steps.map(step=>step.status),['passed','passed','passed']);assert.equal(result.automation?.setup.status,'passed');
+  assert.deepEqual(result.executionOrder?.filter(item=>item.kind==='step'),[{kind:'step',index:0},{kind:'step',index:1},{kind:'step',index:2}]);assert.equal(result.executionOrder?.filter(item=>item.kind==='system').length,3);
  }finally{await f.cleanup();}
 });
 test('repeated visits use the existing checkpoint fingerprints and indexes distinguish identical commands',async()=>{
@@ -39,7 +41,7 @@ test('repeated visits use the existing checkpoint fingerprints and indexes disti
  const refs=referenceCatalog(projection.yaml,fixture.flows).references.filter(ref=>ref.kind==='step');
  const pair=refs.flatMap((ref,index)=>refs.slice(index+1).filter(other=>other.fingerprint===ref.fingerprint).map(other=>[ref,other])).at(0)!;assert.ok(pair);
  const rows=pair.map((ref,index)=>({id:'visit-'+index,label:'Visit',source:'output.X=1',beforeStep:{index:ref.index!,fingerprint:ref.fingerprint}}));
- const plan=buildRunPlan({yaml:projection.yaml,flows:fixture.flows,scripts:rows,trust:rows.map(row=>({rowId:row.id,origin:'local',trusted:true,hash:''}))});
+ const plan=buildRunPlan({yaml:projection.yaml,flows:fixture.flows,scripts:rows,trust:rows.map(row=>({rowId:row.id,origin:'local',trusted:true,hash:scriptHash(row.source)}))});
  assert.deepEqual(plan.blocked,[]);assert.deepEqual(plan.executionItems.filter(item=>item.kind==='runScript').map(item=>item.beforeStep),pair.map(ref=>ref.index));
  assert.notEqual(rows[0].beforeStep.index,rows[1].beforeStep.index);assert.equal(rows[0].beforeStep.fingerprint,rows[1].beforeStep.fingerprint);
 });

@@ -1,17 +1,17 @@
 import {protectRunEvidence,verifyEvidence,redact,removeRunEvidence,assertEvidenceRoot} from './run-script-evidence.js';
 import {mapScriptResults} from './run-script-results.js';
-import {EVIDENCE_SCRUB_FAILED,type ScriptRunResults,type ScriptExecutionReference} from './run-script-contract.js';
+import {EVIDENCE_SCRUB_FAILED,type ScriptRunResults} from './run-script-contract.js';
 import type {EvidenceScrubber} from './run-script-evidence.js';
 import {homedir} from 'node:os';
 import {createScriptTrustStore,workspaceScripts} from './script-trust-store.js';
-import {buildRunPlan} from './run-script-plan.js';
+import {buildRunPlan,scriptExecutionYaml} from './run-script-plan.js';
 import {ScriptBlocked} from './script-validation.js';
 import {assertReservedInputs,assertAuthoredVariables,assertAutomationVariables} from './script-validation.js';
 import {parsePackage,portableContent,packageReview,readOmittedValues,missingValues,type OmittedValue,type WorkspacePackage} from './workspace-package.js';
 import {WorkspaceConflict,createWorkspaceStore,type WorkspaceMetadata,type WorkspaceStoreFaults} from './workspace-store.js';
 import {createBatches} from './batches.js';
 import {projectCanvasRoute} from './canvas-route.js';
-import {refreshChecks,operationProblem} from '../shared/canvas-authoring.js';
+import {refreshChecks,operationProblem,routeVisits} from '../shared/canvas-authoring.js';
 import {readScenarios,selectScenario,validateFlowInputs,type ScenarioDefinition} from './scenario-definitions.js';
 import {readAutomation,instrument,mapAutomation,metadataStatus,type Automation,type AutomationResult,type ExecutionItem} from './default-actions.js';
 import { mkdir, readFile, writeFile, realpath, lstat, readdir, mkdtemp, rm, rename } from 'node:fs/promises';
@@ -38,7 +38,7 @@ export type Run = Partial<ScriptRunResults> & {
 export type RunInput = { workspaceId: string; deviceId: string; runtimeInputs?: unknown; captureId?: string; pickerReviewId?: string; pathId?: string; scenarioId?:string; resetApp?:boolean };
 export type Maestro = {
   version(): Promise<string>;
-  run(input: { directory: string; flow: string; deviceId: string; signal: AbortSignal; runtimeInputs?: Record<string, string>; scriptEnv?:Record<string,string> }): Promise<{ code: number | null; log: string; stdout?:string; cleanup: Cleanup }>;
+  run(input: { directory: string; flow: string; deviceId: string; signal: AbortSignal; runtimeInputs?: Record<string, string>; scriptEnv?:Record<string,string>; scriptRun?:boolean }): Promise<{ code: number | null; log: string; stdout?:string; cleanup: Cleanup }>;
 };
 const validId = (id: string) => { if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new Error('Invalid workspace/run identifier.'); return id; };
 
@@ -116,6 +116,22 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       return workspaceStore.save(authoredWorkspace(input),revision,input.clearDraft);
     },
     async workspace(id: string): Promise<Workspace> { return workspaceStore.read(id); },
+    async duplicateScenario(input:{workspaceId:string;scenarioId:string;expectedRevision:number}){
+      const workspace=await workspaceStore.read(input.workspaceId);
+      if(workspace.metadata!.revision!==input.expectedRevision)throw new WorkspaceConflict();
+      const source=workspace.scenarios?.find(scenario=>scenario.id===input.scenarioId);
+      if(!source)throw new Error('Unknown scenario.');
+      const id='scenario-'+randomUUID();const name=(source.name+' copy').slice(0,120);
+      const original=workspace.canvas?.paths.find(path=>path.id===source.pathId);
+      const pathId=original?'sequence-'+randomUUID():undefined;
+      const copy={...structuredClone(source),id,name,pathId,scripts:source.scripts?.map(row=>({...structuredClone(row),id:'script-'+randomUUID()}))};
+      const canvas=workspace.canvas&&structuredClone(workspace.canvas);
+      if(canvas){
+        for(const screen of canvas.screens)for(const test of screen.tests)if(test.scenarioIds?.includes(source.id))test.scenarioIds.push(id);
+        if(original)canvas.paths.push({...structuredClone(original),id:pathId!,scenarioId:id,name,visits:routeVisits(workspace.canvas!,original).map(visit=>({...structuredClone(visit),id:randomUUID()}))});
+      }
+      return workspaceStore.save(authoredWorkspace({...workspace,canvas,scenarios:[...workspace.scenarios!,copy]}),input.expectedRevision);
+    },
     async workspaceDetail(id:string){return workspaceStore.bundle(id);},
     async openWorkspace(id:string){return workspaceStore.open(id);},
     async renameWorkspace(id:string,name:string,expectedRevision=0){if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0)throw new Error('Invalid workspace revision.');return workspaceStore.rename(id,name,expectedRevision);},
@@ -227,6 +243,15 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       if(scriptPlan.blocked.length)throw new ScriptBlocked(scriptPlan.blocked);
       if(scriptPlan.scriptFiles.length)validateFlowInputs(scriptPlan.executionYaml,workspace.flows??{},selection?.inputs??runtimeInputs,[],true);
       const hasScripts=scriptPlan.scriptFiles.length>0;
+      // Keep protected evidence mappers on projected commands, but publish only authored operations.
+      const authoredSteps=(projected:Step[])=>anchorSteps?anchorSteps.map((ref,index)=>({...projected[ref.index],id:'step-'+(index+1)})):projected;
+      const authoredCanvas=(result:CanvasResult|undefined)=>{
+        if(hasScripts&&anchorSteps&&result){
+          const stepIds=new Map(anchorSteps.map((ref,index)=>['step-'+(ref.index+1),'step-'+(index+1)]));
+          for(const item of [...result.tests,...result.occurrences??[]])if(item.stepId)item.stepId=stepIds.get(item.stepId);
+        }
+        return result;
+      };
       const startMock=!!workspace.mock&&(!selection||!!selection.scenario.mockResponseId||hasScripts);
       const executionYaml=hasScripts?scriptPlan.executionYaml:derived?.yaml;
       const pickerReference = input.captureId ? options.runner.picker.assertReview(input.captureId, input.pickerReviewId!, workspace.yaml) : undefined;
@@ -241,10 +266,11 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
         const path = await directory('runs', id);
         const runtimeInputPolicy = confidential ? 'Confidential runtime inputs supplied: values are omitted; raw logs, evaluated metadata, and images are withheld. Temporary tool artifacts are deleted on cleanup. Historical snapshots cannot replay omitted inputs.' : selection?'Saved non-confidential scenario inputs supplied; runtime values are scoped to this run. Keep secrets out of saved inputs/YAML. No inherited application environment is forwarded.':'No runtime inputs supplied. Keep secrets out of authored YAML. No inherited application environment is forwarded.';
         const snapshot = { scenario:selection?.scenario, resetApp, authoredYaml:selection||canvas?authored.yaml:undefined, automation, executionYaml, executionPlan:derived?.plan, canvas, canvasPathId: canvasPath?.id, flows: workspace.flows, mock: workspace.mock, expectedPath: workspace.mock ? { from: workspace.mock.fromScreen, to: workspace.mock.toScreen } : undefined, id: createHash('sha256').update(JSON.stringify({ workspace, derived, steps, version, device, scenarioId:selection?.scenario.id,resetApp,pathId:canvasPath?.id, runtimeInputPolicy, pickerReference, node: process.version })).digest('hex'), workspaceId: workspace.id, name: workspace.name, yaml: workspace.yaml, steps, toolVersions: { maestro: version, node: process.version, mockoon: workspace.mock ? '9.9.0' : undefined }, runtimeInputPolicy, pickerReference };
-        const run: Run = { id, deviceId: device.id, startedAt: new Date().toISOString(), status: 'running', canvas:canvas&&canvasPath?mapCanvas(canvas,canvasPath.id,workspace.yaml,steps,true,automation?{definition:automation,flows:workspace.flows}:undefined):undefined, snapshot, steps: structuredClone(steps), log: '', cleanup: { verified: false, detail: 'Pending' }, artifacts: [], mappingNote: 'Command outcomes will be mapped after execution; unsupported details remain unavailable.' };
-        if(hasScripts){run.scriptSteps=Object.fromEntries(scriptPlan.scriptFiles.map(file=>[file.rowId,{kind:'runScript',rowId:file.rowId,status:'not-run'}]));run.executionOrder=scriptPlan.executionItems.flatMap<ScriptExecutionReference>(item=>item.kind==='step'?[{kind:'step' as const,index:item.index!}]:item.kind==='runScript'?[{kind:'runScript' as const,rowId:item.rowId}]:[]);}
+        if(hasScripts)snapshot.steps=authoredSteps(steps);
+        const run: Run = { id, deviceId: device.id, startedAt: new Date().toISOString(), status: 'running', canvas:authoredCanvas(canvas&&canvasPath?mapCanvas(canvas,canvasPath.id,workspace.yaml,steps,true,automation?{definition:automation,flows:workspace.flows}:undefined):undefined), snapshot, steps: structuredClone(snapshot.steps), log: '', cleanup: { verified: false, detail: 'Pending' }, artifacts: [], mappingNote: 'Command outcomes will be mapped after execution; unsupported details remain unavailable.' };
+        if(hasScripts){run.scriptSteps=Object.fromEntries(scriptPlan.scriptFiles.map(file=>[file.rowId,{kind:'runScript',rowId:file.rowId,status:'not-run'}]));run.executionOrder=scriptPlan.executionOrder;}
         await writeFile(join(path, 'flow.yaml'), workspace.yaml);
-        if(executionYaml)await writeFile(join(path,'.tnt-execution.yaml'),executionYaml);
+        if(executionYaml)await writeFile(join(path,'.tnt-execution.yaml'),executionYaml,{mode:0o600});
         await writeFile(join(path, 'snapshot.json'), JSON.stringify(snapshot, null, 2));
         await writeRecord(join(path, 'result.json'), run);
         const controller = new AbortController();
@@ -260,6 +286,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
           let phase: 'setup' | 'execution' = 'setup';
           run.cleanup = { verified: true, detail: 'No tool process allocated yet.' };
           const scriptPaths:string[]=[];
+          let mappedProjected=false;
           try {
             if (confidential) {
               const privateRoot = join(options.root, 'private');
@@ -267,7 +294,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
               privateDirectory = await realpath(await mkdtemp(join(privateRoot, id + '-')));
             }
             const executionDirectory = privateDirectory ?? path;
-            if (privateDirectory) {await writeFile(join(executionDirectory, 'flow.yaml'), workspace.yaml);if(executionYaml)await writeFile(join(executionDirectory,'.tnt-execution.yaml'),executionYaml);}
+            if (privateDirectory) {await writeFile(join(executionDirectory, 'flow.yaml'), workspace.yaml);if(executionYaml)await writeFile(join(executionDirectory,'.tnt-execution.yaml'),executionYaml,{mode:0o600});}
             for (const [name, yaml] of Object.entries(workspace.flows ?? {})) await writeFile(join(executionDirectory, name), yaml);
             for(const file of scriptPlan.scriptFiles){const name=join(executionDirectory,file.name);scriptPaths.push(name);await writeFile(name,file.content,{mode:0o600});}
             let scriptEnv:Record<string,string>|undefined;
@@ -279,8 +306,9 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
               await mock.prepare(controller.signal);
             }
             if (controller.signal.aborted) throw new Error('Run cancelled before execution.');
+            if(scriptEnv)await writeFile(join(executionDirectory,'.tnt-execution.yaml'),scriptExecutionYaml(scriptPlan,scriptEnv),{mode:0o600});
             phase = 'execution';
-            execution = await options.maestro.run({ directory: executionDirectory, flow: join(executionDirectory, executionYaml?'.tnt-execution.yaml':'flow.yaml'), deviceId: device.id, signal: controller.signal, runtimeInputs:selection?.inputs??runtimeInputs,...(scriptEnv?{scriptEnv}:{}) });
+            execution = await options.maestro.run({ directory: executionDirectory, flow: join(executionDirectory, executionYaml?'.tnt-execution.yaml':'flow.yaml'), deviceId: device.id, signal: controller.signal, runtimeInputs:selection?.inputs??runtimeInputs,scriptRun:hasScripts,...(scriptEnv?{scriptEnv}:{}) });
             run.log = confidential ? 'Raw logs withheld because confidential runtime inputs were supplied.' : execution.log;
             run.cleanup = execution.cleanup;
           } catch (error) {
@@ -311,13 +339,16 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
                 if(!run.cleanup.verified){run.artifacts=[];if(run.status==='running')run.status='tool-error';run.error??='Owned-process cleanup is unverified; device reuse blocked.';}
                 else if(execution){
                   const executionDirectory=privateDirectory??path;
-                  const files=await listFiles(executionDirectory);
+                  const allFiles=await listFiles(executionDirectory);
+                  const files=allFiles.filter(file=>isRunArtifact(file,workspace.flows));
                   run.artifacts=confidential?['flow.yaml','snapshot.json']:files.filter(file=>file!=='result.json'&&file!=='mock-environment.json');
                   // Maestro 2.11 emits a per-flow commands JSON under its debug output directory.
-                  const commandFile=files.find(file=>/(?:^|\/)commands(?:-[^/]*)?\.json$/.test(file));
+                  const commandFile=allFiles.find(file=>/(?:^|\/)commands(?:-[^/]*)?\.json$/.test(file));
                   const commands=commandFile?JSON.parse(await readFile(join(executionDirectory,commandFile),'utf8')):[];
                   const scripts=hasScripts?mapScriptResults(scriptPlan,commands,run.log,confidential):undefined;
                   const authoredCommands=scripts?.commands??commands;
+                  run.steps=structuredClone(steps);
+                  mappedProjected=true;
                   mapResults(run,authoredCommands,confidential);
                   if(scripts){run.scriptSteps=scripts.scriptSteps;for(const index of scripts.notRunIndexes){run.steps[index].status='not-run';run.steps[index].assertionStatus='not-run';run.steps[index].detail='Not executed after an earlier failure.';delete run.steps[index].actual;}}
                   const automationMapping=automation&&derived?mapAutomation(automation,derived.plan,authoredCommands):undefined;
@@ -328,16 +359,20 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
                   const failedAssertion=commands.find((entry:any)=>entry.metadata?.status==='FAILED'&&entry.command?.assertConditionCommand);
                   // Preserve earlier cleanup/capture failures instead of overwriting them with a passing report.
                   if(run.status==='running'){
-                    run.status=controller.signal.aborted?'cancelled':execution.code===124?'tool-error':scripts?.failure?'script-error':execution.code===0&&Number(suite?.['@_tests'])===1&&Number(suite?.['@_failures'])===0&&!scripts?.ambiguous&&(!scripts||Object.values(scripts.scriptSteps).every(item=>item.status==='passed'))?'passed':failedAssertion?'assertion-failed':'tool-error';
-                    if(scripts?.failure)run.error=scripts.failure;
+                    run.status=controller.signal.aborted?'cancelled':execution.code===124?'tool-error':scripts?.failure!==undefined?'script-error':execution.code===0&&Number(suite?.['@_tests'])===1&&Number(suite?.['@_failures'])===0&&!scripts?.ambiguous&&(!scripts||Object.values(scripts.scriptSteps).every(item=>item.status==='passed'))?'passed':failedAssertion?'assertion-failed':'tool-error';
+                    if(scripts?.failure!==undefined)run.error=scripts.failure;
                     if(automationMapping?.failedPhase){run.status=controller.signal.aborted?'cancelled':automationMapping.failedPhase==='setup'?'setup-error':'handler-error';run.error=automationMapping.failedPhase==='setup'?'Independent setup failed; dependent authored steps did not run.':'Default action failed; dependent authored steps did not run.';}
                     if(failedAssertion&&run.status==='assertion-failed'){run.error=confidential?'Assertion failed. Evaluated detail withheld for confidential inputs.':failedAssertion.metadata.error?.message;run.expectedFailure=confidential?run.steps.find(step=>step.status==='failed')?.expected:failedAssertion.command.assertConditionCommand.condition;}
-                    else if(run.status==='tool-error')run.error=execution.code===124?'Run stopped at 300s cap':'Maestro did not report a successful scenario or a structured assertion failure. Inspect raw logs.';
+                    else if(run.status==='tool-error')run.error=execution.code===124?'Run stopped at 300s cap':scripts?.toolFailure??'Maestro did not report a successful scenario or a structured assertion failure. Inspect raw logs.';
                   }
                 }
                 if(canvas&&canvasPath){
                   run.canvas=mapCanvas(canvas,canvasPath.id,workspace.yaml,run.steps,false,automation?{definition:automation,result:run.automation,flows:workspace.flows}:undefined);
                   if(run.status==='passed'&&(run.canvas.edges.some(edge=>canvasPath.edgeIds.includes(edge.id)&&edge.status!=='passed')||!!canvasPath.screenId&&run.canvas.screens.find(screen=>screen.id===canvasPath.screenId)?.status!=='passed')){run.status='path-failed';run.error='The selected scenario path was not verified: a required action or destination assertion did not report passed. No alternate route was followed.';}
+                }
+                if(hasScripts){
+                  if(mappedProjected)run.steps=authoredSteps(run.steps);
+                  if(mappedProjected)run.canvas=authoredCanvas(run.canvas);
                 }
                 await verifyEvidence({directories:[],token,value:run});
               }
@@ -434,6 +469,15 @@ function rejectFileReferences(value: unknown, flows: Record<string,string>, ance
 async function listFiles(base: string, prefix = ''): Promise<string[]> {
   const entries = await readdir(join(base, prefix), { withFileTypes: true });
   return (await Promise.all(entries.map(entry => entry.isDirectory() ? listFiles(base, prefix + entry.name + '/') : entry.isFile() ? [prefix + entry.name] : []))).flat();
+}
+function isRunArtifact(file:string,flows:Record<string,string>={}){
+  // Maestro nests generated-flow evidence under the known .tnt-execution directory.
+  // Its .maestro history, homes, downloads and other hidden trees are never evidence.
+  if(file!=='.tnt-execution.yaml'&&file.split('/').some(part=>part.startsWith('.')&&!(file.startsWith('raw/')&&part==='.tnt-execution')))return false;
+  if(['flow.yaml','snapshot.json','report.xml','maestro.log','.tnt-execution.yaml',...Object.keys(flows)].includes(file))return true;
+  if(/^commands(?:-[^/]*)?\.json$/.test(file))return true;
+  if(/^(?:step-|screenshot|failure|screen)[^/]*\.png$/.test(file.split('/').at(-1)!))return !file.includes('/')||file.startsWith('raw/');
+  return file.startsWith('raw/')&&/^(?:commands(?:-[^/]*)?\.json|maestro\.log|report\.xml)$/.test(file.split('/').at(-1)!);
 }
 function mapResults(run: Run, commands: any[],confidential:boolean) {
   const keys: Record<string, string> = { launchApp: 'launchAppCommand', assertVisible: 'assertConditionCommand', assertNotVisible: 'assertConditionCommand', tapOn: 'tapOnElement', inputText: 'inputTextCommand', back: 'backPressCommand', evalScript: 'evalScriptCommand', runFlow: 'runFlowCommand' };

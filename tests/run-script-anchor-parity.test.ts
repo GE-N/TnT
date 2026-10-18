@@ -29,6 +29,8 @@ for(const mode of ['inserted-launch','existing-launch','empty','repeated-visit']
   const workspace=await f.service.save({...f.workspace,yaml,canvas,scenarios:[{...f.scenario,authoring:'canvas',pathId:'path',steps:[],scripts}]});
   const result=await f.service.wait((await f.start()).id);
   assert.equal(result.status,'passed');assert.deepEqual(Object.keys(result.scriptSteps!),scripts.map(row=>row.id));
+  assert.deepEqual(result.executionOrder?.filter(item=>item.kind==='step'),steps.map((_,index)=>({kind:'step',index})));
+  assert.deepEqual(result.executionOrder?.[0],{kind:'system'});assert.equal(result.steps.length,steps.length);assert.equal(result.snapshot.steps.length,steps.length);
   assert.ok(Object.values(result.scriptSteps!).every(row=>row.status==='passed'));
   assert.equal(f.outputs[0].order,scripts.map(row=>row.id+',').join(''));
   const commands=parseAllDocuments(await readFile(f.calls[0].flow,'utf8'))[1].toJS();
@@ -51,6 +53,25 @@ for(const mode of ['inserted-launch','existing-launch','empty','repeated-visit']
    await assert.rejects(f.start(),(error:unknown)=>error instanceof ScriptBlocked&&error.blocked.some(row=>row.kind==='stale-anchor'&&row.rowId==='after-last-a'));
    assert.equal(f.stats().acquisitions,acquisitions,'Real authored changes must still block before device acquisition');assert.equal(f.calls.length,1);
   }
+ }finally{await f.cleanup();}
+});
+
+test('canvas script throwing before authored step 2 leaves step 2 and every later authored step Not run',async()=>{
+ const f=await scriptFixture();try{
+  const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:['first','second','third'].map(id=>({id,label:id,role:'assertion',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:id}}))}],edges:[],paths:[{id:'path',name:'One',scenarioId:'one',screenId:'home',edgeIds:[],visits:[{id:'visit',operationIds:['first','second','third']}]}]};
+  const yaml=writeChecks('appId: com.example.HybridApp\n---\n- launchApp\n',{screens:[],edges:[],paths:[]},canvas).replace('- launchApp\n','');
+  const refs=(await f.service.references({yaml})).references;
+  for(const check of authoredChecks(yaml))canvas.screens[0].tests.find(test=>test.id===check.id)!.reference=refs.find(ref=>ref.kind==='step'&&ref.index===check.index)!;
+  const steps=orderedScenarioSteps(canvas,'path');
+  const row={...f.row,source:'throw new Error("Before second")',beforeStep:{index:1,fingerprint:steps[1].fingerprint}};
+  const later={...row,id:'later',source:'output.mustNotRun = true',beforeStep:anchorForNewScript(steps,0)};
+  await f.service.save({...f.workspace,yaml,canvas,scenarios:[{...f.scenario,authoring:'canvas',pathId:'path',steps:[],scripts:[row,later]}]});
+  const result=await f.service.wait((await f.start()).id);assert.equal(result.status,'script-error');
+  assert.deepEqual(result.executionOrder,[{kind:'system'},{kind:'step',index:0},{kind:'runScript',rowId:row.id},{kind:'step',index:1},{kind:'step',index:2},{kind:'runScript',rowId:later.id}]);
+  assert.deepEqual(result.steps.map(step=>[step.id,step.status]),[['step-1','passed'],['step-2','not-run'],['step-3','not-run']]);
+  assert.deepEqual(result.snapshot.steps.map(step=>step.id),['step-1','step-2','step-3']);
+  assert.equal(result.scriptSteps![row.id].status,'script-error');assert.equal(result.scriptSteps![later.id].status,'not-run');assert.equal(f.outputs[0].mustNotRun,undefined);
+  assert.equal(result.canvas?.occurrences?.[0].stepId,'step-1');
  }finally{await f.cleanup();}
 });
 

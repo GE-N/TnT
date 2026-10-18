@@ -1,3 +1,4 @@
+import {scriptHash} from '../server/script-trust-store.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,readdir,writeFile,mkdir,rm,rename,symlink} from 'node:fs/promises';
@@ -48,12 +49,40 @@ test('no mock JS/output works with omitted env; zero scripts set no credentials'
 });
 test('script error precedence uses structured marker, then log; Graal syntax failures remain readable',async()=>{
  const f=await scriptFixture();try{
-  const plan=buildRunPlan({yaml:f.workspace.yaml,scripts:[f.row],trust:[{rowId:f.row.id,origin:'local',hash:'',trusted:true}]});
+  const plan=buildRunPlan({yaml:f.workspace.yaml,scripts:[f.row],trust:[{rowId:f.row.id,origin:'local',hash:scriptHash(f.row.source),trusted:true}]});
   const first={command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}};
-  for(const [message,log,expected] of [['TNT_SCRIPT_FAILED row=script-one ไทย structured','TNT_SCRIPT_FAILED row=script-one log','ไทย structured'],['Unknown error','TNT_SCRIPT_FAILED row=script-one ไทย log','ไทย log'],['SyntaxError: Graal rejects this','','SyntaxError: Graal rejects this']]){
+  for(const [message,log,expected] of [['TNT_SCRIPT_FAILED row=script-one ไทย structured','TNT_SCRIPT_FAILED row=script-one log','ไทย structured'],['Error: TNT_SCRIPT_FAILED row=script-one ไทย\nSecond line','','ไทย\nSecond line'],['Unknown error','TNT_SCRIPT_FAILED row=script-one ไทย log','ไทย log']]){
    const commands=[first,{command:{runScriptCommand:{}},metadata:{depth:0,status:'FAILED',error:{message}}}];
    const mapped=mapScriptResults(plan,commands,log,false);assert.equal(mapped.failure,expected);assert.deepEqual(mapped.notRunIndexes,[1,2]);
   }
+  const unmarked=mapScriptResults(plan,[first,{command:{runScriptCommand:{}},metadata:{depth:0,status:'FAILED',error:{message:'SyntaxError: Graal rejects this'}}}],'',false);
+  assert.equal(unmarked.failure,undefined);assert.equal(unmarked.toolFailure,'SyntaxError: Graal rejects this');assert.equal(unmarked.scriptSteps[f.row.id].status,'not-run');
+ }finally{await f.cleanup();}
+});
+test('multi-line thrown errors stay whole, and a completed script logging a marker still passes',async()=>{
+ const f=await scriptFixture({source:'throw new Error("First line\\nSecond line\\nไทย")'});try{
+  const result=await f.service.wait((await f.start()).id);assert.equal(result.status,'script-error');assert.equal(result.error,'First line\nSecond line\nไทย');assert.equal(result.scriptSteps![f.row.id].message,result.error);
+  const plan=buildRunPlan({yaml:f.workspace.yaml,scripts:[f.row],trust:[{rowId:f.row.id,origin:'local',trusted:true,hash:scriptHash(f.row.source)}]});
+  const first={command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}};
+  for(const [status,message] of [['COMPLETED','TNT_SCRIPT_FAILED row=script-one merely logged'],['FAILED','prefix TNT_SCRIPT_FAILED row=script-one not at start']]){
+   const mapped=mapScriptResults(plan,[first,{command:{runScriptCommand:{}},metadata:{depth:0,status,error:{message}}}],status==='COMPLETED'?message:'',false);
+   assert.equal(mapped.failure,undefined);assert.equal(mapped.scriptSteps[f.row.id].status,status==='COMPLETED'?'passed':'not-run');
+  }
+ }finally{await f.cleanup();}
+});
+test('artifact allow-list excludes adbkey, HOME, telemetry and downloads even when tools write them into a run',async()=>{
+ const f=await scriptFixture({customRun:async({directory})=>{
+  for(const folder of ['.maestro-home/.android','raw/deps','raw/time/.tnt-execution'])await mkdir(join(directory,folder),{recursive:true});
+  for(const file of ['adbkey','.maestro-home/.android/adbkey','raw/adbkey','raw/deps/download.jar','raw/telemetry.zip'])await writeFile(join(directory,file),'private non-evidence');
+  await writeFile(join(directory,'raw','step-001-screenshot.png'),'image');
+  const commands=['launchAppCommand','runScriptCommand','tapOnElement','assertConditionCommand'].map(key=>({command:{[key]:{}},metadata:{depth:0,status:'COMPLETED'}}));
+  await writeFile(join(directory,'raw','time','.tnt-execution','commands.json'),JSON.stringify(commands));await writeFile(join(directory,'report.xml'),'<testsuites><testsuite tests="1" failures="0"/></testsuites>');
+  return {code:0,log:'safe',cleanup:{verified:true,detail:'Stopped'}};
+ }});try{
+  const result=await f.service.wait((await f.start()).id);assert.equal(result.status,'passed');
+  assert.ok(result.artifacts.includes('raw/step-001-screenshot.png'));assert.ok(result.artifacts.includes('raw/time/.tnt-execution/commands.json'));
+  assert.ok(result.artifacts.every(file=>!/adbkey|maestro-home|telemetry|deps/.test(file)));
+  await assert.rejects(f.service.artifact(result.id,'raw/adbkey'),/Unknown run artifact/);
  }finally{await f.cleanup();}
 });
 test('empty, stale, syntax and breakout blocks precede every acquisition, app, mock and Maestro call',async()=>{
@@ -103,7 +132,7 @@ test('marker source never executes during compile, preview, review, export, impo
  const f=await scriptFixture();try{
   const marker=join(f.root,'must-not-execute');const source='globalThis.process.getBuiltinModule("node:fs").writeFileSync('+JSON.stringify(marker)+', "executed")';
   const workspace=await f.service.save({...f.workspace,scenarios:[{...f.scenario,scripts:[{...f.row,source}]}]});
-  const plan=buildRunPlan({yaml:workspace.yaml,scripts:workspace.scenarios![0].scripts,trust:[{rowId:f.row.id,origin:'local',hash:'',trusted:true}]});assert.deepEqual(plan.blocked,[]);
+  const plan=buildRunPlan({yaml:workspace.yaml,scripts:workspace.scenarios![0].scripts,trust:[{rowId:f.row.id,origin:'local',hash:scriptHash(source),trusted:true}]});assert.deepEqual(plan.blocked,[]);
   await f.service.preview({...workspace,scenarioId:'one'});const pkg=await f.service.exportWorkspace({id:workspace.id,expectedRevision:2,includeValues:true});await f.service.reviewWorkspacePackage({package:pkg.package});const imported=await f.service.importWorkspace({package:pkg.package,name:'Marker'});
   const batch=await f.service.waitBatch((await f.service.startBatch({workspaceId:imported.id,deviceId})).id);assert.equal(batch.entries[0].reason,'Script needs trust');assert.equal(f.calls.length,0);
   await assert.rejects(readFile(marker),{code:'ENOENT'});
@@ -112,7 +141,7 @@ test('marker source never executes during compile, preview, review, export, impo
 });
 test('unknown or extra script command metadata never claims a verified script pass',async()=>{
  const f=await scriptFixture();try{
-  const plan=buildRunPlan({yaml:f.workspace.yaml,scripts:[f.row],trust:[{rowId:f.row.id,origin:'local',hash:'',trusted:true}]});
+  const plan=buildRunPlan({yaml:f.workspace.yaml,scripts:[f.row],trust:[{rowId:f.row.id,origin:'local',hash:scriptHash(f.row.source),trusted:true}]});
   const launch={command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}};
   const unknown={command:{unknownCommand:{}},metadata:{depth:0,status:'COMPLETED'}};
   const mapped=mapScriptResults(plan,[launch,unknown],'',false);assert.equal(mapped.ambiguous,true);assert.equal(mapped.scriptSteps[f.row.id].status,'not-run');

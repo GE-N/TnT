@@ -23,6 +23,8 @@ test('real Mockoon preserves all responses/rules/modes, defaults at launch, orig
     assert.deepEqual(selected.routes[0].responses.map((response:any)=>response.default),overrideResponse?[false,true]:[true,false]);
     const base=`http://127.0.0.1:${plan.port}`;assert.equal((await fetch(base+'/items')).status,overrideResponse?500:200);assert.equal((await fetch(base+'/items',{headers:{'x-special':'yes'}})).status,200);assert.equal(await (await fetch(base+'/passthrough')).text(),'backend');
     await mock.evidence(false);assert.doesNotMatch(JSON.stringify(mock.result),new RegExp(access.token));
+    assert.equal(mock.result.intent.responseRole,'default');assert.match(mock.result.intent.failureSemantics,/Configured default response/);assert.match(mock.result.evidence.detail,/rules and modes may select another response/);
+    assert.ok(mock.result.evidence.transactions.some(transaction=>transaction.statusCode===200));
    }finally{assert.equal((await mock.cleanup()).verified,true);}
    await assert.rejects(fetch(`http://127.0.0.1:${plan.port}/items`));assert.deepEqual(plan,before);
   }

@@ -18,7 +18,7 @@ export type ScriptBlockReason =
 export type ScriptStepResult = { kind: 'runScript'; rowId: string; status: 'passed' | 'script-error' | 'not-run'; message?: string };
 
 // Result placement agreed in SPEC §8: references only; authored step indexes stay stable.
-export type ScriptExecutionReference = { kind: 'step'; index: number } | { kind: 'runScript'; rowId: string };
+export type ScriptExecutionReference = { kind: 'step'; index: number } | { kind: 'runScript'; rowId: string } | { kind: 'system' };
 export type ScriptRunResults = { scriptSteps: Record<string, ScriptStepResult>; executionOrder: ScriptExecutionReference[] };
 
 // Run-level error when the scrub fails closed.

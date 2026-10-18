@@ -23,6 +23,14 @@ test('Run returns typed 422 before any launch; trust routes require origin/sessi
   const anonymous=await f.request('/api/scripts/trust?workspace='+f.workspace.id,undefined,{'x-tnt-token':''});assert.equal(anonymous.status,403);
  }finally{await f.close();}
 });
+test('Duplicate API returns server-generated row IDs to the UI',async()=>{
+ const f=await fixture();try{
+  const response=await f.request('/api/scenarios/duplicate',{workspaceId:f.workspace.id,scenarioId:'one',expectedRevision:1});assert.equal(response.status,200);
+  const saved=await response.json();assert.equal(saved.scenarios.length,2);assert.equal(saved.metadata.revision,2);
+  assert.equal(saved.scenarios[0].scripts[0].id,f.row.id);assert.notEqual(saved.scenarios[1].scripts[0].id,f.row.id);
+  assert.deepEqual(JSON.parse(JSON.stringify((await f.service.workspace(f.workspace.id)).scenarios)),saved.scenarios);
+ }finally{await f.close();}
+});
 test('reserved input and variable errors are structured at save/import/runtime/preflight, including unused nested flows',async()=>{
  const f=await fixture();try{
   const badYaml=f.workspace.yaml.replace('tapOn: Load','evalScript: ${TNT_MOCK_TOKEN + ""}');

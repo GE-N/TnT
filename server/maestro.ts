@@ -1,7 +1,8 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { access,mkdir } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { access,mkdtemp,rm } from 'node:fs/promises';
+import { resolve,join } from 'node:path';
+import {tmpdir} from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Maestro } from './scenarios.js';
 import { InspectionCleanupError, type Inspector } from './picker.js';
@@ -34,16 +35,18 @@ export function createMaestro(dependencies:MaestroDependencies={}): Maestro & In
       if (result.code !== 0) throw new Error('Maestro hierarchy failed: ' + result.log.slice(-2000));
       return result.stdout;
     },
-    async run({ directory, flow, deviceId, signal, runtimeInputs,scriptEnv }) {
-      const inputs = [...Object.entries(runtimeInputs ?? {}),...Object.entries(scriptEnv??{})].flatMap(([key, value]) => ['-e', `${key}=${value}`]);
-      return command(['--device', deviceId, 'test', '--no-ansi', '--format', 'JUNIT', '--output', resolve(directory, 'report.xml'), '--test-output-dir', resolve(directory, 'raw'), '--debug-output', resolve(directory,'raw'), ...inputs, flow], directory, signal);
+    async run({ directory, flow, deviceId, signal, runtimeInputs,scriptEnv,scriptRun }) {
+      const inputs = Object.entries(runtimeInputs ?? {}).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
+      const scripts=scriptRun??!!scriptEnv;
+      return command(['--device', deviceId, 'test', '--no-ansi', '--format', 'JUNIT', '--output', resolve(directory, 'report.xml'), '--test-output-dir', resolve(directory, 'raw'), ...(scripts?['--debug-output', resolve(directory,'raw')]:[]), ...inputs, flow], directory, signal,300_000,scripts);
     },
   };
-  async function command(args: string[], directory: string, signal: AbortSignal, timeoutMs = 300_000) {
-      const env = await environment();
-      // Maestro also writes JVM user.home diagnostics; own both destinations per run.
-      if(args.includes('test')){const home=resolve(directory,'.maestro-home');await mkdir(home,{recursive:true});env.HOME=home;Object.assign(env,{JAVA_TOOL_OPTIONS:'-Duser.home='+JSON.stringify(home)});}
-      return new Promise<{ code: number | null; log: string; stdout: string; cleanup: import('./scenarios.js').Cleanup }>(resolveRun => {
+  async function command(args: string[], directory: string, signal: AbortSignal, timeoutMs = 300_000,scriptRun=false) {
+      const env = {...await environment()};
+      const home=scriptRun?await mkdtemp(join(tmpdir(),'tnt-maestro-home-')):undefined;
+      if(home){env.HOME=home;env.JAVA_TOOL_OPTIONS=[env.JAVA_TOOL_OPTIONS,'-Duser.home='+JSON.stringify(home)].filter(Boolean).join(' ');}
+      let result: { code: number | null; log: string; stdout: string; cleanup: import('./scenarios.js').Cleanup }|undefined;
+      try{return result=await new Promise<{ code: number | null; log: string; stdout: string; cleanup: import('./scenarios.js').Cleanup }>(resolveRun => {
         const child = spawnProcess(file, args, { cwd: directory, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
         let log = '';
         let stdout = '';
@@ -79,6 +82,6 @@ export function createMaestro(dependencies:MaestroDependencies={}): Maestro & In
           const verified = gone && !cleanupError;
           resolveRun({ code: timedOut ? 124 : code, log, stdout, cleanup: { verified, detail: verified ? 'Owned CLI exited and process group disappearance verified. No mock instance allocated. App data was not restored.' : 'Owned process-group cleanup could not be verified; device ownership retained. ' + cleanupError } });
         });
-      });
+      });}finally{if(home)try{await rm(home,{recursive:true,force:true});}catch(error){if(result)result.cleanup={verified:false,detail:'Temporary Maestro HOME removal could not be verified; ownership retained.'};else throw error;}}
     }
 }

@@ -8,7 +8,8 @@ import {createScenarios,type Maestro} from '../server/scenarios.js';
 import {createRunner} from '../server/runner.js';
 import {createMockSession} from '../server/mockoon.js';
 import type {EvidenceScrubber} from '../server/run-script-evidence.js';
-import {tokenForms} from '../server/run-script-evidence.js';
+// Independent fixtures/oracle: never derive leaked values from the production scrub patterns.
+export const evidenceForms=(token?:string)=>token?[token,encodeURIComponent(token),Buffer.from(token).toString('base64')]:[];
 export const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
 export const yaml='appId: com.example.HybridApp\n---\n- launchApp\n- tapOn: Load\n- assertVisible: Home\n';
 export async function scriptFixture(config:{mock?:boolean;source?:string;terminal?:'timeout'|'cancel'|'crash';scrubber?:EvidenceScrubber;mockFailure?:'prepare'|'evidence'|'cleanup';customRun?:Maestro['run'];httpStatus?:number}={}){
@@ -22,14 +23,14 @@ export async function scriptFixture(config:{mock?:boolean;source?:string;termina
   for(const command of commands){
    if(failed)break;const key=typeof command==='string'?command:Object.keys(command)[0];let internal:any;let error:string|undefined;
    if(key==='runScript'){
-    internal={runScriptCommand:{script:command.runScript.file,env:input.scriptEnv}};
-    try{runInNewContext(await readFile(join(input.directory,command.runScript.file),'utf8'),{output,...input.scriptEnv,http:{get:()=>({ok:(config.httpStatus??200)<400,status:config.httpStatus??200})}},{timeout:500});}catch(e){failed=true;error=(e as Error).message;}
+    internal={runScriptCommand:{script:command.runScript.file,env:command.runScript.env}};
+    try{runInNewContext(await readFile(join(input.directory,command.runScript.file),'utf8'),{output,...command.runScript.env,http:{get:()=>({ok:(config.httpStatus??200)<400,status:config.httpStatus??200})}},{timeout:500});}catch(e){failed=true;error=(e as Error).message;}
    }else if(key==='evalScript'){
     internal={evalScriptCommand:{}};try{runInNewContext(command.evalScript.slice(2,-1),{output});}catch(e){failed=true;error=(e as Error).message;}
    }else internal={[{launchApp:'launchAppCommand',tapOn:'tapOnElement',assertVisible:'assertConditionCommand',runFlow:'runFlowCommand'}[key]??key]:{}};
    metadata.push({command:internal,metadata:{depth:0,status:failed?'FAILED':'COMPLETED',...(error?{error:{message:error},evaluatedCommand:{message:error}}:{})}});
   }
-  const leak=tokenForms(input.scriptEnv?.TNT_MOCK_TOKEN).join(' ');
+  const leak=evidenceForms(input.scriptEnv?.TNT_MOCK_TOKEN).join(' ');
   await mkdir(join(input.directory,'raw','nested'),{recursive:true});await writeFile(join(input.directory,'raw','nested','commands.json'),JSON.stringify(metadata));
   await writeFile(join(input.directory,'maestro.log'),leak);await writeFile(join(input.directory,'report.xml'),`<testsuites><testsuite tests="1" failures="${failed?1:0}"><testcase><failure>Unknown error ${leak}</failure></testcase></testsuite></testsuites>`);
   if(config.terminal==='cancel')await new Promise<void>(resolve=>input.signal.aborted?resolve():input.signal.addEventListener('abort',()=>resolve(),{once:true}));
@@ -48,6 +49,6 @@ export async function scriptFixture(config:{mock?:boolean;source?:string;termina
  return {root,runner,service,options,workspace,scenario,row,calls,tokens,outputs,mockOptions,stats:()=>({toolCalls,acquisitions,mockCount,cleanupCount}),cleanup:()=>rm(root,{recursive:true,force:true}),start:()=>service.start({workspaceId:workspace.id,deviceId,scenarioId:'one'})};
 }
 export async function assertTokenFree(f:Awaited<ReturnType<typeof scriptFixture>>,runId:string){
- const result=await f.service.result(runId);for(const token of f.tokens)for(const form of tokenForms(token))assert.equal(JSON.stringify(result).includes(form),false);
- for(const name of result.artifacts){assert.doesNotMatch(name,/\.tnt-script-\d+\.js/);const bytes=await f.service.artifact(runId,name);for(const token of f.tokens)for(const form of tokenForms(token))assert.equal(bytes.includes(Buffer.from(form)),false,name);}
+ const result=await f.service.result(runId);for(const token of f.tokens)for(const form of evidenceForms(token))assert.equal(JSON.stringify(result).includes(form),false);
+ for(const name of result.artifacts){assert.doesNotMatch(name,/\.tnt-script-\d+\.js/);const bytes=await f.service.artifact(runId,name);for(const token of f.tokens)for(const form of evidenceForms(token))assert.equal(bytes.includes(Buffer.from(form)),false,name);}
 }
