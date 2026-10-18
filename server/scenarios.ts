@@ -78,10 +78,10 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
   }
   const workspaceStore=createWorkspaceStore(options.root,input=>authoredWorkspace(input,[]),{faults:options.faults,now:options.now,beforePublish:(next,previous)=>trustStore.register(next,previous)});
   const service = {
-    async scriptTrust(id:string){return {scripts:await trustStore.list(await workspaceStore.read(id))};},
+    async scriptTrust(id:string){const workspace=await workspaceStore.read(id);return {scripts:await trustStore.list(workspace),...sourceContext(workspace)};},
     async trustScript(input:{workspace:string;rowId:string;hash:string}){
       if(!input||Object.keys(input).some(key=>!['workspace','rowId','hash'].includes(key))||typeof input.rowId!=='string'||typeof input.hash!=='string')throw new Error('Trust exactly one script by workspace, rowId and current source hash.');
-      return workspaceStore.withWorkspace(input.workspace,async workspace=>({trust:await trustStore.approve(workspace,input.rowId,input.hash)}));
+      return workspaceStore.withWorkspace(input.workspace,async workspace=>({trust:await trustStore.approve(workspace,input.rowId,input.hash),...sourceContext(workspace)}));
     },
     async preview(input:{yaml:string;flows?:Record<string,string>;automation?:unknown;canvas?:unknown;mock?:unknown;scenarios?:unknown;scenarioId?:string;pathId?:string;runtimeInputs?:unknown;resetApp?:boolean}) {
       if(typeof input.yaml!=='string'||Buffer.byteLength(input.yaml)>100_000)throw new Error('Provide YAML up to 100 KB.');
@@ -162,7 +162,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       if(sourceId)try{source=await workspaceStore.read(sourceId);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
       const sourceTrust=source?await trustStore.list(source):[];
       const origins=Object.fromEntries(workspaceScripts(content).map(row=>{const trust=sourceTrust.find(item=>item.rowId===row.id);const original=source&&workspaceScripts(source).find(item=>item.id===row.id);return [row.id,trust?.origin==='local'&&original?.source===row.source?'local' as const:'imported' as const];}));
-      return workspaceStore.importCopy(content,next=>trustStore.register(next,undefined,origins));
+      return workspaceStore.importCopy(content,next=>trustStore.register(next,undefined,origins),source?{kind:'copy',name:source.name}:undefined);
     },
     async exportWorkspace(input:{id:string;expectedRevision:number;includeValues?:boolean}){
       if(input.includeValues!==undefined&&typeof input.includeValues!=='boolean')throw new Error('Include values must be a boolean.');
@@ -187,9 +187,9 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const review=packageReview(content,[...missing,...(content.canvasDiagnostics??[]).map(item=>item.detail??`${item.code}:${item.actionId}`)]);
       return {package:{...pkg,dependencies:review.dependencies,workspace:portableContent(content,true)},review};
     },
-    async importWorkspace(input:{package:unknown;name:string}){
+    async importWorkspace(input:{package:unknown;name:string;filename?:string}){
       const reviewed=await service.reviewWorkspacePackage(input);
-      return workspaceStore.importCopy(authoredWorkspace({...reviewed.package.workspace,name:input.name,id:undefined},[]),next=>trustStore.register(next,undefined,Object.fromEntries(workspaceScripts(next).map(row=>[row.id,'imported' as const]))));
+      return workspaceStore.importCopy(authoredWorkspace({...reviewed.package.workspace,name:input.name,id:undefined},[]),next=>trustStore.register(next,undefined,Object.fromEntries(workspaceScripts(next).map(row=>[row.id,'imported' as const]))),{kind:'import',name:reviewed.package.workspace.name,filename:input.filename??null});
     },
     async start(input: RunInput): Promise<Run> {
       if (batches.busy) throw new Error('A scenario batch is in progress. Wait for cleanup.');
@@ -407,6 +407,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
   });
   return {...service, startBatch: batches.start, batch: batches.result, waitBatch: batches.wait, cancelBatch: batches.cancel};
 }
+function sourceContext(workspace:Workspace){return workspace.metadata?.sourceWorkspace?{sourceWorkspace:workspace.metadata.sourceWorkspace}:{};}
 async function readRecord(base: string, name: string) {
   const file = await realpath(join(base, name));
   if (!file.startsWith((await realpath(base)) + sep)) throw new Error('Record path escapes its workspace/run.');

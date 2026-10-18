@@ -15,6 +15,37 @@ async function fixture(){
  const workspace=await service.save({name:'Scripts',yaml,scenarios:[{id:'first',name:'First',steps:refs,inputs:{},parameters:{},enabledHandlerIds:[],scripts:[row,{...row,id:'two'}]}]});
  return {root,trustDirectory,options,service,workspace};
 }
+test('import provenance persists unverified file claims and copy provenance captures the local source name',async()=>{
+ const f=await fixture();try{
+  const exported=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});
+  const claimed=structuredClone(exported.package);claimed.workspace.name='Claimed source · ไทย';
+  const imported=await f.service.importWorkspace({package:claimed,name:'Destination',filename:'unverified-export.json'});
+  const source={kind:'import' as const,name:'Claimed source · ไทย',filename:'unverified-export.json'};
+  assert.deepEqual(imported.metadata!.sourceWorkspace,source);
+  let restarted=createScenarios(f.options);
+  assert.deepEqual((await restarted.workspace(imported.id)).metadata!.sourceWorkspace,source);
+  assert.deepEqual((await restarted.scriptTrust(imported.id)).sourceWorkspace,source);
+  const trust=(await restarted.scriptTrust(imported.id)).scripts[0];assert.equal(trust.trusted,false);
+  const approved=await restarted.trustScript({workspace:imported.id,rowId:trust.rowId,hash:trust.hash});assert.deepEqual(approved.sourceWorkspace,source);
+  const saved=await restarted.save({...await restarted.workspace(imported.id),metadata:{...imported.metadata!,sourceWorkspace:{kind:'copy',name:'Forged verified name'}}});
+  assert.deepEqual(saved.metadata!.sourceWorkspace,source,'Ordinary saves cannot overwrite server provenance');
+  await restarted.renameWorkspace(imported.id,'Renamed destination',saved.metadata!.revision);await restarted.openWorkspace(imported.id);
+  await restarted.trashWorkspace(imported.id);await restarted.restoreWorkspace(imported.id);
+  restarted=createScenarios(f.options);assert.deepEqual((await restarted.scriptTrust(imported.id)).sourceWorkspace,source);
+  const copy=await restarted.copyWorkspace({...await restarted.workspace(imported.id),id:undefined,sourceWorkspaceId:imported.id,name:'Copied destination'});
+  const localSource={kind:'copy' as const,name:'Renamed destination'};
+  assert.deepEqual(copy.metadata!.sourceWorkspace,localSource);
+  assert.deepEqual((await createScenarios(f.options).scriptTrust(copy.id)).sourceWorkspace,localSource);
+  assert.ok((await restarted.scriptTrust(copy.id)).scripts.every(row=>!row.trusted),'A local source name never transfers script approvals');
+  const again=await restarted.exportWorkspace({id:copy.id,expectedRevision:1,includeValues:true});
+  assert.equal((again.package.workspace as any).metadata,undefined,'Local provenance is not asserted as a verified origin in exports');
+  const legacy=await restarted.importWorkspace({package:exported.package,name:'Legacy filename caller'});
+  assert.deepEqual(legacy.metadata!.sourceWorkspace,{kind:'import',name:f.workspace.name,filename:null});
+  const before=(await restarted.listWorkspaces()).items.length;
+  await assert.rejects(restarted.importWorkspace({package:exported.package,name:'Invalid filename',filename:'../source.json'}),/import filename/);
+  assert.equal((await restarted.listWorkspaces()).items.length,before);
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
 test('local trust, import per-workspace/per-row approval, durable hash invalidation and portable exclusion',async()=>{
  const f=await fixture();try{
   assert.ok((await f.service.scriptTrust(f.workspace.id)).scripts.every(item=>item.origin==='local'&&item.trusted));
@@ -89,6 +120,7 @@ for(const state of ['missing','trashed'] as const)test('copy with '+state+' sour
   const sourceWorkspaceId=state==='trashed'?f.workspace.id:'00000000-0000-4000-8000-000000000000';
   const copy=await f.service.copyWorkspace({...f.workspace,id:undefined,sourceWorkspaceId,name:'Conservative copy'});
   assert.notEqual(copy.id,f.workspace.id);assert.deepEqual(copy.scenarios![0].scripts,f.workspace.scenarios![0].scripts);
+  assert.equal(copy.metadata!.sourceWorkspace,undefined,'An unavailable source is never presented as a verified local copy origin');
   const scripts=(await f.service.scriptTrust(copy.id)).scripts;assert.ok(scripts.every(item=>item.origin==='imported'&&!item.trusted));
  }finally{await rm(f.root,{recursive:true,force:true});}
 });

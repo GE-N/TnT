@@ -3,8 +3,9 @@ import type {FileHandle} from 'node:fs/promises';
 import {dirname,join,resolve,sep} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import type {Workspace} from './scenarios.js';
+import type {ScriptSourceWorkspace} from './run-script-contract.js';
 
-export type WorkspaceMetadata={createdAt:string;updatedAt:string;openedAt:string;revision:number};
+export type WorkspaceMetadata={createdAt:string;updatedAt:string;openedAt:string;revision:number;sourceWorkspace?:ScriptSourceWorkspace};
 export type WorkspaceSummary=WorkspaceMetadata & {id:string;name:string;screens:number;scenarios:number;hasDraft?:boolean};
 export type WorkspaceLibrary={items:WorkspaceSummary[];unreadable:number};
 export type DraftContent={yaml?:unknown;flows?:unknown;canvas?:unknown;scenarios?:unknown;automation?:unknown;mock?:unknown};
@@ -19,6 +20,13 @@ export type WorkspaceView=Record<string,unknown> & {
  allocatedDraftRevision?:number;
 };
 export type WorkspaceSession={lastActiveId:string|null;updatedAt:string;unavailable?:boolean};
+function readSourceWorkspace(value:unknown):ScriptSourceWorkspace|undefined{
+ if(value===undefined)return;
+ if(!value||typeof value!=='object'||!('name' in value)||typeof value.name!=='string'||!value.name.trim()||value.name.length>120)throw new Error('Unreadable source workspace name.');
+ if('kind' in value&&value.kind==='copy')return {kind:'copy',name:value.name};
+ if('kind' in value&&value.kind==='import'&&'filename' in value&&(value.filename===null||typeof value.filename==='string'&&!!value.filename.trim()&&value.filename.length<=255&&!/[\\/\0]/.test(value.filename)))return {kind:'import',name:value.name,filename:value.filename};
+ throw new Error('Provide an import filename of 1–255 characters without path separators, or omit it.');
+}
 export type WorkspaceStoreFaults={
  /** Awaited before a temp file is created. Tests hold this to queue a write. */
  beforeWrite?:()=>Promise<void>;
@@ -124,6 +132,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   const content=readContent(raw);
   const date=(value:unknown,fallback:string)=>typeof value==='string'&&Number.isFinite(Date.parse(value))?value:fallback;
   const metadata:WorkspaceMetadata={createdAt:date(raw.metadata?.createdAt,dates.birthtime.toISOString()),updatedAt:date(raw.metadata?.updatedAt,dates.mtime.toISOString()),openedAt:date(raw.metadata?.openedAt,dates.birthtime.toISOString()),revision:Number.isSafeInteger(raw.metadata?.revision)&&raw.metadata.revision>=0?raw.metadata.revision:0};
+  const sourceWorkspace=readSourceWorkspace(raw.metadata?.sourceWorkspace);if(sourceWorkspace)metadata.sourceWorkspace=sourceWorkspace;
   return {...content,metadata};
  }
  async function write(value:Workspace){const path=await file(value.id,true);await writeJson(path,{...value,canvasDiagnostics:undefined},recordLimit,'Workspace record exceeds the supported size.');return value;}
@@ -254,10 +263,10 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   readView:(id:string)=>serialize(()=>readView(id)),
   bundle:(id:string)=>serialize(async()=>{const workspace=await read(id);const draftState=await readDraftOnce(id);const view=await readView(id);return {...workspace,draft:draftState.draft,draftError:draftState.draftError,view};}),
   withWorkspace:<T>(id:string,operation:(workspace:Workspace)=>Promise<T>)=>serialize(async()=>operation(await read(id))),
-  importCopy:(content:Workspace,beforePublish?:(next:Workspace)=>Promise<void>)=>serialize(async()=>{
+  importCopy:(content:Workspace,beforePublish?:(next:Workspace)=>Promise<void>,sourceWorkspace?:ScriptSourceWorkspace)=>serialize(async()=>{
    const stamp=now();const id=randomUUID();
    let written:Workspace;
-   try{const next={...content,id,metadata:{createdAt:stamp,updatedAt:stamp,openedAt:stamp,revision:1}};await (beforePublish??options?.beforePublish)?.(next);written=await write(next);}
+   try{const source=readSourceWorkspace(sourceWorkspace);const next={...content,id,metadata:{createdAt:stamp,updatedAt:stamp,openedAt:stamp,revision:1,...(source?{sourceWorkspace:source}:{})}};await (beforePublish??options?.beforePublish)?.(next);written=await write(next);}
    catch(error){await rm(join(await base(),id),{recursive:true,force:true});throw error;}
    try{await writeSession({lastActiveId:id,updatedAt:stamp});}catch(error){console.error('Import committed; session update failed.',error);}
    return written;
@@ -266,7 +275,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
    const previous=content.id?await read(content.id):undefined;
    if(previous&&previous.metadata!.revision!==expectedRevision)throw new WorkspaceConflict();
    const stamp=now();
-   const next={...content,id:content.id||randomUUID(),metadata:{createdAt:previous?.metadata?.createdAt??stamp,updatedAt:stamp,openedAt:previous?.metadata?.openedAt??stamp,revision:(previous?.metadata?.revision??0)+1}};
+   const next={...content,id:content.id||randomUUID(),metadata:{...previous?.metadata,createdAt:previous?.metadata?.createdAt??stamp,updatedAt:stamp,openedAt:previous?.metadata?.openedAt??stamp,revision:(previous?.metadata?.revision??0)+1}};
    await options?.beforePublish?.(next,previous);
    const written=await write(next);
    let draftCleared=false;

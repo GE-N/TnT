@@ -6,6 +6,12 @@ export type ScriptRow = { id: string; beforeStep: ScriptAnchor; label: string; s
 export type ScriptOrigin = 'local' | 'imported';
 export type ScriptTrust = { rowId: string; origin: ScriptOrigin; trusted: boolean; hash: string };
 
+// Import names/filenames are unverified file claims; copy names come from a workspace on this Mac.
+// null filename means the import caller did not supply one (legacy API clients).
+export type ScriptSourceWorkspace =
+  | { kind: 'import'; name: string; filename: string | null }
+  | { kind: 'copy'; name: string };
+
 export type ScriptBlockReason =
   | { kind: 'empty'; rowId: string; message: 'Script is empty · add code or delete the row' }
   | { kind: 'stale-anchor'; rowId: string; message: 'Step changed · relink before running' }
@@ -26,7 +32,9 @@ export const EVIDENCE_SCRUB_FAILED = 'Evidence scrub failed';
 export const REDACTED = '[redacted]';
 
 // HTTP API (paths follow server/http.ts conventions):
-// GET  /api/scripts/trust?workspace=<id>       -> { scripts: ScriptTrust[] }
-// POST /api/scripts/trust { workspace, rowId, hash } -> { trust: ScriptTrust }   // hash must match current source, else 409
+// Workspace metadata.sourceWorkspace?: ScriptSourceWorkspace is persisted by the server at import/copy.
+// POST /api/workspaces/import accepts optional filename; an omitted filename is recorded as null.
+// GET  /api/scripts/trust?workspace=<id>       -> { scripts: ScriptTrust[], sourceWorkspace?: ScriptSourceWorkspace }
+// POST /api/scripts/trust { workspace, rowId, hash } -> { trust: ScriptTrust, sourceWorkspace?: ScriptSourceWorkspace }   // hash must match current source, else 409
 // POST /api/runs (existing) -> may return 422 { blocked: ScriptBlockReason[] } before launch
 // Batch (POST /api/batches, existing): an untrusted scenario's result = failed with reason 'Script needs trust'; the batch continues.

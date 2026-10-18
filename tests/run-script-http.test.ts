@@ -31,6 +31,21 @@ test('Duplicate API returns server-generated row IDs to the UI',async()=>{
   assert.deepEqual(JSON.parse(JSON.stringify((await f.service.workspace(f.workspace.id)).scenarios)),saved.scenarios);
  }finally{await f.close();}
 });
+test('workspace and Trust HTTP APIs return durable import/copy source context',async()=>{
+ const f=await fixture();try{
+  const exported=await f.request('/api/workspaces/export',{id:f.workspace.id,expectedRevision:1,includeValues:true});const pkg=(await exported.json()).package;
+  pkg.workspace.name='Unverified package claim';
+  const response=await f.request('/api/workspaces/import',{package:pkg,name:'Imported destination',filename:'claimed-source.json'});assert.equal(response.status,200);const imported=await response.json();
+  const source={kind:'import',name:'Unverified package claim',filename:'claimed-source.json'};
+  assert.deepEqual(imported.metadata.sourceWorkspace,source);
+  assert.deepEqual((await (await f.request('/api/workspaces/'+imported.id)).json()).metadata.sourceWorkspace,source);
+  const trust=await (await f.request('/api/scripts/trust?workspace='+imported.id)).json();assert.deepEqual(trust.sourceWorkspace,source);assert.equal(trust.scripts[0].trusted,false);
+  const approval=await f.request('/api/scripts/trust',{workspace:imported.id,rowId:trust.scripts[0].rowId,hash:trust.scripts[0].hash});assert.equal(approval.status,200);assert.deepEqual((await approval.json()).sourceWorkspace,source);
+  const copied=await f.request('/api/workspaces/copy',{...f.workspace,id:undefined,sourceWorkspaceId:f.workspace.id,name:'Copy destination',metadata:{sourceWorkspace:{kind:'copy',name:'Spoofed'}}});assert.equal(copied.status,200);const copy=await copied.json();
+  assert.deepEqual(copy.metadata.sourceWorkspace,{kind:'copy',name:f.workspace.name});
+  assert.deepEqual((await (await f.request('/api/scripts/trust?workspace='+copy.id)).json()).sourceWorkspace,{kind:'copy',name:f.workspace.name});
+ }finally{await f.close();}
+});
 for(const mode of ['run','batch'] as const)test('Duplicate API refuses an active '+mode+' until cleanup without changing the workspace',async()=>{
  const f=await fixture('cancel');let id:string|undefined;
  try{
