@@ -63,10 +63,32 @@ export const SCRIPT_EXAMPLE=[
   '  `Switch to 200 failed: ${res.status}`)',
 ].join('\n');
 
-export const SCRIPT_TIMEOUT='No per-script timeout · the run stops at its 300s cap';
+export const SCRIPT_TIMEOUT='◷ No per-script timeout · the run stops at its 300s cap';
+export const AUTHORED_JAVASCRIPT_ROW="✕ Can't run with a script · this step runs its own JavaScript";
+export const AUTHORED_JAVASCRIPT_RUN="✕ Run blocked · remove the step's JavaScript or the Run script rows";
+export const AUTHORED_JAVASCRIPT_NOTE="⚠ This scenario has its own JavaScript steps. They'll block Run while a script is here.";
+
+/** Indexes the server listed. This does not inspect YAML. */
+export function authoredJavascriptIndexes(blocked:unknown):number[]{
+  if(!Array.isArray(blocked))return [];
+  const indexes:number[]=[];
+  for(const item of blocked){
+    if(!item||typeof item!=='object')continue;
+    const block=item as {kind?:unknown;index?:unknown;message?:unknown};
+    const verdict=block.kind==='authored-javascript'||block.message==="Can't run with a script · this step runs its own JavaScript"||block.message===AUTHORED_JAVASCRIPT_ROW;
+    if(!verdict||typeof block.index!=='number'||!Number.isInteger(block.index)||block.index<0)continue;
+    indexes.push(block.index);
+  }
+  return indexes;
+}
 export const SCRUB_FAILED_TEXT='✕ Evidence scrub failed · run evidence was removed to protect the token';
 
 export type OrderedStep={id:string;visitId:string;visitIndex:number;globalIndex:number;fingerprint:string};
+
+/** Setup and default-action rows are not scenario steps. The server treats those anchors as stale. */
+function anchorsScript(test:{role?:string;reference?:{kind?:string}}|undefined){
+  return !!test&&test.role!=='setup'&&test.role!=='handler'&&test.reference?.kind==='step';
+}
 
 export function orderedScenarioSteps(graph:CanvasGraph,pathId:string):OrderedStep[]{
   const path=graph.paths.find(item=>item.id===pathId);
@@ -76,7 +98,8 @@ export function orderedScenarioSteps(graph:CanvasGraph,pathId:string):OrderedSte
     const screen=graph.screens.find(item=>item.id===visitScreenId(graph,path,visitIndex));
     for(const id of visitOperations(graph,path,visitIndex)){
       const test=screen?.tests.find(item=>item.id===id);
-      steps.push({id,visitId:visit.id,visitIndex,globalIndex:steps.length,fingerprint:test?.reference.fingerprint??''});
+      if(!anchorsScript(test))continue;
+      steps.push({id,visitId:visit.id,visitIndex,globalIndex:steps.length,fingerprint:test!.reference.fingerprint});
     }
   });
   return steps;
@@ -89,10 +112,34 @@ export function scriptFirstLine(source:string){
 
 export type ScriptRecord=ScriptRow&{scenarioId:string;origin:ScriptOrigin;hash:string};
 
-export function trustFor(row:Pick<ScriptRecord,'id'|'origin'|'hash'>,approvals:ScriptTrust[]):ScriptTrust{
-  if(row.origin==='local')return {rowId:row.id,origin:'local',trusted:true,hash:row.hash};
-  const approval=approvals.find(item=>item.rowId===row.id&&item.origin==='imported'&&item.trusted&&item.hash===row.hash);
-  return {rowId:row.id,origin:'imported',trusted:!!approval,hash:row.hash};
+/** Trusted only when the server returned a matching hash. A missing answer is untrusted, and not an import. */
+export function trustFor(row:Pick<ScriptRecord,'id'|'hash'>,approvals:ScriptTrust[]):ScriptTrust{
+  const approval=approvals.find(item=>item.rowId===row.id&&item.hash===row.hash);
+  if(approval?.trusted)return {rowId:row.id,origin:approval.origin==='local'?'local':'imported',trusted:true,hash:row.hash};
+  if(approval)return {rowId:row.id,origin:approval.origin==='imported'?'imported':'local',trusted:false,hash:row.hash};
+  return {rowId:row.id,origin:'local',trusted:false,hash:row.hash};
+}
+
+export function recordsFor(scenarioId:string,rows:ScriptRow[]|undefined,approvals:ScriptTrust[]):ScriptRecord[]{
+  return (rows??[]).map(row=>{
+    const hash=sha256(row.source);
+    const trust=trustFor({id:row.id,hash},approvals);
+    return {...row,scenarioId,origin:trust.origin,hash};
+  });
+}
+
+/** Ids must match the server's script-row pattern, so they cannot start with a digit. */
+export function newScriptId(){
+  return 'script-'+crypto.randomUUID().replace(/-/g,'').slice(0,12);
+}
+
+/** Seconds from a per-script duration, when the result carries one. */
+export function scriptTook(result?:ScriptStepResult):string|undefined{
+  if(!result||!('durationMs' in result))return;
+  const ms=(result as {durationMs?:unknown}).durationMs;
+  if(typeof ms!=='number'||!Number.isFinite(ms)||ms<0)return;
+  const seconds=ms/1000;
+  return (seconds>=10?String(Math.round(seconds)):String(Math.round(seconds*10)/10))+'s';
 }
 
 export function compileScript(source:string){
@@ -122,7 +169,7 @@ export function scriptBlock(row:ScriptRecord,steps:OrderedStep[],approvals:Scrip
   if(!row.source.trim())return {kind:'empty',rowId:row.id,message:'Script is empty · add code or delete the row'};
   if(!anchorMatches(row.beforeStep,steps))return {kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'};
   const syntax=compileScript(row.source);
-  if(syntax)return {kind:'syntax',rowId:row.id,message:syntax.message,line:syntax.line,column:syntax.column};
+  if(syntax)return {kind:'syntax',rowId:row.id,message:'Script error: '+syntax.message,line:syntax.line,column:syntax.column};
   if(!trustFor(row,approvals).trusted)return {kind:'untrusted',rowId:row.id,message:'Script needs trust'};
 }
 
@@ -139,7 +186,7 @@ export function stableScriptOrder(rows:ScriptRecord[]){
 }
 
 export function untrustedCount(rows:ScriptRecord[],approvals:ScriptTrust[]){
-  return rows.filter(row=>row.origin==='imported'&&!trustFor(row,approvals).trusted).length;
+  return rows.filter(row=>row.source.trim()&&!trustFor(row,approvals).trusted).length;
 }
 
 export function runBlockedLabel(count:number){
@@ -151,6 +198,7 @@ export type ScriptRowView={
   trust:ScriptTrust;
   tone?:'running'|'passed'|'failed'|'not-run';
   message?:string;
+  took?:string;
 };
 
 function scriptFailureIndex(rows:ScriptRecord[],results:ScriptStepResult[],executionOrder:ScriptExecutionReference[]){
@@ -180,9 +228,11 @@ export function scriptRowView(row:ScriptRecord,rows:ScriptRecord[],steps:Ordered
   const trust=trustFor(row,approvals);
   const block=scriptBlock(row,steps,approvals);
   const result=results.find(item=>item.rowId===row.id);
+  const took=scriptTook(result);
   if(result?.status==='script-error')return {block,trust,tone:'failed',message:result.message};
   if(result?.status==='not-run'||scriptFollowsFailure(row.id,rows,results,executionOrder))return {block,trust,tone:'not-run',message:result?.message};
-  if(result?.status==='passed'||(!result&&passedRun&&!block))return {block,trust,tone:'passed'};
+  if(result?.status==='passed')return {block,trust,tone:'passed',took};
+  if(!result&&passedRun)return {block,trust,tone:'not-run'};
   if(running&&!result)return {block,trust,tone:'running'};
   return {block,trust};
 }
@@ -301,6 +351,18 @@ export function batchSummary(entry:BatchLine):BatchSummary{
   if(entry.reason==='Script needs trust')return {statusText:'failed',reason:'Script needs trust',testId:'batch-script-untrusted',tone:'trust'};
   if(entry.status==='script-error'||entry.reason==='Script failed')return {statusText:'failed',reason:'Script failed',testId:'batch-script-failed',tone:'failed'};
   return {statusText:entry.status,reason:entry.reason,tone:'plain'};
+}
+
+/** Variables are shown when the workspace has a mock and this scenario chose a response or has a trusted script. */
+export function scenarioShowsMockVariables(workspaceHasMock:boolean,mockResponseId:string|undefined,rows:ScriptRecord[],approvals:ScriptTrust[]){
+  return workspaceHasMock&&(!!mockResponseId||rows.some(row=>trustFor(row,approvals).trusted));
+}
+
+export function batchReasonLabel(summary:BatchSummary){
+  if(!summary.reason)return;
+  if(summary.tone==='trust')return '⚠ '+summary.reason;
+  if(summary.tone==='failed')return '✕ '+summary.reason;
+  return summary.reason;
 }
 
 /** Untrusted scenarios fail before launch. The rest of the batch keeps its order and continues. */

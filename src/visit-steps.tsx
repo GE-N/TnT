@@ -26,9 +26,10 @@ export function RunStatusBadge({status,testId}:{status:InspectorStepStatus;testI
  return <span className={'run-status-badge '+status.tone} role="status" data-testid={testId}>{status.tone==='running'&&<span className="run-status-spinner" aria-hidden="true"/>}{runStatusLabel(status.tone)}</span>;
 }
 
-export function AddStepMenu({disabled,onAdd}:{disabled:boolean;onAdd:(command:string)=>void}){
+export function AddStepMenu({disabled,onAdd,includeScript=true}:{disabled:boolean;onAdd:(command:string)=>void;includeScript?:boolean}){
  const [open,setOpen]=useState(false);const [query,setQuery]=useState('');const [active,setActive]=useState(0);const trigger=useRef<HTMLButtonElement>(null);const input=useRef<HTMLInputElement>(null);const cancel=useRef<HTMLButtonElement>(null);const id=useId();
- const filtered=choices.filter(item=>(item.label+' '+item.command+' '+(item.hint??'')).toLowerCase().includes(query.toLowerCase()));
+ const available=includeScript?choices:choices.filter(item=>item.command!=='runScript');
+ const filtered=available.filter(item=>(item.label+' '+item.command+' '+(item.hint??'')).toLowerCase().includes(query.toLowerCase()));
  useEffect(()=>{if(open)input.current?.focus();},[open]);
  function close(){setOpen(false);trigger.current?.focus();}
  return <><button ref={trigger} className="add-visit-step" disabled={disabled} onClick={()=>{setQuery('');setActive(0);setOpen(true);}}>+ Add step</button>{open&&<div role="dialog" aria-label="Add step" aria-modal="true" className="add-step-dialog" onKeyDown={event=>{

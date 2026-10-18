@@ -1,5 +1,5 @@
 import {RecoveredFields,useWorkspaceDraft} from './workspace-drafts.js';
-import {createContext,useCallback,useContext,useEffect,useMemo,useState,type ReactNode} from 'react';
+import {createContext,useCallback,useContext,useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {readForms,editForm,appendForm,deleteForm,formCommands,type FormCommand,type FormStep,type FormField} from './yaml-forms.js';
 
 type YamlFormDraft={source:string;value:string;dirty:boolean;index?:number;field?:string};
@@ -177,6 +177,13 @@ function StepRow({step,yaml,onChange,disabled,expanded,onExpand,onDelete,onCode,
     </div>}
   </div>;
 }
+function YamlCode({yaml,inputId,disabled,reservedLines,onChange}:{yaml:string;inputId:string;disabled:boolean;reservedLines:number[];onChange:(yaml:string)=>void}){
+  const notes=useRef<HTMLDivElement>(null);
+  return <div className="yaml-code-frame">
+    <textarea id={inputId} value={yaml} disabled={disabled} aria-invalid={reservedLines.length?true:undefined} onChange={event=>onChange(event.target.value)} onScroll={event=>{if(notes.current)notes.current.scrollTop=event.currentTarget.scrollTop;}} spellCheck={false} maxLength={100_000}/>
+    {!!reservedLines.length&&<div className="yaml-line-notes" ref={notes}>{yaml.split('\n').map((_,index)=><div className="yaml-line-note" key={index}>{reservedLines.includes(index+1)&&<span className="script-inline-error" data-testid="reserved-variable-error" role="alert">✕ Reserved TnT variable · line {index+1}</span>}</div>)}</div>}
+  </div>;
+}
 function YamlEditorBody({yaml,onChange,disabled,deletionWarnings,onDelete,inputId='scenario-yaml',reservedLines=[]}:EditorProps){
   const view=useMemo(()=>readForms(yaml),[yaml]);
   const idPrefix=inputId==='scenario-yaml'?'':inputId+'-';
@@ -207,7 +214,7 @@ function YamlEditorBody({yaml,onChange,disabled,deletionWarnings,onDelete,inputI
     <div className="label-row"><button className="confirm" type="button" aria-pressed={mode==='code'} onClick={()=>setMode('code')}>YAML code</button><button className="confirm" type="button" aria-pressed={mode==='forms'} onClick={()=>setMode('forms')}>Command forms</button></div>
     {view.error&&<div role="alert" className="notice error">{view.error} Your code is retained. Repair it in YAML code; form transformations are blocked.</div>}
     {undo&&<div role="status" className="yaml-undo">Step deleted. <button type="button" disabled={disabled||yaml!==undo.after} onClick={()=>{onChange(undo.before);undo.restore?.();setUndo(undefined);setError('');}}>Undo deletion</button>{yaml!==undo.after&&<span> Undo unavailable after further YAML edits.</span>}</div>}
-    <div hidden={mode!=='code'}><label htmlFor={inputId}>Maestro YAML</label><textarea id={inputId} value={yaml} disabled={disabled} aria-invalid={reservedLines.length?true:undefined} onChange={event=>onChange(event.target.value)} spellCheck={false} maxLength={100_000}/>{reservedLines.map(line=><p className="script-inline-error" data-testid="reserved-variable-error" role="alert" key={line}>✕ Reserved TnT variable · line {line}</p>)}</div><div hidden={mode!=='forms'}>
+    <div hidden={mode!=='code'}><label htmlFor={inputId}>Maestro YAML</label><YamlCode yaml={yaml} inputId={inputId} disabled={disabled} reservedLines={reservedLines} onChange={onChange}/></div><div hidden={mode!=='forms'}>
       <p className="field-hint">Edit values inline; expand Details for arguments. Enter or Apply saves a value. Complex YAML remains editable in code.</p>
       {view.steps.map(step=><StepRow key={step.index+':'+step.command} step={step} yaml={yaml} onChange={onChange} disabled={disabled} expanded={expanded===step.index} onExpand={()=>setExpanded(expanded===step.index?undefined:step.index)} onDelete={()=>requestDeletion(step.index)} onCode={()=>setMode('code')} idPrefix={idPrefix}/>)}
       <fieldset className="yaml-add" disabled={disabled||!!view.error||!view.canAppend}><legend>Add command</legend><label className="sr-only" htmlFor={commandId}>Command</label><select id={commandId} value={command} onChange={event=>setCommand(event.target.value as FormCommand)}>{formCommands.map(command=><option key={command}>{command}</option>)}</select><label className="sr-only" htmlFor={valueId}>New command value</label><input id={valueId} placeholder="Command value" value={value} onChange={event=>drafts.setCommand(event.target.value)}/><button type="button" className="confirm" onClick={append}>Append command</button></fieldset>

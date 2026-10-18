@@ -86,5 +86,5 @@ export function inspectorRunView(graph:CanvasGraph|undefined,pathId:string|undef
 }
 
 export function runStatusLabel(status:InspectorStepTone){
- return status==='running'?'Running':status==='passed'?'✓ Passed':status==='not-run'?'Not run':'✕ Failed';
+ return status==='running'?'Running':status==='passed'?'✓ Passed':status==='not-run'?'○ Not run':'✕ Failed';
 }
