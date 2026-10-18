@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {EventEmitter} from 'node:events';
 import {readFile,mkdtemp,rm} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
@@ -29,4 +30,21 @@ test('real Mockoon preserves all responses/rules/modes, defaults at launch, orig
    await assert.rejects(fetch(`http://127.0.0.1:${plan.port}/items`));assert.deepEqual(plan,before);
   }
  }finally{await new Promise<void>(resolve=>backend.close(()=>resolve()));await rm(root,{recursive:true,force:true});}
+});
+test('Mockoon spawn records the owned pid',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-mockoon-note-'));
+ try{
+  const plan=validateMock({environment,port:19876,routeId:environment.routes[0].uuid,responseId:environment.routes[0].responses[0].uuid,backendUrl:'http://127.0.0.1:9',passthroughRouteIds:[],fromScreen:'Home',toScreen:'Home',failureSemantics:'HTTP'})!;
+  const child=Object.assign(new EventEmitter(),{pid:424242});
+  let noted:number|undefined;
+  const controller=new AbortController();
+  const mock=createMockSession(plan,root,{spawn:(()=>child) as unknown as typeof import('node:child_process').spawn,noteProcess:async pid=>{noted=pid;}});
+  const prepare=mock.prepare(controller.signal);
+  const deadline=Date.now()+2_000;
+  while(noted===undefined&&Date.now()<deadline)await new Promise<void>(resolve=>setTimeout(resolve,10));
+  if(noted===undefined)controller.abort();
+  assert.equal(noted,424242);
+  child.emit('exit',1);
+  await assert.rejects(prepare,/exited during setup/);
+ }finally{await rm(root,{recursive:true,force:true});}
 });

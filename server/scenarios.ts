@@ -42,8 +42,8 @@ export type Maestro = {
 };
 const validId = (id: string) => { if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new Error('Invalid workspace/run identifier.'); return id; };
 
-export function createScenarios(options: { root: string; runner: ReturnType<typeof createRunner>; maestro: Maestro; faults?: WorkspaceStoreFaults; now?: () => Date; trustDirectory?:string; createMockSession?:typeof createMockSession; scrubber?:EvidenceScrubber; noteProcess?:(pid:number)=>Promise<void>|void; afterDuplicateRead?:()=>Promise<void> }) {
-  const trustStore=createScriptTrustStore(options.trustDirectory??join(homedir(),'Library','Application Support','TnT','script-trust'));
+export function createScenarios(options: { root: string; runner: ReturnType<typeof createRunner>; maestro: Maestro; faults?: WorkspaceStoreFaults; now?: () => Date; trustDirectory?:string; trustFaults?:{beforeList?:()=>Promise<void>}; createMockSession?:typeof createMockSession; scrubber?:EvidenceScrubber; noteProcess?:(pid:number)=>Promise<void>|void; afterDuplicateRead?:()=>Promise<void>; afterTrustRead?:()=>Promise<void> }) {
+  const trustStore=createScriptTrustStore(options.trustDirectory??join(homedir(),'Library','Application Support','TnT','script-trust'),options.trustFaults);
   const activeWorkspaces=new Set<string>();
   const deleting=new Set<string>();
   const pending = new Map<string, Promise<Run>>();
@@ -96,7 +96,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const selection=selectScenario({yaml:input.yaml,flows,automation:configured,canvas:readCanvas(input.canvas),mock:validateMock(input.mock),scenarios:readScenarios(input.scenarios)},input.scenarioId,validateInputs(input.runtimeInputs));
       let yaml=selection?.yaml??input.yaml;let automation=selection?.automation??configured;
       const rawCanvas=selection?.canvas??readCanvas(input.canvas);
-      if(rawCanvas){const canvas=refreshChecks(rawCanvas,yaml);const pathId=selection?.scenario.pathId??input.pathId;const projection=projectCanvasRoute(canvas,yaml,flows??{},pathId,automation);yaml=projection.yaml;automation=projection.automation;selectedCanvasPath(projection.canvas,yaml,flows??{},pathId,automation);}
+      if(rawCanvas){const canvas=refreshChecks(rawCanvas,yaml);const pathId=selection?.scenario.pathId??input.pathId;const draftBlocked=draftAnchorBlocks(selection?.scenario.scripts,canvas,pathId);if(draftBlocked.length)throw new ScriptBlocked(draftBlocked);const projection=projectCanvasRoute(canvas,yaml,flows??{},pathId,automation);yaml=projection.yaml;automation=projection.automation;selectedCanvasPath(projection.canvas,yaml,flows??{},pathId,automation);}
       const root=validate(yaml,flows,[],new Set(),undefined,!!selection?.scenario.scripts?.length);
       for(const flow of Object.values(flows??{}))if(validate(flow,flows).appId!==root.appId)throw new Error('Reusable flows must declare the same appId as the scenario.');
       const executionYaml=automation?instrument(yaml,automation,input.resetApp??false).yaml:yaml;
@@ -136,6 +136,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const sourceTrust=await trustStore.list(workspace);
       const origins=Object.fromEntries(copy.scripts?.map((row,index)=>[row.id,sourceTrust.find(trust=>trust.rowId===source.scripts![index].id)?.origin??'imported'])??[]);
       assertIdle();
+      await options.afterTrustRead?.();
       const canvas=workspace.canvas&&structuredClone(workspace.canvas);
       if(canvas){
         for(const screen of canvas.screens)for(const test of screen.tests)if(test.scenarioIds?.includes(source.id))test.scenarioIds.push(id);

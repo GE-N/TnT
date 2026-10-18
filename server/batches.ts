@@ -38,7 +38,7 @@ export function createBatches(dependencies:Dependencies){
     state.batch=batch;
     for(const entry of entries){
      try{await dependencies.preview({...workspace,scenarioId:entry.scenarioId,runtimeInputs:input.runtimeInputs,resetApp:input.resetApp});}
-     catch(error){entry.status='not-run';entry.reason=message(error);}
+     catch(error){if(error instanceof ScriptBlocked){entry.status='failed';entry.reason=error.blocked.some(item=>item.kind==='untrusted')?'Script needs trust':error.message;}else{entry.status='not-run';entry.reason=message(error);}}
     }
     await dependencies.persist(batch);
     state.done=(async()=>{

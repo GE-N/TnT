@@ -38,6 +38,14 @@ test('plain runs preserve HOME/JVM settings; script-only runs isolate HOME witho
   }
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('spawn records the owned maestro pid',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-maestro-note-'));try{
+  const f=fakeProcess();const noted:number[]=[];f.dependencies.noteProcess=async pid=>{noted.push(pid);};
+  const done=createMaestro(f.dependencies).run({directory:root,flow:join(root,'flow.yaml'),deviceId:'fixture',signal:new AbortController().signal});
+  while(!f.timers.length)await new Promise<void>(resolve=>setImmediate(resolve));
+  f.child.emit('close',0);await done;assert.deepEqual(noted,[32123]);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
 test('cancel kills descendants; live group cannot be marked clean and no script credentials by default',async()=>{
  const root=await mkdtemp(join(tmpdir(),'tnt-maestro-live-'));try{
   const f=fakeProcess(false);const controller=new AbortController();const done=createMaestro(f.dependencies).run({directory:root,flow:join(root,'flow.yaml'),deviceId:'fixture',signal:controller.signal});

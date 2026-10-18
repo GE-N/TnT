@@ -6,7 +6,7 @@ import {referenceCatalog,type CanvasGraph} from '../server/canvas.js';
 import {ScriptBlocked} from '../server/script-validation.js';
 import {authoredChecks,writeChecks} from '../shared/canvas-authoring.js';
 import {anchorForNewScript,anchorMatches,orderedScenarioSteps} from './fixtures/pr84-script-anchors.js';
-import {scriptFixture} from './run-script-helpers.js';
+import {scriptFixture,deviceId} from './run-script-helpers.js';
 import {projectCanvasRoute} from '../server/canvas-route.js';
 import {canvasScriptAnchors} from '../server/run-script-plan.js';
 import type {GoldenFixture} from './golden-canvas-runner.js';
@@ -146,6 +146,34 @@ test('a script anchored on an uncaptured draft step blocks with draft-anchor bef
    assert.deepEqual(error.blocked,[{kind:'draft-anchor',rowId:script.id,message:'Step not captured yet · capture it before running'}]);
    return true;
   });
+  assert.deepEqual(f.stats(),before);
+ }finally{await f.cleanup();}
+});
+test('start blocks a draft anchor before canvas projection can hide it',async()=>{
+ const f=await scriptFixture();try{
+  const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'first',label:'First',role:'action',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'}}]}],edges:[],paths:[{id:'path',name:'One',scenarioId:'one',screenId:'home',edgeIds:[],visits:[{id:'visit',operationIds:['first']}]}]};
+  const script={...f.row,beforeStep:{index:0,fingerprint:'draft'}};
+  await f.service.save({...f.workspace,yaml:'appId: com.example.HybridApp\n---\n- launchApp\n',canvas,scenarios:[{...f.scenario,authoring:'canvas',pathId:'path',steps:[],scripts:[script]}]});
+  const before=f.stats();
+  await assert.rejects(f.start(),(error:unknown)=>{
+   assert.ok(error instanceof ScriptBlocked);
+   assert.deepEqual(error.blocked,[{kind:'draft-anchor',rowId:script.id,message:'Step not captured yet · capture it before running'}]);
+   return true;
+  });
+  assert.deepEqual(f.stats(),before);
+ }finally{await f.cleanup();}
+});
+test('Run All reports a draft anchor and does not launch',async()=>{
+ const f=await scriptFixture();try{
+  const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'first',label:'First',role:'action',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'}}]}],edges:[],paths:[{id:'path',name:'One',scenarioId:'one',screenId:'home',edgeIds:[],visits:[{id:'visit',operationIds:['first']}]}]};
+  const script={...f.row,beforeStep:{index:0,fingerprint:'draft'}};
+  await f.service.save({...f.workspace,yaml:'appId: com.example.HybridApp\n---\n- launchApp\n',canvas,scenarios:[{...f.scenario,authoring:'canvas',pathId:'path',steps:[],scripts:[script]}]});
+  const before=f.stats();
+  const batch=await f.service.waitBatch((await f.service.startBatch({workspaceId:f.workspace.id,deviceId})).id);
+  assert.equal(batch.status,'completed');
+  assert.equal(batch.entries[0].status,'failed');
+  assert.equal(batch.entries[0].reason,'Step not captured yet · capture it before running');
+  assert.equal(batch.entries[0].runId,undefined);
   assert.deepEqual(f.stats(),before);
  }finally{await f.cleanup();}
 });

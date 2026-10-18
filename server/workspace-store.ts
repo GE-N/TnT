@@ -21,13 +21,17 @@ export type WorkspaceView=Record<string,unknown> & {
 };
 export type WorkspaceSession={lastActiveId:string|null;updatedAt:string;unavailable?:boolean};
 // C0/C1 controls (including LF) and bidi overrides that can spoof a displayed claim.
-const claimControls=/[\u0000-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/;
+const claimControls=/[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069\uFEFF]/;
 function readSourceWorkspace(value:unknown):ScriptSourceWorkspace|undefined{
  if(value===undefined)return;
  if(!value||typeof value!=='object'||!('name' in value)||typeof value.name!=='string'||!value.name.trim()||value.name.length>120||claimControls.test(value.name))throw new Error('Unreadable source workspace name.');
  if('kind' in value&&value.kind==='copy')return {kind:'copy',name:value.name};
  if('kind' in value&&value.kind==='import'&&'filename' in value&&(value.filename===null||typeof value.filename==='string'&&!!value.filename.trim()&&value.filename.length<=255&&!/[\\/]/.test(value.filename)&&!claimControls.test(value.filename)))return {kind:'import',name:value.name,filename:value.filename};
  throw new Error('Provide an import filename of 1–255 characters without path separators or control characters, or omit it.');
+}
+function readStoredSourceWorkspace(value:unknown):ScriptSourceWorkspace|undefined{
+ if(value===undefined)return;
+ try{return readSourceWorkspace(value);}catch{return;}
 }
 export type WorkspaceStoreFaults={
  /** Awaited before a temp file is created. Tests hold this to queue a write. */
@@ -136,7 +140,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   const content=readContent(raw);
   const date=(value:unknown,fallback:string)=>typeof value==='string'&&Number.isFinite(Date.parse(value))?value:fallback;
   const metadata:WorkspaceMetadata={createdAt:date(raw.metadata?.createdAt,dates.birthtime.toISOString()),updatedAt:date(raw.metadata?.updatedAt,dates.mtime.toISOString()),openedAt:date(raw.metadata?.openedAt,dates.birthtime.toISOString()),revision:Number.isSafeInteger(raw.metadata?.revision)&&raw.metadata.revision>=0?raw.metadata.revision:0};
-  const sourceWorkspace=readSourceWorkspace(raw.metadata?.sourceWorkspace);if(sourceWorkspace)metadata.sourceWorkspace=sourceWorkspace;
+  const sourceWorkspace=readStoredSourceWorkspace(raw.metadata?.sourceWorkspace);if(sourceWorkspace)metadata.sourceWorkspace=sourceWorkspace;
   await faults?.beforeRead?.();
   return {...content,metadata};
  }

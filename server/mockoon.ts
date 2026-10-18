@@ -38,7 +38,7 @@ function isLoopback(hostname: string) {
   return host==='localhost' || host.endsWith('.localhost') || /^127\./.test(host) || host==='0.0.0.0' || host==='[::1]' || host==='[::]' || /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]+\]$/.test(host);
 }
 
-export function createMockSession(plan: MockPlan, directory: string, options?:{overrideResponse?:boolean;noteProcess?:(pid:number)=>Promise<void>|void}): { scriptAccess():{url:string;token:string}; result: MockResult; prepare(signal: AbortSignal): Promise<void>; evidence(confidential: boolean): Promise<void>; cleanup(): Promise<Cleanup> } {
+export function createMockSession(plan: MockPlan, directory: string, options?:{overrideResponse?:boolean;noteProcess?:(pid:number)=>Promise<void>|void;spawn?:typeof spawn}): { scriptAccess():{url:string;token:string}; result: MockResult; prepare(signal: AbortSignal): Promise<void>; evidence(confidential: boolean): Promise<void>; cleanup(): Promise<Cleanup> } {
   const route = plan.environment.routes.find(route => route.uuid === plan.routeId)!;
   const response = route.responses.find(response => options?.overrideResponse===false?response.default:response.uuid===plan.responseId)??route.responses[0];
   const result: MockResult = { intent: { status: 'pending', responseRole:'default',routeId: route.uuid, responseId: response.uuid, method: route.method, endpoint: route.endpoint, httpStatus: response.statusCode, failureSemantics: 'Configured default response: '+plan.failureSemantics }, evidence: { status: 'unavailable', detail: 'Intent records the configured default response; rules and modes may select another response. No observed requests captured.', transactions: [] }, cleanup: { verified: false, detail: 'Pending' } };
@@ -77,7 +77,7 @@ export function createMockSession(plan: MockPlan, directory: string, options?:{o
       if(version!=='9.9.0') throw new Error('Use the pinned Mockoon CLI 9.9.0 for this adapter.');
       const file = resolve(directory, 'mock-environment.json');
       await writeFile(file, JSON.stringify(selected), {mode:0o600});
-      child = spawn(process.execPath, [resolve('node_modules/@mockoon/cli/bin/run.js'), 'start', '--data', file, '--hostname', '127.0.0.1', '--port', String(plan.port), '--disable-log-to-file', '--max-transaction-logs', '100', '--max-request-body-size', '1mb'], { detached:true, cwd:directory, env:{ PATH:process.env.PATH, HOME:directory, TMPDIR:process.env.TMPDIR, MOCKOON_ADMIN_API_TOKEN:token }, stdio:['ignore','ignore','ignore'] });
+      child = (options?.spawn??spawn)(process.execPath, [resolve('node_modules/@mockoon/cli/bin/run.js'), 'start', '--data', file, '--hostname', '127.0.0.1', '--port', String(plan.port), '--disable-log-to-file', '--max-transaction-logs', '100', '--max-request-body-size', '1mb'], { detached:true, cwd:directory, env:{ PATH:process.env.PATH, HOME:directory, TMPDIR:process.env.TMPDIR, MOCKOON_ADMIN_API_TOKEN:token }, stdio:['ignore','ignore','ignore'] });
       child.on('error', error => { processError = error.message; }); child.on('exit', ()=>{exited=true;});
       if(child.pid)await options?.noteProcess?.(child.pid);
       try {

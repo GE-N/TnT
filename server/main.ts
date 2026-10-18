@@ -7,7 +7,7 @@ import { createRunner, type Execute } from './runner.js';
 import { createApiHandler } from './http.js';
 import { createScenarios } from './scenarios.js';
 import { createMaestro } from './maestro.js';
-import {killProcess,lookupProcess,recordOwnedProcess} from './owned-process.js';
+import {killProcess,lookupProcess,recordSettledProcess} from './owned-process.js';
 import { sweepUnfinishedRuns } from './run-recovery.js';
 
 const exec = promisify(execFile);
@@ -25,11 +25,7 @@ const port = Number(process.env.PORT ?? 4317);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('PORT must be an integer from 1024 to 65535.');
 const artifactDirectory = resolve('.tnt/launches');
 const ownershipRoot = resolve('.tnt');
-const noteProcess = (role: 'maestro' | 'mockoon') => async (pid: number) => {
-  const identity = await lookupProcess(pid);
-  if (!identity) return;
-  await recordOwnedProcess(ownershipRoot, { role, pid, command: identity.command, startedAt: identity.startedAt });
-};
+const noteProcess = (role: 'maestro' | 'mockoon') => (pid: number) => recordSettledProcess(ownershipRoot, role, pid);
 await sweepUnfinishedRuns(ownershipRoot, { lookup: lookupProcess, kill: killProcess });
 const maestro = createMaestro({ noteProcess: noteProcess('maestro') });
 const runner = createRunner({ artifactDirectory, execute, ownershipDirectory: ownershipRoot, inspector: maestro });

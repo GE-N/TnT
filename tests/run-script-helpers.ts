@@ -13,7 +13,7 @@ import type {EvidenceScrubber} from '../server/run-script-evidence.js';
 export const evidenceForms=(token?:string)=>token?[token,encodeURIComponent(token),Buffer.from(token).toString('base64')]:[];
 export const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
 export const yaml='appId: com.example.HybridApp\n---\n- launchApp\n- tapOn: Load\n- assertVisible: Home\n';
-export async function scriptFixture(config:{mock?:boolean;source?:string;terminal?:'timeout'|'cancel'|'crash';scrubber?:EvidenceScrubber;mockFailure?:'prepare'|'evidence'|'cleanup';customRun?:Maestro['run'];httpStatus?:number;faults?:WorkspaceStoreFaults;afterDuplicateRead?:()=>Promise<void>}={}){
+export async function scriptFixture(config:{mock?:boolean;source?:string;terminal?:'timeout'|'cancel'|'crash';scrubber?:EvidenceScrubber;mockFailure?:'prepare'|'evidence'|'cleanup';customRun?:Maestro['run'];httpStatus?:number;faults?:WorkspaceStoreFaults;afterDuplicateRead?:()=>Promise<void>;afterTrustRead?:()=>Promise<void>;beforeTrustList?:()=>Promise<void>}={}){
  const root=await mkdtemp(join(tmpdir(),'tnt-script-'));let toolCalls=0;let acquisitions=0;let mockCount=0;let cleanupCount=0;const tokens:string[]=[];const outputs:Record<string,unknown>[]=[];const calls:Parameters<Maestro['run']>[0][]=[];const mockOptions:Parameters<typeof createMockSession>[2][]=[];
  const runner=createRunner({artifactDirectory:root,execute:async(_file,args)=>{toolCalls++;return {stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''};}});
  const acquire=runner.acquireDevice;runner.acquireDevice=async(...args)=>{acquisitions++;return acquire(...args);};
@@ -42,7 +42,7 @@ export async function scriptFixture(config:{mock?:boolean;source?:string;termina
   mockCount++;mockOptions.push(settings);const base=createMockSession(plan,directory,settings);const token='token +/ไทย?='+mockCount;tokens.push(token);
   return {...base,scriptAccess:()=>({url:'http://127.0.0.1:19841/mockoon-admin',token}),prepare:async()=>{if(config.mockFailure==='prepare')throw new Error('Prepare '+token);base.result.intent.status='acknowledged';},evidence:async()=>{if(config.mockFailure==='evidence')throw new Error('Evidence '+token);base.result.evidence.detail='captured '+token;},cleanup:async()=>{cleanupCount++;if(config.mockFailure==='cleanup')throw new Error('Cleanup '+token);return {verified:true,detail:'Mock stopped '+token};}};
  };
- const options={root,trustDirectory:join(root,'trust'),runner,maestro:{version:async()=>{toolCalls++;return '2.11.0';},run},createMockSession:factory,scrubber:config.scrubber,faults:config.faults,afterDuplicateRead:config.afterDuplicateRead};
+ const options={root,trustDirectory:join(root,'trust'),runner,maestro:{version:async()=>{toolCalls++;return '2.11.0';},run},createMockSession:factory,scrubber:config.scrubber,faults:config.faults,trustFaults:config.beforeTrustList?{beforeList:config.beforeTrustList}:undefined,afterDuplicateRead:config.afterDuplicateRead,afterTrustRead:config.afterTrustRead};
  const service=createScenarios(options);const references=(await service.references({yaml})).references.filter(item=>item.kind==='step');
  const row={id:'script-one',label:'Script',source:config.source??'output.X = `ไทย ${"quote"}`; // trailing',beforeStep:{index:1,fingerprint:references[1].fingerprint}};
  const scenario={id:'one',name:'One',steps:references,inputs:{},parameters:{},enabledHandlerIds:[],scripts:[row]};

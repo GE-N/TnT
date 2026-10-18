@@ -275,5 +275,52 @@ test('import rejects control characters and right-to-left overrides in the claim
   const thai=structuredClone(pkg.package);thai.workspace.name='ชื่อ ไทย';
   const accepted=await f.service.importWorkspace({package:thai,name:'Dest',filename:'ชื่อ.json'});
   assert.deepEqual(accepted.metadata!.sourceWorkspace,{kind:'import',name:'ชื่อ ไทย',filename:'ชื่อ.json'});
+  const emoji=structuredClone(pkg.package);emoji.workspace.name='Family \u200D test';
+  const zwj=await f.service.importWorkspace({package:emoji,name:'Dest',filename:'emoji\u200D.json'});
+  assert.equal(zwj.metadata!.sourceWorkspace?.kind,'import');
+  const invisible=['\u200B','\uFEFF','\u200C','\u061C','\u2028','\u2029'];
+  for(const mark of invisible){
+   await assert.rejects(f.service.importWorkspace({package:pkg.package,name:'Dest',filename:'a'+mark+'b.json'}),/import filename/);
+   const claimed=structuredClone(pkg.package);claimed.workspace.name='A'+mark+'B';
+   await assert.rejects(f.service.importWorkspace({package:claimed,name:'Dest',filename:'ok.json'}),/source workspace name/);
+  }
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('an invalid stored source claim is dropped on read instead of locking the workspace',async()=>{
+ const f=await fixture();try{
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});
+  const imported=await f.service.importWorkspace({package:pkg.package,name:'Dest',filename:'ok.json'});
+  const file=join(f.root,'workspaces',imported.id,'workspace.json');
+  const raw=JSON.parse(await readFile(file,'utf8'));
+  raw.metadata.sourceWorkspace.filename='report\u202Ejson.exe';
+  await writeFile(file,JSON.stringify(raw));
+  const opened=await f.service.workspace(imported.id);
+  assert.equal(opened.metadata!.sourceWorkspace,undefined);
+  assert.equal(opened.name,'Dest');
+  assert.equal((await f.service.scriptTrust(imported.id)).scripts[0].origin,'imported');
+  assert.equal((await f.service.listWorkspaces()).items.some(item=>item.id===imported.id),true);
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('an imported row id evicted by the tombstone cap comes back imported and untrusted',async()=>{
+ const f=await fixture();try{
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});
+  const imported=await f.service.importWorkspace({package:pkg.package,name:'Capped',filename:'rows.json'});
+  const file=join(f.trustDirectory,'state.json');const state=JSON.parse(await readFile(file,'utf8'));
+  const entries=state.workspaces[imported.id];
+  for(let index=0;index<importedTombstoneCap;index++)entries['old-'+String(index).padStart(4,'0')]={origin:'imported',scenarioId:'first'};
+  await writeFile(file,JSON.stringify(state));
+  const before=Object.keys(entries);
+  const emptied=await f.service.save({...imported,scenarios:[{...imported.scenarios![0],scripts:[]}]});
+  const kept=JSON.parse(await readFile(file,'utf8'));
+  const evicted=before.filter(id=>!kept.workspaces[imported.id][id]);
+  assert.ok(evicted.includes('one')&&evicted.includes('two'));
+  assert.ok(kept.importedOverflow.includes(imported.id));
+  const row={...imported.scenarios![0].scripts![0],id:evicted[0]};
+  const back=await f.service.save({...await f.service.workspace(emptied.id),scenarios:[{...imported.scenarios![0],scripts:[row,{...row,id:'brandnew',source:'globalThis.other=true'}]}]});
+  for(const id of [evicted[0],'brandnew']){
+   const trust=(await f.service.scriptTrust(back.id)).scripts.find(item=>item.rowId===id)!;
+   assert.equal(trust.origin,'imported',id);assert.equal(trust.trusted,false,id);
+  }
+  await assert.rejects(f.service.start({workspaceId:back.id,deviceId:'not-used',scenarioId:'first'}),/Script needs trust/);
  }finally{await rm(f.root,{recursive:true,force:true});}
 });

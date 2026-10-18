@@ -241,3 +241,24 @@ test('duplicate re-checks that the workspace is idle after reading it',async()=>
   assert.equal(fState.gap,false,'A run that begins during the read is rejected before later duplicate work');
  }finally{fState.release();if(fState.run)await fState.run.then(run=>f.service.wait(run.id)).catch(()=>{});await f.cleanup();}
 });
+test('duplicate re-checks that the workspace is idle after reading script trust',async()=>{
+ const gate:{releaseList:()=>void;releaseRun:()=>void;run?:Promise<{id:string}>;gap:boolean}={releaseList:()=>{},releaseRun:()=>{},gap:false};
+ let armList=false;let holdRun=false;let enteredList!:()=>void;let enteredRun!:()=>void;
+ const sawList=new Promise<void>(resolve=>{enteredList=resolve;});const sawRun=new Promise<void>(resolve=>{enteredRun=resolve;});
+ const f=await scriptFixture({
+  faults:{beforeRead:async()=>{if(!holdRun)return;holdRun=false;enteredRun();await new Promise<void>(resolve=>{gate.releaseRun=resolve;});}},
+  beforeTrustList:async()=>{if(!armList)return;armList=false;enteredList();await new Promise<void>(resolve=>{gate.releaseList=resolve;});},
+  afterTrustRead:async()=>{gate.gap=true;gate.releaseRun();const started=await gate.run;if(started)await f.service.wait(started.id);},
+ });
+ try{
+  armList=true;
+  const duplicate=f.service.duplicateScenario({workspaceId:f.workspace.id,scenarioId:'one',expectedRevision:f.workspace.metadata!.revision});
+  await sawList;
+  holdRun=true;
+  gate.run=f.service.start({workspaceId:f.workspace.id,deviceId,scenarioId:'one'});
+  await sawRun;
+  gate.releaseList();
+  await assert.rejects(duplicate,/Active execution blocks duplication/);
+  assert.equal(gate.gap,false,'A run that begins during the trust read is rejected before the copy is saved');
+ }finally{gate.releaseList();gate.releaseRun();if(gate.run)await gate.run.then(run=>f.service.wait(run.id)).catch(()=>{});await f.cleanup();}
+});
