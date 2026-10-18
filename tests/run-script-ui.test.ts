@@ -550,6 +550,29 @@ test('a read-only editor takes focus when the inspector steps aside',async()=>{
   }finally{restore();await page.close();}
 });
 
+test('widening the window while typing in the script leaves focus in the code',async()=>{
+  const page=await mount([row('paid',0,narrowFingerprint,{source:'1+1'})]);
+  const restore=await showNarrowFixture(page);
+  try{
+    await click(page.document,'[data-script-id="paid"] .script-row-summary');
+    const name=page.document.querySelector<HTMLInputElement>('[aria-label="Script name"]')!;
+    const source=page.document.querySelector<HTMLTextAreaElement>('[aria-label="Script source"]')!;
+    assert.equal(page.document.activeElement,name);
+    source.focus();
+    await act(async()=>{
+      Object.getOwnPropertyDescriptor(page.window.HTMLTextAreaElement.prototype,'value')!.set!.call(source,'1+1\n2');
+      source.dispatchEvent(new page.window.Event('input',{bubbles:true}));
+    });
+    assert.equal(source.value,'1+1\n2');
+    assert.equal(page.document.activeElement,source);
+    Object.defineProperty(page.window,'innerWidth',{value:1600,configurable:true});
+    await act(async()=>page.window.dispatchEvent(new page.window.Event('resize')));
+    assert.equal(page.document.querySelector('.floating-inspector')?.getAttribute('data-inspector-yielded'),null);
+    assert.equal(page.document.activeElement,source);
+    assert.equal(source.value,'1+1\n2');
+  }finally{restore();await page.close();}
+});
+
 test('while running, the heading and hint span the status row',async()=>{
   const page=await mount([row('paid',0,fingerprint,{source:'1+1'})]);
   try{

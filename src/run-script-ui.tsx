@@ -55,9 +55,13 @@ export function ScriptEditor({row,view,sourceWorkspace,stepNumber,afterLast=fals
   onYieldRef.current=onYieldInspector;
   const [beside,setBeside]=useState<ScriptEditorPlace>();
   useEffect(()=>{
-    if(beside?.yieldsInspector){editorRef.current?.querySelector<HTMLElement>('button,input,textarea,select,a[href]')?.focus();return;}
-    if(!readOnly)nameRef.current?.focus();
-  },[row.id,readOnly,beside?.yieldsInspector]);
+    if(readOnly){
+      const trust=editorRef.current?.querySelector<HTMLElement>('[data-testid="trust-this-script"]');
+      (trust??editorRef.current?.querySelector<HTMLElement>('[aria-label="Close script editor"]'))?.focus();
+      return;
+    }
+    nameRef.current?.focus();
+  },[row.id]);
   useLayoutEffect(()=>{
     const place=()=>{
       const inspector=document.querySelector<HTMLElement>('.floating-inspector');
