@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile,readdir,writeFile,mkdir,rm} from 'node:fs/promises';
+import {readFile,readdir,writeFile,mkdir,rm,rename,symlink} from 'node:fs/promises';
 import {join} from 'node:path';
 import {scriptFixture,deviceId,assertTokenFree} from './run-script-helpers.js';
 import {mapScriptResults} from '../server/run-script-results.js';
@@ -116,5 +116,16 @@ test('unknown or extra script command metadata never claims a verified script pa
   const launch={command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}};
   const unknown={command:{unknownCommand:{}},metadata:{depth:0,status:'COMPLETED'}};
   const mapped=mapScriptResults(plan,[launch,unknown],'',false);assert.equal(mapped.ambiguous,true);assert.equal(mapped.scriptSteps[f.row.id].status,'not-run');
+ }finally{await f.cleanup();}
+});
+
+test('replaced run root cannot redirect cleanup or final record writes and retains ownership',async()=>{
+ let unrelated:string;
+ const f=await scriptFixture({customRun:async({directory})=>{
+  unrelated=join(directory,'..','unrelated');await mkdir(unrelated);await writeFile(join(unrelated,'keep'),'untouched');
+  await rename(directory,directory+'-moved');await symlink(unrelated,directory);
+  return {code:0,log:'fixture',cleanup:{verified:true,detail:'Stopped'}};
+ }});try{
+  const run=await f.start();await assert.rejects(f.service.wait(run.id),/Evidence root changed/);assert.equal(await readFile(join(unrelated!,'keep'),'utf8'),'untouched');await assert.rejects(readFile(join(unrelated!,'result.json')),{code:'ENOENT'});await assert.rejects(f.runner.acquireDevice(deviceId),/in progress/);
  }finally{await f.cleanup();}
 });

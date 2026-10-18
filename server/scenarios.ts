@@ -1,4 +1,4 @@
-import {protectRunEvidence,verifyEvidence,redact} from './run-script-evidence.js';
+import {protectRunEvidence,verifyEvidence,redact,removeRunEvidence,assertEvidenceRoot} from './run-script-evidence.js';
 import {mapScriptResults} from './run-script-results.js';
 import {EVIDENCE_SCRUB_FAILED,type ScriptRunResults,type ScriptExecutionReference} from './run-script-contract.js';
 import type {EvidenceScrubber} from './run-script-evidence.js';
@@ -14,7 +14,7 @@ import {projectCanvasRoute} from './canvas-route.js';
 import {refreshChecks,operationProblem} from '../shared/canvas-authoring.js';
 import {readScenarios,selectScenario,validateFlowInputs,type ScenarioDefinition} from './scenario-definitions.js';
 import {readAutomation,instrument,mapAutomation,metadataStatus,type Automation,type AutomationResult,type ExecutionItem} from './default-actions.js';
-import { mkdir, readFile, writeFile, realpath, readdir, mkdtemp, rm, rename } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, realpath, lstat, readdir, mkdtemp, rm, rename } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { parseAllDocuments } from 'yaml';
@@ -51,11 +51,13 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
   async function directory(kind: string, id: string) {
     const base = resolve(options.root, kind);
     await mkdir(base, { recursive: true });
+    if((await lstat(base)).isSymbolicLink())throw new Error('Workspace path escapes its root.');
     if (!(await realpath(base)).startsWith((await realpath(options.root)) + sep)) throw new Error('Workspace path escapes its root.');
     const path = join(base, validId(id));
     await mkdir(path, { recursive: true });
+    if((await lstat(path)).isSymbolicLink())throw new Error('Workspace path escapes its root.');
     if (!(await realpath(path)).startsWith((await realpath(base)) + sep)) throw new Error('Workspace path escapes its root.');
-    return path;
+    return realpath(path);
   }
   function authoredWorkspace(input: {id?:string;name:string;yaml:string;flows?:Record<string,string>;mock?:unknown;canvas?:unknown;automation?:unknown;scenarios?:unknown;omittedValues?:unknown},unresolved?:string[]):Workspace {
       if (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 120 || typeof input.yaml !== 'string' || Buffer.byteLength(input.yaml) > 100_000) throw new Error('Provide a workspace title and YAML up to 100 KB.');
@@ -257,7 +259,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
             if (confidential) {
               const privateRoot = join(options.root, 'private');
               await mkdir(privateRoot, { recursive: true, mode: 0o700 });
-              privateDirectory = await mkdtemp(join(privateRoot, id + '-'));
+              privateDirectory = await realpath(await mkdtemp(join(privateRoot, id + '-')));
             }
             const executionDirectory = privateDirectory ?? path;
             if (privateDirectory) {await writeFile(join(executionDirectory, 'flow.yaml'), workspace.yaml);if(executionYaml)await writeFile(join(executionDirectory,'.tnt-execution.yaml'),executionYaml);}
@@ -337,13 +339,13 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
             }catch{
               run.status='error';run.error=EVIDENCE_SCRUB_FAILED;run.log='';run.artifacts=[];run.steps=[];delete run.mock;delete run.canvas;delete run.automation;delete run.scriptSteps;delete run.expectedFailure;
               run.snapshot={id:'evidence-removed',workspaceId:authored.id,name:'Evidence removed',yaml:'',steps:[],toolVersions:{maestro:version,node:process.version},runtimeInputPolicy:'Evidence scrub failed'};
-              let removed=true;for(const directory of directories)try{for(const name of await readdir(directory))await rm(join(directory,name),{recursive:true,force:true});}catch{removed=false;}
+              const removed=await removeRunEvidence(directories);
               if(!removed)run.cleanup={verified:false,detail:'Unsafe evidence removal unverified; ownership retained.'};
               run.cleanup.detail=redact(run.cleanup.detail,token);
             }finally{
-              if(privateDirectory)try{await rm(privateDirectory,{recursive:true,force:true});run.cleanup.detail+=' Confidential temporary artifacts removed.';}catch{run.cleanup={verified:false,detail:'Confidential temporary artifact removal could not be verified.'};run.artifacts=[];}
+              if(privateDirectory)try{if(!await removeRunEvidence([privateDirectory]))throw new Error('Private root changed.');await rm(privateDirectory,{recursive:true,force:true});run.cleanup.detail+=' Confidential temporary artifacts removed.';}catch{run.cleanup={verified:false,detail:'Confidential temporary artifact removal could not be verified.'};run.artifacts=[];}
               run.finishedAt=new Date().toISOString();
-              try{await verifyEvidence({directories:[],token,value:run});await writeRecord(join(path,'result.json'),run);}
+              try{await verifyEvidence({directories:[],token,value:run});await assertEvidenceRoot(path);await writeRecord(join(path,'result.json'),run);}
               finally{signal?.removeEventListener('abort',abort);controllers.delete(id);if(run.cleanup.verified)await release();}
             }
           }

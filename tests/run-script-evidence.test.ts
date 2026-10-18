@@ -1,12 +1,12 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,symlink} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,symlink,realpath} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {protectRunEvidence,tokenForms,verifyEvidence} from '../server/run-script-evidence.js';
 const token='secret +/ไทย?=';
 test('recursive JSON keys/evaluatedCommand/errors, logs and binary scan; visible redaction and script deletion',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-scrub-'));try{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'tnt-scrub-')));try{
   await mkdir(join(root,'raw','nested'),{recursive:true});const leak=tokenForms(token).join(' ');
   await writeFile(join(root,'raw','nested','commands-1.json'),JSON.stringify({[token]:{command:{env:leak},metadata:{error:{message:'ผิด '+leak},evaluatedCommand:leak}}}));
   await writeFile(join(root,'maestro.log'),leak);const script=join(root,'.tnt-script-0001.js');await writeFile(script,'// generated');
@@ -17,7 +17,7 @@ test('recursive JSON keys/evaluatedCommand/errors, logs and binary scan; visible
  }finally{await rm(root,{recursive:true,force:true});}
 });
 for(const mode of ['throw','leftover','binary','malformed-json','symlink'] as const)test('fails closed: '+mode,async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-scrub-fail-'));const outside=await mkdtemp(join(tmpdir(),'tnt-scrub-outside-'));try{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'tnt-scrub-fail-')));const outside=await realpath(await mkdtemp(join(tmpdir(),'tnt-scrub-outside-')));try{
   await writeFile(join(root,'commands.json'),mode==='malformed-json'?'{broken':JSON.stringify({token}));
   const script=join(root,'.tnt-script-0001.js');await writeFile(script,'// generated');
   await writeFile(join(outside,'keep'),'untouched '+token);
@@ -28,11 +28,23 @@ for(const mode of ['throw','leftover','binary','malformed-json','symlink'] as co
  }finally{await rm(root,{recursive:true,force:true});await rm(outside,{recursive:true,force:true});}
 });
 test('no-mock runs take the same scrub path and remove generated files',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-scrub-nomock-'));try{const script=join(root,'.tnt-script-0001.js');await writeFile(script,'output.X=1');const result=await protectRunEvidence({directories:[root],value:{log:'hello'},scriptFiles:[script]});assert.equal(result.ok,true);assert.deepEqual(await readdir(root),[]);}finally{await rm(root,{recursive:true,force:true});}
+ const root=await realpath(await mkdtemp(join(tmpdir(),'tnt-scrub-nomock-')));try{const script=join(root,'.tnt-script-0001.js');await writeFile(script,'output.X=1');const result=await protectRunEvidence({directories:[root],value:{log:'hello'},scriptFiles:[script]});assert.equal(result.ok,true);assert.deepEqual(await readdir(root),[]);}finally{await rm(root,{recursive:true,force:true});}
 });
 test('independent parsed JSON scan catches escaped token values and keys left by a no-op scrubber',async()=>{
- const root=await mkdtemp(join(tmpdir(),'tnt-scrub-escaped-'));try{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'tnt-scrub-escaped-')));try{
   const escaped='secret"\\escape';await writeFile(join(root,'commands.json'),JSON.stringify({[escaped]:{message:escaped}}));
   const result=await protectRunEvidence({directories:[root],token:escaped,value:{log:'safe'},scriptFiles:[]},async()=>{});assert.deepEqual(result,{ok:false,removed:true});
  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('changed root or ancestor symlinks never cause deletion outside the captured run',async()=>{
+ for(const ancestor of [false,true]){
+  const parent=await realpath(await mkdtemp(join(tmpdir(),'tnt-scrub-root-')));const outside=await realpath(await mkdtemp(join(tmpdir(),'tnt-scrub-target-')));
+  const root=ancestor?join(parent,'run'):parent;const target=ancestor?join(outside,'run'):outside;
+  try{
+   if(ancestor)await mkdir(target);await writeFile(join(target,'keep'),'untouched '+token);
+   await rm(parent,{recursive:true});await symlink(outside,parent);
+   const result=await protectRunEvidence({directories:[root],token,value:{log:token},scriptFiles:[]});assert.deepEqual(result,{ok:false,removed:false});assert.equal(await readFile(join(target,'keep'),'utf8'),'untouched '+token);
+  }finally{await rm(parent,{recursive:true,force:true});await rm(outside,{recursive:true,force:true});}
+ }
 });

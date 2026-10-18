@@ -1,5 +1,5 @@
-import {lstat,readdir,readFile,writeFile,rm} from 'node:fs/promises';
-import {join,basename} from 'node:path';
+import {lstat,readdir,readFile,writeFile,rm,realpath} from 'node:fs/promises';
+import {join,basename,resolve} from 'node:path';
 import {REDACTED} from './run-script-contract.js';
 export type EvidenceInput={directories:string[];token?:string;value:unknown};
 export type EvidenceScrubber=(input:EvidenceInput)=>Promise<void>;
@@ -11,7 +11,12 @@ function redactValue(value:unknown,token?:string):unknown {
  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,child])=>[redact(key,token),redactValue(child,token)]));
  return value;
 }
+export async function assertEvidenceRoot(directory:string){
+ // Callers capture canonical directories before launching tools. Reject changed ancestors too.
+ if(await realpath(directory)!==resolve(directory)||(await lstat(directory)).isSymbolicLink())throw new Error('Evidence root changed.');
+}
 async function files(directory:string):Promise<string[]>{
+ await assertEvidenceRoot(directory);
  const result:string[]=[];
  async function walk(path:string){
   const info=await lstat(path);
@@ -23,6 +28,7 @@ async function files(directory:string):Promise<string[]>{
  await walk(directory);return result;
 }
 export const defaultEvidenceScrubber:EvidenceScrubber=async input=>{
+ if(!input.token)return; // No secret exists to replace; the same terminal guard still deletes scripts and checks roots.
  for(const directory of input.directories)for(const file of await files(directory)){
   const bytes=await readFile(file);const text=bytes.toString('utf8');
   if(/^commands.*\.json$/.test(basename(file)))await writeFile(file,JSON.stringify(redactValue(JSON.parse(text),input.token),null,2));
@@ -39,7 +45,16 @@ export async function verifyEvidence(input:EvidenceInput){
  const scanValue=(value:unknown):void=>{if(typeof value==='string')scan(Buffer.from(value));else if(Array.isArray(value))value.forEach(scanValue);else if(value&&typeof value==='object')for(const [key,child] of Object.entries(value)){scan(Buffer.from(key));scanValue(child);}};
  scanValue(input.value);
  scan(Buffer.from(JSON.stringify(input.value)??''));
- for(const directory of input.directories)for(const file of await files(directory)){scan(Buffer.from(file));const bytes=await readFile(file);scan(bytes);if(/^commands.*\.json$/.test(basename(file)))scanValue(JSON.parse(bytes.toString('utf8')));}
+ for(const directory of input.directories)for(const file of await files(directory)){if(!forms.length)continue;scan(Buffer.from(file));const bytes=await readFile(file);scan(bytes);if(/^commands.*\.json$/.test(basename(file)))scanValue(JSON.parse(bytes.toString('utf8')));}
+}
+/** Delete only captured physical roots, never a substituted root/ancestor symlink. */
+export async function removeRunEvidence(directories:string[]){
+ let removed=true;
+ for(const directory of directories)try{
+  await assertEvidenceRoot(directory);
+  for(const entry of await readdir(directory))await rm(join(directory,entry),{recursive:true,force:true});
+ }catch{removed=false;}
+ return removed;
 }
 /** All terminal paths call this before mapping or listing artifacts, even without a mock. */
 export async function protectRunEvidence<T>(input:EvidenceInput&{value:T;scriptFiles:string[]},scrubber:EvidenceScrubber=defaultEvidenceScrubber):Promise<{ok:true;value:T}|{ok:false;removed:boolean}>{
@@ -48,10 +63,6 @@ export async function protectRunEvidence<T>(input:EvidenceInput&{value:T;scriptF
  for(const file of input.scriptFiles)try{await rm(file,{force:true});}catch{failed=true;}
  try{await verifyEvidence(input);}catch{failed=true;}
  if(!failed)return {ok:true,value:input.value as T};
- let removed=true;
- // Deny all evidence, including hidden tool output and malformed commands, rather than publish a partially scrubbed tree.
- for(const directory of input.directories)try{
-  for(const entry of await readdir(directory))await rm(join(directory,entry),{recursive:true,force:true});
- }catch{removed=false;}
- return {ok:false,removed};
+ // Deny all evidence, including hidden output, rather than publish a partially scrubbed tree.
+ return {ok:false,removed:await removeRunEvidence(input.directories)};
 }
