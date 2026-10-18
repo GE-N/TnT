@@ -48,3 +48,16 @@ test('changed root or ancestor symlinks never cause deletion outside the capture
   }finally{await rm(parent,{recursive:true,force:true});await rm(outside,{recursive:true,force:true});}
  }
 });
+for(const offset of [0,1,2])test('base64 scrub and independent scan cover token alignment '+offset+' in a longer blob',async()=>{
+ const secret='a1b2c3d4'.repeat(8);
+ const prefix=Buffer.from([0xe9,0x52].slice(0,offset));const blob=Buffer.concat([prefix,Buffer.from(secret),Buffer.from('suffix')]).toString('base64');
+ assert.equal(blob.includes(Buffer.from(secret).toString('base64')),false,'Fixture must require an embedded-token pattern');
+ for(const noop of [false,true]){
+  const root=await realpath(await mkdtemp(join(tmpdir(),'tnt-base64-offset-')));try{
+   await writeFile(join(root,'commands.json'),JSON.stringify({[blob]:{metadata:{evaluatedCommand:blob,error:{message:'Bad '+blob}}}}));await writeFile(join(root,'maestro.log'),blob);
+   const input={directories:[root],token:secret,value:{log:blob},scriptFiles:[]};const result=await protectRunEvidence(input,noop?async()=>{}:undefined);
+   if(noop){assert.deepEqual(result,{ok:false,removed:true});assert.deepEqual(await readdir(root),[]);}
+   else {assert.equal(result.ok,true);assert.match(input.value.log,/\[redacted\]/);assert.match(await readFile(join(root,'maestro.log'),'utf8'),/\[redacted\]/);const json=JSON.parse(await readFile(join(root,'commands.json'),'utf8'));const key=Object.keys(json)[0];assert.match(key,/\[redacted\]/);assert.match(json[key].metadata.error.message,/Bad .*\[redacted\]/);await verifyEvidence(input);}
+  }finally{await rm(root,{recursive:true,force:true});}
+ }
+});

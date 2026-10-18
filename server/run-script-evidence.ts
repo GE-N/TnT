@@ -3,7 +3,14 @@ import {join,basename,resolve} from 'node:path';
 import {REDACTED} from './run-script-contract.js';
 export type EvidenceInput={directories:string[];token?:string;value:unknown};
 export type EvidenceScrubber=(input:EvidenceInput)=>Promise<void>;
-export function tokenForms(token?:string):string[]{return token?[...new Set([token,encodeURIComponent(token),Buffer.from(token).toString('base64')])].sort((a,b)=>b.length-a.length):[];}
+export function tokenForms(token?:string):string[]{
+ if(!token)return [];
+ const bytes=Buffer.from(token);
+ // Keep only complete six-bit groups belonging to the token. Prefix/suffix bits vary
+ // when it sits inside a larger base64 blob (for example user:token in Basic auth).
+ const aligned=[0,1,2].map(offset=>Buffer.concat([Buffer.alloc(offset),bytes]).toString('base64').slice(Math.ceil(offset*8/6),Math.floor((offset+bytes.length)*8/6)));
+ return [...new Set([token,encodeURIComponent(token),bytes.toString('base64'),...aligned])].filter(Boolean).sort((a,b)=>b.length-a.length);
+}
 export function redact(value:string,token?:string){for(const form of tokenForms(token))value=value.replaceAll(form,REDACTED);return value;}
 function redactValue(value:unknown,token?:string):unknown {
  if(typeof value==='string')return redact(value,token);
