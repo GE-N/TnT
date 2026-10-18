@@ -56,9 +56,9 @@ for(const mode of ['inserted-launch','existing-launch','empty','repeated-visit']
  }finally{await f.cleanup();}
 });
 
-test('canvas script throwing before authored step 2 leaves step 2 and every later authored step Not run',async()=>{
+test('canvas script throwing before authored step 2 leaves step 2+ Not run, including server duplicates',async()=>{
  const f=await scriptFixture();try{
-  const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:['first','second','third'].map(id=>({id,label:id,role:'assertion',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:id}}))}],edges:[],paths:[{id:'path',name:'One',scenarioId:'one',screenId:'home',edgeIds:[],visits:[{id:'visit',operationIds:['first','second','third']}]}]};
+  const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:['first','second','third'].map(id=>({id,label:id,role:'assertion',scenarioIds:['one'],reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:id}}))}],edges:[],paths:[{id:'path',name:'One',scenarioId:'one',screenId:'home',edgeIds:[],visits:[{id:'visit',operationIds:['first','second','third']}]}]};
   const yaml=writeChecks('appId: com.example.HybridApp\n---\n- launchApp\n',{screens:[],edges:[],paths:[]},canvas).replace('- launchApp\n','');
   const refs=(await f.service.references({yaml})).references;
   for(const check of authoredChecks(yaml))canvas.screens[0].tests.find(test=>test.id===check.id)!.reference=refs.find(ref=>ref.kind==='step'&&ref.index===check.index)!;
@@ -72,6 +72,17 @@ test('canvas script throwing before authored step 2 leaves step 2 and every late
   assert.deepEqual(result.snapshot.steps.map(step=>step.id),['step-1','step-2','step-3']);
   assert.equal(result.scriptSteps![row.id].status,'script-error');assert.equal(result.scriptSteps![later.id].status,'not-run');assert.equal(f.outputs[0].mustNotRun,undefined);
   assert.equal(result.canvas?.occurrences?.[0].stepId,'step-1');
+  const saved=await f.service.workspace(f.workspace.id);
+  const duplicated=await f.service.duplicateScenario({workspaceId:saved.id,scenarioId:'one',expectedRevision:saved.metadata!.revision});
+  const copy=duplicated.scenarios!.at(-1)!;const path=duplicated.canvas!.paths.find(path=>path.id===copy.pathId)!;
+  assert.notEqual(copy.pathId,'path');assert.equal(path.scenarioId,copy.id);assert.notEqual(path.visits![0].id,'visit');assert.deepEqual(path.visits![0].operationIds,['first','second','third']);
+  assert.ok(duplicated.canvas!.screens[0].tests.every(test=>test.scenarioIds?.includes('one')&&test.scenarioIds.includes(copy.id)));
+  assert.ok(copy.scripts!.every(copied=>copied.id!==row.id&&copied.id!==later.id));
+  assert.deepEqual(copy.scripts!.map(({id,...row})=>row),[row,later].map(({id,...row})=>row));
+  const copiedRun=await f.service.wait((await f.service.start({workspaceId:saved.id,scenarioId:copy.id,deviceId:f.calls[0].deviceId})).id);
+  assert.equal(copiedRun.status,'script-error');assert.deepEqual(copiedRun.steps.map(step=>step.status),['passed','not-run','not-run']);
+  assert.deepEqual(Object.keys(copiedRun.scriptSteps!),copy.scripts!.map(row=>row.id));
+  assert.deepEqual(duplicated.scenarios![0].scripts,[row,later],'Duplicating must preserve the original script identities');
  }finally{await f.cleanup();}
 });
 
