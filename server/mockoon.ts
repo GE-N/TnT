@@ -8,7 +8,7 @@ import type { Cleanup } from './scenarios.js';
 
 export type MockPlan = { environment: Environment; port: number; routeId: string; responseId: string; backendUrl: string; passthroughRouteIds: string[]; fromScreen: string; toScreen: string; failureSemantics: string };
 export type MockResult = {
-  intent: { status: 'pending' | 'acknowledged' | 'failed'; routeId: string; responseId: string; method: string; endpoint: string; httpStatus: number; failureSemantics: string; acknowledgedAt?: string };
+  intent: { status: 'pending' | 'acknowledged' | 'failed'; responseRole: 'default'; routeId: string; responseId: string; method: string; endpoint: string; httpStatus: number; failureSemantics: string; acknowledgedAt?: string };
   evidence: { status: 'unavailable' | 'captured'; detail: string; transactions: { method: string; path: string; statusCode: number; routeId?: string; responseId?: string; proxied: boolean; timestampMs: number }[] };
   cleanup: Cleanup;
 };
@@ -38,17 +38,16 @@ function isLoopback(hostname: string) {
   return host==='localhost' || host.endsWith('.localhost') || /^127\./.test(host) || host==='0.0.0.0' || host==='[::1]' || host==='[::]' || /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]+\]$/.test(host);
 }
 
-export function createMockSession(plan: MockPlan, directory: string): { result: MockResult; prepare(signal: AbortSignal): Promise<void>; evidence(confidential: boolean): Promise<void>; cleanup(): Promise<Cleanup> } {
+export function createMockSession(plan: MockPlan, directory: string, options?:{overrideResponse?:boolean;prepareProcess?:()=>Promise<void>|void;cancelProcess?:()=>Promise<void>|void;noteProcess?:(pid:number)=>Promise<void>|void;spawn?:typeof spawn}): { scriptAccess():{url:string;token:string}; result: MockResult; prepare(signal: AbortSignal): Promise<void>; evidence(confidential: boolean): Promise<void>; cleanup(): Promise<Cleanup> } {
   const route = plan.environment.routes.find(route => route.uuid === plan.routeId)!;
-  const response = route.responses.find(response => response.uuid === plan.responseId)!;
-  const result: MockResult = { intent: { status: 'pending', routeId: route.uuid, responseId: response.uuid, method: route.method, endpoint: route.endpoint, httpStatus: response.statusCode, failureSemantics: plan.failureSemantics }, evidence: { status: 'unavailable', detail: 'No observed requests captured.', transactions: [] }, cleanup: { verified: false, detail: 'Pending' } };
+  const response = route.responses.find(response => options?.overrideResponse===false?response.default:response.uuid===plan.responseId)??route.responses[0];
+  const result: MockResult = { intent: { status: 'pending', responseRole:'default',routeId: route.uuid, responseId: response.uuid, method: route.method, endpoint: route.endpoint, httpStatus: response.statusCode, failureSemantics: 'Configured default response: '+plan.failureSemantics }, evidence: { status: 'unavailable', detail: 'Intent records the configured default response; rules and modes may select another response. No observed requests captured.', transactions: [] }, cleanup: { verified: false, detail: 'Pending' } };
   const token = randomBytes(32).toString('hex');
   const baseline = { ...structuredClone(plan.environment), uuid: randomUUID(), name: 'TnT owned test copy', hostname: '127.0.0.1', port: plan.port, proxyMode: true, proxyHost: plan.backendUrl };
   const selected = structuredClone(baseline);
   selected.routes = selected.routes.filter(item => !plan.passthroughRouteIds.includes(item.uuid));
   const selectedRoute = selected.routes.find(item => item.uuid === plan.routeId)!;
-  selectedRoute.responses = [{ ...structuredClone(response), default: true, rules: [] }];
-  selectedRoute.responseMode = null;
+  if(options?.overrideResponse!==false)for(const item of selectedRoute.responses)item.default=item.uuid===response.uuid;
   let child: ReturnType<typeof spawn> | undefined;
   let exited = false;
   let ready = false;
@@ -72,13 +71,17 @@ export function createMockSession(plan: MockPlan, directory: string): { result: 
   }
   return {
     result,
+    scriptAccess:()=>({url:base,token}),
     async prepare(signal) {
       const version=JSON.parse(await readFile(resolve('node_modules/@mockoon/cli/package.json'),'utf8')).version;
       if(version!=='9.9.0') throw new Error('Use the pinned Mockoon CLI 9.9.0 for this adapter.');
       const file = resolve(directory, 'mock-environment.json');
-      await writeFile(file, JSON.stringify(baseline), {mode:0o600});
-      child = spawn(process.execPath, [resolve('node_modules/@mockoon/cli/bin/run.js'), 'start', '--data', file, '--hostname', '127.0.0.1', '--port', String(plan.port), '--disable-log-to-file', '--max-transaction-logs', '100', '--max-request-body-size', '1mb'], { detached:true, cwd:directory, env:{ PATH:process.env.PATH, HOME:directory, TMPDIR:process.env.TMPDIR, MOCKOON_ADMIN_API_TOKEN:token }, stdio:['ignore','ignore','ignore'] });
+      await writeFile(file, JSON.stringify(selected), {mode:0o600});
+      if(options?.prepareProcess)await options.prepareProcess();
+      try{child = (options?.spawn??spawn)(process.execPath, [resolve('node_modules/@mockoon/cli/bin/run.js'), 'start', '--data', file, '--hostname', '127.0.0.1', '--port', String(plan.port), '--disable-log-to-file', '--max-transaction-logs', '100', '--max-request-body-size', '1mb'], { detached:true, cwd:directory, env:{ PATH:process.env.PATH, HOME:directory, TMPDIR:process.env.TMPDIR, MOCKOON_ADMIN_API_TOKEN:token }, stdio:['ignore','ignore','ignore'] });}
+      catch(error){await options?.cancelProcess?.();throw error;}
       child.on('error', error => { processError = error.message; }); child.on('exit', ()=>{exited=true;});
+      if(child.pid)await options?.noteProcess?.(child.pid);else await options?.cancelProcess?.();
       try {
         const deadline = Date.now() + 10_000;
         while (Date.now() < deadline) {
@@ -103,7 +106,7 @@ export function createMockSession(plan: MockPlan, directory: string): { result: 
         const observed=logs.filter(log=>!String(log.request.urlPath).startsWith('/mockoon-admin'));
         result.evidence.transactions=observed.map(log=>({method:String(log.request.method),path:String(log.request.route || log.request.urlPath).split('?')[0],statusCode:Number(log.response.statusCode),routeId:log.routeUUID,responseId:log.routeResponseUUID,proxied:log.proxied===true,timestampMs:Number(log.timestampMs)}));
         result.evidence.status=observed.length ? 'captured':'unavailable';
-        result.evidence.detail=observed.length ? 'Observed at the owned Mockoon server; callers are not independently attributed to the app. Bodies, query values and headers omitted. Latest 100 transactions only.':'No requests observed at the owned Mockoon server.';
+        result.evidence.detail='Intent records the configured default response; rules and modes may select another response. '+(observed.length ? 'Observed at the owned Mockoon server; callers are not independently attributed to the app. Bodies, query values and headers omitted. Latest 100 transactions only.':'No requests observed at the owned Mockoon server.');
       } catch { result.evidence.detail='Mockoon transaction capture unavailable.'; }
     },
     async cleanup() {

@@ -1,3 +1,5 @@
+import {ScriptBlocked} from './script-validation.js';
+import {ScriptTrustConflict} from './script-trust-store.js';
 import {DraftConflict,WorkspaceConflict,WorkspacePayloadTooLarge} from './workspace-store.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
@@ -54,6 +56,8 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         return response.end(image);
       }
       if (scenarios) {
+        if(request.method==='GET'&&url.pathname==='/api/scripts/trust')return json(200,await scenarios.scriptTrust(url.searchParams.get('workspace')??''));
+        if(request.method==='POST'&&url.pathname==='/api/scripts/trust')return json(200,await scenarios.trustScript(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/canvas/references') return json(200, await scenarios.references(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/automation/preview') return json(200, await scenarios.preview(await readJson(request)));
         if (request.method === 'GET' && url.pathname === '/api/session') return json(200, await scenarios.session());
@@ -64,6 +68,7 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         if (request.method === 'POST' && url.pathname === '/api/workspaces/import/review') return json(200, await scenarios.reviewWorkspacePackage(await readJson(request,2_300_000)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/import') return json(200, await scenarios.importWorkspace(await readJson(request,2_300_000)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/copy') return json(200, await scenarios.copyWorkspace(await readJson(request)));
+        if (request.method === 'POST' && url.pathname === '/api/scenarios/duplicate') return json(200, await scenarios.duplicateScenario(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/draft') return json(200, await scenarios.createDraftWorkspace(await readJson(request,17_000_000)));
         const draftDiscard = /^\/api\/workspaces\/([0-9a-f-]{36})\/draft\/discard$/.exec(url.pathname);
         if (request.method === 'POST' && draftDiscard) return json(200, await scenarios.discardDraft(draftDiscard[1],(await readJson(request)).expectedDraftRevision));
@@ -126,6 +131,8 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       }
       return json(404, { error: 'Unknown runner operation.' });
     } catch (error) {
+      if(error instanceof ScriptBlocked)return json(url.pathname==='/api/runs'?422:400,{blocked:error.blocked,error:error.message});
+      if(error instanceof ScriptTrustConflict)return json(409,{error:error.message});
       const code = (error as NodeJS.ErrnoException).code;
       return json(error instanceof WorkspacePayloadTooLarge?413:error instanceof WorkspaceConflict||error instanceof DraftConflict?409:code === 'ENOENT' ? 404 : 400, { error: message(error) });
     }

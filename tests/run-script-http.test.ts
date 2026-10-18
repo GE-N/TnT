@@ -1,0 +1,80 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {createApiHandler} from '../server/http.js';
+import {scriptFixture,deviceId} from './run-script-helpers.js';
+async function fixture(terminal?:'cancel'){
+ const f=await scriptFixture({mock:true,terminal});const server=createServer(createApiHandler(f.runner,f.root,undefined,f.service));await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address();if(!address||typeof address==='string')throw new Error('No port');const base=`http://127.0.0.1:${address.port}`;
+ const token=(await (await fetch(base+'/api/status')).json()).token;
+ const request=(path:string,body?:unknown,headers:Record<string,string>={})=>fetch(base+path,{method:body===undefined?'GET':'POST',headers:{'x-tnt-token':token,origin:base,'content-type':'application/json',...headers},body:body===undefined?undefined:JSON.stringify(body)});
+ return {...f,request,close:async()=>{await new Promise<void>(resolve=>server.close(()=>resolve()));await f.cleanup();}};
+}
+test('Run returns typed 422 before any launch; trust routes require origin/session and stale hash is 409',async()=>{
+ const f=await fixture();try{
+  await f.service.save({...f.workspace,scenarios:[{...f.scenario,scripts:[{...f.row,source:' '}]}]});const before=f.stats();
+  const blocked=await f.request('/api/runs',{workspaceId:f.workspace.id,deviceId,scenarioId:'one'});assert.equal(blocked.status,422);assert.equal(blocked.headers.get('cache-control'),'no-store');assert.equal((await blocked.json()).blocked[0].message,'Script is empty · add code or delete the row');assert.deepEqual(f.stats(),before);
+  const list=await f.request('/api/scripts/trust?workspace='+f.workspace.id);const {scripts}=await list.json();assert.equal(scripts.length,1);
+  const stale=await f.request('/api/scripts/trust',{workspace:f.workspace.id,rowId:f.row.id,hash:'a'.repeat(64)});assert.equal(stale.status,409);
+  const good=await f.request('/api/scripts/trust',{workspace:f.workspace.id,rowId:f.row.id,hash:scripts[0].hash});assert.equal(good.status,200);
+  const bulk=await f.request('/api/scripts/trust',{workspace:f.workspace.id,scripts,trustAll:true});assert.equal(bulk.status,400);
+  const cross=await f.request('/api/scripts/trust',{workspace:f.workspace.id,rowId:f.row.id,hash:scripts[0].hash},{origin:'http://other.local'});assert.equal(cross.status,403);
+  const anonymous=await f.request('/api/scripts/trust?workspace='+f.workspace.id,undefined,{'x-tnt-token':''});assert.equal(anonymous.status,403);
+ }finally{await f.close();}
+});
+test('Duplicate API returns server-generated row IDs to the UI',async()=>{
+ const f=await fixture();try{
+  const response=await f.request('/api/scenarios/duplicate',{workspaceId:f.workspace.id,scenarioId:'one',expectedRevision:1});assert.equal(response.status,200);
+  const saved=await response.json();assert.equal(saved.scenarios.length,2);assert.equal(saved.metadata.revision,2);
+  assert.equal(saved.scenarios[0].scripts[0].id,f.row.id);assert.notEqual(saved.scenarios[1].scripts[0].id,f.row.id);
+  assert.deepEqual(JSON.parse(JSON.stringify((await f.service.workspace(f.workspace.id)).scenarios)),saved.scenarios);
+ }finally{await f.close();}
+});
+test('workspace and Trust HTTP APIs return durable import/copy source context',async()=>{
+ const f=await fixture();try{
+  const exported=await f.request('/api/workspaces/export',{id:f.workspace.id,expectedRevision:1,includeValues:true});const pkg=(await exported.json()).package;
+  pkg.workspace.name='Unverified package claim';
+  const response=await f.request('/api/workspaces/import',{package:pkg,name:'Imported destination',filename:'claimed-source.json'});assert.equal(response.status,200);const imported=await response.json();
+  const source={kind:'import',name:'Unverified package claim',filename:'claimed-source.json'};
+  assert.deepEqual(imported.metadata.sourceWorkspace,source);
+  assert.deepEqual((await (await f.request('/api/workspaces/'+imported.id)).json()).metadata.sourceWorkspace,source);
+  const trust=await (await f.request('/api/scripts/trust?workspace='+imported.id)).json();assert.deepEqual(trust.sourceWorkspace,source);assert.equal(trust.scripts[0].trusted,false);
+  const approval=await f.request('/api/scripts/trust',{workspace:imported.id,rowId:trust.scripts[0].rowId,hash:trust.scripts[0].hash});assert.equal(approval.status,200);assert.deepEqual((await approval.json()).sourceWorkspace,source);
+  const copied=await f.request('/api/workspaces/copy',{...f.workspace,id:undefined,sourceWorkspaceId:f.workspace.id,name:'Copy destination',metadata:{sourceWorkspace:{kind:'copy',name:'Spoofed'}}});assert.equal(copied.status,200);const copy=await copied.json();
+  assert.deepEqual(copy.metadata.sourceWorkspace,{kind:'copy',name:f.workspace.name});
+  assert.deepEqual((await (await f.request('/api/scripts/trust?workspace='+copy.id)).json()).sourceWorkspace,{kind:'copy',name:f.workspace.name});
+ }finally{await f.close();}
+});
+for(const mode of ['run','batch'] as const)test('Duplicate API refuses an active '+mode+' until cleanup without changing the workspace',async()=>{
+ const f=await fixture('cancel');let id:string|undefined;
+ try{
+  const active=mode==='run'?await f.start():await f.service.startBatch({workspaceId:f.workspace.id,deviceId});id=active.id;
+  while(!f.calls.length)await new Promise<void>(resolve=>setImmediate(resolve));
+  const before=await f.service.workspace(f.workspace.id);
+  const input={workspaceId:f.workspace.id,scenarioId:'one',expectedRevision:1};
+  const blocked=await f.request('/api/scenarios/duplicate',input);assert.equal(blocked.status,400);assert.match((await blocked.json()).error,/Active execution blocks duplication/);
+  assert.deepEqual(await f.service.workspace(f.workspace.id),before);
+  assert.equal((mode==='run'?await f.service.result(id):await f.service.batch(id)).status,'running');
+  if(mode==='run')await f.service.cancel(id);else await f.service.cancelBatch(id);id=undefined;
+  const allowed=await f.request('/api/scenarios/duplicate',input);assert.equal(allowed.status,200);assert.equal((await allowed.json()).metadata.revision,2);
+ }finally{if(id){if(mode==='run')await f.service.cancel(id);else await f.service.cancelBatch(id);}await f.close();}
+});
+test('duplication refuses a batch reservation before the first run dispatch',async()=>{
+ const f=await fixture('cancel');const starting=f.service.startBatch({workspaceId:f.workspace.id,deviceId});
+ try{
+  await assert.rejects(f.service.duplicateScenario({workspaceId:f.workspace.id,scenarioId:'one',expectedRevision:1}),/Active execution blocks duplication/);
+ }finally{await f.service.cancelBatch((await starting).id);await f.close();}
+});
+test('reserved input and variable errors are structured at save/import/runtime/preflight, including unused nested flows',async()=>{
+ const f=await fixture();try{
+  const badYaml=f.workspace.yaml.replace('tapOn: Load','evalScript: ${TNT_MOCK_TOKEN + ""}');
+  const save=await f.request('/api/workspaces',{...f.workspace,yaml:badYaml});assert.equal(save.status,400);assert.equal((await save.json()).blocked[0].kind,'reserved-variable');
+  const unused=await f.request('/api/workspaces',{...f.workspace,flows:{'unused.yaml':badYaml}});assert.equal(unused.status,400);
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});pkg.package.workspace.yaml=badYaml;
+  const imported=await f.request('/api/workspaces/import',{package:pkg.package,name:'Rejected'});assert.equal(imported.status,400);assert.equal((await imported.json()).blocked[0].message,'Reserved TnT variable');
+  const runtime=await f.request('/api/runs',{workspaceId:f.workspace.id,deviceId,scenarioId:'one',runtimeInputs:{TNT_MOCK_URL:'shadow'}});assert.equal(runtime.status,422);assert.equal((await runtime.json()).blocked[0].kind,'reserved-input');
+  const disk={...f.workspace,yaml:badYaml};await writeFile(join(f.root,'workspaces',f.workspace.id,'workspace.json'),JSON.stringify(disk));
+  const before=f.stats();const preflight=await f.request('/api/runs',{workspaceId:f.workspace.id,deviceId,scenarioId:'one'});assert.equal(preflight.status,422);assert.deepEqual(f.stats(),before);
+ }finally{await f.close();}
+});
