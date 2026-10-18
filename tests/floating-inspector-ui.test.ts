@@ -793,7 +793,7 @@ test('ArrowUp moves backwards and wraps, while ArrowDown wraps forwards',async()
  try{
   await page.click(page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!);const combo=page.document.querySelector<HTMLInputElement>('[role=combobox]')!;
   const active=()=>page.document.querySelector('[role=option][aria-selected=true]')!.textContent;
-  assert.equal(active(),'Tap');await page.press(combo,'ArrowUp');assert.equal(active(),'assertNotVisible');await page.press(combo,'ArrowUp');assert.equal(active(),'assertVisible');await page.press(combo,'ArrowDown');assert.equal(active(),'assertNotVisible');await page.press(combo,'ArrowDown');assert.equal(active(),'Tap');
+  assert.equal(active(),'Tap');await page.press(combo,'ArrowUp');assert.equal(active(),'</> Run script JavaScript between steps');await page.press(combo,'ArrowUp');assert.equal(active(),'assertNotVisible');await page.press(combo,'ArrowUp');assert.equal(active(),'assertVisible');await page.press(combo,'ArrowDown');assert.equal(active(),'assertNotVisible');await page.press(combo,'ArrowDown');assert.equal(active(),'</> Run script JavaScript between steps');await page.press(combo,'ArrowDown');assert.equal(active(),'Tap');
  }finally{await page.close();}
 });
 
@@ -815,7 +815,7 @@ test('Escape discards a new blank selector and leaves existing Undo history unch
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
   const trigger=page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!;
-  await page.click(trigger);const combo=page.document.querySelector('[role=combobox]')!;await page.press(combo,'ArrowUp');await page.press(combo,'Enter');
+  await page.click(trigger);const combo=page.document.querySelector('[role=combobox]')!;await page.press(combo,'ArrowUp');await page.press(combo,'ArrowUp');await page.press(combo,'Enter');
   const newRow=page.section(1,'Home')!.querySelector<HTMLElement>('.visit-step:last-of-type')!;const input=newRow.querySelector<HTMLInputElement>('input[aria-label$=" selector"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,'Later');input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});await page.press(input,'Enter');
   await page.click([...newRow.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='↑ Move above actions')!);
   const before=page.saved();const undo=[...page.document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Undo canvas deletion')!;assert.equal(undo.disabled,false);
@@ -856,7 +856,7 @@ test('navigation warning appears only at the first affected step and follows the
  try{
   const before=page.saved();const title='Settings with a very long destination name for keyboard and touch users';await page.restore({graph:{...before.graph,screens:before.graph.screens.map(screen=>screen.id==='profile'?{...screen,title}:screen)},yaml:before.yaml});
   const trigger=page.card()!.querySelector<HTMLButtonElement>('.add-visit-step')!;
-  for(const value of ['First affected','Second affected']){await page.click(trigger);const combo=page.document.querySelector('[role=combobox]')!;await page.press(combo,'ArrowUp');await page.press(combo,'Enter');const input=page.document.activeElement as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});await page.press(input,'Enter');}
+  for(const value of ['First affected','Second affected']){await page.click(trigger);const combo=page.document.querySelector('[role=combobox]')!;await page.press(combo,'ArrowUp');await page.press(combo,'ArrowUp');await page.press(combo,'Enter');const input=page.document.activeElement as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});await page.press(input,'Enter');}
   assert.equal(page.card()!.querySelectorAll('.navigation-hint').length,1);assert.equal(page.card()!.querySelector('.navigation-hint p')!.textContent,'⚠ This step runs after navigation, on '+title);assert.match(page.card()!.querySelector('.navigation-hint')!.closest('.visit-step')!.textContent!,/First affected/);
   await page.click(page.card()!.querySelector<HTMLButtonElement>('.navigation-hint button')!);assert.equal(page.card()!.querySelectorAll('.navigation-hint').length,1);assert.match(page.card()!.querySelector('.navigation-hint')!.closest('.visit-step')!.textContent!,/Second affected/);
  }finally{await page.close();}
