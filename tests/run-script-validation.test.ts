@@ -29,3 +29,12 @@ test('reserved names reject authored scopes, expressions and nested flows',()=>{
   assert.throws(()=>validateFlowInputs('appId: com.example.App\n---\n- runFlow: nested.yaml',flows,{}),/Reserved TnT variable/);
  }
 });
+test('end anchor schema and portability preserve last-step suffix and the empty-scenario sentinel',()=>{
+ for(const beforeStep of [{index:3,fingerprint:'a'.repeat(64)+':end'},{index:0,fingerprint:'end'}]){
+  const scenarios=readScenarios([{...scenario,scripts:[{...row,beforeStep}]}])!;
+  const content=portableContent({id:'',name:'End script',yaml:'appId: com.example.App\n---\n- launchApp\n',scenarios},true);
+  const pkg={format:'tnt-workspace',version:1,source:{revision:1,savedAt:new Date().toISOString()},dependencies:[],workspace:content};
+  assert.deepEqual(parsePackage(pkg).workspace.scenarios![0].scripts![0].beforeStep,beforeStep);
+ }
+ for(const fingerprint of ['a'.repeat(63)+':end','a'.repeat(64)+':end:end','end:extra'])assert.throws(()=>readScenarios([{...scenario,scripts:[{...row,beforeStep:{index:3,fingerprint}}]}]),/Script rows/);
+});

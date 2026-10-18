@@ -16,12 +16,16 @@ export function checkScriptSyntax(source:string):{message:string}|undefined {
  * Anchors refer to the script-free projected scenario (including repeated occurrences).
  */
 export function buildRunPlan(input:{yaml:string;flows?:Record<string,string>;scripts?:readonly ScriptRow[];trust?:readonly ScriptTrust[];automation?:{yaml:string;plan:ExecutionItem[]};mockAvailable?:boolean}):RunPlan {
-  const rows=readScriptRows(input.scripts??[]);
+  // Sort only this derived copy. Stable sorting preserves saved array order at each anchor.
+  const rows=readScriptRows(input.scripts??[]).toSorted((a,b)=>a.beforeStep.index-b.beforeStep.index);
   const catalog=referenceCatalog(input.yaml,input.flows);
+  const steps=catalog.references.filter(ref=>ref.kind==='step');
+  const endFingerprint=steps.length?steps.at(-1)!.fingerprint+':end':'end';
   const blocked:ScriptBlockReason[]=[];
   for(const row of rows){
     if(!row.source.trim())blocked.push({kind:'empty',rowId:row.id,message:'Script is empty · add code or delete the row'});
-    if(row.beforeStep.fingerprint!=='end'&&!catalog.references.some(ref=>ref.kind==='step'&&ref.index===row.beforeStep.index&&ref.fingerprint===row.beforeStep.fingerprint))blocked.push({kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'});
+    const validAnchor=row.beforeStep.index===steps.length?row.beforeStep.fingerprint===endFingerprint:steps.some(ref=>ref.index===row.beforeStep.index&&ref.fingerprint===row.beforeStep.fingerprint);
+    if(!validAnchor)blocked.push({kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'});
     const syntax=checkScriptSyntax(row.source);
     if(syntax)blocked.push({kind:'syntax',rowId:row.id,...syntax});
     if(!input.trust?.some(trust=>trust.rowId===row.id&&trust.trusted&&(trust.origin==='local'||trust.hash===scriptHash(row.source))))blocked.push({kind:'untrusted',rowId:row.id,message:'Script needs trust'});
@@ -41,12 +45,12 @@ export function buildRunPlan(input:{yaml:string;flows?:Record<string,string>;scr
   }
   commands.forEach((command,position)=>{
     const item=original[position];
-    if(item.kind==='step')for(const row of rows.filter(row=>row.beforeStep.fingerprint!=='end'&&row.beforeStep.index===item.index)){
+    if(item.kind==='step')for(const row of rows.filter(row=>row.beforeStep.index===item.index)){
       append(row,item.index!);
     }
     if(item.kind==='step')authoredStepMap.push({index:item.index!,executionIndex:executionItems.length});
     executionItems.push({...item});generated.push(command);
   });
-  for(const row of rows.filter(row=>row.beforeStep.fingerprint==='end'))append(row,catalog.references.filter(ref=>ref.kind==='step').length);
+  for(const row of rows.filter(row=>row.beforeStep.index===steps.length))append(row,steps.length);
   return {executionYaml:scriptFiles.length?docs[0].toString()+'---\n'+stringify(generated,{aliasDuplicateObjects:false,lineWidth:0}):input.automation?.yaml??input.yaml,scriptFiles,executionItems,authoredStepMap,blocked};
 }

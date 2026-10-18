@@ -8,7 +8,7 @@ const yaml='appId: com.example.App\n---\n- launchApp\n- tapOn: Load\n- assertVis
 const anchor=(index:number)=>{const ref=referenceCatalog(yaml).references[index];return {index,fingerprint:ref.fingerprint};};
 const row={id:'first',label:'First',beforeStep:anchor(1),source:'output.X = `ไทย ${"quote"}`; // trailing comment'};
 const trust=[{rowId:row.id,origin:'local' as const,trusted:true,hash:''}];
-function freeze(value:any){if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;}
+function freeze<T>(value:T):T{if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;}
 test('pure plan preserves source bytes, order and wrapper newlines; no credentials',()=>{
  const input=freeze({yaml,scripts:[row],trust,mockAvailable:true});
  const result=buildRunPlan(input);assert.deepEqual(result,buildRunPlan(input));
@@ -42,11 +42,30 @@ test('same-anchor scripts keep row order after checkpoint with fixed automation 
  assert.deepEqual(plan.scriptFiles.map(file=>file.rowId),['first','second']);
  assert.doesNotMatch(plan.executionYaml,/TNT_MOCK/);
 });
-test('end sentinel always stays after final step; scripts never shift anchors or checkpoint fingerprints',()=>{
- const final={...row,id:'last',beforeStep:{index:3,fingerprint:'end'}};
- const inputs={yaml,scripts:[final,row],trust:[...trust,{...trust[0],rowId:'last'}]};
- const plan=buildRunPlan(inputs);assert.deepEqual(plan.executionItems.map(item=>item.kind),['step','runScript','step','step','runScript']);
- const changed=buildRunPlan({...inputs,yaml:yaml+'- tapOn: Another\n'});assert.deepEqual(changed.blocked,[]);assert.equal(changed.executionItems.at(-1)?.kind,'runScript');
- assert.equal(referenceCatalog(yaml).references[1].fingerprint,row.beforeStep.fingerprint);
- const reversed=buildRunPlan({...inputs,scripts:[row,final]});assert.equal(reversed.executionItems[2].kind,'step');assert.deepEqual(inputs.scripts[1].beforeStep,anchor(1));
+test('end anchors run last and become stale when a step is appended or the last step changes',()=>{
+ const final={...row,id:'last',beforeStep:{index:3,fingerprint:anchor(2).fingerprint+':end'}};
+ const inputs=freeze({yaml,scripts:[final,row],trust:[...trust,{...trust[0],rowId:'last'}]});
+ const plan=buildRunPlan(inputs);assert.deepEqual(plan.blocked,[]);assert.deepEqual(plan.executionItems.map(item=>item.kind),['step','runScript','step','step','runScript']);
+ for(const changed of [yaml+'- tapOn: Another\n',yaml.replace('Home','Changed'),yaml.replace('- tapOn: Load\n','')]){
+  const stale=buildRunPlan({...inputs,yaml:changed});assert.ok(stale.blocked.some(item=>item.kind==='stale-anchor'&&item.rowId==='last'&&item.message==='Step changed · relink before running'));assert.deepEqual(stale.scriptFiles,[]);
+ }
+ for(const beforeStep of [{index:3,fingerprint:'end'},{index:1,fingerprint:final.beforeStep.fingerprint},{index:3,fingerprint:anchor(2).fingerprint}]){
+  const stale=buildRunPlan({...inputs,scripts:[{...final,beforeStep}]});assert.equal(stale.blocked[0].kind,'stale-anchor');assert.deepEqual(stale.scriptFiles,[]);
+ }
+ assert.equal(referenceCatalog(yaml).references[1].fingerprint,row.beforeStep.fingerprint);assert.deepEqual(inputs.scripts.map(row=>row.id),['last','first']);
+});
+test('empty scenario end anchor is exactly index zero and end; adding its first step makes it stale',()=>{
+ const empty='appId: com.example.App\n---\n[]\n';
+ const final={...row,beforeStep:{index:0,fingerprint:'end'}};
+ const plan=buildRunPlan({yaml:empty,scripts:[final],trust});assert.deepEqual(plan.blocked,[]);assert.equal(plan.scriptFiles.length,1);assert.deepEqual(plan.executionItems.map(item=>item.kind),['runScript']);
+ const populated=buildRunPlan({yaml,scripts:[final],trust});assert.equal(populated.blocked[0].kind,'stale-anchor');assert.deepEqual(populated.scriptFiles,[]);
+ const wrongIndex=buildRunPlan({yaml:empty,scripts:[{...final,beforeStep:{index:1,fingerprint:'end'}}],trust});assert.equal(wrongIndex.blocked[0].kind,'stale-anchor');
+});
+test('run plan stably sorts by index while saved rows, ties and other anchors stay unchanged',()=>{
+ const rows=[{...row,id:'end',beforeStep:{index:3,fingerprint:anchor(2).fingerprint+':end'}},{...row,id:'later-a',beforeStep:anchor(2)},{...row,id:'early-a',beforeStep:anchor(0)},{...row,id:'later-b',beforeStep:anchor(2)},{...row,id:'early-b',beforeStep:anchor(0)}];
+ const input=freeze({yaml,scripts:rows,trust:rows.map(row=>({...trust[0],rowId:row.id}))});
+ const plan=buildRunPlan(input);assert.deepEqual(plan.blocked,[]);assert.deepEqual(plan.scriptFiles.map(file=>file.rowId),['early-a','early-b','later-a','later-b','end']);assert.deepEqual(plan,buildRunPlan(input));
+ assert.deepEqual(input.scripts.map(row=>row.id),['end','later-a','early-a','later-b','early-b']);
+ const reordered=buildRunPlan({...input,scripts:[rows[0],rows[1],rows[4],rows[3],rows[2]]});assert.deepEqual(reordered.scriptFiles.map(file=>file.rowId),['early-b','early-a','later-a','later-b','end']);
+ assert.deepEqual(rows.map(row=>row.beforeStep),[{index:3,fingerprint:anchor(2).fingerprint+':end'},anchor(2),anchor(0),anchor(2),anchor(0)]);
 });

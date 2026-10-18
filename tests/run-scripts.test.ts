@@ -77,9 +77,9 @@ test('untrusted batch entry fails and continues; script-error is failed with dis
 });
 test('array order survives reload; end scripts execute after the last authored command',async()=>{
  const f=await scriptFixture();try{
-  const rows=[{...f.row,id:'second',source:'output.sequence = "second"'},{...f.row,id:'first',source:'output.sequence += ",first"'},{...f.row,id:'last',beforeStep:{index:3,fingerprint:'end'},source:'output.sequence += ",last"'}];
+  const rows=[{...f.row,id:'last',beforeStep:{index:3,fingerprint:f.scenario.steps[2].fingerprint+':end'},source:'output.sequence += ",last"'},{...f.row,id:'second',source:'output.sequence = "second"'},{...f.row,id:'first',source:'output.sequence += ",first"'}];
   await f.service.save({...f.workspace,scenarios:[{...f.scenario,scripts:rows}]});
-  assert.deepEqual((await createScenarios(f.options).workspace(f.workspace.id)).scenarios![0].scripts!.map(row=>row.id),['second','first','last']);
+  assert.deepEqual((await createScenarios(f.options).workspace(f.workspace.id)).scenarios![0].scripts!.map(row=>row.id),['last','second','first']);
   const result=await f.service.wait((await f.start()).id);assert.equal(result.status,'passed');assert.equal(f.outputs[0].sequence,'second,first,last');assert.equal(result.executionOrder!.at(-1)!.kind,'runScript');assert.deepEqual(Object.keys(result.scriptSteps!),['second','first','last']);
  }finally{await f.cleanup();}
 });
@@ -128,4 +128,17 @@ test('replaced run root cannot redirect cleanup or final record writes and retai
  }});try{
   const run=await f.start();await assert.rejects(f.service.wait(run.id),/Evidence root changed/);assert.equal(await readFile(join(unrelated!,'keep'),'utf8'),'untouched');await assert.rejects(readFile(join(unrelated!,'result.json')),{code:'ENOENT'});await assert.rejects(f.runner.acquireDevice(deviceId),/in progress/);
  }finally{await f.cleanup();}
+});
+
+test('changed end anchors block before acquisition when the selected scenario grows or its last step changes',async()=>{
+ for(const edit of ['append','change-last','legacy-end'] as const){
+  const f=await scriptFixture({mock:true});try{
+   const end={...f.row,beforeStep:{index:3,fingerprint:edit==='legacy-end'?'end':f.scenario.steps[2].fingerprint+':end'}};
+   const yaml=edit==='append'?f.workspace.yaml+'- tapOn: Another\n':edit==='change-last'?f.workspace.yaml.replace('Home','Changed'):f.workspace.yaml;
+   const steps=(await f.service.references({yaml})).references.filter(ref=>ref.kind==='step');
+   await f.service.save({...f.workspace,yaml,scenarios:[{...f.scenario,steps,scripts:[end]}]});
+   await assert.rejects(f.start(),(error:unknown)=>error instanceof ScriptBlocked&&error.blocked.some(item=>item.kind==='stale-anchor'&&item.rowId===end.id&&item.message==='Step changed · relink before running'));
+   assert.deepEqual(f.stats(),{toolCalls:0,acquisitions:0,mockCount:0,cleanupCount:0});
+  }finally{await f.cleanup();}
+ }
 });

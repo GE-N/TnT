@@ -36,7 +36,7 @@ export function assertAutomationVariables(value:unknown):void {
 export function readScriptRows(value:unknown,ids=new Set<string>()):ScriptRow[]{
   if(!Array.isArray(value)||value.length>100)throw new Error('Provide up to 100 script rows per scenario.');
   return value.map(row=>{
-    if(!row||typeof row!=='object'||typeof row.id!=='string'||!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(row.id)||ids.has(row.id)||typeof row.label!=='string'||row.label.length>120||typeof row.source!=='string'||Buffer.byteLength(row.source)>900_000||!row.beforeStep||!Number.isSafeInteger(row.beforeStep.index)||row.beforeStep.index<0||typeof row.beforeStep.fingerprint!=='string'||!(row.beforeStep.fingerprint==='end'||/^[a-f0-9]{64}$/.test(row.beforeStep.fingerprint)))throw new Error('Script rows require workspace-wide unique safe IDs, a label, source and an index/fingerprint anchor.');
+    if(!row||typeof row!=='object'||typeof row.id!=='string'||!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(row.id)||ids.has(row.id)||typeof row.label!=='string'||row.label.length>120||typeof row.source!=='string'||Buffer.byteLength(row.source)>900_000||!row.beforeStep||!Number.isSafeInteger(row.beforeStep.index)||row.beforeStep.index<0||typeof row.beforeStep.fingerprint!=='string'||!(row.beforeStep.fingerprint==='end'||/^[a-f0-9]{64}(?::end)?$/.test(row.beforeStep.fingerprint)))throw new Error('Script rows require workspace-wide unique safe IDs, a label, source and an index/fingerprint anchor.');
     ids.add(row.id);
     return {id:row.id,label:row.label,source:row.source,beforeStep:{index:row.beforeStep.index,fingerprint:row.beforeStep.fingerprint}};
   });

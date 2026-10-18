@@ -31,7 +31,7 @@ async function fixture(withMock=false){
  async function save(source=row.source,end=false){
   const authored=end?yaml.replace('if (output.X !== \"ไทย quote\") throw new Error(\"output did not round-trip\")','output.X = \"ไทย quote\"'):yaml;
   const steps=(await service.references({yaml:authored})).references.filter(item=>item.kind==='step');
-  return service.save({name:'Real script',yaml:authored,scenarios:[{id:'real',name:'Real',steps,inputs:{},parameters:{},enabledHandlerIds:[],scripts:[{...row,source,...(end?{beforeStep:{index:steps.length,fingerprint:'end'}}:{})}]}],mock});
+  return service.save({name:'Real script',yaml:authored,scenarios:[{id:'real',name:'Real',steps,inputs:{},parameters:{},enabledHandlerIds:[],scripts:[{...row,source,...(end?{beforeStep:{index:steps.length,fingerprint:steps.length?steps.at(-1)!.fingerprint+':end':'end'}}:{})}]}],mock});
  }
  async function scan(){for(const path of [...await walk(root),...await walk(join(homedir(),'.maestro','tests'))]){const bytes=await readFile(path);for(const token of tokens)for(const form of tokenForms(token))assert.equal(bytes.includes(Buffer.from(form)),false,'Token in '+path);}assert.equal((await walk(join(root,'runs'))).some(path=>/\.tnt-script-\d+\.js$/.test(path)),false);}
  return {root,service,runner,save,tokens,port,scan,pid:()=>ownedPid};
@@ -91,5 +91,10 @@ test('real end anchor executes after the final step without mock variables',asyn
  const f=await fixture();try{
   const workspace=await f.save('if (output.X !== "ไทย quote") throw new Error("end order wrong"); if (typeof TNT_MOCK_TOKEN !== "undefined") throw new Error("unexpected env");',true);
   const result=await f.service.wait((await f.service.start({workspaceId:workspace.id,deviceId:deviceId!,scenarioId:'real'})).id);assert.equal(result.status,'passed',JSON.stringify(result));assert.equal(result.executionOrder?.at(-1)?.kind,'runScript');await f.scan();
+  for(const yaml of [workspace.yaml+'- evalScript: ${output.unused = true}\n',workspace.yaml.replace('output.X = \"ไทย quote\"','output.X = \"changed\"')]){
+   const steps=(await f.service.references({yaml})).references.filter(ref=>ref.kind==='step');
+   await f.service.save({...workspace,metadata:(await f.service.workspace(workspace.id)).metadata,yaml,scenarios:workspace.scenarios!.map(scenario=>({...scenario,steps}))});
+   const pid=f.pid();await assert.rejects(f.service.start({workspaceId:workspace.id,deviceId:deviceId!,scenarioId:'real'}),/Step changed · relink before running/);assert.equal(f.pid(),pid);
+  }
  }finally{await rm(f.root,{recursive:true,force:true});}
 });
