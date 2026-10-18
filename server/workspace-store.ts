@@ -86,7 +86,7 @@ export function createWriteFaults(){
 }
 
 /** The existing local workspace records, with serialized atomic metadata/content writes. */
-export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>Workspace,options?:{faults?:WorkspaceStoreFaults;now?:()=>Date;beforePublish?:(next:Workspace,previous?:Workspace)=>Promise<void>}){
+export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>Workspace,options?:{faults?:WorkspaceStoreFaults;now?:()=>Date;beforePublish?:(next:Workspace,previous?:Workspace)=>Promise<void>;onScenarioClosed?:(workspace:Workspace,scenarioId:string)=>Promise<void>}){
  const queueKey=resolve(root);
  const faults=options?.faults;
  const now=()=>(options?.now??(()=>new Date()))().toISOString();
@@ -271,12 +271,12 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
    try{await writeSession({lastActiveId:id,updatedAt:stamp});}catch(error){console.error('Import committed; session update failed.',error);}
    return written;
   }),
-  save:(content:Workspace,expectedRevision:number=0,clearDraftRevision?:number)=>serialize(async()=>{
+  save:(content:Workspace,expectedRevision:number=0,clearDraftRevision?:number,beforePublish?:(next:Workspace,previous?:Workspace)=>Promise<void>)=>serialize(async()=>{
    const previous=content.id?await read(content.id):undefined;
    if(previous&&previous.metadata!.revision!==expectedRevision)throw new WorkspaceConflict();
    const stamp=now();
    const next={...content,id:content.id||randomUUID(),metadata:{...previous?.metadata,createdAt:previous?.metadata?.createdAt??stamp,updatedAt:stamp,openedAt:previous?.metadata?.openedAt??stamp,revision:(previous?.metadata?.revision??0)+1}};
-   await options?.beforePublish?.(next,previous);
+   await (beforePublish??options?.beforePublish)?.(next,previous);
    const written=await write(next);
    let draftCleared=false;
    try{
@@ -308,12 +308,13 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
    await rm(path,{force:true});return {discarded:true};
   }),
   saveView:(id:string,patch:unknown)=>serialize(async()=>{
-   await read(id);
+   const workspace=await read(id);
    if(!patch||typeof patch!=='object'||Array.isArray(patch))throw new Error('View preferences must be an object.');
    const existing=await readView(id);
    const view=mergeView(existing,patch as Record<string,unknown>);
    const path=await contained(await workspaceDirectory(id),'view.json',true);
    await writeJson(path,view,viewLimit,'View preferences exceed the supported size.');
+   if(typeof existing?.scenarioId==='string'&&existing.scenarioId!==view.scenarioId)await options?.onScenarioClosed?.(workspace,existing.scenarioId);
    return view;
   }),
   session:()=>serialize(async()=>{

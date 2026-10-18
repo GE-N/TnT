@@ -76,7 +76,11 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       return { omittedValues:readOmittedValues(input.omittedValues), scenarios, automation, flows, mock, canvas, canvasDiagnostics, id: input.id ? validId(input.id) : '', name: input.name.trim(), yaml: input.yaml };
 
   }
-  const workspaceStore=createWorkspaceStore(options.root,input=>authoredWorkspace(input,[]),{faults:options.faults,now:options.now,beforePublish:(next,previous)=>trustStore.register(next,previous)});
+  async function closeScriptUndo(workspace:Workspace,id:string){
+    try{await trustStore.closeScenario(workspace,id);}
+    catch{/* Retain provenance on cleanup failure; navigation remains usable and script trust still fails closed. */}
+  }
+  const workspaceStore=createWorkspaceStore(options.root,input=>authoredWorkspace(input,[]),{faults:options.faults,now:options.now,beforePublish:(next,previous)=>trustStore.register(next,previous),onScenarioClosed:closeScriptUndo});
   const service = {
     async scriptTrust(id:string){const workspace=await workspaceStore.read(id);return {scripts:await trustStore.list(workspace),...sourceContext(workspace)};},
     async trustScript(input:{workspace:string;rowId:string;hash:string}){
@@ -128,12 +132,15 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const original=workspace.canvas?.paths.find(path=>path.id===source.pathId);
       const pathId=original?'sequence-'+randomUUID():undefined;
       const copy={...structuredClone(source),id,name,pathId,scripts:source.scripts?.map(row=>({...structuredClone(row),id:'script-'+randomUUID()}))};
+      const sourceTrust=await trustStore.list(workspace);
+      const origins=Object.fromEntries(copy.scripts?.map((row,index)=>[row.id,sourceTrust.find(trust=>trust.rowId===source.scripts![index].id)?.origin??'imported'])??[]);
+      assertIdle();
       const canvas=workspace.canvas&&structuredClone(workspace.canvas);
       if(canvas){
         for(const screen of canvas.screens)for(const test of screen.tests)if(test.scenarioIds?.includes(source.id))test.scenarioIds.push(id);
         if(original)canvas.paths.push({...structuredClone(original),id:pathId!,scenarioId:id,name,visits:routeVisits(workspace.canvas!,original).map(visit=>({...structuredClone(visit),id:randomUUID()}))});
       }
-      return workspaceStore.save(authoredWorkspace({...workspace,canvas,scenarios:[...workspace.scenarios!,copy]}),input.expectedRevision);
+      return workspaceStore.save(authoredWorkspace({...workspace,canvas,scenarios:[...workspace.scenarios!,copy]}),input.expectedRevision,undefined,(next,previous)=>trustStore.register(next,previous,origins));
     },
     async workspaceDetail(id:string){return workspaceStore.bundle(id);},
     async openWorkspace(id:string){return workspaceStore.open(id);},

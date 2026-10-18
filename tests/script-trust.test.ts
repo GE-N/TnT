@@ -104,14 +104,75 @@ test('approval serializes against source edits and import publication failure is
   assert.doesNotMatch(await readFile(join(f.root,'workspaces',f.workspace.id,'workspace.json'),'utf8'),/approved|trusted|origin/);
  }finally{await rm(f.root,{recursive:true,force:true});}
 });
-test('copy preserves verified local origin; copied imported sources under new row IDs remain imported',async()=>{
+test('copy preserves verified local origin; brand-new editor IDs are local even for imported text',async()=>{
  const f=await fixture();try{
   const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});
   const imported=await f.service.importWorkspace({package:pkg.package,name:'Imported'});
   const copiedLocal=await f.service.copyWorkspace({...f.workspace,id:undefined,sourceWorkspaceId:f.workspace.id});assert.ok((await f.service.scriptTrust(copiedLocal.id)).scripts.every(item=>item.origin==='local'&&item.trusted));
   const edited=structuredClone(imported);edited.scenarios![0].scripts!.push({...edited.scenarios![0].scripts![0],id:'pasted'});
-  const saved=await f.service.save(edited);assert.equal((await f.service.scriptTrust(saved.id)).scripts.at(-1)!.origin,'imported');
+  const saved=await f.service.save(edited);const added=(await f.service.scriptTrust(saved.id)).scripts.at(-1)!;assert.equal(added.origin,'local');assert.equal(added.trusted,true);
   const noScripts=await f.service.save({...f.workspace,scenarios:[]});await writeFile(join(f.trustDirectory,'state.json'),'unreadable');assert.deepEqual(await f.service.scriptTrust(noScripts.id),{scripts:[]});
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('Undo restores a deleted local row as local/trusted even when its source was imported elsewhere',async()=>{
+ const f=await fixture();try{
+  const exported=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});
+  const imported=await f.service.importWorkspace({package:exported.package,name:'Same source elsewhere'});
+  assert.ok((await f.service.scriptTrust(imported.id)).scripts.every(row=>row.origin==='imported'&&!row.trusted));
+  for(const removeAll of [false,true]){
+   const before=await f.service.workspace(f.workspace.id);const removed=await f.service.save({...before,scenarios:before.scenarios!.map(scenario=>({...scenario,scripts:removeAll?[]:scenario.scripts!.filter(row=>row.id!=='one')}))});
+   const restarted=createScenarios(f.options);await restarted.save({...removed,scenarios:before.scenarios});
+   const restored=(await restarted.scriptTrust(f.workspace.id)).scripts;assert.ok(restored.every(row=>row.origin==='local'&&row.trusted));
+   assert.deepEqual((await restarted.workspace(f.workspace.id)).scenarios,before.scenarios);
+  }
+  assert.ok((await createScenarios(f.options).scriptTrust(imported.id)).scripts.every(row=>row.origin==='imported'&&!row.trusted));
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('Undo restores an imported row as imported/untrusted and still checks its approved hash',async()=>{
+ const f=await fixture();try{
+  const exported=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});const imported=await f.service.importWorkspace({package:exported.package,name:'Imported Undo'});
+  let before=imported;
+  for(const edited of [false,true]){
+   if(edited){const row=(await f.service.scriptTrust(imported.id)).scripts[0];await f.service.trustScript({workspace:imported.id,rowId:row.rowId,hash:row.hash});}
+   const deleted=await f.service.save({...before,scenarios:before.scenarios!.map(scenario=>({...scenario,scripts:scenario.scripts!.filter(row=>row.id!=='one')}))});
+   const scenarios=structuredClone(before.scenarios!);if(edited)scenarios[0].scripts![0].source+='; // changed during restore';
+   const restarted=createScenarios(f.options);before=await restarted.save({...deleted,scenarios});
+   const row=(await restarted.scriptTrust(imported.id)).scripts.find(row=>row.rowId==='one')!;assert.equal(row.origin,'imported');assert.equal(row.trusted,false);
+  }
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('client save cannot change an existing imported row ID to local, including with new source text',async()=>{
+ const f=await fixture();try{
+  const exported=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});const imported=await f.service.importWorkspace({package:exported.package,name:'Imported identity'});
+  for(const edited of [false,true]){
+   const current=await f.service.workspace(imported.id);const scripts=current.scenarios![0].scripts!.map(row=>({...row,source:row.source+(edited?'; // edited':''),origin:'local',trusted:true}));
+   await f.service.save({...current,scenarios:[{...current.scenarios![0],scripts}]});
+   assert.ok((await createScenarios(f.options).scriptTrust(imported.id)).scripts.every(row=>row.origin==='imported'&&!row.trusted));
+  }
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('scenario-switch view saves retire only closed-scenario tombstones and retain active imported rows',async()=>{
+ const f=await fixture();try{
+  const saved=await f.service.save({...f.workspace,scenarios:[...f.workspace.scenarios!,{...f.workspace.scenarios![0],id:'other',scripts:[{...f.workspace.scenarios![0].scripts![0],id:'other-row'}]}]});
+  const exported=await f.service.exportWorkspace({id:saved.id,expectedRevision:2,includeValues:true});const imported=await f.service.importWorkspace({package:exported.package,name:'Tombstone lifecycle'});
+  await f.service.saveView(imported.id,{scenarioId:'first'});
+  await f.service.save({...imported,scenarios:imported.scenarios!.map(scenario=>({...scenario,scripts:scenario.scripts!.filter(row=>row.id==='two')}))});
+  const readEntries=async()=>JSON.parse(await readFile(join(f.trustDirectory,'state.json'),'utf8')).workspaces[imported.id];
+  assert.equal((await readEntries()).one.origin,'imported');assert.equal((await readEntries())['other-row'].origin,'imported');
+  await f.service.saveView(imported.id,{panels:{advanced:true}});assert.ok((await readEntries()).one,'Unrelated view saves leave the Undo window open');
+  const restarted=createScenarios(f.options);await restarted.saveView(imported.id,{scenarioId:'other'});
+  const entries=await readEntries();assert.equal(entries.one,undefined);assert.equal(entries['other-row'].origin,'imported','An unrelated scenario tombstone remains');
+  assert.equal(entries.two.origin,'imported','Active imported IDs are never retired');
+  assert.ok((await restarted.scriptTrust(imported.id)).scripts.every(row=>row.origin==='imported'&&!row.trusted));
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
+test('scenario switching tolerates trust-store failure while the script trust gate stays closed',async()=>{
+ const f=await fixture();try{
+  await f.service.saveView(f.workspace.id,{scenarioId:'first'});
+  const file=join(f.trustDirectory,'state.json');await writeFile(file,'unreadable');
+  await f.service.saveView(f.workspace.id,{scenarioId:'other'});
+  assert.equal(await readFile(file,'utf8'),'unreadable','Failed retirement must not replace provenance');
+  await assert.rejects(f.service.scriptTrust(f.workspace.id),/unreadable/);
  }finally{await rm(f.root,{recursive:true,force:true});}
 });
 for(const state of ['missing','trashed'] as const)test('copy with '+state+' source context falls back to untrusted imported rows',async()=>{
