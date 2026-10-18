@@ -7,6 +7,7 @@ import { createRunner, type Execute } from './runner.js';
 import { createApiHandler } from './http.js';
 import { createScenarios } from './scenarios.js';
 import { createMaestro } from './maestro.js';
+import { sweepUnfinishedRuns } from './run-recovery.js';
 
 const exec = promisify(execFile);
 const execute: Execute = async (file, args) => {
@@ -22,6 +23,7 @@ const execute: Execute = async (file, args) => {
 const port = Number(process.env.PORT ?? 4317);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('PORT must be an integer from 1024 to 65535.');
 const artifactDirectory = resolve('.tnt/launches');
+await sweepUnfinishedRuns(resolve('.tnt'));
 const maestro = createMaestro();
 const runner = createRunner({ artifactDirectory, execute, ownershipDirectory: resolve('.tnt'), inspector: maestro });
 const scenarios = createScenarios({ root: resolve('.tnt'), runner, maestro });
