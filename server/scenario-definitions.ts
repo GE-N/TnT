@@ -1,12 +1,15 @@
+import type {ScriptRow} from './run-script-contract.js';
+import {assertReservedInputs,assertAuthoredVariables,readScriptRows} from './script-validation.js';
 import {attachLeadingComments} from '../shared/canvas-authoring.js';
 import {isSeq,parseAllDocuments} from 'yaml';
 import {referenceCatalog,type YAMLReference,type CanvasGraph} from './canvas.js';
 import {readAutomation,instrument,type Automation,type FlowCall} from './default-actions.js';
 import {validateMock,type MockPlan} from './mockoon.js';
 export type Parameter={type:'text'|'number'|'boolean';required:boolean};
-export type ScenarioDefinition={id:string;name:string;skipInRunAll?:boolean;steps:YAMLReference[];authoring?:'canvas';pathId?:string;inputs:Record<string,string>;parameters:Record<string,Parameter>;setup?:FlowCall;enabledHandlerIds:string[];mockResponseId?:string};
+export type ScenarioDefinition={id:string;name:string;skipInRunAll?:boolean;steps:YAMLReference[];authoring?:'canvas';pathId?:string;inputs:Record<string,string>;parameters:Record<string,Parameter>;setup?:FlowCall;enabledHandlerIds:string[];mockResponseId?:string;scripts?:ScriptRow[]};
 export function namedInputs(value:unknown):Record<string,string>{
  if(value===undefined)return {};
+ assertReservedInputs(value);
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length>20||Object.entries(value).some(([key,input])=>! /^[A-Z][A-Z0-9_]{0,63}$/.test(key)||key.startsWith('MAESTRO_')||typeof input!=='string'||input.length>4000||input.includes('\0')))throw new Error('Inputs require at most 20 uppercase names and bounded strings; MAESTRO_ names are reserved.');
  return {...value} as Record<string,string>;
 }
@@ -14,6 +17,7 @@ export function readScenarios(value:unknown):ScenarioDefinition[]|undefined{
  if(value===undefined)return;
  if(!Array.isArray(value))throw new Error('Provide a list of named scenarios.');
  const ids=new Set<string>();
+ const rowIds=new Set<string>();
  return value.map((item:ScenarioDefinition)=>{
   if(!item||typeof item.id!=='string'||! /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(item.id)||ids.has(item.id)||typeof item.name!=='string'||!item.name.trim()||item.name.length>120)throw new Error('Scenarios require unique IDs and nonempty names.');
   ids.add(item.id);
@@ -28,7 +32,7 @@ export function readScenarios(value:unknown):ScenarioDefinition[]|undefined{
   namedInputs(Object.fromEntries(Object.keys(parameters).map(name=>[name,''])));
   for(const rule of Object.values(parameters))if(!rule||!['text','number','boolean'].includes(rule.type)||typeof rule.required!=='boolean')throw new Error('Parameter requirements need text/number/boolean type and required flag.');
   if(item.mockResponseId!==undefined&&(typeof item.mockResponseId!=='string'||!item.mockResponseId||item.mockResponseId.length>120))throw new Error('Choose a mock response identity.');
-  return {id:item.id,name:item.name.trim(),skipInRunAll:item.skipInRunAll,authoring:item.authoring,pathId:item.pathId,steps:item.steps.map(ref=>({kind:'step',file:'flow.yaml',index:ref.index,fingerprint:ref.fingerprint})),setup:item.setup?{file:item.setup.file,parameters:namedInputs(item.setup.parameters)}:undefined,enabledHandlerIds:[...item.enabledHandlerIds],inputs:namedInputs(item.inputs),parameters:structuredClone(parameters),mockResponseId:item.mockResponseId};
+  return {id:item.id,name:item.name.trim(),skipInRunAll:item.skipInRunAll,authoring:item.authoring,pathId:item.pathId,steps:item.steps.map(ref=>({kind:'step',file:'flow.yaml',index:ref.index,fingerprint:ref.fingerprint})),setup:item.setup?{file:item.setup.file,parameters:namedInputs(item.setup.parameters)}:undefined,enabledHandlerIds:[...item.enabledHandlerIds],inputs:namedInputs(item.inputs),parameters:structuredClone(parameters),mockResponseId:item.mockResponseId,...(item.scripts===undefined?{}:{scripts:readScriptRows(item.scripts,rowIds)})};
  });
 }
 // Selection references the authored commands; the execution projection never edits them.
@@ -82,7 +86,7 @@ export function selectScenario(workspace:{yaml:string;flows?:Record<string,strin
  }
  if(!canvasAuthored)validateFlowInputs(automation?instrument(yaml,automation).yaml:yaml,flows,inputs);
  if(scenario.mockResponseId&&!workspace.mock)throw new Error('Configure the shared mock environment before choosing a response.');
- let mock=scenario.mockResponseId?validateMock({...workspace.mock,responseId:scenario.mockResponseId}):undefined;
+ let mock=workspace.mock?validateMock({...workspace.mock,...(scenario.mockResponseId?{responseId:scenario.mockResponseId}:{})}):undefined;
  if(mock&&canvas&&scenario.pathId){const path=canvas.paths.find(path=>path.id===scenario.pathId);const edges=path?.edgeIds.map(id=>canvas.edges.find(edge=>edge.id===id));const first=edges?.[0];const last=edges?.at(-1);if(first&&last)mock={...mock,fromScreen:canvas.screens.find(screen=>screen.id===first.from)!.title,toScreen:canvas.screens.find(screen=>screen.id===last.to)!.title};}
  if(canvasAuthored&&!canvas)throw new Error('Draft scenario: add a screen and choose its start before running.');
  if(canvas&&!scenario.pathId)throw new Error('Select a canvas path for this scenario.');
@@ -90,11 +94,13 @@ export function selectScenario(workspace:{yaml:string;flows?:Record<string,strin
 }
 
 // Validate simple Maestro placeholders at invocation scopes. JavaScript expressions stay YAML-owned.
-export function validateFlowInputs(yaml:string,flows:Record<string,string>,inputs:Record<string,string>,ancestors:string[]=[]){
+export function validateFlowInputs(yaml:string,flows:Record<string,string>,inputs:Record<string,string>,ancestors:string[]=[],generated=false){
+ assertReservedInputs(inputs);
+ if(!generated)assertAuthoredVariables(yaml);
  const docs=parseAllDocuments(yaml);
  if(docs.length!==2||docs.some(doc=>doc.errors.length))throw new Error('Repair reusable-flow YAML before running.');
  const config=docs[0].toJS();const values={...inputs,...config?.env};
- const builtIns=new Set(['MAESTRO_FILENAME','MAESTRO_DEVICE_UDID','MAESTRO_SHARD_ID','MAESTRO_SHARD_INDEX']);
+ const builtIns=new Set([...(generated?['TNT_MOCK_URL','TNT_MOCK_TOKEN']:[]),'MAESTRO_FILENAME','MAESTRO_DEVICE_UDID','MAESTRO_SHARD_ID','MAESTRO_SHARD_INDEX']);
  const check=(value:unknown,scope:Record<string,unknown>)=>{
   if(typeof value!=='string')return;
   for(const match of value.matchAll(/\$\{([A-Z][A-Z0-9_]*)\}/g))if(!builtIns.has(match[1])&&(scope[match[1]]===undefined||scope[match[1]]===''))throw new Error('Missing required input: '+match[1]);

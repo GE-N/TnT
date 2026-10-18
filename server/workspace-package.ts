@@ -11,7 +11,7 @@ const selector:Shape={target:true,match:true,value:true,visibility:true};
 const reference:Shape={kind:true,file:true,index:true,actionId:true,fingerprint:true};
 const call:Shape={file:true,parameters:true};
 const shape:Shape={name:true,yaml:true,flows:true,mock:{environment:true,port:true,routeId:true,responseId:true,backendUrl:true,passthroughRouteIds:true,fromScreen:true,toScreen:true,failureSemantics:true},omittedValues:[{owner:true,name:true}],
- scenarios:[{id:true,name:true,skipInRunAll:true,steps:[reference],authoring:true,pathId:true,inputs:true,parameters:true,setup:call,enabledHandlerIds:true,mockResponseId:true}],
+ scenarios:[{id:true,name:true,skipInRunAll:true,steps:[reference],authoring:true,pathId:true,inputs:true,parameters:true,setup:call,enabledHandlerIds:true,mockResponseId:true,scripts:[{id:true,beforeStep:{index:true,fingerprint:true},label:true,source:true}]}],
  automation:{setup:call,actions:[{...call,id:true,name:true,condition:true,enabled:true}],checkpoints:[{beforeStep:true,fingerprint:true,timeoutMs:true}]},
  canvas:{screens:[{id:true,title:true,x:true,y:true,referenceScreenshot:true,tests:[{scenarioIds:true,input:true,back:true,backSelector:selector,tap:selector,check:selector,id:true,label:true,role:true,reference}]}],edges:[{actionTestIds:true,id:true,from:true,to:true,actionTestId:true,assertionTestId:true,responseCondition:true}],paths:[{scenarioId:true,id:true,name:true,edgeIds:true,screenId:true,finished:true,visits:[{id:true,operationIds:true,checkIds:true}]}]}};
 function project(value:unknown,schema:Shape,strict:boolean):Record<string,unknown>{

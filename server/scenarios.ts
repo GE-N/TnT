@@ -1,3 +1,4 @@
+import {assertReservedInputs,assertAuthoredVariables,assertAutomationVariables} from './script-validation.js';
 import {parsePackage,portableContent,packageReview,readOmittedValues,missingValues,type OmittedValue,type WorkspacePackage} from './workspace-package.js';
 import {WorkspaceConflict,createWorkspaceStore,type WorkspaceMetadata,type WorkspaceStoreFaults} from './workspace-store.js';
 import {createBatches} from './batches.js';
@@ -49,6 +50,9 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
   }
   function authoredWorkspace(input: {id?:string;name:string;yaml:string;flows?:Record<string,string>;mock?:unknown;canvas?:unknown;automation?:unknown;scenarios?:unknown;omittedValues?:unknown},unresolved?:string[]):Workspace {
       if (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 120 || typeof input.yaml !== 'string' || Buffer.byteLength(input.yaml) > 100_000) throw new Error('Provide a workspace title and YAML up to 100 KB.');
+      assertAuthoredVariables(input.yaml);
+      assertAutomationVariables(input.automation);
+      assertAutomationVariables(input.scenarios);
       const scenarios=readScenarios(input.scenarios);
       const flows = validateFlows(input.flows,unresolved);
       const mock = validateMock(input.mock);
@@ -67,6 +71,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       if(typeof input.yaml!=='string'||Buffer.byteLength(input.yaml)>100_000)throw new Error('Provide YAML up to 100 KB.');
       const flows=validateFlows(input.flows);
       if(input.resetApp!==undefined&&typeof input.resetApp!=='boolean')throw new Error('Reset app must be a boolean.');
+      assertAuthoredVariables(input.yaml);assertAutomationVariables(input.automation);assertAutomationVariables(input.scenarios);
       const configured=readAutomation(input.automation,flows??{},input.yaml);
       const selection=selectScenario({yaml:input.yaml,flows,automation:configured,canvas:readCanvas(input.canvas),mock:validateMock(input.mock),scenarios:readScenarios(input.scenarios)},input.scenarioId,validateInputs(input.runtimeInputs));
       let yaml=selection?.yaml??input.yaml;let automation=selection?.automation??configured;
@@ -174,6 +179,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const runtimeInputs = validateInputs(input.runtimeInputs);
       const confidential = Object.keys(runtimeInputs).length > 0;
       if(input.resetApp!==undefined&&typeof input.resetApp!=='boolean')throw new Error('Reset app must be a boolean.');
+      assertAuthoredVariables(authored.yaml);assertAutomationVariables(authored.automation);assertAutomationVariables(authored.scenarios);
       const selection=selectScenario(authored,input.scenarioId,runtimeInputs);
       const omitted=missingValues({...authored,automation:selection?.automation??authored.automation},{runtime:runtimeInputs,scenarioId:input.scenarioId});if(omitted.length)throw new Error('Repair imported workspace before execution. '+omitted.join(' '));
       let workspace=selection?{...authored,...selection,name:selection.scenario.name}:authored;
@@ -308,12 +314,14 @@ async function writeRecord(file: string, value: unknown) {
 function validateInputs(value: unknown): Record<string, string> {
   if (value === undefined) return {};
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 20) throw new Error('Runtime inputs must be an object of at most 20 named strings.');
+  assertReservedInputs(value);
   const entries = Object.entries(value);
   if (entries.some(([key, input]) => !/^[A-Z][A-Z0-9_]{0,63}$/.test(key) || key.startsWith('MAESTRO_') || typeof input !== 'string' || input.length > 4000 || input.includes('\0'))) throw new Error('Runtime inputs require uppercase variable names and string values up to 4000 characters; MAESTRO_ names are reserved.');
   return Object.fromEntries(entries);
 }
 
 function validate(yaml: string, flows: Record<string,string> = {}, ancestors: string[] = [], verified = new Set<string>(),unresolved?:string[]) {
+  assertAuthoredVariables(yaml);
   const documents = parseAllDocuments(yaml);
   if (documents.length !== 2 || documents.some(doc => doc.errors.length)) throw new Error('Invalid Maestro YAML: use an appId header, --- separator, and command list.');
   const config = documents[0].toJS();
@@ -331,6 +339,7 @@ function validate(yaml: string, flows: Record<string,string> = {}, ancestors: st
 function validateFlows(value: unknown,unresolved?:string[]): Record<string,string> | undefined {
   if (value === undefined) return;
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 20) throw new Error('Provide up to 20 reusable YAML flows.');
+  assertReservedInputs(value);
   const entries = Object.entries(value);
   if (entries.some(([name,yaml]) => !/^[A-Za-z][A-Za-z0-9_-]{0,63}\.yaml$/.test(name) || name === 'flow.yaml' || typeof yaml !== 'string' || Buffer.byteLength(yaml) > 100_000)) throw new Error('Reusable flow names must be simple .yaml filenames, with content up to 100 KB.');
   const flows = Object.fromEntries(entries) as Record<string,string>;
