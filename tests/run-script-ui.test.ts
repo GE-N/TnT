@@ -144,10 +144,11 @@ test('a passed run does not mark a script row passed when that row has no result
 });
 
 test('import and copy source lines stay plain',()=>{
-  assert.equal(scriptSourceLine({kind:'file',file:'x.tnt',name:'Payments'}),'Imported from file `x.tnt` (named "Payments").');
-  assert.equal(scriptSourceLine({kind:'workspace',name:'Payments'}),'Imported from Payments.');
-  assert.equal(scriptSourceLine({kind:'unknown'}),'Imported from an imported workspace.');
-  assert.doesNotMatch(scriptSourceLine({kind:'file',file:'x.tnt',name:'Payments'}),/verified/i);
+  assert.equal(scriptSourceLine({kind:'import',name:'Payments',filename:'x.tnt'}),'Imported from file `x.tnt` (named "Payments").');
+  assert.equal(scriptSourceLine({kind:'import',name:'Payments',filename:null}),'Imported from a file named "Payments".');
+  assert.equal(scriptSourceLine({kind:'copy',name:'Payments'}),'Copied from "Payments".');
+  assert.equal(scriptSourceLine(undefined),'Imported from an imported workspace.');
+  assert.doesNotMatch(scriptSourceLine({kind:'import',name:'Payments',filename:'x.tnt'}),/verified/i);
 });
 
 test('a draft step is not an anchor and an existing row uses the usual block line',()=>{
@@ -258,7 +259,7 @@ async function mount(seed:ScriptRecord[]=[],granted:ScriptTrust[]=[]){
     const [trust,setTrust]=useState(granted);
     const [extra,setExtra]=useState(initial);
     replaceGraph=setGraph;updateExtra=patch=>setExtra(value=>({...value,...patch}));latest=rows;
-    const runScripts:RunScriptModel={scenarioId:'main',rows,trust,results:extra.results,executionOrder:extra.executionOrder,hasMock:extra.hasMock,revealBlocks:extra.revealBlocks,running:extra.running,passedRun:extra.passedRun,timedOut:extra.timedOut,scrubFailed:extra.scrubFailed,failedAtScript:extra.failedAtScript,trustBlockCount:untrustedCount(rows,trust),trustLoadFailed:extra.trustLoadFailed,workspaceName:'Imported workspace',onRetryTrust:()=>{retries+=1;},onAdd:anchor=>{const id=newScriptId();const source='';setRows(value=>[...value,{id,scenarioId:'main',origin:'imported',beforeStep:anchor,label:'Run script',source,hash:sha256(source)}]);return id;},onUpdate:(rowId,patch)=>setRows(value=>value.map(item=>item.id===rowId?{...item,...patch,hash:sha256(patch.source??item.source)}:item)),onMove:(rowId,direction,stepCount,fingerprintAt)=>setRows(value=>moveScript(value,rowId,direction,stepCount,fingerprintAt)??value),onDelete:rowId=>setRows(value=>value.filter(item=>item.id!==rowId)),onReplace:next=>setRows(next.map(item=>({...item,scenarioId:'main',origin:'imported' as const,hash:sha256(item.source)}))),onTrust:async rowId=>{const item=rows.find(entry=>entry.id===rowId);if(!item)return;const saved=await approveScriptTrust({workspace:'workspace',rowId,hash:item.hash,token:'token'});setTrust(value=>[...value.filter(entry=>entry.rowId!==saved.rowId),saved]);}};
+    const runScripts:RunScriptModel={scenarioId:'main',rows,trust,results:extra.results,executionOrder:extra.executionOrder,hasMock:extra.hasMock,revealBlocks:extra.revealBlocks,running:extra.running,passedRun:extra.passedRun,timedOut:extra.timedOut,scrubFailed:extra.scrubFailed,failedAtScript:extra.failedAtScript,trustBlockCount:untrustedCount(rows,trust),trustLoadFailed:extra.trustLoadFailed,sourceWorkspace:{kind:'copy',name:'Imported workspace'},onRetryTrust:()=>{retries+=1;},onAdd:anchor=>{const id=newScriptId();const source='';setRows(value=>[...value,{id,scenarioId:'main',origin:'imported',beforeStep:anchor,label:'Run script',source,hash:sha256(source)}]);return id;},onUpdate:(rowId,patch)=>setRows(value=>value.map(item=>item.id===rowId?{...item,...patch,hash:sha256(patch.source??item.source)}:item)),onMove:(rowId,direction,stepCount,fingerprintAt)=>setRows(value=>moveScript(value,rowId,direction,stepCount,fingerprintAt)??value),onDelete:rowId=>setRows(value=>value.filter(item=>item.id!==rowId)),onReplace:next=>setRows(next.map(item=>({...item,scenarioId:'main',origin:'imported' as const,hash:sha256(item.source)}))),onTrust:async rowId=>{const item=rows.find(entry=>entry.id===rowId);if(!item)return;const saved=await approveScriptTrust({workspace:'workspace',rowId,hash:item.hash,token:'token'});setTrust(value=>[...value.filter(entry=>entry.rowId!==saved.rowId),saved]);}};
     return createElement('div',null,
       createElement(CanvasEditor,{graph:current,onChange:(next:CanvasGraph|undefined)=>{if(next)setGraph(next);},yaml:'appId: app\n---\n- assertVisible: Home\n',onYamlChange:()=>{},catalog:[],diagnostics:[],pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode:true,scenarioId:'main',scenarios:[{id:'main',name:'Main',pathId:'route'}],initialView:{selectedScreenId:'home',selectedVisitId:'v1'},runScripts}),
       createElement(RedactedText,{text:'token [redacted] hidden'}),
@@ -336,7 +337,7 @@ test('imported scripts are trusted one at a time and a failure stops later steps
     const editor=page.document.querySelector('.script-editor')!;
     assert.equal(editor.getAttribute('role'),null);
     assert.equal(page.document.querySelector('[data-testid="script-source"]')!.textContent,'console.log(1)');
-    assert.match(editor.textContent!,/Imported from Imported workspace/);
+    assert.match(editor.textContent!,/Copied from "Imported workspace"/);
     assert.match(editor.textContent!,/1 of 2 left after this/);
     assert.doesNotMatch(editor.textContent!,/Trust all/);
     await act(async()=>{page.document.querySelector<HTMLButtonElement>('[data-testid="trust-this-script"]')!.click();await new Promise(resolve=>setTimeout(resolve,0));});

@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
-import type {ScriptAnchor,ScriptBlockReason,ScriptRow,ScriptStepResult,ScriptTrust} from '../server/run-script-contract.js';
+import type {ScriptAnchor,ScriptBlockReason,ScriptRow,ScriptSourceWorkspace,ScriptStepResult,ScriptTrust} from '../server/run-script-contract.js';
 import {REDACTED} from '../server/run-script-contract.js';
 import {RunStatusBadge} from './visit-steps.js';
 import {SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,TRUST_UNKNOWN_TEXT,scriptFirstLine,scriptSourceLine,type ScriptRecord,type ScriptRowView} from './run-script.js';
@@ -38,7 +38,7 @@ export function ScriptStepRow({row,view,reveal,open,runLocked,stepNumber,afterLa
   </div>;
 }
 
-export function ScriptEditor({row,view,workspaceName,stepNumber,afterLast=false,hasMock,untrustedLeft,running,timedOut,onChange,onTrust,onStop,onRunAgain,onOpenLog,onClose}:{row:ScriptRecord;view:ScriptRowView;workspaceName:string;stepNumber:number;afterLast?:boolean;hasMock:boolean;untrustedLeft:number;running:boolean;timedOut:boolean;onChange:(patch:{label?:string;source?:string})=>void;onTrust:()=>Promise<void>;onStop?:()=>void;onRunAgain?:()=>void;onOpenLog?:()=>void;onClose:()=>void}){
+export function ScriptEditor({row,view,sourceWorkspace,stepNumber,afterLast=false,hasMock,untrustedLeft,running,timedOut,onChange,onTrust,onStop,onRunAgain,onOpenLog,onClose}:{row:ScriptRecord;view:ScriptRowView;sourceWorkspace?:ScriptSourceWorkspace;stepNumber:number;afterLast?:boolean;hasMock:boolean;untrustedLeft:number;running:boolean;timedOut:boolean;onChange:(patch:{label?:string;source?:string})=>void;onTrust:()=>Promise<void>;onStop?:()=>void;onRunAgain?:()=>void;onOpenLog?:()=>void;onClose:()=>void}){
   const [editing,setEditing]=useState(false);
   const [trusting,setTrusting]=useState(false);
   const [trustError,setTrustError]=useState('');
@@ -58,7 +58,7 @@ export function ScriptEditor({row,view,workspaceName,stepNumber,afterLast=false,
   return <aside className="script-editor" aria-label={title} data-script-editor={row.id}>
     <header className="script-editor-header"><h3>{title}</h3><button type="button" aria-label="Close script editor" onClick={onClose}>✕</button></header>
     {readOnly&&<div className="script-trust">
-      {!trustUnknown&&<p>{scriptSourceLine(workspaceName.trim()?{kind:'workspace',name:workspaceName}:{kind:'unknown'})} Scripts can read files and call the network.</p>}
+      {!trustUnknown&&<p>{scriptSourceLine(sourceWorkspace)} Scripts can read files and call the network.</p>}
       <div className="script-code-label"><span>Script · JavaScript</span><span className="script-readonly-badge">Read only until trusted</span></div>
       <ScriptSource source={row.source} readOnly/>
       {!trustUnknown&&<button type="button" className="primary script-trust-button" data-testid="trust-this-script" disabled={trusting} onClick={()=>{setTrusting(true);setTrustError('');void onTrust().then(()=>setTrusting(false)).catch(()=>{setTrustError('Trust could not be saved on this Mac.');setTrusting(false);});}}>Trust this script</button>}
@@ -114,7 +114,7 @@ export type RunScriptModel={
   failedAtScript:boolean;
   trustBlockCount:number;
   trustLoadFailed?:boolean;
-  workspaceName:string;
+  sourceWorkspace?:ScriptSourceWorkspace;
   onAdd:(anchor:ScriptAnchor)=>string;
   onUpdate:(rowId:string,patch:{label?:string;source?:string})=>void;
   onMove:(rowId:string,direction:-1|1,stepCount:number,fingerprintAt:(index:number)=>string)=>void;

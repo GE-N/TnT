@@ -1,4 +1,11 @@
-import type {ScriptTrust} from '../server/run-script-contract.js';
+import type {ScriptSourceWorkspace,ScriptTrust} from '../server/run-script-contract.js';
+
+export function readSourceWorkspace(value:unknown):ScriptSourceWorkspace|undefined{
+  if(!value||typeof value!=='object')return;
+  const source=value as ScriptSourceWorkspace;
+  if(source.kind==='copy'&&typeof source.name==='string')return {kind:'copy',name:source.name};
+  if(source.kind==='import'&&typeof source.name==='string'&&(source.filename===null||typeof source.filename==='string'))return {kind:'import',name:source.name,filename:source.filename};
+}
 
 function trustPayload(value:unknown):ScriptTrust|undefined{
   if(!value||typeof value!=='object')return;
@@ -19,12 +26,12 @@ function trustList(value:unknown):ScriptTrust[]|undefined{
 }
 
 /** Trust is whatever GET /api/scripts/trust returned. Any failure leaves the caller with no grant. */
-export async function pullScriptTrust(workspaceId:string,token:string):Promise<ScriptTrust[]>{
+export async function pullScriptTrust(workspaceId:string,token:string):Promise<{scripts:ScriptTrust[];sourceWorkspace?:ScriptSourceWorkspace}>{
   const response=await fetch('/api/scripts/trust?workspace='+encodeURIComponent(workspaceId),{headers:{'X-TnT-Token':token}});
   const body=await response.json().catch(()=>undefined);
   const scripts=response.ok?trustList(body):undefined;
   if(!scripts)throw new Error('Script trust could not be loaded.');
-  return scripts;
+  return {scripts,sourceWorkspace:readSourceWorkspace((body as {sourceWorkspace?:unknown}).sourceWorkspace)};
 }
 
 /** A 200 with the server's trust object is the only approval. 400 and every other failure throw. */

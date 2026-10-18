@@ -1,5 +1,5 @@
 import type {CanvasGraph} from '../server/canvas.js';
-import type {ScriptAnchor,ScriptBlockReason,ScriptExecutionReference,ScriptOrigin,ScriptRow,ScriptRunResults,ScriptStepResult,ScriptTrust} from '../server/run-script-contract.js';
+import type {ScriptAnchor,ScriptBlockReason,ScriptExecutionReference,ScriptOrigin,ScriptRow,ScriptRunResults,ScriptSourceWorkspace,ScriptStepResult,ScriptTrust} from '../server/run-script-contract.js';
 import {EVIDENCE_SCRUB_FAILED,REDACTED} from '../server/run-script-contract.js';
 import {routeVisits,visitOperations,visitScreenId} from '../shared/canvas-authoring.js';
 
@@ -68,10 +68,11 @@ export const DRAFT_STEP_TEXT='Step not captured yet · capture it before running
 export const TRUST_LOAD_TEXT="⚠ Trust couldn't be loaded";
 export const TRUST_UNKNOWN_TEXT='⚠ Trust unknown';
 
-/** Plain source text. A file import is not a verified origin. A copy uses the workspace name unchanged. */
-export function scriptSourceLine(source:{kind:'file';file:string;name:string}|{kind:'workspace';name:string}|{kind:'unknown'}){
-  if(source.kind==='file')return 'Imported from file `'+source.file+'` (named "'+source.name+'").';
-  if(source.kind==='workspace'&&source.name.trim())return 'Imported from '+source.name+'.';
+/** Plain source text. A file import is an unverified claim. A copy uses the workspace name unchanged. */
+export function scriptSourceLine(source:ScriptSourceWorkspace|undefined){
+  if(source?.kind==='import'&&source.filename)return 'Imported from file `'+source.filename+'` (named "'+source.name+'").';
+  if(source?.kind==='import'&&source.name.trim())return 'Imported from a file named "'+source.name+'".';
+  if(source?.kind==='copy'&&source.name.trim())return 'Copied from "'+source.name+'".';
   return 'Imported from an imported workspace.';
 }
 export const SCRUB_FAILED_TEXT='✕ Evidence scrub failed · run evidence was removed to protect the token';

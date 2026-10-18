@@ -4,7 +4,7 @@ import type {WorkspacePackage,PackageReview} from '../server/workspace-package.j
 export type PackageResult={package:WorkspacePackage;review:PackageReview;filename?:string};
 export type ExportOptions={includeValues:boolean;savedOnly:boolean};
 export function isFileDrag(event:DragEvent){return Array.from(event.dataTransfer.types).includes('Files');}
-export function WorkspaceTransfer({mode,token,blocked,busy,initialFiles,onExport,onImport,onCancel}:{mode:'export'|'import';token:string;blocked:boolean;busy:boolean;initialFiles?:File[];onExport:(options:ExportOptions)=>Promise<PackageResult>;onImport:(pkg:WorkspacePackage,name:string)=>Promise<void>;onCancel:()=>void}){
+export function WorkspaceTransfer({mode,token,blocked,busy,initialFiles,onExport,onImport,onCancel}:{mode:'export'|'import';token:string;blocked:boolean;busy:boolean;initialFiles?:File[];onExport:(options:ExportOptions)=>Promise<PackageResult>;onImport:(pkg:WorkspacePackage,name:string,filename?:string)=>Promise<void>;onCancel:()=>void}){
  const [result,setResult]=useState<PackageResult>();const [filename,setFilename]=useState('');const [title,setTitle]=useState('');const [error,setError]=useState('');const [loading,setLoading]=useState(false);const [includeValues,setIncludeValues]=useState(false);const [savedOnly,setSavedOnly]=useState(blocked);const [dragging,setDragging]=useState(false);
  const picker=useRef<HTMLInputElement>(null);const generation=useRef(0);const committed=useRef(false);
  useEffect(()=>()=>{generation.current++;},[]);
@@ -34,7 +34,7 @@ export function WorkspaceTransfer({mode,token,blocked,busy,initialFiles,onExport
   if(!result||committed.current)return;
   if(!title.trim()||title.trim().length>120){setError('Use a workspace title of 1–120 characters.');return;}
   committed.current=true;setLoading(true);setError('');
-  try{await onImport(result.package,title.trim());}catch(error){setError(error instanceof Error?error.message:'Import failed. Current work is retained.');}finally{committed.current=false;setLoading(false);}
+  try{await onImport(result.package,title.trim(),filename||undefined);}catch(error){setError(error instanceof Error?error.message:'Import failed. Current work is retained.');}finally{committed.current=false;setLoading(false);}
  }
  function download(){
   if(!result)return;
