@@ -9,7 +9,8 @@ import {YamlEditor} from './yaml-editor.js';
 import {RecoveredFields,useWorkspaceDraft} from './workspace-drafts.js';
 import {inspectorRunView,type InspectorRunFeed} from './inspector-run-state.js';
 import {planCanvasDeletion,type CanvasDeletion,connectVisitAction,connectionVisitActions,freezeVisitOperations,visitOperations,updateVisitOperations,privateVisitOperation,refreshChecks,writeChecks,backControl,canvasTestLabel,connectCanvasAction,appendCanvasConnection,edgeActions,routeVisits,visitChecks,visitScreenId,screenChecks,appendRouteTransition,isAuthored,type ScreenCheck} from '../shared/canvas-authoring.js';
-import {Fragment,useContext,useEffect,useId,useLayoutEffect,useRef,useState,type ReactNode,type MouseEvent,type PointerEvent,type CSSProperties} from 'react';
+import type {ScenarioDetailsProps} from './scenario-details.js';
+import {Fragment,cloneElement,isValidElement,useContext,useEffect,useId,useLayoutEffect,useRef,useState,type ReactNode,type MouseEvent,type PointerEvent,type CSSProperties} from 'react';
 import type {YAMLReference,CanvasGraph,CanvasTest,CanvasDiagnostic,CanvasResult,CatalogEntry,ScreenNode} from '../server/canvas.js';
 import {inspectorWidth,placeInspector,visibleBounds,type InspectorPlacement,type Rect} from './inspector-placement.js';
 const runLockReason='Unavailable while the scenario is running.';
@@ -160,7 +161,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   const bounds=visibleBounds(rectOf(viewportRef.current),{width:window.innerWidth,height:window.innerHeight});
   if(viewportRef.current.closest('.workbench')){const bottom=Math.min(bounds.top+bounds.height,window.innerHeight-88);bounds.top=Math.max(bounds.top,156);bounds.height=Math.max(0,bottom-bounds.top);}
   const rects=(elements:Element[])=>elements.map(rectOf).filter(rect=>rect.width>0&&rect.height>0);
-  const controls=rects(Array.from(document.querySelectorAll('.workbench .device-toolbar[open],.workbench .scenario-controls[open],.workbench .workspace-advanced[open],.workbench .report-tools[open],.workbench .workspace-management-surface,.workbench .canvas-inspectors,.workbench .draft-banner,.workbench .canvas-editor>.notice,.workbench .go-to-issue,.workbench>main>.notice,.workbench .scenario-panel>.notice,.workbench .run-error-toast')));
+  const controls=rects(Array.from(document.querySelectorAll('.workbench .device-toolbar[open],.workbench .scenario-details-panel,.workbench .workspace-advanced[open],.workbench .report-tools[open],.workbench .workspace-management-surface,.workbench .canvas-inspectors,.workbench .draft-banner,.workbench .canvas-editor>.notice,.workbench .go-to-issue,.workbench>main>.notice,.workbench .scenario-panel>.notice,.workbench .run-error-toast')));
   for(const control of controls){
    if(control.width<260||control.height<44||control.left+control.width<=bounds.left||control.left>=bounds.left+bounds.width)continue;
    const leftSpace=control.left-bounds.left-12;const rightSpace=bounds.left+bounds.width-control.left-control.width-12;
@@ -225,7 +226,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  </div>;
 }
 
-export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,onRun,onRepairSource,scenarioMode=false,scenarioId,scenarios=[],initialView,onViewChange,picker,cards,onCardPosition,yamlDeletionWarnings,onYamlDelete,run,draftInvalid=false,runScripts,reservedLines}:{onRepairSource?:(ownerId:string)=>void;scenarioId?:string;scenarios?:{id:string;name:string;pathId?:string}[];scenarioMode?:boolean;onRun?:()=>void;yaml?:string;onYamlChange?:(yaml:string)=>void;graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string};onViewChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number;selectedScreenId:string;selectedVisitId:string})=>void;picker?:PickerSession;cards?:{picker?:CardPosition;yaml?:CardPosition};onCardPosition?:(card:'picker'|'yaml',position:CardPosition)=>void;yamlDeletionWarnings?:(index:number)=>string[];onYamlDelete?:(yaml:string,index:number)=>()=>void;run?:InspectorRunFeed;draftInvalid?:boolean;runScripts?:RunScriptModel;reservedLines?:number[]}){
+export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,onRun,onRepairSource,scenarioMode=false,scenarioId,scenarios=[],initialView,onViewChange,picker,cards,onCardPosition,yamlDeletionWarnings,onYamlDelete,run,draftInvalid=false,runScripts,reservedLines,scenarioPanel,onScenarioPanelChange}:{onRepairSource?:(ownerId:string)=>void;scenarioId?:string;scenarios?:{id:string;name:string;pathId?:string}[];scenarioMode?:boolean;onRun?:()=>void;yaml?:string;onYamlChange?:(yaml:string)=>void;graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string};onViewChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number;selectedScreenId:string;selectedVisitId:string})=>void;picker?:PickerSession;cards?:{picker?:CardPosition;yaml?:CardPosition};onCardPosition?:(card:'picker'|'yaml',position:CardPosition)=>void;yamlDeletionWarnings?:(index:number)=>string[];onYamlDelete?:(yaml:string,index:number)=>()=>void;run?:InspectorRunFeed;draftInvalid?:boolean;runScripts?:RunScriptModel;reservedLines?:number[];scenarioPanel?:ReactNode;onScenarioPanelChange?:(open:boolean)=>void}){
  const [pending,setPending]=useState<{graph:CanvasGraph;source?:string;warnings:string[]}>();
  const [clearPending,setClearPending]=useState<{graph:CanvasGraph;source?:string;title:string;visits:string[]}>();
  const [linkedEdgeId,setLinkedEdgeId]=useState<string>();
@@ -239,7 +240,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  function endDrag(){dragging.current=undefined;setDropTarget(undefined);}
  const discardedVisit=useRef('');
  useEffect(()=>{if(newStep||!discardedVisit.current)return;const visitId=discardedVisit.current;discardedVisit.current='';Array.from(document.querySelectorAll<HTMLElement>('[data-visit-id]')).find(element=>element.dataset.visitId===visitId)?.querySelector<HTMLButtonElement>('.add-visit-step')?.focus();},[newStep]);
- const [expandedRow,setExpandedRow]=useState('');const [openScriptId,setOpenScriptId]=useState('');const [inspectorYielded,setInspectorYielded]=useState(false);const scriptOpener=useRef<HTMLElement|null>(null);const restoreScriptFocus=useRef(false);const [scriptUndo,setScriptUndo]=useState<{text:string;rows:ScriptRow[];kind:'deleted'|'moved';rowId:string;index:number;at:number}|undefined>();const [announcement,setAnnouncement]=useState('');
+ const [expandedRow,setExpandedRow]=useState('');const [openScriptId,setOpenScriptId]=useState('');const [inspectorYielded,setInspectorYielded]=useState(false);const [panelOpen,setPanelOpen]=useState(false);const scriptOpener=useRef<HTMLElement|null>(null);const restoreScriptFocus=useRef(false);const scenarioTrigger=useRef<HTMLButtonElement>(null);const scenarioPanelId=useId();const panelOpenRef=useRef(false);const notifyScenarioPanel=useRef(onScenarioPanelChange);panelOpenRef.current=panelOpen;notifyScenarioPanel.current=onScenarioPanelChange;const [scriptUndo,setScriptUndo]=useState<{text:string;rows:ScriptRow[];kind:'deleted'|'moved';rowId:string;index:number;at:number}|undefined>();const [announcement,setAnnouncement]=useState('');
  useEffect(()=>{setScriptUndo(undefined);},[scenarioId]);
  const [nodeInfoId,setNodeInfoId]=useState('');const [yamlHost,setYamlHost]=useState(false);const [yamlOpen,setYamlOpen]=useState(false);const yamlOpener=useRef<HTMLButtonElement|null>(null);
  let displayGraph=graph;try{if(graph&&yaml)displayGraph=refreshChecks(graph,yaml);}catch{ /* Retain graph while invalid YAML is repaired. */ }
@@ -274,10 +275,10 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
    bar.style.top='24px';bar.style.left=`${Math.round(left)}px`;bar.style.right=`${Math.round(window.innerWidth-rightEdge)}px`;
   };
   place();
-  const observer=new ResizeObserver(place);
-  document.querySelectorAll('.workbench .workspace-title,.workbench .device-toolbar').forEach(node=>observer.observe(node));
+  const observer=typeof ResizeObserver==='undefined'?undefined:new ResizeObserver(place);
+  document.querySelectorAll('.workbench .workspace-title,.workbench .device-toolbar').forEach(node=>observer?.observe(node));
   window.addEventListener('resize',place);
-  return()=>{observer.disconnect();window.removeEventListener('resize',place);};
+  return()=>{observer?.disconnect();window.removeEventListener('resize',place);};
  },[scenarioMode,path?.id,scenarios.find(item=>item.id===scenarioId)?.name]);
  const runLocked=run?.status==='running';
  const runView=inspectorRunView(graph,pathId,run);
@@ -610,6 +611,17 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   if(row&&!row.source.trim())runScripts?.onDelete(row.id);
   restoreScriptFocus.current=true;setInspectorYielded(false);setOpenScriptId('');
  }
+ function closeScenarioPanel(){
+  setPanelOpen(false);
+  notifyScenarioPanel.current?.(false);
+  scenarioTrigger.current?.focus();
+ }
+ function openScenarioPanel(){
+  if(openScriptId){closeScript();restoreScriptFocus.current=false;}
+  setPanelOpen(true);
+  notifyScenarioPanel.current?.(true);
+ }
+ useEffect(()=>()=>{if(panelOpenRef.current)notifyScenarioPanel.current?.(false);},[]);
  useEffect(()=>{
   if(openScriptId||!restoreScriptFocus.current)return;
   restoreScriptFocus.current=false;
@@ -700,24 +712,28 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  const boardGraph=graph&&scenarioMode&&scenarioId?{...graph,screens:graph.screens.map(screen=>({...screen,tests:screen.tests.filter(test=>!isAuthored(test)||(selectedOperationIds?selectedOperationIds.has(test.id):visibleOperation(test)))}))}:graph;
  const visibleDiagnostics=referenceDiagnostics.filter(item=>!scenarioMode||!scenarioId||['yaml','flows','automation',pathId].includes(item.ownerId)||graph?.screens.some(screen=>screen.id===item.ownerId||screen.tests.some(test=>test.id===item.ownerId&&visibleOperation(test)))||path?.edgeIds.includes(item.ownerId));
  return <section className="canvas-editor" aria-labelledby="canvas-heading"><div className="label-row"><div><h2 id="canvas-heading">Screen test canvas</h2><p className="field-hint">Add nodes on the canvas. Select a node, or press Enter on it, to edit its actions and checks in the inspector. Right-click a node for info.</p></div>{!scenarioMode&&<button className="confirm" disabled={disabled} onClick={()=>{onChange(graph?undefined:emptyCanvas());onPathChange('');}}>{graph?'Disable canvas':'Create screen canvas'}</button>}</div>
- {graph&&<>
- {!scenarioMode&&<div className="canvas-route-bar"><label htmlFor={apiId+'-path'}>Scenario path</label><select id={apiId+'-path'} value={pathId} disabled={disabled} onChange={event=>onPathChange(event.target.value)}><option value="">Explicitly select a route</option>{graph.paths.map(path=><option key={path.id} value={path.id}>{path.name}</option>)}</select><span>{path?.edgeIds.length??0} selected transitions</span></div>}
- {scenarioMode&&path&&<section ref={sequenceBar} className="scenario-sequence-bar" aria-label="Sequence builder">
+ {scenarioMode&&<section ref={sequenceBar} className="scenario-sequence-bar" aria-label="Sequence builder">
  <svg className="sequence-scenario-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg>
  <div className="sequence-scenario-copy">
- <p className="sequence-scenario-name">{scenarios.find(item=>item.id===scenarioId)?.name??path.name}</p>
+ <p className="sequence-scenario-name">{scenarios.length===0?'No scenarios':(scenarios.find(item=>item.id===scenarioId)?.name??path?.name)}</p>
+ {scenarios.length===0&&<p className="sequence-empty-hint">Create one to start a sequence</p>}
  {runScripts?.scrubFailed&&<p className="run-scrub-failed" data-testid="evidence-scrub-failed" role="alert">{SCRUB_FAILED_TEXT}</p>}
  {runScripts&&!runScripts.scrubFailed&&runScripts.failedAtScript&&<p className="run-script-stop" data-testid="failed-at-script">✕ Failed at Run script</p>}
- <div className="sequence-trail">
- <ol aria-label="Scenario sequence">{path.screenId&&routeVisits(graph,path).map((visit,index)=>{const id=visitScreenId(graph!,path,index);const title=graph!.screens.find(screen=>screen.id===id)?.title??'Missing screen';return <li key={visit.id}><button className="sequence-step" aria-label={'Visit '+(index+1)+' · '+title} aria-pressed={selectedVisit===visit.id} onClick={()=>{setSelected(id??'');setSelectedVisit(visit.id);}}>{index+1} · {title}</button></li>;})}</ol>
- {path.screenId&&routeVisits(graph,path).length>0&&<span className="sequence-separator" aria-hidden="true">&gt;</span>}
- <button className="sequence-finish" title={path.finished?'Finished · finite end saved':'Choose the next connection at the current end'} disabled={disabled||!path.screenId} onClick={()=>onChange({...graph,paths:graph.paths.map(item=>item.id===pathId?{...item,finished:!item.finished}:item)})}>{path.finished?'Resume sequence':'Finish sequence'}</button>
- </div>
+ {path&&<div className="sequence-trail">
+ <ol aria-label="Scenario sequence">{path.screenId&&routeVisits(graph!,path).map((visit,index)=>{const id=visitScreenId(graph!,path,index);const title=graph!.screens.find(screen=>screen.id===id)?.title??'Missing screen';return <li key={visit.id}><button className="sequence-step" aria-label={'Visit '+(index+1)+' · '+title} aria-pressed={selectedVisit===visit.id} onClick={()=>{setSelected(id??'');setSelectedVisit(visit.id);}}>{index+1} · {title}</button></li>;})}</ol>
+ {path.screenId&&routeVisits(graph!,path).length>0&&<span className="sequence-separator" aria-hidden="true">&gt;</span>}
+ <button className="sequence-finish" title={path.finished?'Finished · finite end saved':'Choose the next connection at the current end'} disabled={disabled||!path.screenId} onClick={()=>onChange({...graph!,paths:graph!.paths.map(item=>item.id===pathId?{...item,finished:!item.finished}:item)})}>{path.finished?'Resume sequence':'Finish sequence'}</button>
+ </div>}
  </div>
  {!!runScripts?.trustLoadFailed&&!!runScripts.rows.length&&<div className="sequence-trust"><p className="trust-load-warning" data-testid="trust-load-failed">{TRUST_LOAD_TEXT} · <button type="button" className="trust-load-retry" data-testid="trust-load-retry" onClick={()=>runScripts.onRetryTrust?.()}>↻ Retry</button></p></div>}
  {!!runScripts?.trustBlockCount&&!runScripts.trustLoadFailed&&<div className="sequence-trust"><p className="run-blocked" data-testid="run-blocked">{runBlockedLabel(runScripts.trustBlockCount)}</p><button type="button" className="primary" aria-label="Run scenario" disabled={!onRun||disabled||runLocked} onClick={()=>onRun?.()}>▶ Run</button></div>}
+ <button type="button" ref={scenarioTrigger} className="scenario-bar-trigger" data-testid="scenario-bar-trigger" aria-label="Scenarios" title="Scenarios" aria-haspopup="dialog" aria-expanded={panelOpen} aria-controls={scenarioPanelId} onClick={()=>panelOpen?closeScenarioPanel():openScenarioPanel()}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 6h10M4 11h10M4 16h6"/><path d={panelOpen?'M15 17l2.5-2.5 2.5 2.5':'M15 14.5l2.5 2.5 2.5-2.5'}/></svg><span className="scenario-bar-tooltip" role="tooltip" aria-hidden="true">Scenarios</span></button>
  </section>}
- <CanvasBoard inspectorYielded={inspectorYielded} initialView={initialView} onViewportChange={next=>{viewport.current=next;onViewChange?.({...next,selectedScreenId:selected,selectedVisitId:selectedVisit});}} highlightedEdgeId={highlightedEdge?.id} inspectorNote={highlightNote||undefined} onCloseInspector={()=>{setSelected('');setSelectedVisit('');}} onAppend={scenarioMode&&path?.screenId&&!path.finished&&!disabled&&!runLocked?id=>perform(()=>appendScreen(id)):undefined} graph={boardGraph!} pathId={pathId} result={scenarioMode?undefined:canvasResult} selected={selected} onRun={disabled||runLocked?undefined:onRun} onAdd={disabled||runLocked?undefined:(x,y)=>perform(()=>addScreen('New screen',x,y))} onRename={disabled||runLocked?undefined:(id,title)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,title}:screen)})} onInfo={disabled?undefined:id=>{setNodeInfoId(id);setSelected(id);setError('');}} onDelete={disabled||runLocked?undefined:deleteScreen} onSelect={id=>{setSelected(id);setSelectedVisit(path?routeVisits(graph,path).find((visit,index)=>visitScreenId(graph,path,index)===id)?.id??'':'');setRepairTest('');}} renderInspector={yaml!==undefined&&onYamlChange?renderVisitSections:undefined} onMove={disabled||runLocked?undefined:(id,x,y)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,x,y}:screen)})} onRemoveCapture={disabled||runLocked?undefined:id=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,referenceScreenshot:undefined}:screen)})}/>
+ {panelOpen&&isValidElement(scenarioPanel)&&cloneElement(scenarioPanel as React.ReactElement<ScenarioDetailsProps>,{open:true,onClose:closeScenarioPanel,anchor:sequenceBar,id:scenarioPanelId})}
+ {graph&&<>
+ {!scenarioMode&&<div className="canvas-route-bar"><label htmlFor={apiId+'-path'}>Scenario path</label><select id={apiId+'-path'} value={pathId} disabled={disabled} onChange={event=>onPathChange(event.target.value)}><option value="">Explicitly select a route</option>{graph.paths.map(path=><option key={path.id} value={path.id}>{path.name}</option>)}</select><span>{path?.edgeIds.length??0} selected transitions</span></div>}
+ 
+ <CanvasBoard inspectorYielded={inspectorYielded||panelOpen} initialView={initialView} onViewportChange={next=>{viewport.current=next;onViewChange?.({...next,selectedScreenId:selected,selectedVisitId:selectedVisit});}} highlightedEdgeId={highlightedEdge?.id} inspectorNote={highlightNote||undefined} onCloseInspector={()=>{setSelected('');setSelectedVisit('');}} onAppend={scenarioMode&&path?.screenId&&!path.finished&&!disabled&&!runLocked?id=>perform(()=>appendScreen(id)):undefined} graph={boardGraph!} pathId={pathId} result={scenarioMode?undefined:canvasResult} selected={selected} onRun={disabled||runLocked?undefined:onRun} onAdd={disabled||runLocked?undefined:(x,y)=>perform(()=>addScreen('New screen',x,y))} onRename={disabled||runLocked?undefined:(id,title)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,title}:screen)})} onInfo={disabled?undefined:id=>{setNodeInfoId(id);setSelected(id);setError('');}} onDelete={disabled||runLocked?undefined:deleteScreen} onSelect={id=>{setSelected(id);setSelectedVisit(path?routeVisits(graph,path).find((visit,index)=>visitScreenId(graph,path,index)===id)?.id??'':'');setRepairTest('');}} renderInspector={yaml!==undefined&&onYamlChange?renderVisitSections:undefined} onMove={disabled||runLocked?undefined:(id,x,y)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,x,y}:screen)})} onRemoveCapture={disabled||runLocked?undefined:id=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,referenceScreenshot:undefined}:screen)})}/>
  {!scenarioMode&&<p className="field-hint">The selected route runs initial checks, ordered connection actions, then destination checks. Other branches are not selected automatically. Unassociated YAML commands remain in execution. Results map after the run; live per-step reporting remains unavailable. Declared setup and checkpoint-specific handler outcomes map after completion.</p>}
  {!scenarioMode&&<div className="canvas-inspectors">{Boolean(testLabel||from||to||action||assertion||condition||pathName||nextEdge)&&<button onClick={()=>{setTestLabel('');setFrom('');setTo('');setAction('');setAssertion('');setCondition('');setPathName('');setNextEdge('');}}>Cancel canvas drafts</button>}<fieldset disabled={disabled}><legend>Advanced YAML associations</legend>
  {!screen&&<p className="field-hint">Select a node on the canvas to edit its YAML associations.</p>}
