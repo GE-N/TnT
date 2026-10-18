@@ -35,13 +35,16 @@ export function createScriptTrustStore(directory:string){
   list:(workspace:Pick<Workspace,'id'|'scenarios'>)=>serialize(async()=>workspaceScripts(workspace).length?decisions(await read(),workspace):[]),
   register:(workspace:Workspace,previous?:Workspace,origins?:Record<string,ScriptOrigin>)=>serialize(async()=>{
    const rows=workspaceScripts(workspace);if(!rows.length&&!workspaceScripts(previous??{}).length)return;
-   const state=await read();const entries=state.workspaces[workspace.id]??={};const oldIds=new Set(previous?workspaceScripts(previous).map(row=>row.id):[]);
+   const state=await read();const entries=state.workspaces[workspace.id]??={};const oldRows=workspaceScripts(previous??{});const oldIds=new Set(oldRows.map(row=>row.id));const nextIds=new Set(rows.map(row=>row.id));
+   // Only imports removed in this transaction can carry origin to a replacement ID.
+   // Older tombstones and matching text elsewhere must not classify an editor-created row.
+   const removedImportedHashes=new Set(oldRows.filter(row=>!nextIds.has(row.id)&&(!Object.hasOwn(entries,row.id)||entries[row.id].origin==='imported')).map(row=>scriptHash(row.source)));
    // Associate legacy entries before removal, so only the closed scenario's tombstones retire.
    for(const scenario of previous?.scenarios??[])for(const row of scenario.scripts??[])if(Object.hasOwn(entries,row.id))entries[row.id].scenarioId=scenario.id;
    for(const scenario of workspace.scenarios??[])for(const row of scenario.scripts??[]){
     // Entries survive deletion as durable Undo tombstones. An existing row ID
     // keeps its origin; imported approvals still require the current source hash.
-    if(!Object.hasOwn(entries,row.id))entries[row.id]={origin:origins&&Object.hasOwn(origins,row.id)?origins[row.id]:oldIds.has(row.id)?'imported':'local'};
+    if(!Object.hasOwn(entries,row.id))entries[row.id]={origin:origins&&Object.hasOwn(origins,row.id)?origins[row.id]:oldIds.has(row.id)||removedImportedHashes.has(scriptHash(row.source))?'imported':'local'};
     entries[row.id].scenarioId=scenario.id;
    }
    await write(state);

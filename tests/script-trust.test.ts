@@ -77,6 +77,8 @@ test('server duplication assigns fresh script IDs and never transfers an importe
   assert.deepEqual(copy.scripts!.map(({id,...row})=>row),original.scripts!.map(({id,...row})=>row));
   const trust=(await f.service.scriptTrust(imported.id)).scripts;
   assert.ok(trust.filter(item=>copy.scripts!.some(row=>row.id===item.rowId)).every(item=>item.origin==='imported'&&!item.trusted));
+  const persisted=(await createScenarios(f.options).scriptTrust(imported.id)).scripts;
+  assert.ok(persisted.filter(item=>copy.scripts!.some(row=>row.id===item.rowId)).every(item=>item.origin==='imported'&&!item.trusted));
   assert.ok(trust.filter(item=>original.scripts!.some(row=>row.id===item.rowId)).every(item=>item.trusted));
   await assert.rejects(f.service.duplicateScenario({workspaceId:imported.id,scenarioId:'first',expectedRevision:1}),/changed|revision/i);
  }finally{await rm(f.root,{recursive:true,force:true});}
@@ -151,6 +153,21 @@ test('client save cannot change an existing imported row ID to local, including 
   }
  }finally{await rm(f.root,{recursive:true,force:true});}
 });
+for(const destination of ['same-scenario','other-scenario'] as const)test('one save replacing an imported ID with identical source stays imported/untrusted: '+destination,async()=>{
+ const f=await fixture();try{
+  const exported=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});exported.package.workspace.scenarios![0].scripts!.splice(1);
+  const imported=await f.service.importWorkspace({package:exported.package,name:'Imported replacement'});
+  const original=imported.scenarios![0].scripts![0];const approval=(await f.service.scriptTrust(imported.id)).scripts[0];
+  await f.service.trustScript({workspace:imported.id,rowId:original.id,hash:approval.hash});
+  const replacement={...original,id:'replacement',origin:'local',trusted:true};
+  const scenario={...imported.scenarios![0],id:destination==='same-scenario'?'first':'other',scripts:[replacement]};
+  const saved=await f.service.save({...imported,scenarios:destination==='same-scenario'?[scenario]:[{...imported.scenarios![0],scripts:[]},scenario]});
+  assert.equal(saved.scenarios!.flatMap(scenario=>scenario.scripts??[]).some(row=>row.id===original.id),false);
+  const restarted=createScenarios(f.options);const trust=(await restarted.scriptTrust(imported.id)).scripts;
+  assert.deepEqual(trust,[{rowId:replacement.id,origin:'imported',trusted:false,hash:approval.hash}]);
+  await assert.rejects(restarted.start({workspaceId:imported.id,deviceId:'not-used',scenarioId:scenario.id}),/Script needs trust/);
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
 test('scenario-switch view saves retire only closed-scenario tombstones and retain active imported rows',async()=>{
  const f=await fixture();try{
   const saved=await f.service.save({...f.workspace,scenarios:[...f.workspace.scenarios!,{...f.workspace.scenarios![0],id:'other',scripts:[{...f.workspace.scenarios![0].scripts![0],id:'other-row'}]}]});
@@ -191,6 +208,7 @@ test('copy never transfers imported approvals and unknown rows in a source-aware
   for(const trust of (await f.service.scriptTrust(imported.id)).scripts)await f.service.trustScript({workspace:imported.id,rowId:trust.rowId,hash:trust.hash});
   assert.ok((await f.service.scriptTrust(imported.id)).scripts.every(item=>item.trusted));
   const copy=await f.service.copyWorkspace({...imported,id:undefined,sourceWorkspaceId:imported.id});assert.ok((await f.service.scriptTrust(copy.id)).scripts.every(item=>item.origin==='imported'&&!item.trusted));
+  assert.notEqual(copy.id,imported.id);assert.ok((await createScenarios(f.options).scriptTrust(copy.id)).scripts.every(item=>item.origin==='imported'&&!item.trusted));
   const input=structuredClone(f.workspace);input.scenarios![0].scripts![0].source='output.changedInCopy = 102938';input.scenarios![0].scripts!.push({...input.scenarios![0].scripts![0],id:'unknown',source:'output.unseen = 918273'});
   const extra=await f.service.copyWorkspace({...input,id:undefined,sourceWorkspaceId:f.workspace.id});const trust=(await f.service.scriptTrust(extra.id)).scripts.find(item=>item.rowId==='unknown')!;assert.equal(trust.origin,'imported');assert.equal(trust.trusted,false);
   const copiedTrust=(await f.service.scriptTrust(extra.id)).scripts;assert.equal(copiedTrust.find(item=>item.rowId==='one')!.trusted,false);assert.equal(copiedTrust.find(item=>item.rowId==='one')!.origin,'imported');assert.equal(copiedTrust.find(item=>item.rowId==='two')!.origin,'local');
