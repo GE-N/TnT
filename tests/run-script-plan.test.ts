@@ -3,13 +3,25 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {runInNewContext} from 'node:vm';
 import {parseAllDocuments} from 'yaml';
-import {buildRunPlan,checkScriptSyntax} from '../server/run-script-plan.js';
+import {buildRunPlan,checkScriptSyntax,canvasScriptAnchors} from '../server/run-script-plan.js';
 import {referenceCatalog} from '../server/canvas.js';
 const yaml='appId: com.example.App\n---\n- launchApp\n- tapOn: Load\n- assertVisible: Home\n';
 const anchor=(index:number)=>{const ref=referenceCatalog(yaml).references[index];return {index,fingerprint:ref.fingerprint};};
 const row={id:'first',label:'First',beforeStep:anchor(1),source:'output.X = `ไทย ${"quote"}`; // trailing comment'};
 const trust=[{rowId:row.id,origin:'local' as const,trusted:true,hash:scriptHash(row.source)}];
 function freeze<T>(value:T):T{if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;}
+test('canvas authored indexes and end anchors exclude setup/handler occurrences sharing a step position',()=>{
+ const step={kind:'step' as const,file:'flow.yaml',...anchor(1)};
+ const anchorSteps=canvasScriptAnchors({pathId:'path',visits:[],transitions:[],occurrences:[
+  {id:'setup',testId:'setup',visitId:'visit',assertion:false,reference:{kind:'setup',file:'setup.yaml',fingerprint:'a'.repeat(64)}},
+  {id:'step',testId:'check',visitId:'visit',assertion:true,reference:step},
+  {id:'handler',testId:'handler',visitId:'visit',assertion:false,reference:{kind:'handler',file:'handler.yaml',index:1,fingerprint:'b'.repeat(64)}}
+ ]});
+ assert.deepEqual(anchorSteps,[anchor(1)]);
+ const end={...row,beforeStep:{index:1,fingerprint:step.fingerprint+':end'}};
+ const plan=buildRunPlan({yaml,anchorSteps,scripts:[end],trust});assert.deepEqual(plan.blocked,[]);
+ assert.deepEqual(plan.executionOrder,[{kind:'system'},{kind:'step',index:0},{kind:'system'},{kind:'runScript',rowId:row.id}]);
+});
 test('pure plan preserves source bytes, order and wrapper newlines; no credentials',()=>{
  const input=freeze({yaml,scripts:[row],trust,mockAvailable:true});
  const result=buildRunPlan(input);assert.deepEqual(result,buildRunPlan(input));

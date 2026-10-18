@@ -34,9 +34,10 @@ export function mapScriptResults(plan:RunPlan,commands:any[],log:string,confiden
   if(entry?.metadata?.status==='FAILED'){
    const structured=marker(entry?.metadata?.error?.message,item.rowId);
    const readable=entry?.metadata?.error?.message;
-   if(structured!==undefined||logMessage!==undefined){
+   const fallback=typeof readable!=='string'||readable==='Unknown error'?logMessage:undefined;
+   if(structured!==undefined||fallback!==undefined){
     result.status='script-error';
-    result.message=confidential?'Script failed. Evaluated detail withheld for confidential inputs.':structured??logMessage;
+    result.message=confidential?'Script failed. Evaluated detail withheld for confidential inputs.':structured??fallback;
     failure=result.message;
    }else toolFailure=confidential?'Script execution failed. Detail withheld for confidential inputs.':typeof readable==='string'?readable:'Script execution failed without a script marker.';
    stopped=true;

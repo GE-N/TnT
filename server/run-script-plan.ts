@@ -1,5 +1,5 @@
 import {parseAllDocuments,stringify} from 'yaml';
-import {referenceCatalog} from './canvas.js';
+import {referenceCatalog,type CanvasExecution} from './canvas.js';
 import type {ExecutionItem} from './default-actions.js';
 import type {ScriptAnchor,ScriptBlockReason,ScriptRow,ScriptTrust,ScriptExecutionReference} from './run-script-contract.js';
 import {scriptHash} from './script-trust-store.js';
@@ -7,6 +7,10 @@ import {readScriptRows} from './script-validation.js';
 
 export type ScriptExecutionItem=ExecutionItem|{kind:'runScript';rowId:string;beforeStep:number;file:string};
 export type RunPlan={executionYaml:string;scriptFiles:{name:string;content:string;rowId:string}[];executionItems:ScriptExecutionItem[];executionOrder:ScriptExecutionReference[];authoredStepMap:{index:number;executionIndex:number}[];blocked:ScriptBlockReason[]};
+/** Setup/handler occurrences are system work, never authored step indexes or anchors. */
+export function canvasScriptAnchors(execution:CanvasExecution|undefined):ScriptAnchor[]|undefined{
+  return execution?.occurrences.filter(item=>item.reference.kind==='step').map(item=>({index:item.reference.index!,fingerprint:item.reference.fingerprint}));
+}
 /** Compile alone, never invoke. This gate prevents source escaping the wrapper's braces. */
 export function checkScriptSyntax(source:string):{message:string}|undefined {
   try { new Function(source); return; }

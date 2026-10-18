@@ -68,6 +68,8 @@ test('multi-line thrown errors stay whole, and a completed script logging a mark
    const mapped=mapScriptResults(plan,[first,{command:{runScriptCommand:{}},metadata:{depth:0,status,error:{message}}}],status==='COMPLETED'?message:'',false);
    assert.equal(mapped.failure,undefined);assert.equal(mapped.scriptSteps[f.row.id].status,status==='COMPLETED'?'passed':'not-run');
   }
+  const unrelated=mapScriptResults(plan,[first,{command:{runScriptCommand:{}},metadata:{depth:0,status:'FAILED',error:{message:'Unmarked failure'}}}],'TNT_SCRIPT_FAILED row=script-one merely logged',false);
+  assert.equal(unrelated.failure,undefined);assert.equal(unrelated.toolFailure,'Unmarked failure');
  }finally{await f.cleanup();}
 });
 test('artifact allow-list excludes adbkey, HOME, telemetry and downloads even when tools write them into a run',async()=>{

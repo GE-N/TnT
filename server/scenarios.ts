@@ -4,7 +4,7 @@ import {EVIDENCE_SCRUB_FAILED,type ScriptRunResults} from './run-script-contract
 import type {EvidenceScrubber} from './run-script-evidence.js';
 import {homedir} from 'node:os';
 import {createScriptTrustStore,workspaceScripts} from './script-trust-store.js';
-import {buildRunPlan,scriptExecutionYaml} from './run-script-plan.js';
+import {buildRunPlan,scriptExecutionYaml,canvasScriptAnchors} from './run-script-plan.js';
 import {ScriptBlocked} from './script-validation.js';
 import {assertReservedInputs,assertAuthoredVariables,assertAutomationVariables} from './script-validation.js';
 import {parsePackage,portableContent,packageReview,readOmittedValues,missingValues,type OmittedValue,type WorkspacePackage} from './workspace-package.js';
@@ -238,7 +238,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       for (const flow of Object.values(workspace.flows ?? {})) { if (validate(flow, workspace.flows).appId !== appId) throw new Error('Reusable flows must declare the same appId as the scenario.'); }
       if ((input.captureId === undefined) !== (input.pickerReviewId === undefined)) throw new Error('Provide both capture and reviewed step identity.');
       // PR B anchors count canvas operations, excluding synthetic/unassociated commands such as launchApp.
-      const anchorSteps=selection?.scenario.authoring==='canvas'?canvas?.execution?.occurrences.map(item=>({index:item.reference.index!,fingerprint:item.reference.fingerprint})):undefined;
+      const anchorSteps=selection?.scenario.authoring==='canvas'?canvasScriptAnchors(canvas?.execution):undefined;
       const scriptPlan=buildRunPlan({yaml:workspace.yaml,flows:workspace.flows,scripts:selection?.scenario.scripts,trust:scriptTrust,anchorSteps,automation:derived,mockAvailable:!!workspace.mock});
       if(scriptPlan.blocked.length)throw new ScriptBlocked(scriptPlan.blocked);
       if(scriptPlan.scriptFiles.length)validateFlowInputs(scriptPlan.executionYaml,workspace.flows??{},selection?.inputs??runtimeInputs,[],true);
