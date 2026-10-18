@@ -104,6 +104,7 @@ test('startup does not kill a reused PID and skips an already-exited recorded pr
   const killed:number[]=[];
   await sweepUnfinishedRuns(root,{graceMs:0,pause:async()=>{},
    lookup:async pid=>pid===reused.pid?{command:'unrelated',startedAt:reused.startedAt}:pid===restarted.pid?{command:restarted.command,startedAt:'Sun Oct 18 12:01:00 2026'}:undefined,
+   groupAlive:async()=>false,
    kill:async pid=>{killed.push(pid);},
   });
   assert.deepEqual(killed,[]);
@@ -198,6 +199,24 @@ test('startup SIGKILLs a group child that ignores SIGTERM after the leader exits
   await assert.rejects(access(lock),{code:'ENOENT'});
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('startup SIGKILLs a live process group when the recorded leader has already exited',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-recovery-orphan-'));
+ try{
+  const unfinished=join(root,'runs','interrupted');await mkdir(unfinished,{recursive:true});await writeFile(join(unfinished,'.tnt-execution.yaml'),'secret');
+  const owned={role:'mockoon' as const,pid:51,command:'node mockoon',startedAt:'Sun Oct 18 12:00:45 2026'};
+  await deadOwner(root,[owned]);
+  const lock=join(root,'device-ownership.lock');
+  const killed:[number,NodeJS.Signals][]=[];let childGone=false;
+  await sweepUnfinishedRuns(root,{graceMs:0,pause:async()=>{},
+   lookup:async()=>undefined,
+   groupAlive:async()=>!childGone,
+   kill:async(pid,signal)=>{killed.push([pid,signal]);await access(unfinished);await access(lock);if(signal==='SIGKILL')childGone=true;},
+  });
+  assert.deepEqual(killed,[[-owned.pid,'SIGKILL']]);
+  assert.deepEqual(await readdir(join(root,'runs')),[]);
+  await assert.rejects(access(lock),{code:'ENOENT'});
+ }finally{await rm(root,{recursive:true,force:true});}
+});
 test('startup keeps the lock and does not sweep when a started tool was never recorded',async()=>{
  const root=await mkdtemp(join(tmpdir(),'tnt-recovery-unrecorded-'));
  try{
@@ -207,7 +226,7 @@ test('startup keeps the lock and does not sweep when a started tool was never re
   const lock=join(root,'device-ownership.lock');
   await writeFile(lock,JSON.stringify({pid:child.pid,started:['mockoon','maestro'],processes:[mockoon]}));
   const killed:number[]=[];
-  await assert.rejects(sweepUnfinishedRuns(root,{graceMs:0,pause:async()=>{},lookup:async()=>undefined,groupAlive:async()=>false,kill:async pid=>{killed.push(pid);}}),/maestro process was not recorded/);
+  await assert.rejects(sweepUnfinishedRuns(root,{graceMs:0,pause:async()=>{},lookup:async()=>undefined,groupAlive:async()=>false,kill:async pid=>{killed.push(pid);}}),/maestro process was not recorded[\s\S]*Stop the maestro process if it is still running, then delete \.tnt\/device-ownership\.lock/);
   assert.deepEqual(killed,[]);
   assert.equal(await readFile(join(unfinished,'.tnt-execution.yaml'),'utf8'),'secret');
   assert.match(await readFile(lock,'utf8'),/maestro/);

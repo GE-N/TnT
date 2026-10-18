@@ -49,7 +49,7 @@ export async function sweepUnfinishedRuns(root:string,io:RecoveryIO={}){
   const started=startedRoles(owner);
   for(const process of recorded)await stopRecorded(process);
   const missing=started?.filter(role=>started.filter(item=>item===role).length>recorded.filter(item=>item.role===role).length);
-  if(missing?.length)throw new Error('A started '+[...new Set(missing)].join(' and ')+' process was not recorded; unfinished-run recovery refused.');
+  if(missing?.length){const roles=[...new Set(missing)].join(' and ');throw new Error('A started '+roles+' process was not recorded; unfinished-run recovery refused. Stop the '+roles+' process if it is still running, then delete .tnt/device-ownership.lock.');}
   // A legacy lock has no started list, so a recorded-and-gone set is the only proof we have.
   releaseLock=started?true:recorded.length>0;
  }
@@ -88,13 +88,18 @@ export async function sweepUnfinishedRuns(root:string,io:RecoveryIO={}){
  }
  async function stopRecorded(process:OwnedProcess){
   const current=await lookup(process.pid);
-  if(!current||!sameOwnedProcess(process,current))return;
-  await kill(-process.pid,'SIGTERM');
-  const deadline=Date.now()+graceMs;
-  while(await groupLiving(process.pid)){
-   if(Date.now()>=deadline){await kill(-process.pid,'SIGKILL');break;}
-   await pause(pollMs);
+  // A reused PID belongs to someone else. A leader that has already exited can still leave children in the group.
+  if(current&&!sameOwnedProcess(process,current))return;
+  if(current){
+   await kill(-process.pid,'SIGTERM');
+   const deadline=Date.now()+graceMs;
+   while(await groupLiving(process.pid)){
+    if(Date.now()>=deadline)break;
+    await pause(pollMs);
+   }
   }
+  if(!(await groupLiving(process.pid)))return;
+  await kill(-process.pid,'SIGKILL');
   const killDeadline=Date.now()+graceMs;
   while(await groupLiving(process.pid)){
    if(Date.now()>=killDeadline)throw new Error('Recorded tool process is still running; unfinished-run recovery refused.');

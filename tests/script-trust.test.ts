@@ -290,19 +290,22 @@ test('new titles reject bidirectional controls, and a legacy title can still be 
  const f=await fixture();try{
   await assert.rejects(f.service.save({...f.workspace,id:undefined,name:'Hello\u202E'}),/source workspace name/);
   await assert.rejects(f.service.renameWorkspace(f.workspace.id,'Hello\u202E',f.workspace.metadata!.revision),/source workspace name/);
+  await assert.rejects(f.service.copyWorkspace({...f.workspace,id:undefined,name:'Copy\u202E'}),/source workspace name/);
+  const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});
+  await assert.rejects(f.service.importWorkspace({package:pkg.package,name:'Import\u202E',filename:'ok.json'}),/source workspace name/);
   const zwj=await f.service.save({...f.workspace,id:undefined,name:'Family \u200D ok'});
   assert.equal(zwj.name,'Family \u200D ok');
   const file=join(f.root,'workspaces',f.workspace.id,'workspace.json');
   const raw=JSON.parse(await readFile(file,'utf8'));
-  raw.name='Report\u202Ejson';
+  raw.name='Re\u202Eport\u200Bjson';
   await writeFile(file,JSON.stringify(raw));
   const opened=await f.service.workspace(f.workspace.id);
-  assert.equal(opened.name,'Report\u202Ejson');
+  assert.equal(opened.name,'Re\u202Eport\u200Bjson');
   const saved=await f.service.save(opened);
-  assert.equal(saved.name,'Report\u202Ejson');
+  assert.equal(saved.name,'Re\u202Eport\u200Bjson');
   const copy=await f.service.copyWorkspace({...opened,id:undefined,sourceWorkspaceId:opened.id,name:'Clean copy'});
+  assert.equal(copy.name,'Clean copy');
   assert.equal(copy.metadata!.sourceWorkspace?.name,'Reportjson');
-  assert.equal(copy.metadata!.sourceWorkspace?.name.includes('\u202E'),false);
   const exported=await f.service.exportWorkspace({id:opened.id,expectedRevision:saved.metadata!.revision,includeValues:true});
   assert.equal(exported.package.workspace.name,'Reportjson');
   const imported=await f.service.importWorkspace({package:exported.package,name:'Imported',filename:'ok.json'});

@@ -29,8 +29,8 @@ function readSourceWorkspace(value:unknown):ScriptSourceWorkspace|undefined{
  if('kind' in value&&value.kind==='import'&&'filename' in value&&(value.filename===null||typeof value.filename==='string'&&!!value.filename.trim()&&value.filename.length<=255&&!/[\\/]/.test(value.filename)&&!claimControls.test(value.filename)))return {kind:'import',name:value.name,filename:value.filename};
  throw new Error('Provide an import filename of 1–255 characters without path separators or control characters, or omit it.');
 }
-/** Drop characters that cannot be stored as a source claim. An empty result means the claim is omitted. */
-export function readableClaimName(name:string){return name.replace(claimControls,'').trim().slice(0,120);}
+/** Drop every character that cannot be stored as a source claim. An empty result means the claim is omitted. */
+export function readableClaimName(name:string){return name.replace(new RegExp(claimControls.source,'g'),'').trim().slice(0,120);}
 function assertClaimTitle(name:string,previous?:string){if(claimControls.test(name)&&name!==previous)throw new Error('Unreadable source workspace name.');}
 function readStoredSourceWorkspace(value:unknown):ScriptSourceWorkspace|undefined{
  if(value===undefined)return;
@@ -277,6 +277,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   bundle:(id:string)=>serialize(async()=>{const workspace=await read(id);const draftState=await readDraftOnce(id);const view=await readView(id);return {...workspace,draft:draftState.draft,draftError:draftState.draftError,view};}),
   withWorkspace:<T>(id:string,operation:(workspace:Workspace)=>Promise<T>)=>serialize(async()=>operation(await read(id))),
   importCopy:(content:Workspace,beforePublish?:(next:Workspace)=>Promise<void>,sourceWorkspace?:ScriptSourceWorkspace)=>serialize(async()=>{
+   assertClaimTitle(content.name);
    const stamp=now();const id=randomUUID();
    let written:Workspace;
    try{const source=readSourceWorkspace(sourceWorkspace);const next={...content,id,metadata:{createdAt:stamp,updatedAt:stamp,openedAt:stamp,revision:1,...(source?{sourceWorkspace:source}:{})}};await (beforePublish??options?.beforePublish)?.(next);written=await write(next);}
