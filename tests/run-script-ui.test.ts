@@ -4,7 +4,8 @@ import {readFileSync} from 'node:fs';
 import {test} from 'node:test';
 import {JSDOM} from 'jsdom';
 import {act,createElement,useState} from 'react';
-import type {CanvasGraph} from '../server/canvas.js';
+import {inspectCanvas,type CanvasGraph} from '../server/canvas.js';
+import {parsePackage} from '../server/workspace-package.js';
 import type {ScriptExecutionReference,ScriptStepResult,ScriptTrust} from '../server/run-script-contract.js';
 import {approveScriptTrust} from '../src/run-script-client.js';
 import {importFilenameClaim} from '../src/workspace-transfer.js';
@@ -252,6 +253,9 @@ test('reserved names, scrub, cap, and the redacted chip styles',()=>{
 });
 
 const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint};
+const narrowInspector=parsePackage(JSON.parse(readFileSync(new URL('./fixtures/narrow-inspector-workspace.json',import.meta.url),'utf8')));
+const narrowCanvas=narrowInspector.workspace.canvas!;
+const narrowFingerprint=narrowCanvas.screens[0].tests[0].reference.fingerprint;
 const graph:CanvasGraph={
   screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'ready',label:'Home',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Home'}}]}],
   edges:[],
@@ -463,28 +467,43 @@ test('a failed trust load keeps rows read-only and offers Retry',async()=>{
   }finally{await page.close();}
 });
 
-test('at 1024x700 the editor takes the inspector spot and stays inside the window',async()=>{
-  const page=await mount([row('paid',0,fingerprint,{source:'1+1'})]);
+/** jsdom does not lay out. Report the fixture node's own left/top, the 250px node width, and the canvas zoom. */
+async function showNarrowFixture(page:Awaited<ReturnType<typeof mount>>){
+  page.document.getElementById('root')!.classList.add('workbench');
   const proto=page.window.HTMLElement.prototype;
   const original=proto.getBoundingClientRect;
   const box=(left:number,top:number,width:number,height:number)=>({x:left,y:top,left,top,width,height,right:left+width,bottom:top+height,toJSON(){return {};}});
   proto.getBoundingClientRect=function(this:HTMLElement){
     const el=this;
-    if(el.classList.contains('floating-inspector')){
-      if(el.getAttribute('data-inspector-yielded')==='true')return box(-4000,80,300,400) as DOMRect;
-      return box(Number(el.getAttribute('data-slot-left')??362),Number(el.getAttribute('data-slot-top')??80),300,420) as DOMRect;
+    if(el.classList.contains('screen-node')){
+      const zoom=Number(/scale\(([^)]+)\)/.exec(el.closest('.canvas-surface')?.getAttribute('style')??'')?.[1]??1);
+      return box(parseFloat(el.style.left)*zoom,parseFloat(el.style.top)*zoom,250*zoom,180*zoom) as DOMRect;
     }
-    if(el.classList.contains('script-editor')){
-      const left=parseFloat(el.style.left||'0');const top=parseFloat(el.style.top||'0');
-      return box(left,top,parseFloat(el.style.width||'360'),parseFloat(el.style.maxHeight||'400')) as DOMRect;
+    if(el.classList.contains('floating-inspector')||el.classList.contains('script-editor')){
+      const left=parseFloat(el.style.left);const top=parseFloat(el.style.top);
+      if(!Number.isFinite(left)||!Number.isFinite(top))return box(0,0,0,0) as DOMRect;
+      const width=el.classList.contains('script-editor')?parseFloat(el.style.width||'360'):300;
+      const height=el.classList.contains('script-editor')?parseFloat(el.style.maxHeight||'400'):parseFloat(el.style.maxHeight||'400');
+      return box(left,top,width,height) as DOMRect;
     }
-    if(el.classList.contains('screen-node'))return box(100,80,250,180) as DOMRect;
     if(el.classList.contains('canvas-viewport')||el.classList.contains('canvas-surface'))return box(0,0,page.window.innerWidth,page.window.innerHeight) as DOMRect;
     return original.call(el);
   };
+  Object.defineProperty(page.window,'innerWidth',{value:1024,configurable:true});
+  Object.defineProperty(page.window,'innerHeight',{value:700,configurable:true});
+  await act(async()=>{page.replaceGraph(structuredClone(narrowCanvas));page.window.dispatchEvent(new page.window.Event('resize'));});
+  return ()=>{proto.getBoundingClientRect=original;};
+}
+
+test('at 1024x700 the editor takes the inspector spot and stays inside the window',async()=>{
+  assert.deepEqual(inspectCanvas(narrowCanvas,narrowInspector.workspace.yaml).diagnostics,[]);
+  const page=await mount([row('paid',0,narrowFingerprint,{source:'1+1'})]);
+  const restore=await showNarrowFixture(page);
   try{
-    Object.defineProperty(page.window,'innerWidth',{value:1024,configurable:true});Object.defineProperty(page.window,'innerHeight',{value:700,configurable:true});
-    await act(async()=>page.window.dispatchEvent(new page.window.Event('resize')));
+    const node=page.document.querySelector<HTMLElement>('.screen-node')!;
+    assert.equal(node.getAttribute('aria-label'),'Screen Checkout');
+    assert.equal(node.style.left,'800px');
+    assert.equal(page.document.body.textContent?.includes('Before running'),false);
     const opener=page.document.querySelector<HTMLButtonElement>('[data-script-id="paid"] .script-row-summary')!;
     assert.ok(opener);
     opener.focus();
@@ -508,32 +527,14 @@ test('at 1024x700 the editor takes the inspector spot and stays inside the windo
     assert.equal(page.document.activeElement,opener);
     await act(async()=>opener.dispatchEvent(new page.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
     assert.equal(page.document.querySelector('.floating-inspector'),null);
-  }finally{proto.getBoundingClientRect=original;await page.close();}
+  }finally{restore();await page.close();}
 });
 
 test('a read-only editor takes focus when the inspector steps aside',async()=>{
-  const imported=row('paid',0,fingerprint,{source:'1+1',origin:'imported'});
+  const imported=row('paid',0,narrowFingerprint,{source:'1+1',origin:'imported'});
   const page=await mount([imported],[{rowId:imported.id,origin:'imported',trusted:false,hash:imported.hash}]);
-  const proto=page.window.HTMLElement.prototype;
-  const original=proto.getBoundingClientRect;
-  const box=(left:number,top:number,width:number,height:number)=>({x:left,y:top,left,top,width,height,right:left+width,bottom:top+height,toJSON(){return {};}});
-  proto.getBoundingClientRect=function(this:HTMLElement){
-    const el=this;
-    if(el.classList.contains('floating-inspector')){
-      if(el.getAttribute('data-inspector-yielded')==='true')return box(-4000,80,300,400) as DOMRect;
-      return box(Number(el.getAttribute('data-slot-left')??362),Number(el.getAttribute('data-slot-top')??80),300,420) as DOMRect;
-    }
-    if(el.classList.contains('script-editor')){
-      const left=parseFloat(el.style.left||'0');const top=parseFloat(el.style.top||'0');
-      return box(left,top,parseFloat(el.style.width||'360'),parseFloat(el.style.maxHeight||'400')) as DOMRect;
-    }
-    if(el.classList.contains('screen-node'))return box(100,80,250,180) as DOMRect;
-    if(el.classList.contains('canvas-viewport')||el.classList.contains('canvas-surface'))return box(0,0,page.window.innerWidth,page.window.innerHeight) as DOMRect;
-    return original.call(el);
-  };
+  const restore=await showNarrowFixture(page);
   try{
-    Object.defineProperty(page.window,'innerWidth',{value:1024,configurable:true});Object.defineProperty(page.window,'innerHeight',{value:700,configurable:true});
-    await act(async()=>page.window.dispatchEvent(new page.window.Event('resize')));
     const opener=page.document.querySelector<HTMLButtonElement>('[data-script-id="paid"] .script-row-summary')!;
     opener.focus();
     await click(page.document,'[data-script-id="paid"] .script-row-summary');
@@ -546,7 +547,7 @@ test('a read-only editor takes focus when the inspector steps aside',async()=>{
     assert.ok(page.document.activeElement===close||page.document.activeElement===trust);
     assert.notEqual(page.document.activeElement,page.document.body);
     assert.ok(editor.contains(page.document.activeElement));
-  }finally{proto.getBoundingClientRect=original;await page.close();}
+  }finally{restore();await page.close();}
 });
 
 test('while running, the heading and hint span the status row',async()=>{
