@@ -5,6 +5,9 @@ import {
   inspectorMargin,
   inspectorWidth,
   placeInspector,
+  placeScriptEditor,
+  scriptEditorGap,
+  scriptEditorWidth,
   visibleBounds,
   type Rect,
 } from "../src/inspector-placement.js";
@@ -18,6 +21,22 @@ const node = (left: number, top: number): Rect => ({
   height: 200,
 });
 const right = (anchor: Rect) => anchor.left + anchor.width + inspectorGap;
+
+test("the script editor sits beside the inspector without covering it", () => {
+  const inspector = { left: 820, top: 120, width: inspectorWidth, height: 400 };
+  const placed = placeScriptEditor(inspector, {
+    width: bounds.width,
+    height: bounds.height,
+  });
+  assert.equal(placed.left + scriptEditorWidth + scriptEditorGap, inspector.left);
+  assert.ok(placed.left >= inspectorMargin);
+  const onLeft = { left: 40, top: 100, width: inspectorWidth, height: 400 };
+  const rightSide = placeScriptEditor(onLeft, {
+    width: bounds.width,
+    height: bounds.height,
+  });
+  assert.equal(rightSide.left, onLeft.left + inspectorWidth + scriptEditorGap);
+});
 
 test("the inspector opens to the right of its screen by default", () => {
   const anchor = node(100, 100);

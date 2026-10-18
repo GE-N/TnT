@@ -68,12 +68,17 @@ export const DRAFT_STEP_TEXT='Step not captured yet · capture it before running
 export const TRUST_LOAD_TEXT="⚠ Trust couldn't be loaded";
 export const TRUST_UNKNOWN_TEXT='⚠ Trust unknown';
 
-/** Plain source text. A file import is an unverified claim. A copy uses the workspace name unchanged. */
+export type SourcePiece={text:string;isolate?:boolean};
+
+/** Plain source text. A file import is an unverified claim. A copy uses the workspace name unchanged. No trailing period. */
+export function scriptSourcePieces(source:ScriptSourceWorkspace|undefined):SourcePiece[]{
+  if(source?.kind==='import'&&source.filename)return [{text:'Imported from file '},{text:source.filename,isolate:true},{text:' (named “'},{text:source.name,isolate:true},{text:'”)'}];
+  if(source?.kind==='import'&&source.name.trim())return [{text:'Imported from a file named “'},{text:source.name,isolate:true},{text:'”'}];
+  if(source?.kind==='copy'&&source.name.trim())return [{text:'Copied from “'},{text:source.name,isolate:true},{text:'”'}];
+  return [{text:'Imported from an imported workspace.'}];
+}
 export function scriptSourceLine(source:ScriptSourceWorkspace|undefined){
-  if(source?.kind==='import'&&source.filename)return 'Imported from file `'+source.filename+'` (named "'+source.name+'").';
-  if(source?.kind==='import'&&source.name.trim())return 'Imported from a file named "'+source.name+'".';
-  if(source?.kind==='copy'&&source.name.trim())return 'Copied from "'+source.name+'".';
-  return 'Imported from an imported workspace.';
+  return scriptSourcePieces(source).map(piece=>piece.text).join('');
 }
 export const SCRUB_FAILED_TEXT='✕ Evidence scrub failed · run evidence was removed to protect the token';
 
@@ -202,14 +207,15 @@ export function untrustedCount(rows:ScriptRecord[],approvals:ScriptTrust[]){
   return rows.filter(row=>row.source.trim()&&importedNeedsTrust(row,approvals)).length;
 }
 
-/** Blank rows stay in the editor until Esc or the first source. They are not a save. */
-export function scenariosForSave<T extends object>(scenarios:T[]):T[]{
+/** A new blank row is not a save. A row that was already saved stays when its source is cleared. */
+export function scenariosForSave<T extends object>(scenarios:T[],keptIds?:ReadonlySet<string>):T[]{
+  const kept=(row:{id?:string;source:string})=>!!row.source.trim()||(!!row.id&&!!keptIds?.has(row.id));
   let changed=false;
   const next=scenarios.map(item=>{
-    const scripts=(item as {scripts?:{source:string}[]}).scripts;
-    if(!scripts?.some(row=>!row.source.trim()))return item;
+    const scripts=(item as {scripts?:{id?:string;source:string}[]}).scripts;
+    if(!scripts?.some(row=>!kept(row)))return item;
     changed=true;
-    return {...item,scripts:scripts.filter(row=>row.source.trim())};
+    return {...item,scripts:scripts.filter(kept)};
   });
   return changed?next:scenarios;
 }
@@ -390,7 +396,7 @@ export function scenarioShowsMockVariables(workspaceHasMock:boolean,mockResponse
 export function batchReasonLabel(summary:BatchSummary){
   if(!summary.reason)return;
   if(summary.tone==='trust')return '⚠ '+summary.reason;
-  if(summary.tone==='failed')return '✕ '+summary.reason;
+  if(summary.tone==='failed'||summary.reason===DRAFT_STEP_TEXT)return '✕ '+summary.reason;
   return summary.reason;
 }
 

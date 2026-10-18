@@ -124,6 +124,57 @@ export function placeInspector({
   };
 }
 
+export const scriptEditorWidth = 360;
+export const scriptEditorGap = 12;
+
+/** Puts the script editor on a free side of the inspector so the two cards do not overlap. */
+export function placeScriptEditor(
+  inspector: Rect,
+  viewport: { width: number; height: number },
+  size: { width: number; height: number } = {
+    width: scriptEditorWidth,
+    height: 480,
+  },
+): { left: number; top: number } {
+  const margin = inspectorMargin;
+  const leftOf = inspector.left - scriptEditorGap - size.width;
+  const rightOf = inspector.left + inspector.width + scriptEditorGap;
+  const fits = (left: number) =>
+    left >= margin && left + size.width <= viewport.width - margin;
+  const beside =
+    fits(leftOf) &&
+    (inspector.left + inspector.width / 2 >= viewport.width / 2 ||
+      !fits(rightOf))
+      ? leftOf
+      : fits(rightOf)
+        ? rightOf
+        : fits(leftOf)
+          ? leftOf
+          : undefined;
+  const topFor = (top: number) =>
+    clamp(
+      top,
+      margin,
+      Math.max(margin, viewport.height - margin - Math.min(size.height, 160)),
+    );
+  if (beside !== undefined)
+    return { left: Math.round(beside), top: Math.round(topFor(inspector.top)) };
+  const below = inspector.top + inspector.height + scriptEditorGap;
+  const above = inspector.top - scriptEditorGap - Math.min(size.height, 320);
+  const top =
+    below + 160 <= viewport.height - margin
+      ? below
+      : above >= margin
+        ? above
+        : topFor(inspector.top);
+  const left = clamp(
+    inspector.left,
+    margin,
+    Math.max(margin, viewport.width - margin - size.width),
+  );
+  return { left: Math.round(left), top: Math.round(top) };
+}
+
 export function visibleBounds(
   viewport: Rect,
   window: { width: number; height: number },

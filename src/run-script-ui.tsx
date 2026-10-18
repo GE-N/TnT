@@ -1,8 +1,9 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import type {ScriptAnchor,ScriptBlockReason,ScriptRow,ScriptSourceWorkspace,ScriptStepResult,ScriptTrust} from '../server/run-script-contract.js';
 import {REDACTED} from '../server/run-script-contract.js';
 import {RunStatusBadge} from './visit-steps.js';
-import {SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,TRUST_UNKNOWN_TEXT,scriptFirstLine,scriptSourceLine,type ScriptRecord,type ScriptRowView} from './run-script.js';
+import {SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,TRUST_UNKNOWN_TEXT,scriptFirstLine,scriptSourcePieces,type ScriptRecord,type ScriptRowView} from './run-script.js';
+import {placeScriptEditor,scriptEditorWidth} from './inspector-placement.js';
 import type {ScriptExecutionReference} from '../server/run-script-contract.js';
 
 export function RedactedText({text}:{text:string}){
@@ -49,17 +50,33 @@ export function ScriptEditor({row,view,sourceWorkspace,stepNumber,afterLast=fals
   const title=showResult&&!editing?'Run script · '+row.label:'Run script · '+place;
   const remaining=Math.max(0,untrustedLeft-1);
   const nameRef=useRef<HTMLInputElement>(null);
+  const editorRef=useRef<HTMLElement>(null);
+  const [beside,setBeside]=useState<{left:number;top:number}>();
   useEffect(()=>{if(!readOnly)nameRef.current?.focus();},[row.id,readOnly]);
+  useLayoutEffect(()=>{
+    const place=()=>{
+      const inspector=document.querySelector('.floating-inspector');
+      const rect=inspector?.getBoundingClientRect();
+      if(!rect||rect.width<1){setBeside(undefined);return;}
+      setBeside(placeScriptEditor(rect,{width:window.innerWidth,height:window.innerHeight},{width:scriptEditorWidth,height:editorRef.current?.offsetHeight||480}));
+    };
+    place();
+    const observer=typeof ResizeObserver==='undefined'?undefined:new ResizeObserver(place);
+    const inspector=document.querySelector('.floating-inspector');
+    if(inspector)observer?.observe(inspector);
+    window.addEventListener('resize',place);
+    return()=>{observer?.disconnect();window.removeEventListener('resize',place);};
+  },[row.id]);
   useEffect(()=>{
     const onKey=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();onClose();}};
     document.addEventListener('keydown',onKey);
     return ()=>document.removeEventListener('keydown',onKey);
   },[onClose]);
-  return <aside className="script-editor" aria-label={title} data-script-editor={row.id}>
+  return <aside ref={editorRef} className="script-editor" aria-label={title} data-script-editor={row.id} style={beside?{left:beside.left,top:beside.top,right:'auto',width:scriptEditorWidth}:undefined}>
     <header className="script-editor-header"><h3>{title}</h3><button type="button" aria-label="Close script editor" onClick={onClose}>✕</button></header>
     {readOnly&&<div className="script-trust">
-      {!trustUnknown&&<p>{scriptSourceLine(sourceWorkspace)} Scripts can read files and call the network.</p>}
-      <div className="script-code-label"><span>Script · JavaScript</span><span className="script-readonly-badge">Read only until trusted</span></div>
+      {!trustUnknown&&<p>{scriptSourcePieces(sourceWorkspace).map((piece,index)=>piece.isolate?<bdi key={index}>{piece.text}</bdi>:piece.text)} Scripts can read files and call the network.</p>}
+      <div className="script-code-label"><span>Script · JavaScript</span><span className="script-readonly-badge">{trustUnknown?'Read only · trust unknown':'Read only until trusted'}</span></div>
       <ScriptSource source={row.source} readOnly/>
       {!trustUnknown&&<button type="button" className="primary script-trust-button" data-testid="trust-this-script" disabled={trusting} onClick={()=>{setTrusting(true);setTrustError('');void onTrust().then(()=>setTrusting(false)).catch(()=>{setTrustError('Trust could not be saved on this Mac.');setTrusting(false);});}}>Trust this script</button>}
       {trustError&&<p className="script-inline-error" role="alert">{trustError}</p>}

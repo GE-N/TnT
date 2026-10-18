@@ -8,10 +8,11 @@ import {sha256} from '../src/run-script.js';
 const fingerprint='ab'.repeat(32);
 const source='1+1';
 
-function workspace(mock:boolean){
+function workspace(mock:boolean,imported=false){
   return {
     id:'saved',
     name:'Saved home',
+    ...(imported?{metadata:{revision:1,sourceWorkspace:{kind:'import' as const,name:'Saved home',filename:'shop-v3.tnt'}}}:{}),
     yaml:'appId: com.example.App\n---\n- launchApp\n',
     flows:{},
     ...(mock?{mock:{environment:{name:'Pay',routes:[{uuid:'pay',type:'http',method:'get',endpoint:'pay',responses:[{uuid:'ok',label:'OK',statusCode:200,body:'{}'}]}]},port:4320,routeId:'pay',responseId:'ok',backendUrl:'http://127.0.0.1',passthroughRouteIds:[],fromScreen:'home',toScreen:'home',failureSemantics:'HTTP 500'}}:{}),
@@ -29,7 +30,7 @@ async function openWorkspace(options:{mock:boolean;trusted:boolean;failTrust?:bo
   const keys=['window','document','HTMLElement','Event','KeyboardEvent','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch','sessionStorage'];
   const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
   class ResizeObserver{observe(){}disconnect(){}}
-  const saved=workspace(options.mock);
+  const saved=workspace(options.mock,!!options.failTrust);
   const runs:string[]=[];
   const batches:string[]=[];
   const duplicates:unknown[]=[];
@@ -112,7 +113,11 @@ test('a failed trust load blocks Run until Retry succeeds',async()=>{
     await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Visit 1 · Home"]')?.click());
     assert.equal(document.querySelector('[data-testid="trust-unknown"]')?.textContent,'⚠ Trust unknown');
     assert.equal(document.querySelector('[role="alertdialog"]'),null);
-    await clickRun(document);
+    const sidebarRun=document.querySelector<HTMLButtonElement>('[aria-label="Run scenario — Trust couldn\'t be loaded"]');
+    const runAll=[...document.querySelectorAll('button')].find(item=>item.textContent==='Run all');
+    assert.equal(sidebarRun?.disabled,true);
+    assert.equal(runAll?.disabled,true);
+    assert.equal(document.querySelector('.workspace-imported')?.textContent,'↓ Imported workspace');
     assert.deepEqual(page.runs,[]);
     await act(async()=>{document.querySelector<HTMLButtonElement>('[data-testid="trust-load-retry"]')!.click();for(let i=0;i<8;i++)await new Promise(resolve=>setImmediate(resolve));});
     assert.equal(page.trustCalls(),2);

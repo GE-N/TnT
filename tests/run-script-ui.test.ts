@@ -7,6 +7,7 @@ import {act,createElement,useState} from 'react';
 import type {CanvasGraph} from '../server/canvas.js';
 import type {ScriptExecutionReference,ScriptStepResult,ScriptTrust} from '../server/run-script-contract.js';
 import {approveScriptTrust} from '../src/run-script-client.js';
+import {importFilenameClaim} from '../src/workspace-transfer.js';
 import {anchorForNewScript,anchorMatches,anchorTargetsDraft,batchReasonLabel,batchSummary,batchWithScriptBlocks,blockDisplayMessage,blocksFor,DRAFT_STEP_TEXT,endAnchorFingerprint,evidenceScrubFailed,importedNeedsTrust,moveScript,newScriptId,orderedScenarioSteps,readScriptRun,reservedPlacements,runHitCap,scenariosForSave,scenarioShowsMockVariables,scriptBlock,scriptFirstLine,scriptFollowsFailure,scriptRowView,scriptSourceLine,sha256,stableScriptOrder,stepNotRun,trustFor,untrustedCount,SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,SCRUB_FAILED_TEXT,TRUST_LOAD_TEXT,type OrderedStep,type ScriptRecord} from '../src/run-script.js';
 import type {RunScriptModel} from '../src/run-script-ui.js';
 
@@ -143,12 +144,20 @@ test('a passed run does not mark a script row passed when that row has no result
   assert.equal(view.tone,'not-run');
 });
 
+test('an unsafe import filename is recorded as null',()=>{
+  assert.equal(importFilenameClaim('shop-v3.tnt'),'shop-v3.tnt');
+  assert.equal(importFilenameClaim('shop\u202E.tnt'),null);
+  assert.equal(importFilenameClaim('shop\n.tnt'),null);
+  assert.equal(importFilenameClaim('../shop.tnt'),null);
+  assert.equal(importFilenameClaim(undefined),null);
+});
+
 test('import and copy source lines stay plain',()=>{
-  assert.equal(scriptSourceLine({kind:'import',name:'Payments',filename:'x.tnt'}),'Imported from file `x.tnt` (named "Payments").');
-  assert.equal(scriptSourceLine({kind:'import',name:'Payments',filename:null}),'Imported from a file named "Payments".');
-  assert.equal(scriptSourceLine({kind:'copy',name:'Payments'}),'Copied from "Payments".');
+  assert.equal(scriptSourceLine({kind:'import',name:'Payments',filename:'x.tnt'}),'Imported from file x.tnt (named “Payments”)');
+  assert.equal(scriptSourceLine({kind:'import',name:'Payments',filename:null}),'Imported from a file named “Payments”');
+  assert.equal(scriptSourceLine({kind:'copy',name:'Payments'}),'Copied from “Payments”');
   assert.equal(scriptSourceLine(undefined),'Imported from an imported workspace.');
-  assert.doesNotMatch(scriptSourceLine({kind:'import',name:'Payments',filename:'x.tnt'}),/verified/i);
+  assert.doesNotMatch(scriptSourceLine({kind:'import',name:'Payments',filename:'x.tnt'}),/verified|`|\.$/i);
 });
 
 test('a draft step is not an anchor and an existing row uses the usual block line',()=>{
@@ -167,6 +176,7 @@ test('a draft step is not an anchor and an existing row uses the usual block lin
   assert.equal(blockDisplayMessage(reason),DRAFT_STEP_TEXT);
   const lines=batchWithScriptBlocks(['main'],[],new Map([['main',{kind:reason.kind,message:blockDisplayMessage(reason)}]]),new Map([['main','Main']]));
   assert.equal(lines[0].reason,DRAFT_STEP_TEXT);
+  assert.equal(batchReasonLabel(batchSummary(lines[0])),'✕ '+DRAFT_STEP_TEXT);
   assert.notEqual(lines[0].reason,'Step changed · relink before running');
 });
 
@@ -178,6 +188,9 @@ test('a blank script is left out of the save payload',()=>{
   assert.deepEqual(saved[0].scripts,[{source:'1+1'}]);
   assert.deepEqual(saved[1].scripts,[]);
   assert.equal(scenariosForSave(plainList),plainList);
+  const cleared={id:'paid',scripts:[{id:'script-paid',source:''}]};
+  const keptRows=[cleared];
+  assert.equal(scenariosForSave(keptRows,new Set(['script-paid'])),keptRows);
 });
 
 test('an unsaved local script is pending and only a server import counts as untrusted',()=>{
@@ -339,7 +352,8 @@ test('imported scripts are trusted one at a time and a failure stops later steps
     const editor=page.document.querySelector('.script-editor')!;
     assert.equal(editor.getAttribute('role'),null);
     assert.equal(page.document.querySelector('[data-testid="script-source"]')!.textContent,'console.log(1)');
-    assert.match(editor.textContent!,/Copied from "Imported workspace"/);
+    assert.match(editor.textContent!,/Copied from “Imported workspace”/);
+    assert.equal(editor.querySelector('bdi')?.textContent,'Imported workspace');
     assert.match(editor.textContent!,/1 of 2 left after this/);
     assert.doesNotMatch(editor.textContent!,/Trust all/);
     await act(async()=>{page.document.querySelector<HTMLButtonElement>('[data-testid="trust-this-script"]')!.click();await new Promise(resolve=>setTimeout(resolve,0));});
@@ -432,6 +446,7 @@ test('a failed trust load keeps rows read-only and offers Retry',async()=>{
     await click(page.document,'[data-script-id="paid"] .script-row-summary');
     assert.equal(page.document.querySelector('[data-testid="script-source"]')!.textContent,'1+1');
     assert.equal(page.document.querySelector('[aria-label="Script source"]'),null);
+    assert.equal(page.document.querySelector('.script-readonly-badge')?.textContent,'Read only · trust unknown');
     assert.equal(page.document.querySelector('[data-testid="trust-this-script"]'),null);
     await click(page.document,'[data-testid="trust-load-retry"]');
     assert.equal(page.retries(),1);
