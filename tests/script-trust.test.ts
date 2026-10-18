@@ -61,7 +61,7 @@ test('copy preserves verified local origin; copied imported sources under new ro
  const f=await fixture();try{
   const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});
   const imported=await f.service.importWorkspace({package:pkg.package,name:'Imported'});
-  const copiedLocal=await f.service.copyWorkspace(f.workspace);assert.ok((await f.service.scriptTrust(copiedLocal.id)).scripts.every(item=>item.origin==='local'&&item.trusted));
+  const copiedLocal=await f.service.copyWorkspace({...f.workspace,id:undefined,sourceWorkspaceId:f.workspace.id});assert.ok((await f.service.scriptTrust(copiedLocal.id)).scripts.every(item=>item.origin==='local'&&item.trusted));
   const edited=structuredClone(imported);edited.scenarios![0].scripts!.push({...edited.scenarios![0].scripts![0],id:'pasted'});
   const saved=await f.service.save(edited);assert.equal((await f.service.scriptTrust(saved.id)).scripts.at(-1)!.origin,'imported');
   const noScripts=await f.service.save({...f.workspace,scenarios:[]});await writeFile(join(f.trustDirectory,'state.json'),'unreadable');assert.deepEqual(await f.service.scriptTrust(noScripts.id),{scripts:[]});

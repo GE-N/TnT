@@ -131,12 +131,13 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     async trashWorkspace(id:string){if(deleting.has(id))throw new Error('This workspace is already moving to Trash. Wait and retry.');if(activeWorkspaces.has(id)||batches.activeWorkspaceId===id)throw new Error('Active execution blocks deletion of this workspace. Wait for execution and cleanup; no run was cancelled.');deleting.add(id);try{return await workspaceStore.trash(id);}finally{deleting.delete(id);}},
     async restoreWorkspace(id:string){return workspaceStore.restore(id);},
     async purgeWorkspace(id:string){return workspaceStore.purge(id);},
-    async copyWorkspace(input:Parameters<typeof authoredWorkspace>[0]){
+    async copyWorkspace(input:Parameters<typeof authoredWorkspace>[0]&{sourceWorkspaceId?:string}){
       const content=authoredWorkspace({...input,id:undefined});
       const incomplete=content.canvas?.screens.flatMap(screen=>screen.tests).find(test=>operationProblem(test));if(incomplete)throw new Error('Repair incomplete canvas content before copying. '+operationProblem(incomplete));
       validate(content.yaml,content.flows);
       for(const flow of Object.values(content.flows??{}))validate(flow,content.flows);
-      const source=input.id?await workspaceStore.read(input.id):undefined;
+      const sourceId=input.sourceWorkspaceId??input.id;
+      const source=sourceId?await workspaceStore.read(sourceId):undefined;
       const sourceTrust=source?await trustStore.list(source):[];
       const origins=source?Object.fromEntries(workspaceScripts(content).flatMap(row=>{const trust=sourceTrust.find(item=>item.rowId===row.id);const original=workspaceScripts(source).find(item=>item.id===row.id);return trust&&(trust.origin==='imported'||original?.source===row.source)?[[row.id,trust.origin]]:[];})):Object.fromEntries(workspaceScripts(content).map(row=>[row.id,'imported' as const]));
       return workspaceStore.importCopy(content,next=>trustStore.register(next,undefined,origins));
