@@ -12,7 +12,7 @@ import {createScenarios} from '../../server/scenarios.js';
 import {createRunner} from '../../server/runner.js';
 import {createMaestro} from '../../server/maestro.js';
 import {checkScriptSyntax} from '../../server/run-script-plan.js';
-import {tokenForms} from '../../server/run-script-evidence.js';
+import {evidenceForms as tokenForms} from '../run-script-helpers.js';
 const exec=promisify(execFile);
 const deviceId=process.env.TNT_REAL_DEVICE;
 if(!deviceId)throw new Error('Set TNT_REAL_DEVICE for this explicitly invoked real-tool suite.');
@@ -49,13 +49,14 @@ test('real Maestro output/escaping happy path and 20 consecutive fresh Mockoon s
 });
 test('real Graal parity and readable script failures including token/Thai evidence',async()=>{
  const f=await fixture(true);try{
-  const sources=['output.X = ({x:"ไทย quote"})?.x ?? "fallback"; const arrow=()=>`ok`; arrow();','throw new Error("ไทย " + TNT_MOCK_TOKEN + " " + encodeURIComponent(TNT_MOCK_TOKEN));','const response=http.get(TNT_MOCK_URL+"/does-not-exist"); if (!response.ok) throw new Error("HTTP "+response.status);','return 1;'];
+  const sources=['output.X = ({x:"ไทย quote"})?.x ?? "fallback"; const arrow=()=>`ok`; arrow();','throw new Error("ไทย\\nSecond line " + TNT_MOCK_TOKEN + " " + encodeURIComponent(TNT_MOCK_TOKEN));','const response=http.get(TNT_MOCK_URL+"/does-not-exist"); if (!response.ok) throw new Error("HTTP "+response.status);','return 1;','console.log("TNT_SCRIPT_FAILED row=real-script merely logged");output.X="ไทย quote";'];
   for(const [index,source] of sources.entries()){
    assert.equal(checkScriptSyntax(source),undefined);
    const workspace=await f.save(source);
    const result=await f.service.wait((await f.service.start({workspaceId:workspace.id,deviceId:deviceId!,scenarioId:'real'})).id);
-   if(index===0)assert.equal(result.status,'passed',JSON.stringify(result));
-   else {assert.equal(result.status,'script-error',JSON.stringify(result));assert.ok(result.scriptSteps?.['real-script'].message);assert.doesNotMatch(result.scriptSteps!['real-script'].message!,/^Unknown error$/);}
+   if(index===0||index===4)assert.equal(result.status,'passed',JSON.stringify(result));
+   else if(index===3){assert.equal(result.status,'tool-error',JSON.stringify(result));assert.match(result.error!,/SyntaxError/);}
+   else {assert.equal(result.status,'script-error',JSON.stringify(result));assert.ok(result.scriptSteps?.['real-script'].message);assert.doesNotMatch(result.scriptSteps!['real-script'].message!,/^Unknown error$/);if(index===1)assert.match(result.scriptSteps!['real-script'].message!,/ไทย\nSecond line/);}
    await f.scan();
   }
  }finally{await rm(f.root,{recursive:true,force:true});}
