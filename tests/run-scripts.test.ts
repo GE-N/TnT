@@ -99,3 +99,22 @@ test('generated script removal failure deletes unsafe evidence and retains a saf
   return {code:0,log:'cleanup must fail closed',cleanup:{verified:true,detail:'Stopped'}};
  }});try{const result=await f.service.wait((await f.start()).id);assert.equal(result.status,'error');assert.equal(result.error,'Evidence scrub failed');assert.deepEqual(await readdir(join(f.root,'runs',result.id)),['result.json']);}finally{await f.cleanup();}
 });
+test('marker source never executes during compile, preview, review, export, import or batch preflight',async()=>{
+ const f=await scriptFixture();try{
+  const marker=join(f.root,'must-not-execute');const source='globalThis.process.getBuiltinModule("node:fs").writeFileSync('+JSON.stringify(marker)+', "executed")';
+  const workspace=await f.service.save({...f.workspace,scenarios:[{...f.scenario,scripts:[{...f.row,source}]}]});
+  const plan=buildRunPlan({yaml:workspace.yaml,scripts:workspace.scenarios![0].scripts,trust:[{rowId:f.row.id,origin:'local',hash:'',trusted:true}]});assert.deepEqual(plan.blocked,[]);
+  await f.service.preview({...workspace,scenarioId:'one'});const pkg=await f.service.exportWorkspace({id:workspace.id,expectedRevision:2,includeValues:true});await f.service.reviewWorkspacePackage({package:pkg.package});const imported=await f.service.importWorkspace({package:pkg.package,name:'Marker'});
+  const batch=await f.service.waitBatch((await f.service.startBatch({workspaceId:imported.id,deviceId})).id);assert.equal(batch.entries[0].reason,'Script needs trust');assert.equal(f.calls.length,0);
+  await assert.rejects(readFile(marker),{code:'ENOENT'});
+  const current=await f.service.workspace(workspace.id);await f.service.save({...current,scenarios:[{...f.scenario,scripts:[{...f.row,source:'} catch(e){}; '+source+'; try {'}]}]});await assert.rejects(f.service.start({workspaceId:workspace.id,deviceId,scenarioId:'one'}),ScriptBlocked);await assert.rejects(readFile(marker),{code:'ENOENT'});assert.equal(f.stats().acquisitions,0);
+ }finally{await f.cleanup();}
+});
+test('unknown or extra script command metadata never claims a verified script pass',async()=>{
+ const f=await scriptFixture();try{
+  const plan=buildRunPlan({yaml:f.workspace.yaml,scripts:[f.row],trust:[{rowId:f.row.id,origin:'local',hash:'',trusted:true}]});
+  const launch={command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}};
+  const unknown={command:{unknownCommand:{}},metadata:{depth:0,status:'COMPLETED'}};
+  const mapped=mapScriptResults(plan,[launch,unknown],'',false);assert.equal(mapped.ambiguous,true);assert.equal(mapped.scriptSteps[f.row.id].status,'not-run');
+ }finally{await f.cleanup();}
+});
