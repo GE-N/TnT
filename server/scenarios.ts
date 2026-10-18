@@ -8,7 +8,7 @@ import {buildRunPlan,scriptExecutionYaml,canvasScriptAnchors,draftAnchorBlocks} 
 import {ScriptBlocked} from './script-validation.js';
 import {assertReservedInputs,assertAuthoredVariables,assertAutomationVariables} from './script-validation.js';
 import {parsePackage,portableContent,packageReview,readOmittedValues,missingValues,type OmittedValue,type WorkspacePackage} from './workspace-package.js';
-import {WorkspaceConflict,createWorkspaceStore,type WorkspaceMetadata,type WorkspaceStoreFaults} from './workspace-store.js';
+import {WorkspaceConflict,createWorkspaceStore,readableClaimName,type WorkspaceMetadata,type WorkspaceStoreFaults} from './workspace-store.js';
 import {createBatches} from './batches.js';
 import {projectCanvasRoute} from './canvas-route.js';
 import {refreshChecks,operationProblem,routeVisits} from '../shared/canvas-authoring.js';
@@ -42,7 +42,7 @@ export type Maestro = {
 };
 const validId = (id: string) => { if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new Error('Invalid workspace/run identifier.'); return id; };
 
-export function createScenarios(options: { root: string; runner: ReturnType<typeof createRunner>; maestro: Maestro; faults?: WorkspaceStoreFaults; now?: () => Date; trustDirectory?:string; trustFaults?:{beforeList?:()=>Promise<void>}; createMockSession?:typeof createMockSession; scrubber?:EvidenceScrubber; noteProcess?:(pid:number)=>Promise<void>|void; afterDuplicateRead?:()=>Promise<void>; afterTrustRead?:()=>Promise<void> }) {
+export function createScenarios(options: { root: string; runner: ReturnType<typeof createRunner>; maestro: Maestro; faults?: WorkspaceStoreFaults; now?: () => Date; trustDirectory?:string; trustFaults?:{beforeList?:()=>Promise<void>}; createMockSession?:typeof createMockSession; scrubber?:EvidenceScrubber; prepareProcess?:()=>Promise<void>|void; cancelProcess?:()=>Promise<void>|void; noteProcess?:(pid:number)=>Promise<void>|void; afterDuplicateRead?:()=>Promise<void>; afterTrustRead?:()=>Promise<void> }) {
   const trustStore=createScriptTrustStore(options.trustDirectory??join(homedir(),'Library','Application Support','TnT','script-trust'),options.trustFaults);
   const activeWorkspaces=new Set<string>();
   const deleting=new Set<string>();
@@ -171,7 +171,8 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       if(sourceId)try{source=await workspaceStore.read(sourceId);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
       const sourceTrust=source?await trustStore.list(source):[];
       const origins=Object.fromEntries(workspaceScripts(content).map(row=>{const trust=sourceTrust.find(item=>item.rowId===row.id);const original=source&&workspaceScripts(source).find(item=>item.id===row.id);return [row.id,trust?.origin==='local'&&original?.source===row.source?'local' as const:'imported' as const];}));
-      return workspaceStore.importCopy(content,next=>trustStore.register(next,undefined,origins),source?{kind:'copy',name:source.name}:undefined);
+      const claimed=source?readableClaimName(source.name):'';
+      return workspaceStore.importCopy(content,next=>trustStore.register(next,undefined,origins),claimed?{kind:'copy',name:claimed}:undefined);
     },
     async exportWorkspace(input:{id:string;expectedRevision:number;includeValues?:boolean}){
       if(input.includeValues!==undefined&&typeof input.includeValues!=='boolean')throw new Error('Include values must be a boolean.');
@@ -180,7 +181,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const incomplete=workspace.canvas?.screens.flatMap(screen=>screen.tests).find(test=>operationProblem(test));
       if(incomplete)throw new Error('Repair incomplete authored content before export. '+operationProblem(incomplete));
       validate(workspace.yaml,workspace.flows,[],new Set(),undefined,workspaceScripts(workspace).length>0);
-      const content=portableContent(workspace,input.includeValues===true);
+      const content=portableContent({...workspace,name:readableClaimName(workspace.name)||'Workspace'},input.includeValues===true);
       const pkg:WorkspacePackage={dependencies:packageReview(content,[]).dependencies,format:'tnt-workspace',version:1,source:{revision:workspace.metadata!.revision,savedAt:workspace.metadata!.updatedAt},workspace:content};
       if(Buffer.byteLength(JSON.stringify(pkg,null,2)+'\n')>1_100_000)throw new Error('Formatted workspace package exceeds 1.1 MB. Reduce embedded images or authored content.');
       const reviewed=await service.reviewWorkspacePackage({package:pkg});
@@ -313,7 +314,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
             for(const file of scriptPlan.scriptFiles){const name=join(executionDirectory,file.name);scriptPaths.push(name);await writeFile(name,file.content,{mode:0o600});}
             let scriptEnv:Record<string,string>|undefined;
             if (startMock&&workspace.mock) {
-              mock = (options.createMockSession??createMockSession)(workspace.mock, executionDirectory,{overrideResponse:selection?!!selection.scenario.mockResponseId:true,...options.noteProcess?{noteProcess:options.noteProcess}:{}});
+              mock = (options.createMockSession??createMockSession)(workspace.mock, executionDirectory,{overrideResponse:selection?!!selection.scenario.mockResponseId:true,...options.prepareProcess?{prepareProcess:options.prepareProcess}:{},...options.cancelProcess?{cancelProcess:options.cancelProcess}:{},...options.noteProcess?{noteProcess:options.noteProcess}:{}});
               const access=mock.scriptAccess();token=access.token;
               if(hasScripts)scriptEnv={TNT_MOCK_URL:access.url,TNT_MOCK_TOKEN:access.token};
               run.mock = mock.result;

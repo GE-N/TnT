@@ -40,7 +40,11 @@ test('plain runs preserve HOME/JVM settings; script-only runs isolate HOME witho
 });
 test('spawn records the owned maestro pid',async()=>{
  const root=await mkdtemp(join(tmpdir(),'tnt-maestro-note-'));try{
-  const f=fakeProcess();const noted:number[]=[];f.dependencies.noteProcess=async pid=>{noted.push(pid);};
+  const f=fakeProcess();const noted:number[]=[];let prepared=false;
+  f.dependencies.prepareProcess=async()=>{prepared=true;};
+  const spawn=f.dependencies.spawn!;
+  f.dependencies.spawn=((...args:Parameters<NonNullable<MaestroDependencies['spawn']>>)=>{assert.equal(prepared,true);return spawn(...args);}) as MaestroDependencies['spawn'];
+  f.dependencies.noteProcess=async pid=>{noted.push(pid);};
   const done=createMaestro(f.dependencies).run({directory:root,flow:join(root,'flow.yaml'),deviceId:'fixture',signal:new AbortController().signal});
   while(!f.timers.length)await new Promise<void>(resolve=>setImmediate(resolve));
   f.child.emit('close',0);await done;assert.deepEqual(noted,[32123]);

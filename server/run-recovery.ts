@@ -1,7 +1,7 @@
 import {lstat,readFile,readdir,realpath,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
-import {killProcess,lookupProcess,ownerAlive as probeOwner,sameOwnedProcess,type OwnedProcess,type ProcessIdentity} from './owned-process.js';
+import {groupAlive as probeGroup,killProcess,lookupProcess,ownerAlive as probeOwner,sameOwnedProcess,type OwnedProcess,type ProcessIdentity} from './owned-process.js';
 import {assertEvidenceRoot} from './run-script-evidence.js';
 
 export type RecoveryIO={
@@ -11,6 +11,8 @@ export type RecoveryIO={
  kill?:(pid:number,signal:NodeJS.Signals)=>Promise<void>;
  /** True when the server owner PID is still alive. */
  ownerAlive?:(pid:number)=>boolean;
+ /** True while the recorded process group still has a member. */
+ groupAlive?:(pid:number)=>Promise<boolean>;
  pause?:(ms:number)=>Promise<void>;
  /** How long to wait after SIGTERM before SIGKILL, and after SIGKILL before giving up. */
  graceMs?:number;
@@ -29,13 +31,13 @@ function recordedProcesses(value:unknown):OwnedProcess[]{
 
 /** Before accepting requests, stop recorded tool processes, then discard unfinished evidence left by a server crash. */
 export async function sweepUnfinishedRuns(root:string,io:RecoveryIO={}){
- const lookup=io.lookup??lookupProcess;const kill=io.kill??killProcess;const alive=io.ownerAlive??probeOwner;const pause=io.pause??delay;
+ const lookup=io.lookup??lookupProcess;const kill=io.kill??killProcess;const alive=io.ownerAlive??probeOwner;const groupLiving=io.groupAlive??probeGroup;const pause=io.pause??delay;
  const graceMs=io.graceMs??2_000;const pollMs=io.pollMs??50;
  try{if((await lstat(root)).isSymbolicLink())throw new Error('Recovery root must not be a symlink.');}
  catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return;throw error;}
  const base=await realpath(root);
  // A second server must never delete a living server's execution files.
- let owner:{pid?:number;processes?:unknown}|undefined;
+ let owner:{pid?:number;processes?:unknown;started?:unknown}|undefined;
  try{owner=JSON.parse(await readFile(join(base,'device-ownership.lock'),'utf8'));}
  catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
  // Release the lock only after every recorded tool process is confirmed gone.
@@ -44,8 +46,12 @@ export async function sweepUnfinishedRuns(root:string,io:RecoveryIO={}){
   if(typeof owner?.pid!=='number'||!Number.isSafeInteger(owner.pid)||owner.pid<=0)throw new Error('Cannot verify the existing device owner before recovery.');
   if(alive(owner.pid!))throw new Error('Device owner is still alive; unfinished-run recovery refused.');
   const recorded=recordedProcesses(owner.processes);
+  const started=startedRoles(owner);
   for(const process of recorded)await stopRecorded(process);
-  releaseLock=recorded.length>0;
+  const missing=started?.filter(role=>started.filter(item=>item===role).length>recorded.filter(item=>item.role===role).length);
+  if(missing?.length)throw new Error('A started '+[...new Set(missing)].join(' and ')+' process was not recorded; unfinished-run recovery refused.');
+  // A legacy lock has no started list, so a recorded-and-gone set is the only proof we have.
+  releaseLock=started?true:recorded.length>0;
  }
  const terminal=new Set(['passed','assertion-failed','path-failed','script-error','tool-error','setup-error','handler-error','cancelled','error']);
  for(const kind of ['runs','private']){
@@ -76,17 +82,21 @@ export async function sweepUnfinishedRuns(root:string,io:RecoveryIO={}){
  await Promise.all(names.filter(name=>settlingLock.test(name)).map(name=>rm(join(base,name),{force:true})));
  if(releaseLock)await rm(join(base,'device-ownership.lock'),{force:true});
 
+ function startedRoles(owner:{started?:unknown}){
+  if(!Array.isArray(owner.started))return;
+  return owner.started.filter((role):role is OwnedProcess['role']=>role==='maestro'||role==='mockoon');
+ }
  async function stopRecorded(process:OwnedProcess){
-  const matches=async()=>{const current=await lookup(process.pid);return !!current&&sameOwnedProcess(process,current);};
-  if(!(await matches()))return;
+  const current=await lookup(process.pid);
+  if(!current||!sameOwnedProcess(process,current))return;
   await kill(-process.pid,'SIGTERM');
   const deadline=Date.now()+graceMs;
-  while(await matches()){
+  while(await groupLiving(process.pid)){
    if(Date.now()>=deadline){await kill(-process.pid,'SIGKILL');break;}
    await pause(pollMs);
   }
   const killDeadline=Date.now()+graceMs;
-  while(await matches()){
+  while(await groupLiving(process.pid)){
    if(Date.now()>=killDeadline)throw new Error('Recorded tool process is still running; unfinished-run recovery refused.');
    await pause(pollMs);
   }

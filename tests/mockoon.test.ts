@@ -36,9 +36,9 @@ test('Mockoon spawn records the owned pid',async()=>{
  try{
   const plan=validateMock({environment,port:19876,routeId:environment.routes[0].uuid,responseId:environment.routes[0].responses[0].uuid,backendUrl:'http://127.0.0.1:9',passthroughRouteIds:[],fromScreen:'Home',toScreen:'Home',failureSemantics:'HTTP'})!;
   const child=Object.assign(new EventEmitter(),{pid:424242});
-  let noted:number|undefined;
+  let noted:number|undefined;let prepared=false;
   const controller=new AbortController();
-  const mock=createMockSession(plan,root,{spawn:(()=>child) as unknown as typeof import('node:child_process').spawn,noteProcess:async pid=>{noted=pid;}});
+  const mock=createMockSession(plan,root,{prepareProcess:async()=>{prepared=true;},spawn:(()=>{assert.equal(prepared,true);return child;}) as unknown as typeof import('node:child_process').spawn,noteProcess:async pid=>{noted=pid;}});
   const prepare=mock.prepare(controller.signal);
   const deadline=Date.now()+2_000;
   while(noted===undefined&&Date.now()<deadline)await new Promise<void>(resolve=>setTimeout(resolve,10));

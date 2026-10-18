@@ -8,7 +8,7 @@ import type { Maestro } from './scenarios.js';
 import { InspectionCleanupError, type Inspector } from './picker.js';
 
 const exec = promisify(execFile);
-export type MaestroDependencies={spawn?:typeof spawn;kill?:typeof process.kill;schedule?:typeof setTimeout;unschedule?:typeof clearTimeout;pause?:typeof delay;environment?:()=>Promise<NodeJS.ProcessEnv>;file?:string;noteProcess?:(pid:number)=>Promise<void>|void};
+export type MaestroDependencies={spawn?:typeof spawn;kill?:typeof process.kill;schedule?:typeof setTimeout;unschedule?:typeof clearTimeout;pause?:typeof delay;environment?:()=>Promise<NodeJS.ProcessEnv>;file?:string;prepareProcess?:()=>Promise<void>|void;cancelProcess?:()=>Promise<void>|void;noteProcess?:(pid:number)=>Promise<void>|void};
 export function createMaestro(dependencies:MaestroDependencies={}): Maestro & Inspector {
   const spawnProcess=dependencies.spawn??spawn;const kill=dependencies.kill??process.kill;const schedule=dependencies.schedule??setTimeout;const unschedule=dependencies.unschedule??clearTimeout;const pause=dependencies.pause??delay;
   const file = dependencies.file??process.env.MAESTRO_BIN ?? resolve('.tnt/tools/maestro/bin/maestro');
@@ -46,16 +46,22 @@ export function createMaestro(dependencies:MaestroDependencies={}): Maestro & In
       const home=scriptRun?await mkdtemp(join(tmpdir(),'tnt-maestro-home-')):undefined;
       if(home){env.HOME=home;env.JAVA_TOOL_OPTIONS=[env.JAVA_TOOL_OPTIONS,'-Duser.home='+JSON.stringify(home)].filter(Boolean).join(' ');}
       let result: { code: number | null; log: string; stdout: string; cleanup: import('./scenarios.js').Cleanup }|undefined;
+      if(dependencies.prepareProcess)await dependencies.prepareProcess();
+      let child:ReturnType<typeof spawnProcess>;
+      try{child=spawnProcess(file, args, { cwd: directory, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });}
+      catch(error){await dependencies.cancelProcess?.();throw error;}
+      const output=child.stdout;const errors=child.stderr;
+      if(!child.pid||!output||!errors)await dependencies.cancelProcess?.();
+      if(!output||!errors)throw new Error('Maestro did not expose output pipes.');
+      const recording=child.pid&&dependencies.noteProcess?Promise.resolve(dependencies.noteProcess(child.pid)).catch(()=>{}):undefined;
       try{return result=await new Promise<{ code: number | null; log: string; stdout: string; cleanup: import('./scenarios.js').Cleanup }>(resolveRun => {
-        const child = spawnProcess(file, args, { cwd: directory, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
-        if(child.pid&&dependencies.noteProcess)void Promise.resolve(dependencies.noteProcess(child.pid)).catch(()=>{});
         let log = '';
         let stdout = '';
         let timedOut = false;
         let killTimer: ReturnType<typeof setTimeout> | undefined;
         let cleanupError = '';
         const append = (chunk: Buffer) => { log += chunk.toString(); if (log.length > 2_000_000) log = '[Earlier output omitted: 2 MB log limit]\n' + log.slice(-1_900_000); };
-        child.stdout.on('data', chunk => { stdout += chunk.toString(); if (stdout.length > 2_000_000) stdout = stdout.slice(-2_000_000); append(chunk); }); child.stderr.on('data', append);
+        output.on('data', chunk => { stdout += chunk.toString(); if (stdout.length > 2_000_000) stdout = stdout.slice(-2_000_000); append(chunk); }); errors.on('data', append);
         function stop(force = false) {
           if (!child.pid) return;
           try { kill(-child.pid, force ? 'SIGKILL' : 'SIGTERM'); }
@@ -67,6 +73,7 @@ export function createMaestro(dependencies:MaestroDependencies={}): Maestro & In
         const timeout = schedule(() => { timedOut = true; log += '\nMaestro exceeded its operation time limit.\n'; abort(); }, timeoutMs);
         child.on('error', error => { log += '\n' + error.message; });
         child.on('close', async code => {
+          await recording;
           unschedule(timeout); if (killTimer) unschedule(killTimer);
           signal.removeEventListener('abort', abort);
           stop(true); // Also stop owned helper processes that outlived the CLI.

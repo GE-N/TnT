@@ -286,6 +286,29 @@ test('import rejects control characters and right-to-left overrides in the claim
   }
  }finally{await rm(f.root,{recursive:true,force:true});}
 });
+test('new titles reject bidirectional controls, and a legacy title can still be saved, copied, and exported',async()=>{
+ const f=await fixture();try{
+  await assert.rejects(f.service.save({...f.workspace,id:undefined,name:'Hello\u202E'}),/source workspace name/);
+  await assert.rejects(f.service.renameWorkspace(f.workspace.id,'Hello\u202E',f.workspace.metadata!.revision),/source workspace name/);
+  const zwj=await f.service.save({...f.workspace,id:undefined,name:'Family \u200D ok'});
+  assert.equal(zwj.name,'Family \u200D ok');
+  const file=join(f.root,'workspaces',f.workspace.id,'workspace.json');
+  const raw=JSON.parse(await readFile(file,'utf8'));
+  raw.name='Report\u202Ejson';
+  await writeFile(file,JSON.stringify(raw));
+  const opened=await f.service.workspace(f.workspace.id);
+  assert.equal(opened.name,'Report\u202Ejson');
+  const saved=await f.service.save(opened);
+  assert.equal(saved.name,'Report\u202Ejson');
+  const copy=await f.service.copyWorkspace({...opened,id:undefined,sourceWorkspaceId:opened.id,name:'Clean copy'});
+  assert.equal(copy.metadata!.sourceWorkspace?.name,'Reportjson');
+  assert.equal(copy.metadata!.sourceWorkspace?.name.includes('\u202E'),false);
+  const exported=await f.service.exportWorkspace({id:opened.id,expectedRevision:saved.metadata!.revision,includeValues:true});
+  assert.equal(exported.package.workspace.name,'Reportjson');
+  const imported=await f.service.importWorkspace({package:exported.package,name:'Imported',filename:'ok.json'});
+  assert.equal(imported.metadata!.sourceWorkspace?.name,'Reportjson');
+ }finally{await rm(f.root,{recursive:true,force:true});}
+});
 test('an invalid stored source claim is dropped on read instead of locking the workspace',async()=>{
  const f=await fixture();try{
   const pkg=await f.service.exportWorkspace({id:f.workspace.id,expectedRevision:1,includeValues:true});

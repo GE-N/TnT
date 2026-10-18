@@ -11,7 +11,7 @@ export const scriptHash=(source:string)=>createHash('sha256').update(source).dig
 export const workspaceScripts=(workspace:Pick<Workspace,'scenarios'>):ScriptRow[]=>workspace.scenarios?.flatMap(scenario=>scenario.scripts??[])??[];
 type Entry={origin:ScriptOrigin;approved?:string;scenarioId?:string};
 // importedHashes is retained for on-disk v1 compatibility, never used to infer a row's origin.
-// importedOverflow lists workspaces whose imported tombstones were evicted. Unknown ids there stay imported.
+// importedOverflow lists workspaces whose imported tombstones were evicted. By design this is permanent and fail-closed: every id that is not already stored in that workspace registers as imported and untrusted, including a brand-new editor row.
 type State={format:1;workspaces:Record<string,Record<string,Entry>>;importedHashes:string[];importedOverflow?:string[]};
 const queues=new Map<string,Promise<unknown>>();
 /** Machine-local only. Loss of provenance defaults existing rows to imported, never to local. */

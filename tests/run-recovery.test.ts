@@ -90,7 +90,8 @@ test('startup skips plain files in runs and private without aborting the sweep',
 });
 async function deadOwner(root:string,processes:unknown[]){
  const child=spawn(process.execPath,['-e','']);await new Promise<void>((resolve,reject)=>{child.once('error',reject);child.once('close',()=>resolve());});
- await writeFile(join(root,'device-ownership.lock'),JSON.stringify({pid:child.pid,processes}));
+ const started=processes.flatMap(item=>item&&typeof item==='object'&&'role' in item&&(item.role==='maestro'||item.role==='mockoon')?[item.role]:[]);
+ await writeFile(join(root,'device-ownership.lock'),JSON.stringify({pid:child.pid,processes,...started.length?{started}:{}}));
 }
 test('startup does not kill a reused PID and skips an already-exited recorded process',async()=>{
  const root=await mkdtemp(join(tmpdir(),'tnt-recovery-reuse-'));
@@ -120,6 +121,7 @@ test('startup stops a live recorded process group before sweeping, then releases
   const stopped=new Set<number>();const killed:[number,NodeJS.Signals][]=[];
   await sweepUnfinishedRuns(root,{graceMs:0,pause:async()=>{},
    lookup:async pid=>stopped.has(pid)?undefined:pid===mockoon.pid?{command:mockoon.command,startedAt:mockoon.startedAt}:pid===maestro.pid?{command:maestro.command,startedAt:maestro.startedAt}:undefined,
+   groupAlive:async pid=>!stopped.has(Math.abs(pid)),
    kill:async(pid,signal)=>{await access(unfinished);killed.push([pid,signal]);stopped.add(Math.abs(pid));},
   });
   assert.deepEqual(killed,[[-mockoon.pid,'SIGTERM'],[-maestro.pid,'SIGTERM']]);
@@ -138,6 +140,7 @@ test('startup escalates to SIGKILL and keeps the lock when a recorded process su
   const killed:[number,NodeJS.Signals][]=[];let force=false;
   await sweepUnfinishedRuns(root,{graceMs:0,pause:async()=>{},
    lookup:async()=>force?undefined:{command:owned.command,startedAt:owned.startedAt},
+   groupAlive:async()=>!force,
    kill:async(pid,signal)=>{await access(unfinished);killed.push([pid,signal]);if(signal==='SIGKILL')force=true;},
   });
   assert.deepEqual(killed,[[-owned.pid,'SIGTERM'],[-owned.pid,'SIGKILL']]);
@@ -146,6 +149,7 @@ test('startup escalates to SIGKILL and keeps the lock when a recorded process su
   killed.length=0;force=false;await deadOwner(root,[owned]);await mkdir(unfinished,{recursive:true});
   await assert.rejects(sweepUnfinishedRuns(root,{graceMs:0,pause:async()=>{},
    lookup:async()=>({command:owned.command,startedAt:owned.startedAt}),
+   groupAlive:async()=>true,
    kill:async(pid,signal)=>{killed.push([pid,signal]);},
   }),/still running/);
   assert.deepEqual(killed,[[-owned.pid,'SIGTERM'],[-owned.pid,'SIGKILL']]);
@@ -163,6 +167,7 @@ test('startup stops Maestro after its launcher execs java on the same PID and st
   let stopped=false;const killed:[number,NodeJS.Signals][]=[];
   await sweepUnfinishedRuns(root,{graceMs:0,pause:async()=>{},
    lookup:async pid=>pid===launcher.pid&&!stopped?{command:'/usr/bin/java -cp app maestro.cli.AppKt',startedAt}:undefined,
+   groupAlive:async()=>!stopped,
    kill:async(pid,signal)=>{await access(unfinished);killed.push([pid,signal]);stopped=true;},
   });
   assert.deepEqual(killed,[[-launcher.pid,'SIGTERM']]);
@@ -170,25 +175,81 @@ test('startup stops Maestro after its launcher execs java on the same PID and st
   await assert.rejects(access(join(root,'device-ownership.lock')),{code:'ENOENT'});
  }finally{await rm(root,{recursive:true,force:true});}
 });
-test('maestro recording waits until the launcher execs java',async()=>{
+test('startup SIGKILLs a group child that ignores SIGTERM after the leader exits, and releases the lock only then',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-recovery-child-'));
+ try{
+  const unfinished=join(root,'runs','interrupted');await mkdir(unfinished,{recursive:true});await writeFile(join(unfinished,'.tnt-execution.yaml'),'secret');
+  const owned={role:'mockoon' as const,pid:41,command:'node mockoon',startedAt:'Sun Oct 18 12:00:45 2026'};
+  await deadOwner(root,[owned]);
+  const lock=join(root,'device-ownership.lock');
+  const killed:[number,NodeJS.Signals][]=[];let leaderGone=false;let childGone=false;
+  await sweepUnfinishedRuns(root,{graceMs:0,pause:async()=>{},
+   lookup:async()=>leaderGone?undefined:{command:owned.command,startedAt:owned.startedAt},
+   groupAlive:async()=>!childGone,
+   kill:async(pid,signal)=>{
+    killed.push([pid,signal]);
+    await access(unfinished);await access(lock);
+    if(signal==='SIGTERM')leaderGone=true;
+    if(signal==='SIGKILL')childGone=true;
+   },
+  });
+  assert.deepEqual(killed,[[-owned.pid,'SIGTERM'],[-owned.pid,'SIGKILL']]);
+  assert.deepEqual(await readdir(join(root,'runs')),[]);
+  await assert.rejects(access(lock),{code:'ENOENT'});
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+test('startup keeps the lock and does not sweep when a started tool was never recorded',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-recovery-unrecorded-'));
+ try{
+  const unfinished=join(root,'runs','interrupted');await mkdir(unfinished,{recursive:true});await writeFile(join(unfinished,'.tnt-execution.yaml'),'secret');
+  const child=spawn(process.execPath,['-e','']);await new Promise<void>((resolve,reject)=>{child.once('error',reject);child.once('close',()=>resolve());});
+  const mockoon={role:'mockoon',pid:21,command:'node mockoon',startedAt:'Sun Oct 18 12:00:45 2026'};
+  const lock=join(root,'device-ownership.lock');
+  await writeFile(lock,JSON.stringify({pid:child.pid,started:['mockoon','maestro'],processes:[mockoon]}));
+  const killed:number[]=[];
+  await assert.rejects(sweepUnfinishedRuns(root,{graceMs:0,pause:async()=>{},lookup:async()=>undefined,groupAlive:async()=>false,kill:async pid=>{killed.push(pid);}}),/maestro process was not recorded/);
+  assert.deepEqual(killed,[]);
+  assert.equal(await readFile(join(unfinished,'.tnt-execution.yaml'),'utf8'),'secret');
+  assert.match(await readFile(lock,'utf8'),/maestro/);
+  await assert.rejects(createRunner({artifactDirectory:root,ownershipDirectory:root,execute:async()=>({stdout:'',stderr:''})}).acquireDevice('E5C92F6E-40DC-493C-93B4-469E67193736'),/ownership survived a runner crash/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+test('maestro recording writes the launcher before java replaces it',async()=>{
  const root=await mkdtemp(join(tmpdir(),'tnt-owned-settle-'));
  try{
   const lock=join(root,'device-ownership.lock');const startedAt='Sun Oct 18 12:00:45 2026';
+  const shell='/bin/sh /opt/maestro/bin/maestro --device phone';
   await writeFile(lock,JSON.stringify({pid:1}));
   let calls=0;
-  await recordSettledProcess(root,'maestro',50,{pause:async()=>{},settleMs:5_000,lookup:async()=>{calls++;return calls<2?{command:'/bin/sh /opt/maestro/bin/maestro --device phone',startedAt}:{command:'/usr/bin/java maestro.cli.AppKt',startedAt};}});
+  await recordSettledProcess(root,'maestro',50,{pause:async()=>{},settleMs:5_000,lookup:async()=>{
+   calls++;
+   if(calls===1)return {command:shell,startedAt};
+   assert.equal(JSON.parse(await readFile(lock,'utf8')).processes[0].command,shell);
+   return {command:'/usr/bin/java maestro.cli.AppKt',startedAt};
+  }});
   const saved=JSON.parse(await readFile(lock,'utf8'));
   assert.equal(saved.processes[0].command,'/usr/bin/java maestro.cli.AppKt');
   assert.equal(saved.processes[0].startedAt,startedAt);
   await writeFile(lock,JSON.stringify({pid:1}));calls=0;
   await recordSettledProcess(root,'maestro',51,{pause:async()=>{},settleMs:5_000,lookup:async()=>calls++?undefined:{command:'/bin/sh /opt/maestro/bin/maestro',startedAt}});
-  assert.equal(JSON.parse(await readFile(lock,'utf8')).processes,undefined);
+  assert.equal(JSON.parse(await readFile(lock,'utf8')).processes[0].command,'/bin/sh /opt/maestro/bin/maestro');
  }finally{await rm(root,{recursive:true,force:true});}
+});
+test('process lookup forces LC_ALL=C and names the ps failure',async()=>{
+ let locale:string|undefined;
+ await assert.rejects(lookupProcess(77,(async(_file:string,_args:string[],options:{env?:NodeJS.ProcessEnv})=>{locale=options.env?.LC_ALL;throw new Error('ps: locale exploded');}) as never),/Cannot identify process 77 before recovery: ps: locale exploded/);
+ assert.equal(locale,'C');
+ const missing=await lookupProcess(77,(async()=>{throw Object.assign(new Error('Command failed'),{code:1});}) as never);
+ assert.equal(missing,undefined);
 });
 test('production recovery uses the real lookup and kill, and records settled tool processes',async()=>{
  const source=await readFile(new URL('../server/main.ts',import.meta.url),'utf8');
+ assert.match(source,/markToolStarted\(ownershipRoot, role\)/);
+ assert.match(source,/clearToolStarted\(ownershipRoot, role\)/);
  assert.match(source,/recordSettledProcess\(ownershipRoot, role, pid\)/);
- assert.match(source,/createMaestro\(\{ noteProcess: noteProcess\('maestro'\) \}\)/);
+ assert.match(source,/prepareProcess: prepareProcess\('maestro'\)/);
+ assert.match(source,/noteProcess: noteProcess\('maestro'\)/);
+ assert.match(source,/prepareProcess: prepareProcess\('mockoon'\)/);
  assert.match(source,/noteProcess: noteProcess\('mockoon'\)/);
  assert.match(source,/lookup: lookupProcess/);
  assert.match(source,/kill: killProcess/);
@@ -200,7 +261,7 @@ test('the production server stops a recorded process group and releases the lock
   const owner=spawn(process.execPath,['-e','']);await new Promise<void>((resolve,reject)=>{owner.once('error',reject);owner.once('close',()=>resolve());});
   sleep=spawn('/bin/sleep',['30'],{detached:true,stdio:'ignore'});
   const identity=await lookupProcess(sleep.pid!);assert.ok(identity);
-  await writeFile(join(root,'.tnt','device-ownership.lock'),JSON.stringify({pid:owner.pid,processes:[{role:'mockoon',pid:sleep.pid,command:identity.command,startedAt:identity.startedAt}]}));
+  await writeFile(join(root,'.tnt','device-ownership.lock'),JSON.stringify({pid:owner.pid,started:['mockoon'],processes:[{role:'mockoon',pid:sleep.pid,command:identity.command,startedAt:identity.startedAt}]}));
   const probe=createServer();await new Promise<void>(resolve=>probe.listen(0,'127.0.0.1',resolve));const address=probe.address();assert.ok(address&&typeof address!=='string');const port=address.port;await new Promise<void>(resolve=>probe.close(()=>resolve()));
   server=spawn(process.execPath,['--import',import.meta.resolve('tsx'),new URL('../server/main.ts',import.meta.url).pathname,'--production'],{cwd:root,env:{...process.env,PORT:String(port)},signal:t.signal,stdio:['ignore','pipe','pipe']});
   await new Promise<void>((resolve,reject)=>{
