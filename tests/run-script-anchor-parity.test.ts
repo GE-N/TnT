@@ -2,11 +2,27 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {parseAllDocuments} from 'yaml';
-import type {CanvasGraph} from '../server/canvas.js';
+import {referenceCatalog,type CanvasGraph} from '../server/canvas.js';
 import {ScriptBlocked} from '../server/script-validation.js';
 import {authoredChecks,writeChecks} from '../shared/canvas-authoring.js';
 import {anchorForNewScript,anchorMatches,orderedScenarioSteps} from './fixtures/pr84-script-anchors.js';
 import {scriptFixture} from './run-script-helpers.js';
+import {projectCanvasRoute} from '../server/canvas-route.js';
+import {canvasScriptAnchors} from '../server/run-script-plan.js';
+import type {GoldenFixture} from './golden-canvas-runner.js';
+
+test('PR #84 anchor indexes exclude setup and handler rows just like the server',async()=>{
+ const fixture=JSON.parse(await readFile(new URL('./fixtures/golden/default-actions.json',import.meta.url),'utf8')) as GoldenFixture;
+ const references=referenceCatalog(fixture.yaml,fixture.flows,fixture.automation).references;
+ // Capture current references for this test; the golden source includes draft/stale links.
+ for(const test of fixture.canvas.screens.flatMap(screen=>screen.tests))test.reference=references.find(reference=>reference.kind===test.reference.kind&&reference.file===test.reference.file&&reference.index===test.reference.index&&reference.actionId===test.reference.actionId)!;
+ const projected=projectCanvasRoute(fixture.canvas,fixture.yaml,fixture.flows??{},fixture.pathId,fixture.automation);
+ const steps=orderedScenarioSteps(projected.canvas,fixture.pathId);
+ assert.deepEqual(steps.map(step=>step.id),['middle-ready','tap-done','done-ready']);
+ assert.deepEqual(steps.map(step=>step.globalIndex),[0,1,2]);
+ assert.deepEqual(steps.map(step=>step.fingerprint),canvasScriptAnchors(projected.canvas.execution)!.map(anchor=>anchor.fingerprint));
+ assert.equal(anchorMatches(anchorForNewScript(steps,steps.at(-1)!.visitIndex),steps),true);
+});
 
 for(const mode of ['inserted-launch','existing-launch','empty','repeated-visit'] as const)test('PR #84 canvas anchors survive server projection: '+mode,async()=>{
  const f=await scriptFixture();try{
