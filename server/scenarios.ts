@@ -117,7 +117,10 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     },
     async workspace(id: string): Promise<Workspace> { return workspaceStore.read(id); },
     async duplicateScenario(input:{workspaceId:string;scenarioId:string;expectedRevision:number}){
+      const assertIdle=()=>{if(activeWorkspaces.has(input.workspaceId)||batches.activeWorkspaceId===input.workspaceId)throw new Error('Active execution blocks duplication in this workspace. Wait for execution and cleanup; no run was cancelled.');};
+      assertIdle();
       const workspace=await workspaceStore.read(input.workspaceId);
+      assertIdle();
       if(workspace.metadata!.revision!==input.expectedRevision)throw new WorkspaceConflict();
       const source=workspace.scenarios?.find(scenario=>scenario.id===input.scenarioId);
       if(!source)throw new Error('Unknown scenario.');

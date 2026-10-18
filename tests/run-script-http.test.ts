@@ -5,8 +5,8 @@ import {writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createApiHandler} from '../server/http.js';
 import {scriptFixture,deviceId} from './run-script-helpers.js';
-async function fixture(){
- const f=await scriptFixture({mock:true});const server=createServer(createApiHandler(f.runner,f.root,undefined,f.service));await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address();if(!address||typeof address==='string')throw new Error('No port');const base=`http://127.0.0.1:${address.port}`;
+async function fixture(terminal?:'cancel'){
+ const f=await scriptFixture({mock:true,terminal});const server=createServer(createApiHandler(f.runner,f.root,undefined,f.service));await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address();if(!address||typeof address==='string')throw new Error('No port');const base=`http://127.0.0.1:${address.port}`;
  const token=(await (await fetch(base+'/api/status')).json()).token;
  const request=(path:string,body?:unknown,headers:Record<string,string>={})=>fetch(base+path,{method:body===undefined?'GET':'POST',headers:{'x-tnt-token':token,origin:base,'content-type':'application/json',...headers},body:body===undefined?undefined:JSON.stringify(body)});
  return {...f,request,close:async()=>{await new Promise<void>(resolve=>server.close(()=>resolve()));await f.cleanup();}};
@@ -30,6 +30,26 @@ test('Duplicate API returns server-generated row IDs to the UI',async()=>{
   assert.equal(saved.scenarios[0].scripts[0].id,f.row.id);assert.notEqual(saved.scenarios[1].scripts[0].id,f.row.id);
   assert.deepEqual(JSON.parse(JSON.stringify((await f.service.workspace(f.workspace.id)).scenarios)),saved.scenarios);
  }finally{await f.close();}
+});
+for(const mode of ['run','batch'] as const)test('Duplicate API refuses an active '+mode+' until cleanup without changing the workspace',async()=>{
+ const f=await fixture('cancel');let id:string|undefined;
+ try{
+  const active=mode==='run'?await f.start():await f.service.startBatch({workspaceId:f.workspace.id,deviceId});id=active.id;
+  while(!f.calls.length)await new Promise<void>(resolve=>setImmediate(resolve));
+  const before=await f.service.workspace(f.workspace.id);
+  const input={workspaceId:f.workspace.id,scenarioId:'one',expectedRevision:1};
+  const blocked=await f.request('/api/scenarios/duplicate',input);assert.equal(blocked.status,400);assert.match((await blocked.json()).error,/Active execution blocks duplication/);
+  assert.deepEqual(await f.service.workspace(f.workspace.id),before);
+  assert.equal((mode==='run'?await f.service.result(id):await f.service.batch(id)).status,'running');
+  if(mode==='run')await f.service.cancel(id);else await f.service.cancelBatch(id);id=undefined;
+  const allowed=await f.request('/api/scenarios/duplicate',input);assert.equal(allowed.status,200);assert.equal((await allowed.json()).metadata.revision,2);
+ }finally{if(id){if(mode==='run')await f.service.cancel(id);else await f.service.cancelBatch(id);}await f.close();}
+});
+test('duplication refuses a batch reservation before the first run dispatch',async()=>{
+ const f=await fixture('cancel');const starting=f.service.startBatch({workspaceId:f.workspace.id,deviceId});
+ try{
+  await assert.rejects(f.service.duplicateScenario({workspaceId:f.workspace.id,scenarioId:'one',expectedRevision:1}),/Active execution blocks duplication/);
+ }finally{await f.service.cancelBatch((await starting).id);await f.close();}
 });
 test('reserved input and variable errors are structured at save/import/runtime/preflight, including unused nested flows',async()=>{
  const f=await fixture();try{
