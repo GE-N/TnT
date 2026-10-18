@@ -7,7 +7,7 @@ import {act,createElement,useState} from 'react';
 import type {CanvasGraph} from '../server/canvas.js';
 import type {ScriptExecutionReference,ScriptStepResult,ScriptTrust} from '../server/run-script-contract.js';
 import {approveScriptTrust} from '../src/run-script-client.js';
-import {anchorForNewScript,anchorMatches,authoredJavascriptIndexes,batchReasonLabel,batchSummary,batchWithScriptBlocks,blocksFor,endAnchorFingerprint,evidenceScrubFailed,moveScript,newScriptId,orderedScenarioSteps,readScriptRun,reservedPlacements,runHitCap,scenarioShowsMockVariables,scriptBlock,scriptFirstLine,scriptFollowsFailure,scriptRowView,sha256,stableScriptOrder,stepNotRun,trustFor,untrustedCount,SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,SCRUB_FAILED_TEXT,type OrderedStep,type ScriptRecord} from '../src/run-script.js';
+import {anchorForNewScript,anchorMatches,anchorTargetsDraft,batchReasonLabel,batchSummary,batchWithScriptBlocks,blocksFor,DRAFT_STEP_TEXT,endAnchorFingerprint,evidenceScrubFailed,moveScript,newScriptId,orderedScenarioSteps,readScriptRun,reservedPlacements,runHitCap,scenarioShowsMockVariables,scriptBlock,scriptFirstLine,scriptFollowsFailure,scriptRowView,sha256,stableScriptOrder,stepNotRun,trustFor,untrustedCount,SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,SCRUB_FAILED_TEXT,type OrderedStep,type ScriptRecord} from '../src/run-script.js';
 import type {RunScriptModel} from '../src/run-script-ui.js';
 
 const fingerprint='ab'.repeat(32);
@@ -141,10 +141,21 @@ test('a passed run does not mark a script row passed when that row has no result
   assert.equal(view.tone,'not-run');
 });
 
-test('authored JavaScript blocks come from the server verdict',()=>{
-  assert.deepEqual(authoredJavascriptIndexes([{kind:'authored-javascript',index:1}]),[1]);
-  assert.deepEqual(authoredJavascriptIndexes([{message:"Can't run with a script · this step runs its own JavaScript",index:2}]),[2]);
-  assert.deepEqual(authoredJavascriptIndexes([{kind:'evalScript',command:'evalScript',index:0}]),[]);
+test('a draft step is not an anchor and an existing row uses the usual block line',()=>{
+  const drafted=step(0,'draft');
+  const current=row('paid',0,fingerprint,{source:'1+1'});
+  assert.equal(anchorTargetsDraft(anchorForNewScript([drafted],0),[drafted]),true);
+  assert.equal(anchorTargetsDraft({index:1,fingerprint:'draft:end'},[drafted]),true);
+  assert.equal(anchorTargetsDraft(anchorForNewScript([step(0)],0),[step(0)]),false);
+  const view=scriptRowView(current,[current],[drafted],[{rowId:'paid',origin:'local',trusted:true,hash:current.hash}],[],false,false);
+  assert.equal(view.block?.kind,'stale-anchor');
+  assert.equal(view.blockText,DRAFT_STEP_TEXT);
+  assert.equal(scriptBlock(current,[drafted],[] )?.kind,'stale-anchor');
+});
+
+test('execution order keeps system commands without counting them as steps',()=>{
+  const run=readScriptRun({executionOrder:[{kind:'system'},{kind:'step',index:0},{kind:'runScript',rowId:'paid'}],scriptSteps:{}});
+  assert.deepEqual(run.executionOrder,[{kind:'system'},{kind:'step',index:0},{kind:'runScript',rowId:'paid'}]);
 });
 
 test('mock variables follow a chosen response or a trusted script',()=>{
@@ -198,8 +209,8 @@ async function mount(seed:ScriptRecord[]=[],granted:ScriptTrust[]=[]){
   const {RedactedText}=await import('../src/run-script-ui.js');
   const {YamlEditor}=await import('../src/yaml-editor.js');
   let replaceGraph:(next:CanvasGraph)=>void=()=>{};
-  let updateExtra:(patch:Partial<{running:boolean;passedRun:boolean;revealBlocks:boolean;scrubFailed:boolean;failedAtScript:boolean;timedOut:boolean;hasMock:boolean;results:ScriptStepResult[];executionOrder:ScriptExecutionReference[];authoredJavascript:number[]}>)=>void=()=>{};
-  const initial={running:false,passedRun:false,revealBlocks:false,scrubFailed:false,failedAtScript:false,timedOut:false,hasMock:false,results:[] as ScriptStepResult[],executionOrder:[] as ScriptExecutionReference[],authoredJavascript:[] as number[]};
+  let updateExtra:(patch:Partial<{running:boolean;passedRun:boolean;revealBlocks:boolean;scrubFailed:boolean;failedAtScript:boolean;timedOut:boolean;hasMock:boolean;results:ScriptStepResult[];executionOrder:ScriptExecutionReference[]}>)=>void=()=>{};
+  const initial={running:false,passedRun:false,revealBlocks:false,scrubFailed:false,failedAtScript:false,timedOut:false,hasMock:false,results:[] as ScriptStepResult[],executionOrder:[] as ScriptExecutionReference[]};
   let latest:ScriptRecord[]=seed;
   function Host(){
     const [current,setGraph]=useState(graph);
@@ -207,7 +218,7 @@ async function mount(seed:ScriptRecord[]=[],granted:ScriptTrust[]=[]){
     const [trust,setTrust]=useState(granted);
     const [extra,setExtra]=useState(initial);
     replaceGraph=setGraph;updateExtra=patch=>setExtra(value=>({...value,...patch}));latest=rows;
-    const runScripts:RunScriptModel={scenarioId:'main',rows,trust,results:extra.results,executionOrder:extra.executionOrder,hasMock:extra.hasMock,revealBlocks:extra.revealBlocks,running:extra.running,passedRun:extra.passedRun,timedOut:extra.timedOut,scrubFailed:extra.scrubFailed,failedAtScript:extra.failedAtScript,trustBlockCount:untrustedCount(rows,trust),authoredJavascript:extra.authoredJavascript??[],workspaceName:'Imported workspace',onAdd:anchor=>{const id=newScriptId();const source='';setRows(value=>[...value,{id,scenarioId:'main',origin:'imported',beforeStep:anchor,label:'Run script',source,hash:sha256(source)}]);return id;},onUpdate:(rowId,patch)=>setRows(value=>value.map(item=>item.id===rowId?{...item,...patch,hash:sha256(patch.source??item.source)}:item)),onMove:()=>{},onDelete:rowId=>setRows(value=>value.filter(item=>item.id!==rowId)),onReplace:next=>setRows(next.map(item=>({...item,scenarioId:'main',origin:'imported' as const,hash:sha256(item.source)}))),onTrust:async rowId=>{const item=rows.find(entry=>entry.id===rowId);if(!item)return;const saved=await approveScriptTrust({workspace:'workspace',rowId,hash:item.hash,token:'token'});setTrust(value=>[...value.filter(entry=>entry.rowId!==saved.rowId),saved]);}};
+    const runScripts:RunScriptModel={scenarioId:'main',rows,trust,results:extra.results,executionOrder:extra.executionOrder,hasMock:extra.hasMock,revealBlocks:extra.revealBlocks,running:extra.running,passedRun:extra.passedRun,timedOut:extra.timedOut,scrubFailed:extra.scrubFailed,failedAtScript:extra.failedAtScript,trustBlockCount:untrustedCount(rows,trust),workspaceName:'Imported workspace',onAdd:anchor=>{const id=newScriptId();const source='';setRows(value=>[...value,{id,scenarioId:'main',origin:'imported',beforeStep:anchor,label:'Run script',source,hash:sha256(source)}]);return id;},onUpdate:(rowId,patch)=>setRows(value=>value.map(item=>item.id===rowId?{...item,...patch,hash:sha256(patch.source??item.source)}:item)),onMove:()=>{},onDelete:rowId=>setRows(value=>value.filter(item=>item.id!==rowId)),onReplace:next=>setRows(next.map(item=>({...item,scenarioId:'main',origin:'imported' as const,hash:sha256(item.source)}))),onTrust:async rowId=>{const item=rows.find(entry=>entry.id===rowId);if(!item)return;const saved=await approveScriptTrust({workspace:'workspace',rowId,hash:item.hash,token:'token'});setTrust(value=>[...value.filter(entry=>entry.rowId!==saved.rowId),saved]);}};
     return createElement('div',null,
       createElement(CanvasEditor,{graph:current,onChange:(next:CanvasGraph|undefined)=>{if(next)setGraph(next);},yaml:'appId: app\n---\n- assertVisible: Home\n',onYamlChange:()=>{},catalog:[],diagnostics:[],pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode:true,scenarioId:'main',scenarios:[{id:'main',name:'Main',pathId:'route'}],initialView:{selectedScreenId:'home',selectedVisitId:'v1'},runScripts}),
       createElement(RedactedText,{text:'token [redacted] hidden'}),
@@ -300,20 +311,17 @@ test('imported scripts are trusted one at a time and a failure stops later steps
   }finally{await page.close();}
 });
 
-test('a server authored-JavaScript verdict is shown on that step and in the editor',async()=>{
-  const page=await mount();
+test('Run script is omitted before a draft step and an existing row shows the capture error',async()=>{
+  const anchored=row('paid',0,fingerprint,{source:'1+1'});
+  const page=await mount([anchored]);
   try{
-    await act(async()=>page.updateExtra({authoredJavascript:[0]}));
-    const row=page.document.querySelector('[data-testid="authored-javascript"]')!;
-    assert.equal(row.getAttribute('data-step-index'),'0');
-    assert.equal(row.textContent,"✕ Can't run with a script · this step runs its own JavaScript");
-    assert.equal(page.document.querySelector('[data-testid="authored-javascript-run"]')!.textContent,"✕ Run blocked · remove the step's JavaScript or the Run script rows");
+    const draftReference={...reference,fingerprint:'draft'};
+    await act(async()=>page.replaceGraph({...graph,screens:[{...graph.screens[0],tests:[{...graph.screens[0].tests[0],reference:draftReference}]}],paths:[{...graph.paths[0],visits:[{id:'v1',operationIds:['ready']}]}]}));
     await click(page.document,'.add-visit-step');
-    await click(page.document,'[data-testid="add-run-script"]');
-    const note=page.document.querySelector('[data-testid="authored-javascript-note"]')!;
-    assert.equal(note.textContent,"⚠ This scenario has its own JavaScript steps. They'll block Run while a script is here.");
-    assert.equal(note.className,'script-authored-warning');
-    assert.match(readFileSync(new URL('../src/style.css',import.meta.url),'utf8'),/\.script-authored-warning\{[^}]*background:#fff4e5;color:#8a4b00/);
+    assert.equal(page.document.querySelector('[data-testid="add-run-script"]'),null);
+    const error=page.document.querySelector('[data-script-id="paid"] .script-inline-error')!;
+    assert.equal(error.textContent,'✕ '+DRAFT_STEP_TEXT);
+    assert.equal(error.className,'script-inline-error');
   }finally{await page.close();}
 });
 

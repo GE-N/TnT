@@ -804,7 +804,7 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .script-provided p{margin:0 0 6px;font-weight:600}
 .script-provided dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0}
 .script-provided dd,.script-provided dt{margin:0;font-size:12px}
-.script-secret-warning,.script-authored-warning{margin:8px 0;padding:8px 10px;border-radius:8px;background:#fff4e5;color:#8a4b00;font-size:12px}
+.script-secret-warning{margin:8px 0;padding:8px 10px;border-radius:8px;background:#fff4e5;color:#8a4b00;font-size:12px}
 .script-undo{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:12px}
 .script-undo button{min-width:44px;min-height:44px}
 .script-code-error{margin-top:4px}

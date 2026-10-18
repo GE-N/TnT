@@ -32,6 +32,7 @@ async function openWorkspace(options:{mock:boolean;trusted:boolean;onRuns?:()=>R
   const saved=workspace(options.mock);
   const runs:string[]=[];
   const batches:string[]=[];
+  const duplicates:unknown[]=[];
   const grant={rowId:'script-paid',origin:'local' as const,trusted:true,hash:sha256(source)};
   Object.defineProperty(globalThis,'sessionStorage',{value:dom.window.sessionStorage,configurable:true});
   for(const key of keys){
@@ -43,6 +44,7 @@ async function openWorkspace(options:{mock:boolean;trusted:boolean;onRuns?:()=>R
       if(path.includes('/api/runs')){runs.push(path);return options.onRuns?options.onRuns():Response.json({id:'run',status:'passed',snapshot:{workspaceId:saved.id,id:'run',name:saved.name,yaml:saved.yaml,steps:[],toolVersions:{maestro:'',node:''},runtimeInputPolicy:''}});}
       if(path.includes('/api/batches')){batches.push(path);return options.onBatches?options.onBatches():Response.json({id:'batch',status:'completed',entries:[]});}
       if(path.startsWith('/api/workspaces?q='))return Response.json(singleWorkspaceLibrary(saved));
+      if(path==='/api/scenarios/duplicate'){const body=JSON.parse(String(init?.body??'{}'));duplicates.push(body);const copy={...saved.scenarios[0],id:'scenario-server',name:'From server',pathId:'sequence-server',scripts:[{...saved.scenarios[0].scripts[0],id:'script-server'}]};return Response.json({...saved,metadata:{revision:2},scenarios:[saved.scenarios[0],copy],canvas:{...saved.canvas,paths:[...saved.canvas.paths,{...saved.canvas.paths[0],id:'sequence-server',scenarioId:'scenario-server',name:'From server',visits:[{id:'visit-server',operationIds:['ready']}]}]}});}
       if((init?.method??'GET')==='POST'&&path==='/api/workspaces')return Response.json({...saved,metadata:{revision:1}});
       return Response.json(saved);
     }:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
@@ -53,7 +55,7 @@ async function openWorkspace(options:{mock:boolean;trusted:boolean;onRuns?:()=>R
   await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId:'device',bundleId:'',launchBusy:false,onRunning:()=>{}})));
   await workspaceCommand(dom.window.document,'open');
   for(let i=0;i<8;i++)await act(async()=>{await new Promise(resolve=>setImmediate(resolve));});
-  return {dom,runs,batches,async close(){await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor] of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}};
+  return {dom,runs,batches,duplicates,async close(){await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor] of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}};
 }
 
 async function clickRun(document:Document){
@@ -82,30 +84,20 @@ test('Run All does not post a batch while every scenario is script-blocked',asyn
   }finally{await page.close();}
 });
 
-test('a token-carrying run shows the server authored-JavaScript verdict and a no-mock run does not',async()=>{
-  const blocked=()=>Response.json({error:'blocked',blocked:[{kind:'authored-javascript',index:0,message:"Can't run with a script · this step runs its own JavaScript"}]},{status:422});
-  const carrying=await openWorkspace({mock:true,trusted:true,onRuns:blocked});
+test('duplicate posts the saved revision and adopts the server ids',async()=>{
+  const page=await openWorkspace({mock:false,trusted:false});
   try{
-    await clickRun(carrying.dom.window.document);
-    assert.equal(carrying.runs.length,1);
-    const document=carrying.dom.window.document;
+    const document=page.dom.window.document;
+    const row=document.querySelector<HTMLElement>('[aria-label="Scenario list"] [aria-pressed="true"]')!;
+    assert.equal(row.textContent,'Paid');
+    await act(async()=>row.parentElement!.dispatchEvent(new page.dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:20,clientY:20})));
+    const duplicate=[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button=>button.textContent==='Duplicate');
+    assert.ok(duplicate);
+    await act(async()=>{duplicate.click();for(let i=0;i<12;i++)await new Promise(resolve=>setImmediate(resolve));});
+    assert.deepEqual(page.duplicates,[{workspaceId:'saved',scenarioId:'paid',expectedRevision:1}]);
+    assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'From server');
     await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Visit 1 · Home"]')?.click());
-    assert.equal(document.querySelector('[data-testid="authored-javascript"]')?.textContent,"✕ Can't run with a script · this step runs its own JavaScript");
-    assert.equal(document.querySelector('[data-testid="authored-javascript-run"]')?.textContent,"✕ Run blocked · remove the step's JavaScript or the Run script rows");
-    await act(async()=>document.querySelector<HTMLButtonElement>('.add-visit-step')?.click());
-    await act(async()=>document.querySelector<HTMLButtonElement>('[data-testid="add-run-script"]')?.click());
-    assert.equal(document.querySelector('[data-testid="authored-javascript-note"]')?.textContent,"⚠ This scenario has its own JavaScript steps. They'll block Run while a script is here.");
-  }finally{await carrying.close();}
-  const plain=await openWorkspace({mock:false,trusted:true,onRuns:blocked});
-  try{
-    await clickRun(plain.dom.window.document);
-    assert.equal(plain.runs.length,1);
-    const document=plain.dom.window.document;
-    await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Visit 1 · Home"]')?.click());
-    assert.equal(document.querySelector('[data-testid="authored-javascript"]'),null);
-    assert.equal(document.querySelector('[data-testid="authored-javascript-run"]'),null);
-    await act(async()=>document.querySelector<HTMLButtonElement>('.add-visit-step')?.click());
-    await act(async()=>document.querySelector<HTMLButtonElement>('[data-testid="add-run-script"]')?.click());
-    assert.equal(document.querySelector('[data-testid="authored-javascript-note"]'),null);
-  }finally{await plain.close();}
+    assert.equal(document.querySelector('[data-script-id="script-server"]')?.getAttribute('data-script-id'),'script-server');
+    assert.equal(document.querySelector('[data-script-id="script-paid"]'),null);
+  }finally{await page.close();}
 });

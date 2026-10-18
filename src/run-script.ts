@@ -64,28 +64,12 @@ export const SCRIPT_EXAMPLE=[
 ].join('\n');
 
 export const SCRIPT_TIMEOUT='◷ No per-script timeout · the run stops at its 300s cap';
-export const AUTHORED_JAVASCRIPT_ROW="✕ Can't run with a script · this step runs its own JavaScript";
-export const AUTHORED_JAVASCRIPT_RUN="✕ Run blocked · remove the step's JavaScript or the Run script rows";
-export const AUTHORED_JAVASCRIPT_NOTE="⚠ This scenario has its own JavaScript steps. They'll block Run while a script is here.";
-
-/** Indexes the server listed. This does not inspect YAML. */
-export function authoredJavascriptIndexes(blocked:unknown):number[]{
-  if(!Array.isArray(blocked))return [];
-  const indexes:number[]=[];
-  for(const item of blocked){
-    if(!item||typeof item!=='object')continue;
-    const block=item as {kind?:unknown;index?:unknown;message?:unknown};
-    const verdict=block.kind==='authored-javascript'||block.message==="Can't run with a script · this step runs its own JavaScript"||block.message===AUTHORED_JAVASCRIPT_ROW;
-    if(!verdict||typeof block.index!=='number'||!Number.isInteger(block.index)||block.index<0)continue;
-    indexes.push(block.index);
-  }
-  return indexes;
-}
+export const DRAFT_STEP_TEXT='Step not captured yet · capture it before running';
 export const SCRUB_FAILED_TEXT='✕ Evidence scrub failed · run evidence was removed to protect the token';
 
 export type OrderedStep={id:string;visitId:string;visitIndex:number;globalIndex:number;fingerprint:string};
 
-/** Setup and default-action rows are not scenario steps. The server treats those anchors as stale. */
+/** Only authored steps are indexes. Setup and handler rows are never anchors and are never counted. */
 function anchorsScript(test:{role?:string;reference?:{kind?:string}}|undefined){
   return !!test&&test.role!=='setup'&&test.role!=='handler'&&test.reference?.kind==='step';
 }
@@ -156,6 +140,12 @@ export function endAnchorFingerprint(lastFingerprint?:string){
   return lastFingerprint?lastFingerprint+':end':'end';
 }
 
+/** A draft step is not an anchor, including the end position when the last step is still draft. */
+export function anchorTargetsDraft(anchor:ScriptAnchor,steps:OrderedStep[]){
+  if(anchor.index===steps.length)return steps.at(-1)?.fingerprint==='draft';
+  return steps[anchor.index]?.fingerprint==='draft';
+}
+
 /** True when the stored anchor still names the current step list. End anchors do not slide forward. */
 export function anchorMatches(anchor:ScriptAnchor,steps:OrderedStep[]){
   if(!steps.length)return anchor.index===0&&anchor.fingerprint==='end';
@@ -166,6 +156,7 @@ export function anchorMatches(anchor:ScriptAnchor,steps:OrderedStep[]){
 
 /** Before-launch block for one row. Empty wins, then a stale anchor, then syntax, then trust. */
 export function scriptBlock(row:ScriptRecord,steps:OrderedStep[],approvals:ScriptTrust[]):ScriptBlockReason|undefined{
+  if(anchorTargetsDraft(row.beforeStep,steps))return {kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'};
   if(!row.source.trim())return {kind:'empty',rowId:row.id,message:'Script is empty · add code or delete the row'};
   if(!anchorMatches(row.beforeStep,steps))return {kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'};
   const syntax=compileScript(row.source);
@@ -195,6 +186,7 @@ export function runBlockedLabel(count:number){
 
 export type ScriptRowView={
   block?:ScriptBlockReason;
+  blockText?:string;
   trust:ScriptTrust;
   tone?:'running'|'passed'|'failed'|'not-run';
   message?:string;
@@ -227,14 +219,15 @@ export function scriptFollowsFailure(rowId:string,rows:ScriptRecord[],results:Sc
 export function scriptRowView(row:ScriptRecord,rows:ScriptRecord[],steps:OrderedStep[],approvals:ScriptTrust[],results:ScriptStepResult[],running:boolean,passedRun:boolean,executionOrder:ScriptExecutionReference[]=[]):ScriptRowView{
   const trust=trustFor(row,approvals);
   const block=scriptBlock(row,steps,approvals);
+  const blockText=anchorTargetsDraft(row.beforeStep,steps)?DRAFT_STEP_TEXT:undefined;
   const result=results.find(item=>item.rowId===row.id);
   const took=scriptTook(result);
-  if(result?.status==='script-error')return {block,trust,tone:'failed',message:result.message};
-  if(result?.status==='not-run'||scriptFollowsFailure(row.id,rows,results,executionOrder))return {block,trust,tone:'not-run',message:result?.message};
-  if(result?.status==='passed')return {block,trust,tone:'passed',took};
-  if(!result&&passedRun)return {block,trust,tone:'not-run'};
-  if(running&&!result)return {block,trust,tone:'running'};
-  return {block,trust};
+  if(result?.status==='script-error')return {block,blockText,trust,tone:'failed',message:result.message};
+  if(result?.status==='not-run'||scriptFollowsFailure(row.id,rows,results,executionOrder))return {block,blockText,trust,tone:'not-run',message:result?.message};
+  if(result?.status==='passed')return {block,blockText,trust,tone:'passed',took};
+  if(!result&&passedRun)return {block,blockText,trust,tone:'not-run'};
+  if(running&&!result)return {block,blockText,trust,tone:'running'};
+  return {block,blockText,trust};
 }
 
 export function stepNotRun(step:OrderedStep,rows:ScriptRecord[],results:ScriptStepResult[],executionOrder:ScriptExecutionReference[]=[]){
@@ -278,6 +271,7 @@ function readExecutionOrder(value:unknown):ScriptExecutionReference[]{
     const reference=item as ScriptExecutionReference;
     if(reference.kind==='step'&&Number.isInteger(reference.index))order.push({kind:'step',index:reference.index});
     else if(reference.kind==='runScript'&&typeof reference.rowId==='string')order.push({kind:'runScript',rowId:reference.rowId});
+    else if(reference.kind==='system')order.push({kind:'system'});
   }
   return order;
 }

@@ -2,7 +2,7 @@ import {useEffect,useState} from 'react';
 import type {ScriptAnchor,ScriptBlockReason,ScriptRow,ScriptStepResult,ScriptTrust} from '../server/run-script-contract.js';
 import {REDACTED} from '../server/run-script-contract.js';
 import {RunStatusBadge} from './visit-steps.js';
-import {AUTHORED_JAVASCRIPT_NOTE,SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,scriptFirstLine,type ScriptRecord,type ScriptRowView} from './run-script.js';
+import {SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,scriptFirstLine,type ScriptRecord,type ScriptRowView} from './run-script.js';
 import type {ScriptExecutionReference} from '../server/run-script-contract.js';
 
 export function RedactedText({text}:{text:string}){
@@ -28,7 +28,7 @@ export function ScriptStepRow({row,view,reveal,open,runLocked,stepNumber,afterLa
     </button>
     {view.trust.origin==='imported'&&!view.trust.trusted&&<p className="script-untrusted" data-testid="script-not-trusted">⚠ Not trusted on this Mac</p>}
     {failed&&<p className="script-inline-error" data-testid="script-error-reason" role="alert">✕ Script failed: <RedactedText text={view.message||'Script failed'}/> · scenario stopped</p>}
-    {showBlock&&view.block&&view.block.kind!=='untrusted'&&<p className="script-inline-error" role="alert">✕ {view.block.message}</p>}
+    {showBlock&&view.block&&view.block.kind!=='untrusted'&&<p className="script-inline-error" role="alert">✕ {view.blockText??view.block.message}</p>}
     {!runLocked&&<details className="visit-step-actions script-row-actions"><summary aria-label={'Script actions '+row.label}>⋯</summary>
       <button type="button" disabled={!canMoveUp} aria-label={'Move '+row.label+' up'} onClick={event=>{event.currentTarget.closest('details')!.open=false;onMove(-1);}}>↑ Move up</button>
       <button type="button" disabled={!canMoveDown} aria-label={'Move '+row.label+' down'} onClick={event=>{event.currentTarget.closest('details')!.open=false;onMove(1);}}>↓ Move down</button>
@@ -37,7 +37,7 @@ export function ScriptStepRow({row,view,reveal,open,runLocked,stepNumber,afterLa
   </div>;
 }
 
-export function ScriptEditor({row,view,workspaceName,stepNumber,afterLast=false,hasMock,untrustedLeft,running,timedOut,authoredWarning=false,onChange,onTrust,onStop,onRunAgain,onOpenLog,onClose}:{row:ScriptRecord;view:ScriptRowView;workspaceName:string;stepNumber:number;afterLast?:boolean;hasMock:boolean;untrustedLeft:number;running:boolean;timedOut:boolean;authoredWarning?:boolean;onChange:(patch:{label?:string;source?:string})=>void;onTrust:()=>Promise<void>;onStop?:()=>void;onRunAgain?:()=>void;onOpenLog?:()=>void;onClose:()=>void}){
+export function ScriptEditor({row,view,workspaceName,stepNumber,afterLast=false,hasMock,untrustedLeft,running,timedOut,onChange,onTrust,onStop,onRunAgain,onOpenLog,onClose}:{row:ScriptRecord;view:ScriptRowView;workspaceName:string;stepNumber:number;afterLast?:boolean;hasMock:boolean;untrustedLeft:number;running:boolean;timedOut:boolean;onChange:(patch:{label?:string;source?:string})=>void;onTrust:()=>Promise<void>;onStop?:()=>void;onRunAgain?:()=>void;onOpenLog?:()=>void;onClose:()=>void}){
   const [editing,setEditing]=useState(false);
   const [trusting,setTrusting]=useState(false);
   const [trustError,setTrustError]=useState('');
@@ -70,7 +70,6 @@ export function ScriptEditor({row,view,workspaceName,stepNumber,afterLast=false,
       {!running&&<button type="button" className="text-button" onClick={()=>setEditing(true)}>Edit script</button>}
     </div>}
     {(!showResult||editing)&&!readOnly&&<div className="script-author">
-      {authoredWarning&&<p className="script-authored-warning" data-testid="authored-javascript-note">{AUTHORED_JAVASCRIPT_NOTE}</p>}
       <label>Name<input aria-label="Script name" value={row.label} maxLength={120} onChange={event=>onChange({label:event.target.value})}/></label>
       <div className="script-code-label"><span>Script · JavaScript</span><button type="button" className="text-button" onClick={()=>onChange({source:SCRIPT_EXAMPLE})}>Example code</button></div>
       <ScriptSource source={row.source} onChange={source=>onChange({source})}/>
@@ -110,7 +109,6 @@ export type RunScriptModel={
   scrubFailed:boolean;
   failedAtScript:boolean;
   trustBlockCount:number;
-  authoredJavascript:number[];
   workspaceName:string;
   onAdd:(anchor:ScriptAnchor)=>string;
   onUpdate:(rowId:string,patch:{label?:string;source?:string})=>void;
