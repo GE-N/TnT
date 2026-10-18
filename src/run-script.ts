@@ -65,6 +65,15 @@ export const SCRIPT_EXAMPLE=[
 
 export const SCRIPT_TIMEOUT='◷ No per-script timeout · the run stops at its 300s cap';
 export const DRAFT_STEP_TEXT='Step not captured yet · capture it before running';
+export const TRUST_LOAD_TEXT="⚠ Trust couldn't be loaded";
+export const TRUST_UNKNOWN_TEXT='⚠ Trust unknown';
+
+/** Plain source text. A file import is not a verified origin. A copy uses the workspace name unchanged. */
+export function scriptSourceLine(source:{kind:'file';file:string;name:string}|{kind:'workspace';name:string}|{kind:'unknown'}){
+  if(source.kind==='file')return 'Imported from file `'+source.file+'` (named "'+source.name+'").';
+  if(source.kind==='workspace'&&source.name.trim())return 'Imported from '+source.name+'.';
+  return 'Imported from an imported workspace.';
+}
 export const SCRUB_FAILED_TEXT='✕ Evidence scrub failed · run evidence was removed to protect the token';
 
 export type OrderedStep={id:string;visitId:string;visitIndex:number;globalIndex:number;fingerprint:string};
@@ -154,6 +163,18 @@ export function anchorMatches(anchor:ScriptAnchor,steps:OrderedStep[]){
   return !!step&&anchor.fingerprint===step.fingerprint;
 }
 
+/** A saved row the server marked imported, whose current source is not the trusted hash. A row missing from the server list is pending. */
+export function importedNeedsTrust(row:Pick<ScriptRecord,'id'|'hash'>,approvals:ScriptTrust[]){
+  const recorded=approvals.some(item=>item.rowId===row.id&&item.origin==='imported');
+  return recorded&&!trustFor(row,approvals).trusted;
+}
+
+/** Row and Run All text. An uncaptured anchor keeps the contract kind and shows the capture sentence. */
+export function blockDisplayMessage(reason:ScriptBlockReason,row:{beforeStep:ScriptAnchor}|undefined,steps:OrderedStep[]){
+  if(reason.kind==='stale-anchor'&&row&&anchorTargetsDraft(row.beforeStep,steps))return DRAFT_STEP_TEXT;
+  return reason.message;
+}
+
 /** Before-launch block for one row. Empty wins, then a stale anchor, then syntax, then trust. */
 export function scriptBlock(row:ScriptRecord,steps:OrderedStep[],approvals:ScriptTrust[]):ScriptBlockReason|undefined{
   if(anchorTargetsDraft(row.beforeStep,steps))return {kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'};
@@ -161,7 +182,7 @@ export function scriptBlock(row:ScriptRecord,steps:OrderedStep[],approvals:Scrip
   if(!anchorMatches(row.beforeStep,steps))return {kind:'stale-anchor',rowId:row.id,message:'Step changed · relink before running'};
   const syntax=compileScript(row.source);
   if(syntax)return {kind:'syntax',rowId:row.id,message:'Script error: '+syntax.message,line:syntax.line,column:syntax.column};
-  if(!trustFor(row,approvals).trusted)return {kind:'untrusted',rowId:row.id,message:'Script needs trust'};
+  if(importedNeedsTrust(row,approvals))return {kind:'untrusted',rowId:row.id,message:'Script needs trust'};
 }
 
 export function blocksFor(rows:ScriptRecord[],steps:OrderedStep[],approvals:ScriptTrust[]){
@@ -177,7 +198,19 @@ export function stableScriptOrder(rows:ScriptRecord[]){
 }
 
 export function untrustedCount(rows:ScriptRecord[],approvals:ScriptTrust[]){
-  return rows.filter(row=>row.source.trim()&&!trustFor(row,approvals).trusted).length;
+  return rows.filter(row=>row.source.trim()&&importedNeedsTrust(row,approvals)).length;
+}
+
+/** Blank rows stay in the editor until Esc or the first source. They are not a save. */
+export function scenariosForSave<T extends object>(scenarios:T[]):T[]{
+  let changed=false;
+  const next=scenarios.map(item=>{
+    const scripts=(item as {scripts?:{source:string}[]}).scripts;
+    if(!scripts?.some(row=>!row.source.trim()))return item;
+    changed=true;
+    return {...item,scripts:scripts.filter(row=>row.source.trim())};
+  });
+  return changed?next:scenarios;
 }
 
 export function runBlockedLabel(count:number){
@@ -188,6 +221,7 @@ export type ScriptRowView={
   block?:ScriptBlockReason;
   blockText?:string;
   trust:ScriptTrust;
+  trustUnknown?:boolean;
   tone?:'running'|'passed'|'failed'|'not-run';
   message?:string;
   took?:string;
@@ -360,7 +394,7 @@ export function batchReasonLabel(summary:BatchSummary){
 }
 
 /** Untrusted scenarios fail before launch. The rest of the batch keeps its order and continues. */
-export function batchWithScriptBlocks(order:string[],entries:BatchLine[],blocks:Map<string,ScriptBlockReason>,names:Map<string,string>):BatchLine[]{
+export function batchWithScriptBlocks(order:string[],entries:BatchLine[],blocks:Map<string,{kind:string;message:string}>,names:Map<string,string>):BatchLine[]{
   const byId=new Map(entries.map(entry=>[entry.scenarioId,entry]));
   return order.map(id=>{
     const reason=blocks.get(id);

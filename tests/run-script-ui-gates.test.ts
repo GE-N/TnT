@@ -24,7 +24,7 @@ function workspace(mock:boolean){
   };
 }
 
-async function openWorkspace(options:{mock:boolean;trusted:boolean;onRuns?:()=>Response;onBatches?:()=>Response}){
+async function openWorkspace(options:{mock:boolean;trusted:boolean;failTrust?:boolean;onRuns?:()=>Response;onBatches?:()=>Response}){
   const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost/'});
   const keys=['window','document','HTMLElement','Event','KeyboardEvent','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch','sessionStorage'];
   const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
@@ -33,19 +33,22 @@ async function openWorkspace(options:{mock:boolean;trusted:boolean;onRuns?:()=>R
   const runs:string[]=[];
   const batches:string[]=[];
   const duplicates:unknown[]=[];
+  const saves:unknown[]=[];
+  let trustCalls=0;
   const grant={rowId:'script-paid',origin:'local' as const,trusted:true,hash:sha256(source)};
+  const denied={rowId:'script-paid',origin:'imported' as const,trusted:false,hash:sha256(source)};
   Object.defineProperty(globalThis,'sessionStorage',{value:dom.window.sessionStorage,configurable:true});
   for(const key of keys){
     if(key==='sessionStorage')continue;
     Object.defineProperty(globalThis,key,{value:key==='fetch'?async(path:string,init?:RequestInit)=>{
       if(path==='/api/session')return Response.json({});
       if(path==='/api/canvas/references')return Response.json({references:[],diagnostics:[]});
-      if(path.includes('/api/scripts/trust'))return Response.json({scripts:options.trusted?[grant]:[]});
+      if(path.includes('/api/scripts/trust')){trustCalls+=1;if(options.failTrust&&trustCalls===1)return new Response('no',{status:500});return Response.json({scripts:options.trusted?[grant]:[denied]});}
       if(path.includes('/api/runs')){runs.push(path);return options.onRuns?options.onRuns():Response.json({id:'run',status:'passed',snapshot:{workspaceId:saved.id,id:'run',name:saved.name,yaml:saved.yaml,steps:[],toolVersions:{maestro:'',node:''},runtimeInputPolicy:''}});}
       if(path.includes('/api/batches')){batches.push(path);return options.onBatches?options.onBatches():Response.json({id:'batch',status:'completed',entries:[]});}
       if(path.startsWith('/api/workspaces?q='))return Response.json(singleWorkspaceLibrary(saved));
       if(path==='/api/scenarios/duplicate'){const body=JSON.parse(String(init?.body??'{}'));duplicates.push(body);const copy={...saved.scenarios[0],id:'scenario-server',name:'From server',pathId:'sequence-server',scripts:[{...saved.scenarios[0].scripts[0],id:'script-server'}]};return Response.json({...saved,metadata:{revision:2},scenarios:[saved.scenarios[0],copy],canvas:{...saved.canvas,paths:[...saved.canvas.paths,{...saved.canvas.paths[0],id:'sequence-server',scenarioId:'scenario-server',name:'From server',visits:[{id:'visit-server',operationIds:['ready']}]}]}});}
-      if((init?.method??'GET')==='POST'&&path==='/api/workspaces')return Response.json({...saved,metadata:{revision:1}});
+      if((init?.method??'GET')==='POST'&&path==='/api/workspaces'){const body=JSON.parse(String(init?.body??'{}'));saves.push(body);return Response.json({...saved,metadata:{revision:1}});}
       return Response.json(saved);
     }:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
   }
@@ -55,7 +58,7 @@ async function openWorkspace(options:{mock:boolean;trusted:boolean;onRuns?:()=>R
   await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId:'device',bundleId:'',launchBusy:false,onRunning:()=>{}})));
   await workspaceCommand(dom.window.document,'open');
   for(let i=0;i<8;i++)await act(async()=>{await new Promise(resolve=>setImmediate(resolve));});
-  return {dom,runs,batches,duplicates,async close(){await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor] of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}};
+  return {dom,runs,batches,duplicates,saves,trustCalls:()=>trustCalls,async close(){await act(async()=>root.unmount());dom.window.close();for(const [key,descriptor] of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}};
 }
 
 async function clickRun(document:Document){
@@ -81,6 +84,40 @@ test('Run All does not post a batch while every scenario is script-blocked',asyn
     assert.equal(button.disabled,false);
     await act(async()=>{button.click();for(let i=0;i<12;i++)await new Promise(resolve=>setImmediate(resolve));});
     assert.deepEqual(page.batches,[]);
+  }finally{await page.close();}
+});
+
+test('a blank script is not saved and Escape from the name field removes it',async()=>{
+  const page=await openWorkspace({mock:false,trusted:true});
+  try{
+    const document=page.dom.window.document;
+    await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Visit 1 · Home"]')?.click());
+    await act(async()=>document.querySelector<HTMLButtonElement>('.add-visit-step')?.click());
+    await act(async()=>document.querySelector<HTMLButtonElement>('[data-testid="add-run-script"]')?.click());
+    const focused=document.activeElement;
+    assert.equal(focused?.getAttribute('aria-label'),'Script name');
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,400));});
+    assert.equal(page.saves.some(body=>JSON.stringify(body).includes('"source":""')),false);
+    await act(async()=>focused!.dispatchEvent(new page.dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+    assert.equal(document.querySelector('[data-script-editor]'),null);
+    assert.ok(document.querySelector('.floating-inspector'));
+  }finally{await page.close();}
+});
+
+test('a failed trust load blocks Run until Retry succeeds',async()=>{
+  const page=await openWorkspace({mock:false,trusted:false,failTrust:true});
+  try{
+    const document=page.dom.window.document;
+    assert.equal(document.querySelector('[data-testid="trust-load-failed"]')?.textContent,"⚠ Trust couldn't be loaded · ↻ Retry");
+    await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Visit 1 · Home"]')?.click());
+    assert.equal(document.querySelector('[data-testid="trust-unknown"]')?.textContent,'⚠ Trust unknown');
+    assert.equal(document.querySelector('[role="alertdialog"]'),null);
+    await clickRun(document);
+    assert.deepEqual(page.runs,[]);
+    await act(async()=>{document.querySelector<HTMLButtonElement>('[data-testid="trust-load-retry"]')!.click();for(let i=0;i<8;i++)await new Promise(resolve=>setImmediate(resolve));});
+    assert.equal(page.trustCalls(),2);
+    assert.equal(document.querySelector('[data-testid="trust-load-failed"]'),null);
+    assert.equal(document.querySelector('[data-testid="trust-unknown"]'),null);
   }finally{await page.close();}
 });
 

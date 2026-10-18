@@ -7,7 +7,7 @@ import {act,createElement,useState} from 'react';
 import type {CanvasGraph} from '../server/canvas.js';
 import type {ScriptExecutionReference,ScriptStepResult,ScriptTrust} from '../server/run-script-contract.js';
 import {approveScriptTrust} from '../src/run-script-client.js';
-import {anchorForNewScript,anchorMatches,anchorTargetsDraft,batchReasonLabel,batchSummary,batchWithScriptBlocks,blocksFor,DRAFT_STEP_TEXT,endAnchorFingerprint,evidenceScrubFailed,moveScript,newScriptId,orderedScenarioSteps,readScriptRun,reservedPlacements,runHitCap,scenarioShowsMockVariables,scriptBlock,scriptFirstLine,scriptFollowsFailure,scriptRowView,sha256,stableScriptOrder,stepNotRun,trustFor,untrustedCount,SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,SCRUB_FAILED_TEXT,type OrderedStep,type ScriptRecord} from '../src/run-script.js';
+import {anchorForNewScript,anchorMatches,anchorTargetsDraft,batchReasonLabel,batchSummary,batchWithScriptBlocks,blockDisplayMessage,blocksFor,DRAFT_STEP_TEXT,endAnchorFingerprint,evidenceScrubFailed,importedNeedsTrust,moveScript,newScriptId,orderedScenarioSteps,readScriptRun,reservedPlacements,runHitCap,scenariosForSave,scenarioShowsMockVariables,scriptBlock,scriptFirstLine,scriptFollowsFailure,scriptRowView,scriptSourceLine,sha256,stableScriptOrder,stepNotRun,trustFor,untrustedCount,SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,SCRUB_FAILED_TEXT,TRUST_LOAD_TEXT,type OrderedStep,type ScriptRecord} from '../src/run-script.js';
 import type {RunScriptModel} from '../src/run-script-ui.js';
 
 const fingerprint='ab'.repeat(32);
@@ -60,7 +60,9 @@ test('block priority is empty, then stale, then syntax, then trust',()=>{
   assert.equal(scriptBlock(row('e',0,fingerprint,{source:'  '}),steps,approvals)?.kind,'empty');
   assert.equal(scriptBlock(row('s',0,'stale',{source:'function ('}),steps,approvals)?.kind,'stale-anchor');
   assert.equal(scriptBlock(row('y',0,fingerprint,{source:'function (',origin:'imported'}),steps,approvals)?.kind,'syntax');
-  assert.equal(scriptBlock(row('u',0,fingerprint,{origin:'local'}),steps,approvals)?.message,'Script needs trust');
+  const imported=row('u',0,fingerprint);
+  assert.equal(scriptBlock(imported,steps,[{rowId:'u',origin:'imported',trusted:false,hash:imported.hash}])?.message,'Script needs trust');
+  assert.equal(scriptBlock(row('pending',0,fingerprint),steps,approvals),undefined);
   const trusted=row('ok',0,fingerprint);
   assert.equal(scriptBlock(trusted,steps,[{rowId:'ok',origin:'local',trusted:true,hash:trusted.hash}]),undefined);
   assert.match(scriptBlock(row('y',0,fingerprint,{source:'function ('}),steps,approvals)?.message??'',/^Script error: /);
@@ -141,6 +143,13 @@ test('a passed run does not mark a script row passed when that row has no result
   assert.equal(view.tone,'not-run');
 });
 
+test('import and copy source lines stay plain',()=>{
+  assert.equal(scriptSourceLine({kind:'file',file:'x.tnt',name:'Payments'}),'Imported from file `x.tnt` (named "Payments").');
+  assert.equal(scriptSourceLine({kind:'workspace',name:'Payments'}),'Imported from Payments.');
+  assert.equal(scriptSourceLine({kind:'unknown'}),'Imported from an imported workspace.');
+  assert.doesNotMatch(scriptSourceLine({kind:'file',file:'x.tnt',name:'Payments'}),/verified/i);
+});
+
 test('a draft step is not an anchor and an existing row uses the usual block line',()=>{
   const drafted=step(0,'draft');
   const current=row('paid',0,fingerprint,{source:'1+1'});
@@ -150,7 +159,33 @@ test('a draft step is not an anchor and an existing row uses the usual block lin
   const view=scriptRowView(current,[current],[drafted],[{rowId:'paid',origin:'local',trusted:true,hash:current.hash}],[],false,false);
   assert.equal(view.block?.kind,'stale-anchor');
   assert.equal(view.blockText,DRAFT_STEP_TEXT);
-  assert.equal(scriptBlock(current,[drafted],[] )?.kind,'stale-anchor');
+  const reason=scriptBlock(current,[drafted],[])!;
+  assert.equal(reason.kind,'stale-anchor');
+  assert.equal(reason.message,'Step changed · relink before running');
+  assert.equal(blockDisplayMessage(reason,current,[drafted]),DRAFT_STEP_TEXT);
+  const lines=batchWithScriptBlocks(['main'],[],new Map([['main',{kind:reason.kind,message:blockDisplayMessage(reason,current,[drafted])}]]),new Map([['main','Main']]));
+  assert.equal(lines[0].reason,DRAFT_STEP_TEXT);
+});
+
+test('a blank script is left out of the save payload',()=>{
+  const kept={id:'paid',scripts:[{source:'1+1'},{source:'  '},{source:''}]};
+  const empty={id:'empty',scripts:[{source:''}]};
+  const plainList=[{id:'plain'}];
+  const saved=scenariosForSave([kept,empty]);
+  assert.deepEqual(saved[0].scripts,[{source:'1+1'}]);
+  assert.deepEqual(saved[1].scripts,[]);
+  assert.equal(scenariosForSave(plainList),plainList);
+});
+
+test('an unsaved local script is pending and only a server import counts as untrusted',()=>{
+  const pending=row('new',0,fingerprint,{source:'1+1'});
+  const saved=row('old',0,fingerprint,{source:'1+1'});
+  const approvals:ScriptTrust[]=[{rowId:'old',origin:'imported',trusted:false,hash:saved.hash}];
+  assert.equal(importedNeedsTrust(pending,[]),false);
+  assert.equal(importedNeedsTrust(saved,approvals),true);
+  assert.equal(untrustedCount([pending,saved],approvals),1);
+  assert.equal(scriptBlock(pending,[step(0)],[]),undefined);
+  assert.equal(scriptBlock(saved,[step(0)],approvals)?.kind,'untrusted');
 });
 
 test('execution order keeps system commands without counting them as steps',()=>{
@@ -183,6 +218,10 @@ test('reserved names, scrub, cap, and the redacted chip styles',()=>{
   assert.match(css,/\.redacted-chip\{[^}]*font-size:12px/);
   assert.match(css,/\.batch-script-untrusted\{color:#8a4b00/);
   assert.match(css,/\.batch-script-failed\{color:#b3261e/);
+  assert.match(css,/\.script-preview\{[^}]*white-space:nowrap/);
+  assert.match(css,/\.script-provided \.script-muted\{font-weight:400/);
+  assert.match(css,/\.floating-inspector\{[^}]*z-index:42/);
+  assert.match(css,/\.script-editor\{[^}]*z-index:41/);
   assert.match(css,/#b3261e/);
 });
 
@@ -209,8 +248,9 @@ async function mount(seed:ScriptRecord[]=[],granted:ScriptTrust[]=[]){
   const {RedactedText}=await import('../src/run-script-ui.js');
   const {YamlEditor}=await import('../src/yaml-editor.js');
   let replaceGraph:(next:CanvasGraph)=>void=()=>{};
-  let updateExtra:(patch:Partial<{running:boolean;passedRun:boolean;revealBlocks:boolean;scrubFailed:boolean;failedAtScript:boolean;timedOut:boolean;hasMock:boolean;results:ScriptStepResult[];executionOrder:ScriptExecutionReference[]}>)=>void=()=>{};
-  const initial={running:false,passedRun:false,revealBlocks:false,scrubFailed:false,failedAtScript:false,timedOut:false,hasMock:false,results:[] as ScriptStepResult[],executionOrder:[] as ScriptExecutionReference[]};
+  let updateExtra:(patch:Partial<{running:boolean;passedRun:boolean;revealBlocks:boolean;scrubFailed:boolean;failedAtScript:boolean;timedOut:boolean;hasMock:boolean;trustLoadFailed:boolean;results:ScriptStepResult[];executionOrder:ScriptExecutionReference[]}>)=>void=()=>{};
+  const initial={running:false,passedRun:false,revealBlocks:false,scrubFailed:false,failedAtScript:false,timedOut:false,hasMock:false,trustLoadFailed:false,results:[] as ScriptStepResult[],executionOrder:[] as ScriptExecutionReference[]};
+  let retries=0;
   let latest:ScriptRecord[]=seed;
   function Host(){
     const [current,setGraph]=useState(graph);
@@ -218,7 +258,7 @@ async function mount(seed:ScriptRecord[]=[],granted:ScriptTrust[]=[]){
     const [trust,setTrust]=useState(granted);
     const [extra,setExtra]=useState(initial);
     replaceGraph=setGraph;updateExtra=patch=>setExtra(value=>({...value,...patch}));latest=rows;
-    const runScripts:RunScriptModel={scenarioId:'main',rows,trust,results:extra.results,executionOrder:extra.executionOrder,hasMock:extra.hasMock,revealBlocks:extra.revealBlocks,running:extra.running,passedRun:extra.passedRun,timedOut:extra.timedOut,scrubFailed:extra.scrubFailed,failedAtScript:extra.failedAtScript,trustBlockCount:untrustedCount(rows,trust),workspaceName:'Imported workspace',onAdd:anchor=>{const id=newScriptId();const source='';setRows(value=>[...value,{id,scenarioId:'main',origin:'imported',beforeStep:anchor,label:'Run script',source,hash:sha256(source)}]);return id;},onUpdate:(rowId,patch)=>setRows(value=>value.map(item=>item.id===rowId?{...item,...patch,hash:sha256(patch.source??item.source)}:item)),onMove:()=>{},onDelete:rowId=>setRows(value=>value.filter(item=>item.id!==rowId)),onReplace:next=>setRows(next.map(item=>({...item,scenarioId:'main',origin:'imported' as const,hash:sha256(item.source)}))),onTrust:async rowId=>{const item=rows.find(entry=>entry.id===rowId);if(!item)return;const saved=await approveScriptTrust({workspace:'workspace',rowId,hash:item.hash,token:'token'});setTrust(value=>[...value.filter(entry=>entry.rowId!==saved.rowId),saved]);}};
+    const runScripts:RunScriptModel={scenarioId:'main',rows,trust,results:extra.results,executionOrder:extra.executionOrder,hasMock:extra.hasMock,revealBlocks:extra.revealBlocks,running:extra.running,passedRun:extra.passedRun,timedOut:extra.timedOut,scrubFailed:extra.scrubFailed,failedAtScript:extra.failedAtScript,trustBlockCount:untrustedCount(rows,trust),trustLoadFailed:extra.trustLoadFailed,workspaceName:'Imported workspace',onRetryTrust:()=>{retries+=1;},onAdd:anchor=>{const id=newScriptId();const source='';setRows(value=>[...value,{id,scenarioId:'main',origin:'imported',beforeStep:anchor,label:'Run script',source,hash:sha256(source)}]);return id;},onUpdate:(rowId,patch)=>setRows(value=>value.map(item=>item.id===rowId?{...item,...patch,hash:sha256(patch.source??item.source)}:item)),onMove:(rowId,direction,stepCount,fingerprintAt)=>setRows(value=>moveScript(value,rowId,direction,stepCount,fingerprintAt)??value),onDelete:rowId=>setRows(value=>value.filter(item=>item.id!==rowId)),onReplace:next=>setRows(next.map(item=>({...item,scenarioId:'main',origin:'imported' as const,hash:sha256(item.source)}))),onTrust:async rowId=>{const item=rows.find(entry=>entry.id===rowId);if(!item)return;const saved=await approveScriptTrust({workspace:'workspace',rowId,hash:item.hash,token:'token'});setTrust(value=>[...value.filter(entry=>entry.rowId!==saved.rowId),saved]);}};
     return createElement('div',null,
       createElement(CanvasEditor,{graph:current,onChange:(next:CanvasGraph|undefined)=>{if(next)setGraph(next);},yaml:'appId: app\n---\n- assertVisible: Home\n',onYamlChange:()=>{},catalog:[],diagnostics:[],pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode:true,scenarioId:'main',scenarios:[{id:'main',name:'Main',pathId:'route'}],initialView:{selectedScreenId:'home',selectedVisitId:'v1'},runScripts}),
       createElement(RedactedText,{text:'token [redacted] hidden'}),
@@ -227,7 +267,7 @@ async function mount(seed:ScriptRecord[]=[],granted:ScriptTrust[]=[]){
   }
   const root=createRoot(window.document.getElementById('root')!);
   await act(async()=>root.render(createElement(Host)));
-  return {window,document:window.document,replaceGraph,updateExtra,rows:()=>latest,async close(){await act(async()=>root.unmount());globalThis.fetch=fetchImpl;for(const [key,descriptor] of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete (globalThis as Record<string,unknown>)[key];}}};
+  return {window,document:window.document,replaceGraph,updateExtra,rows:()=>latest,retries:()=>retries,async close(){await act(async()=>root.unmount());globalThis.fetch=fetchImpl;for(const [key,descriptor] of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete (globalThis as Record<string,unknown>)[key];}}};
 }
 
 async function click(document:Document,selector:string){
@@ -261,7 +301,8 @@ test('the script menu, editor, end anchor, trust panel, and run states render in
     assert.match(page.document.querySelector('.script-preview')!.textContent!,/\/\/ Switch POST \/pay to \.\.\./);
     const stored=page.rows()[0];
     assert.equal(stored.beforeStep.fingerprint,fingerprint+':end');
-    assert.equal(page.document.querySelector('[data-testid="script-blocks-run"]')?.getAttribute('data-block-kind'),'untrusted');
+    assert.equal(page.document.querySelector('[data-testid="script-blocks-run"]'),null);
+    assert.equal(page.document.querySelector('[data-testid="run-blocked"]'),null);
     await act(async()=>page.updateExtra({passedRun:true,results:[{kind:'runScript',rowId:stored.id,status:'passed',durationMs:300} as ScriptStepResult],executionOrder:[{kind:'step',index:0},{kind:'runScript',rowId:stored.id}]}));
     assert.match(page.document.body.textContent!,/✓ Passed/);
     assert.match(page.document.body.textContent!,/Ran after the last step · took 0\.3s/);
@@ -307,7 +348,7 @@ test('imported scripts are trusted one at a time and a failure stops later steps
     assert.match(page.document.querySelector('[data-testid="script-error-reason"]')!.textContent!,/switch failed/);
     assert.equal(page.document.querySelector('[data-testid="script-not-run"]')!.textContent,'○ Not run');
     assert.match(page.document.querySelector('[data-testid="failed-at-script"]')!.textContent!,/Failed at Run script/);
-    assert.equal(blocksFor(page.rows(),[step(0)],[{rowId:'one',origin:'imported',trusted:true,hash:first.hash}]).some(item=>item.kind==='untrusted'),true);
+    assert.equal(blocksFor(page.rows(),[step(0)],[{rowId:'one',origin:'imported',trusted:true,hash:first.hash},{rowId:'two',origin:'imported',trusted:false,hash:second.hash}]).some(item=>item.kind==='untrusted'),true);
   }finally{await page.close();}
 });
 
@@ -331,8 +372,11 @@ test('Escape removes a blank script and delete leaves an inline undo',async()=>{
     await click(page.document,'.add-visit-step');
     await click(page.document,'[data-testid="add-run-script"]');
     assert.equal(page.rows().length,1);
-    await act(async()=>page.document.dispatchEvent(new page.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+    const focused=page.document.activeElement;
+    assert.equal(focused?.getAttribute('aria-label'),'Script name');
+    await act(async()=>focused!.dispatchEvent(new page.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
     assert.equal(page.rows().length,0);
+    assert.ok(page.document.querySelector('.floating-inspector'));
     assert.equal(page.document.querySelector('.script-undo'),null);
     await click(page.document,'.add-visit-step');
     await click(page.document,'[data-testid="add-run-script"]');
@@ -343,6 +387,50 @@ test('Escape removes a blank script and delete leaves an inline undo',async()=>{
     await click(page.document,'.script-undo button');
     assert.equal(page.rows().length,1);
     assert.equal(page.document.querySelector('.script-undo'),null);
+  }finally{await page.close();}
+});
+
+test('delete undo replaces the row and move undo sits on the moved row',async()=>{
+  const page=await mount([
+    row('before',0,fingerprint,{source:'1',label:'Before'}),
+    row('after',1,endAnchorFingerprint(fingerprint),{source:'2',label:'After'}),
+  ]);
+  try{
+    await click(page.document,'[aria-label="Delete Before"]');
+    const undo=page.document.querySelector('.script-undo')!;
+    const step=page.document.querySelector('[data-operation-id="ready"]')!;
+    assert.match(undo.textContent!,/Run script deleted/);
+    assert.ok(undo.compareDocumentPosition(step)&page.window.Node.DOCUMENT_POSITION_FOLLOWING);
+    assert.ok(undo.compareDocumentPosition(page.document.querySelector('[data-script-id="after"]')!)&page.window.Node.DOCUMENT_POSITION_FOLLOWING);
+    await click(page.document,'.script-undo button');
+    await click(page.document,'[aria-label="Move Before down"]');
+    const moved=page.document.querySelector('[data-script-id="before"]')!;
+    assert.equal(moved.nextElementSibling?.className,'script-undo');
+    assert.match(moved.nextElementSibling!.textContent!,/Run script moved/);
+  }finally{await page.close();}
+});
+
+test('a failed trust load keeps rows read-only and offers Retry',async()=>{
+  const page=await mount([row('paid',0,fingerprint,{source:'1+1'})]);
+  try{
+    await act(async()=>page.updateExtra({trustLoadFailed:true}));
+    const warning=page.document.querySelector('[data-testid="trust-load-failed"]')!;
+    assert.equal(warning.textContent,TRUST_LOAD_TEXT+' · ↻ Retry');
+    assert.equal(warning.className,'trust-load-warning');
+    const retry=page.document.querySelector<HTMLButtonElement>('[data-testid="trust-load-retry"]')!;
+    assert.equal(retry.textContent,'↻ Retry');
+    assert.equal(retry.className,'trust-load-retry');
+    assert.match(readFileSync(new URL('../src/style.css',import.meta.url),'utf8'),/\.trust-load-warning\{[^}]*background:#fff4e5;color:#8a4b00/);
+    assert.match(readFileSync(new URL('../src/style.css',import.meta.url),'utf8'),/\.trust-load-retry\{[^}]*min-height:44px/);
+    assert.equal(page.document.querySelector('[data-testid="trust-unknown"]')!.textContent,'⚠ Trust unknown');
+    assert.equal(page.document.querySelector('[data-testid="script-not-trusted"]'),null);
+    assert.equal(page.document.querySelector('[role="alertdialog"]'),null);
+    await click(page.document,'[data-script-id="paid"] .script-row-summary');
+    assert.equal(page.document.querySelector('[data-testid="script-source"]')!.textContent,'1+1');
+    assert.equal(page.document.querySelector('[aria-label="Script source"]'),null);
+    assert.equal(page.document.querySelector('[data-testid="trust-this-script"]'),null);
+    await click(page.document,'[data-testid="trust-load-retry"]');
+    assert.equal(page.retries(),1);
   }finally{await page.close();}
 });
 

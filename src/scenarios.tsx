@@ -22,10 +22,21 @@ import { MockSetup } from './mock-setup.js';
 import type { MockPlan } from '../server/mockoon.js';
 import { parseAllDocuments } from 'yaml';
 import {approveScriptTrust,pullScriptTrust} from './run-script-client.js';
-import {batchReasonLabel,batchSummary,batchWithScriptBlocks,blocksFor,evidenceScrubFailed,moveScript,newScriptId,orderedScenarioSteps,readScriptRun,recordsFor,reservedPlacements,runHitCap,scenarioShowsMockVariables,untrustedCount,type BatchLine} from './run-script.js';
+import {batchReasonLabel,batchSummary,batchWithScriptBlocks,blockDisplayMessage,blocksFor,evidenceScrubFailed,moveScript,newScriptId,orderedScenarioSteps,readScriptRun,recordsFor,reservedPlacements,runHitCap,scenariosForSave,scenarioShowsMockVariables,untrustedCount,type BatchLine} from './run-script.js';
 import type {RunScriptModel} from './run-script-ui.js';
 import {RedactedText} from './run-script-ui.js';
-import type {ScriptBlockReason,ScriptRow,ScriptTrust} from '../server/run-script-contract.js';
+import type {ScriptRow,ScriptTrust} from '../server/run-script-contract.js';
+
+function mergeBlankScripts(saved:ScenarioDefinition[],local:ScenarioDefinition[]){
+  const blanks=new Map(local.flatMap(item=>{const rows=(item.scripts??[]).filter(row=>!row.source.trim());return rows.length?[[item.id,rows] as const]:[];}));
+  if(!blanks.size)return saved;
+  return saved.map(item=>{
+    const extra=blanks.get(item.id);
+    if(!extra?.length)return item;
+    const ids=new Set((item.scripts??[]).map(row=>row.id));
+    return {...item,scripts:[...(item.scripts??[]),...extra.filter(row=>!ids.has(row.id))]};
+  });
+}
 
 export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, recoverSession=false, simulatorConnected=!!deviceId&&!!token }: { token: string; deviceId: string; bundleId: string; launchBusy: boolean; onRunning: (running: boolean) => void; recoverSession?: boolean; simulatorConnected?: boolean }) {
   simulatorConnected=simulatorConnected&&!!deviceId&&!!token;
@@ -54,6 +65,8 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const setMockPlan=useCallback((plan:MockPlan|undefined,error:string)=>{setMock(plan);setMockError(error);},[]);
   const [noWorkspace,setNoWorkspace]=useState(false);
   const [scriptTrust,setScriptTrust]=useState<ScriptTrust[]>([]);
+  const [trustLoadFailed,setTrustLoadFailed]=useState(false);
+  const [trustRetry,setTrustRetry]=useState(0);
   const [scriptSourceName,setScriptSourceName]=useState('');
   const [revealBlocks,setRevealBlocks]=useState(false);
   const [reservedVisible,setReservedVisible]=useState(false);
@@ -100,11 +113,11 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const [dismissedDraft,setDismissedDraft]=useState(0);
   const [savedRevision,setSavedRevision]=useState(0);
   useEffect(()=>{
-    if(!workspaceId||!token){setScriptTrust([]);return;}
+    if(!workspaceId||!token){setScriptTrust([]);setTrustLoadFailed(false);return;}
     let cancelled=false;
-    pullScriptTrust(workspaceId,token).then(list=>{if(!cancelled)setScriptTrust(list);}).catch(()=>{if(!cancelled)setScriptTrust([]);});
+    pullScriptTrust(workspaceId,token).then(list=>{if(!cancelled){setScriptTrust(list);setTrustLoadFailed(false);}}).catch(()=>{if(!cancelled){setScriptTrust([]);setTrustLoadFailed(true);}});
     return ()=>{cancelled=true;};
-  },[workspaceId,token,savedRevision]);
+  },[workspaceId,token,savedRevision,trustRetry]);
   const [draftError,setDraftError]=useState('');
   const [draftFailed,setDraftFailed]=useState(false);
   const [draftSaving,setDraftSaving]=useState(false);
@@ -128,7 +141,8 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   },[]);
   const contentKey=(value:{name:string;yaml:string;flows?:unknown;mock?:unknown;canvas?:unknown;automation?:unknown;scenarios?:unknown})=>JSON.stringify({name:value.name,yaml:value.yaml,flows:value.flows??{},mock:value.mock,canvas:value.canvas,automation:value.automation,scenarios:value.scenarios??[]});
   let parsedFlows:unknown;try{parsedFlows=JSON.parse(flows);}catch{parsedFlows=flows;}
-  const authoredContent={name,yaml,flows:parsedFlows,mock,canvas,automation,scenarios:definitions};
+  const definitionsRef=useRef(definitions);definitionsRef.current=definitions;
+  const authoredContent={name,yaml,flows:parsedFlows,mock,canvas,automation,scenarios:scenariosForSave(definitions)};
   const reviewedContent=(overrides:Partial<Pick<Workspace,'name'|'yaml'>>={})=>({...authoredContent,omittedValues:lastValid.current?.omittedValues,flows:JSON.parse(flows),...overrides});
   const currentKey=contentKey(authoredContent);
   const initialKey=useRef(currentKey);
@@ -141,7 +155,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const dirty=pendingDraft||currentKey!==(acknowledged||initialKey.current);
   const draftFields:Record<string,string>={};
   for(const report of fieldsRef.current.values())if(report.pending&&report.key&&typeof report.value==='string')draftFields[report.key]=report.value;
-  const draftContent={yaml,flows,canvas,scenarios:definitions,automation,mock};
+  const draftContent={yaml,flows,canvas,scenarios:scenariosForSave(definitions),automation,mock};
   const draftKey=JSON.stringify({name,content:draftContent,fields:draftFields});
   latestDraftKey.current=draftKey;
   const baseline=acknowledged||initialKey.current;
@@ -246,17 +260,20 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     return()=>{stopped=true;clearInterval(timer);};
   },[batch?.id,batchRunning,token]);
   function scriptBlockMap(){
-    const map=new Map<string,ScriptBlockReason>();
+    const map=new Map<string,{kind:string;message:string}>();
     for(const item of definitions){
       if(item.skipInRunAll)continue;
-      const reasons=blocksFor(recordsFor(item.id,item.scripts,scriptTrust),canvas&&item.pathId?orderedScenarioSteps(canvas,item.pathId):[],scriptTrust);
+      const steps=canvas&&item.pathId?orderedScenarioSteps(canvas,item.pathId):[];
+      const records=recordsFor(item.id,item.scripts,scriptTrust);
+      const reasons=blocksFor(records,steps,scriptTrust);
       const reason=reasons.find(entry=>entry.kind==='untrusted')??reasons[0];
-      if(reason)map.set(item.id,reason);
+      if(reason)map.set(item.id,{kind:reason.kind,message:blockDisplayMessage(reason,'rowId' in reason?records.find(entry=>entry.id===reason.rowId):undefined,steps)});
     }
     return map;
   }
   async function runAll(){
     if(running||submitting||pickerBusy||launchBusy||!definitions.some(item=>!item.skipInRunAll))return;
+    if(trustLoadFailed&&definitions.some(item=>(item.scripts??[]).some(row=>row.source.trim())))return;
     setSubmitting(true);setRunError('');
     try{
       const workspace=await save();
@@ -387,7 +404,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       else if(action.kind==='rename')setName(action.name);
       else{
         const source=options?.discard?(lastValid.current??reviewedContent({name:action.name})):saved?{...saved,name:action.name}:reviewedContent({name:action.name});
-        {const copied=await api('/api/workspaces/copy',copyRequest(source,action.name));if(copied?.id)rememberScriptSource(copied.id,('name' in source&&typeof source.name==='string'?source.name:name));receive(copied);}
+        {const copied=await api('/api/workspaces/copy',copyRequest(source,action.name));if(copied?.id)rememberScriptSource(copied.id,scriptSourceName.trim()||name);receive(copied);}
       }
     }finally{setSubmitting(false);}
   }
@@ -419,7 +436,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
         setWorkspaceId(workspace.id);setAcknowledged(contentKey(workspace));setSaveFailed(false);setDraftFailed(false);setSaveProblem('');setConflict(false);failedKey.current='';failedDraftKey.current='';
         lastValid.current=workspace;setSavedRevision(workspace.metadata?.revision??0);
         if(draftCleared){setAcknowledgedDraftKey('');setRecoveredFields({});setDraftRevisionShown(0);setDraftSavedAt('');draftRecord.current=null;}
-        if(!hasNewEdits){setYaml(workspace.yaml);setCanvas(workspace.canvas);setDefinitions(workspace.scenarios??[]);setAutomation(workspace.automation);setMock(workspace.mock);setFlows(JSON.stringify(workspace.flows??{},null,2));}
+        if(!hasNewEdits){setYaml(workspace.yaml);setCanvas(workspace.canvas);setDefinitions(mergeBlankScripts(workspace.scenarios??[],definitionsRef.current));setAutomation(workspace.automation);setMock(workspace.mock);setFlows(JSON.stringify(workspace.flows??{},null,2));}
         return workspace;
       }catch(error){
         if(epoch===persistence.current.epoch){const message=error instanceof Error?error.message:'Local save failed.';failedKey.current=savingKey;setSaveFailed(true);setSaveProblem(message);const conflicted=error instanceof RunnerRequestError&&error.status===409;setConflict(conflicted);if(conflicted)setConflictBar(true);}
@@ -518,7 +535,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   async function copyWithDraft(){
     const base=lastValid.current;if(!base?.id)throw new Error('Save a valid version before restoring the draft as a copy.');
     const copyName=(base.name.slice(0,115)+' copy').slice(0,120);
-    const copy:Workspace=await api('/api/workspaces/copy',copyRequest(base,copyName));if(copy?.id)rememberScriptSource(copy.id,base.name);
+    const copy:Workspace=await api('/api/workspaces/copy',copyRequest(base,copyName));if(copy?.id)rememberScriptSource(copy.id,scriptSourceName.trim()||base.name);
     const draft=draftRecord.current;
     const written=await api('/api/workspaces/'+copy.id+'/draft',{baseRevision:copy.metadata?.revision??1,expectedDraftRevision:0,name:draft?.name??name,content:draft?.content??draftContent,fields:draft?.fields??draftFields});
     const detail=await api('/api/workspaces/'+copy.id);
@@ -528,7 +545,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   }
   async function copyConflict(){
     const copyName=(name.slice(0,115)+' copy').slice(0,120);
-    {const copied=await api('/api/workspaces/copy',copyRequest(reviewedContent({name:copyName}),copyName));if(copied?.id)rememberScriptSource(copied.id,name);loadWorkspace(copied);}
+    {const copied=await api('/api/workspaces/copy',copyRequest(reviewedContent({name:copyName}),copyName));if(copied?.id)rememberScriptSource(copied.id,scriptSourceName.trim()||name);loadWorkspace(copied);}
     setConflict(false);setConflictBar(false);setSaveFailed(false);setSaveProblem('');
   }
   async function loadLatest(){
@@ -552,6 +569,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     if(submitting||pickerBusy||(execute&&(running||launchBusy)))return;
     if (execute) {
       setRunError('');
+      if(trustLoadFailed&&definitions.some(item=>(item.scripts??[]).some(row=>row.source.trim())))return;
       if(!token){setRunError('Connect to the runner before running a scenario.');return;}
       if(!deviceId){setRunError('Select a device before running a scenario.');return;}
       const targetPath=definitions.find(item=>item.id===targetId)?.pathId??pathId;
@@ -630,13 +648,13 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const currentResults=Object.values(scriptRun.scriptSteps);
   const runIsCurrent=!!run&&(run.snapshot.scenario?.id===scenarioId||!run.snapshot.scenario);
   function patchScripts(id:string,update:(rows:ScriptRow[])=>ScriptRow[]){setDefinitions(current=>current.map(item=>item.id===id?{...item,scripts:update(item.scripts??[])}:item));}
-  const runScripts:RunScriptModel|undefined=scenarioId?{scenarioId,rows:scriptRows,trust:scriptTrust,results:runIsCurrent?currentResults:[],executionOrder:runIsCurrent?scriptRun.executionOrder:[],hasMock:scenarioShowsMockVariables(!!mock,selectedScenario?.mockResponseId,scriptRows,scriptTrust),revealBlocks,running:!!runIsCurrent&&run?.status==='running',passedRun:!!runIsCurrent&&run?.status==='passed',timedOut:runIsCurrent&&runHitCap(run),scrubFailed:runIsCurrent&&evidenceScrubFailed(run),failedAtScript:runIsCurrent&&currentResults.some(item=>item.status==='script-error'&&scriptRows.some(row=>row.id===item.rowId)),trustBlockCount:scriptTrustCount,workspaceName:scriptSourceName,onAdd:anchor=>{const id=newScriptId();patchScripts(scenarioId,rows=>[...rows,{id,beforeStep:anchor,label:'Run script',source:''}]);return id;},onUpdate:(rowId,patch)=>patchScripts(scenarioId,rows=>rows.map(row=>row.id===rowId?{...row,...patch}:row)),onMove:(rowId,direction,stepCount,fingerprintAt)=>patchScripts(scenarioId,rows=>{const next=moveScript(recordsFor(scenarioId,rows,scriptTrust),rowId,direction,stepCount,fingerprintAt);return next?next.map(({id,label,source,beforeStep})=>({id,label,source,beforeStep})):rows;}),onDelete:rowId=>patchScripts(scenarioId,rows=>rows.filter(row=>row.id!==rowId)),onReplace:rows=>patchScripts(scenarioId,()=>rows),onTrust:async rowId=>{const row=scriptRows.find(item=>item.id===rowId);if(!row||!workspaceId)throw new Error('Script trust was not saved.');const saved=await approveScriptTrust({workspace:workspaceId,rowId,hash:row.hash,token});setScriptTrust(current=>[...current.filter(item=>item.rowId!==saved.rowId),saved]);},onStop:()=>void cancel(),onRunAgain:()=>void submit(true),onOpenLog:()=>{const reports=document.querySelector('.report-tools');if(reports instanceof HTMLDetailsElement)reports.open=true;document.getElementById('run-log')?.querySelector('summary')?.focus();}}:undefined;
+  const runScripts:RunScriptModel|undefined=scenarioId?{scenarioId,rows:scriptRows,trust:scriptTrust,results:runIsCurrent?currentResults:[],executionOrder:runIsCurrent?scriptRun.executionOrder:[],hasMock:scenarioShowsMockVariables(!!mock,selectedScenario?.mockResponseId,scriptRows,scriptTrust),revealBlocks,running:!!runIsCurrent&&run?.status==='running',passedRun:!!runIsCurrent&&run?.status==='passed',timedOut:runIsCurrent&&runHitCap(run),scrubFailed:runIsCurrent&&evidenceScrubFailed(run),failedAtScript:runIsCurrent&&currentResults.some(item=>item.status==='script-error'&&scriptRows.some(row=>row.id===item.rowId)),trustBlockCount:scriptTrustCount,trustLoadFailed,workspaceName:scriptSourceName,onRetryTrust:()=>setTrustRetry(count=>count+1),onAdd:anchor=>{const id=newScriptId();patchScripts(scenarioId,rows=>[...rows,{id,beforeStep:anchor,label:'Run script',source:''}]);return id;},onUpdate:(rowId,patch)=>patchScripts(scenarioId,rows=>rows.map(row=>row.id===rowId?{...row,...patch}:row)),onMove:(rowId,direction,stepCount,fingerprintAt)=>patchScripts(scenarioId,rows=>{const next=moveScript(recordsFor(scenarioId,rows,scriptTrust),rowId,direction,stepCount,fingerprintAt);return next?next.map(({id,label,source,beforeStep})=>({id,label,source,beforeStep})):rows;}),onDelete:rowId=>patchScripts(scenarioId,rows=>rows.filter(row=>row.id!==rowId)),onReplace:rows=>patchScripts(scenarioId,()=>rows),onTrust:async rowId=>{const row=scriptRows.find(item=>item.id===rowId);if(!row||!workspaceId)throw new Error('Script trust was not saved.');const saved=await approveScriptTrust({workspace:workspaceId,rowId,hash:row.hash,token});setScriptTrust(current=>[...current.filter(item=>item.rowId!==saved.rowId),saved]);},onStop:()=>void cancel(),onRunAgain:()=>void submit(true),onOpenLog:()=>{const reports=document.querySelector('.report-tools');if(reports instanceof HTMLDetailsElement)reports.open=true;document.getElementById('run-log')?.querySelector('summary')?.focus();}}:undefined;
   const batchLines=batch?batchWithScriptBlocks(definitions.filter(item=>!item.skipInRunAll).map(item=>item.id),batch.entries as BatchLine[],scriptBlockMap(),new Map(definitions.map(item=>[item.id,item.name]))):undefined;
   const recoveryNote=showRecovery&&recoveryOpen&&<div ref={recoveryNoteRef} className="recovery-note" role="dialog" aria-label="Recovered draft" data-recovery-for="workspace" style={recoveryBox?{top:Math.max(8,Math.min(recoveryBox.bottom+6,window.innerHeight-8)),left:Math.max(8,Math.min(recoveryBox.left,window.innerWidth-288))}:undefined}><p>Unsaved changes from <time dateTime={draftSavedAt}>{draftSavedAt?new Date(draftSavedAt).toLocaleString():'earlier'}</time> were recovered.{staleDraft?' Based on an older version.':''}</p><div className="recovery-note-actions">{staleDraft?<button type="button" className="primary" onClick={()=>void copyWithDraft()}>Restore as a copy</button>:<button type="button" className="primary" onClick={()=>draftRecord.current&&restoreDraft(draftRecord.current)}>Restore draft</button>}<button type="button" onClick={()=>void keepSaved()}>Keep saved version</button></div></div>;
   return <WorkspaceDrafts.Provider value={reportDraft}><RecoveredFields.Provider value={recoveredFields}><YamlDraftProvider resetToken={loadRevision} yaml={yaml}><section className="panel scenario-panel" aria-labelledby="scenario-heading">
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Scenario workspace</h2><p>Design scenarios on the shared canvas. Connect a simulator when ready to run.</p></div></div>
     {!!lastValid.current?.omittedValues?.length&&missingValues({...lastValid.current,scenarios:definitions,automation}).length>0&&<aside className="draft-banner" role="status"><p>Imported values need repair before execution: {missingValues({...lastValid.current,scenarios:definitions,automation}).join(' ')}</p><button onClick={()=>{if(advanced.current)advanced.current.open=true;}}>Review required values</button></aside>}
-    <div className="canvas-workspace"><details className="scenario-controls"><summary>Scenarios</summary>{!noWorkspace&&<ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={simulatorConnected&&!draftInvalid} runBlockedReason={runBlockedReason}  runningId={run?.status==='running'&&!batchRunning?run.snapshot.scenario?.id:undefined} onStop={()=>void cancel()} onSelect={selectScenario} onCreate={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);rememberView({scenarioId:id,scenarioName:'Scenario '+(definitions.length+1),pathId:path});}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item))} key={'sidebar-'+loadRevision}>{run?.status==='running'&&!batchRunning&&!run.snapshot.scenario?.id&&<button className="confirm scenario-stop" aria-label="Stop scenario" onClick={()=>void cancel()}>Stop</button>}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</ScenarioSidebar>}</details><div className="workspace-canvas"><WorkspaceManager imported={scriptTrust.some(item=>item.origin==='imported')} empty={noWorkspace} token={token} id={workspaceId} name={name} status={persistenceStatus} statusNote={pauseNote} dirty={dirty} busy={submitting||pickerBusy} blocked={running||launchBusy||pickerBusy} onAction={workspaceAction} onSave={manualSave} onPrepare={prepareSwitch} onExport={async({includeValues,savedOnly})=>{
+    <div className="canvas-workspace"><details className="scenario-controls"><summary>Scenarios</summary>{!noWorkspace&&<ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={simulatorConnected&&!draftInvalid} runBlockedReason={trustLoadFailed&&scriptRows.some(row=>row.source.trim())?"Trust couldn't be loaded":runBlockedReason}  runningId={run?.status==='running'&&!batchRunning?run.snapshot.scenario?.id:undefined} onStop={()=>void cancel()} onSelect={selectScenario} onCreate={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);rememberView({scenarioId:id,scenarioName:'Scenario '+(definitions.length+1),pathId:path});}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item))} key={'sidebar-'+loadRevision}>{run?.status==='running'&&!batchRunning&&!run.snapshot.scenario?.id&&<button className="confirm scenario-stop" aria-label="Stop scenario" onClick={()=>void cancel()}>Stop</button>}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</ScenarioSidebar>}</details><div className="workspace-canvas"><WorkspaceManager imported={scriptTrust.some(item=>item.origin==='imported')} empty={noWorkspace} token={token} id={workspaceId} name={name} status={persistenceStatus} statusNote={pauseNote} dirty={dirty} busy={submitting||pickerBusy} blocked={running||launchBusy||pickerBusy} onAction={workspaceAction} onSave={manualSave} onPrepare={prepareSwitch} onExport={async({includeValues,savedOnly})=>{
       let source=lastValid.current;
       if(!savedOnly&&!running&&!launchBusy){source=await manualSave();}
       if(!source?.id)throw new Error('Save valid authored work before exporting. Repair incomplete drafts first.');

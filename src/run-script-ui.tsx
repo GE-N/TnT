@@ -1,8 +1,8 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import type {ScriptAnchor,ScriptBlockReason,ScriptRow,ScriptStepResult,ScriptTrust} from '../server/run-script-contract.js';
 import {REDACTED} from '../server/run-script-contract.js';
 import {RunStatusBadge} from './visit-steps.js';
-import {SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,scriptFirstLine,type ScriptRecord,type ScriptRowView} from './run-script.js';
+import {SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,TRUST_UNKNOWN_TEXT,scriptFirstLine,scriptSourceLine,type ScriptRecord,type ScriptRowView} from './run-script.js';
 import type {ScriptExecutionReference} from '../server/run-script-contract.js';
 
 export function RedactedText({text}:{text:string}){
@@ -26,7 +26,8 @@ export function ScriptStepRow({row,view,reveal,open,runLocked,stepNumber,afterLa
       <span className="script-chip" aria-hidden="true">{'</>'}</span>
       <span className="script-row-copy"><span className="script-row-title"><strong>Run script</strong> · {row.label}</span>{preview&&<span className="script-preview">{preview}</span>}{view.tone&&<span className="script-row-status"><RunStatusBadge status={{tone:view.tone==='failed'?'failed':view.tone}} testId={view.tone==='not-run'?'script-not-run':undefined}/></span>}</span>
     </button>
-    {view.trust.origin==='imported'&&!view.trust.trusted&&<p className="script-untrusted" data-testid="script-not-trusted">⚠ Not trusted on this Mac</p>}
+    {view.trustUnknown&&<p className="script-untrusted" data-testid="trust-unknown">{TRUST_UNKNOWN_TEXT}</p>}
+    {!view.trustUnknown&&view.trust.origin==='imported'&&!view.trust.trusted&&<p className="script-untrusted" data-testid="script-not-trusted">⚠ Not trusted on this Mac</p>}
     {failed&&<p className="script-inline-error" data-testid="script-error-reason" role="alert">✕ Script failed: <RedactedText text={view.message||'Script failed'}/> · scenario stopped</p>}
     {showBlock&&view.block&&view.block.kind!=='untrusted'&&<p className="script-inline-error" role="alert">✕ {view.blockText??view.block.message}</p>}
     {!runLocked&&<details className="visit-step-actions script-row-actions"><summary aria-label={'Script actions '+row.label}>⋯</summary>
@@ -41,11 +42,14 @@ export function ScriptEditor({row,view,workspaceName,stepNumber,afterLast=false,
   const [editing,setEditing]=useState(false);
   const [trusting,setTrusting]=useState(false);
   const [trustError,setTrustError]=useState('');
-  const readOnly=view.trust.origin==='imported'&&!view.trust.trusted;
+  const trustUnknown=!!view.trustUnknown;
+  const readOnly=trustUnknown||(view.trust.origin==='imported'&&!view.trust.trusted);
   const showResult=running||view.tone==='passed'||view.tone==='failed'||view.tone==='not-run';
   const place=afterLast?'after the last step':'before step '+stepNumber;
   const title=showResult&&!editing?'Run script · '+row.label:'Run script · '+place;
   const remaining=Math.max(0,untrustedLeft-1);
+  const nameRef=useRef<HTMLInputElement>(null);
+  useEffect(()=>{if(!readOnly)nameRef.current?.focus();},[row.id,readOnly]);
   useEffect(()=>{
     const onKey=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();onClose();}};
     document.addEventListener('keydown',onKey);
@@ -54,12 +58,12 @@ export function ScriptEditor({row,view,workspaceName,stepNumber,afterLast=false,
   return <aside className="script-editor" aria-label={title} data-script-editor={row.id}>
     <header className="script-editor-header"><h3>{title}</h3><button type="button" aria-label="Close script editor" onClick={onClose}>✕</button></header>
     {readOnly&&<div className="script-trust">
-      <p>Imported from {workspaceName||'an imported workspace'}. Scripts can read files and call the network.</p>
+      {!trustUnknown&&<p>{scriptSourceLine(workspaceName.trim()?{kind:'workspace',name:workspaceName}:{kind:'unknown'})} Scripts can read files and call the network.</p>}
       <div className="script-code-label"><span>Script · JavaScript</span><span className="script-readonly-badge">Read only until trusted</span></div>
       <ScriptSource source={row.source} readOnly/>
-      <button type="button" className="primary script-trust-button" data-testid="trust-this-script" disabled={trusting} onClick={()=>{setTrusting(true);setTrustError('');void onTrust().then(()=>setTrusting(false)).catch(()=>{setTrustError('Trust could not be saved on this Mac.');setTrusting(false);});}}>Trust this script</button>
+      {!trustUnknown&&<button type="button" className="primary script-trust-button" data-testid="trust-this-script" disabled={trusting} onClick={()=>{setTrusting(true);setTrustError('');void onTrust().then(()=>setTrusting(false)).catch(()=>{setTrustError('Trust could not be saved on this Mac.');setTrusting(false);});}}>Trust this script</button>}
       {trustError&&<p className="script-inline-error" role="alert">{trustError}</p>}
-      <p className="script-trust-note">Each script is trusted on its own, after you've seen it in full. {remaining} of {untrustedLeft} left after this.</p>
+      {!trustUnknown&&<p className="script-trust-note">Each script is trusted on its own, after you've seen it in full. {remaining} of {untrustedLeft} left after this.</p>}
     </div>}
     {showResult&&!editing&&<div className="script-result">
       {running&&<div className="script-running"><p>While running</p><p className="script-running-label"><span className="run-status-spinner" aria-hidden="true"/> Running</p>{onStop&&<button type="button" className="script-stop" onClick={onStop}>■ Stop</button>}<p className="field-hint">Result is shown after the run ends. No banners.</p></div>}
@@ -67,10 +71,10 @@ export function ScriptEditor({row,view,workspaceName,stepNumber,afterLast=false,
       {!running&&view.tone==='failed'&&<div><p>Result</p><p className="script-inline-error">✕ Script failed</p><p className="script-error-box" data-testid="script-error-reason">Error: <RedactedText text={view.message||'Script failed'}/></p><p>Scenario stopped. ✕ Failed at Run script. Step {stepNumber} did not run.</p><div className="script-result-actions">{onOpenLog&&<button type="button" className="text-button" onClick={onOpenLog}>Open run log</button>}{onRunAgain&&<button type="button" onClick={onRunAgain}>↻ Run again</button>}</div></div>}
       {!running&&view.tone==='not-run'&&<p className="script-muted">○ Not run</p>}
       {timedOut&&<p className="script-inline-error">✕ Run stopped at 300s cap</p>}
-      {!running&&<button type="button" className="text-button" onClick={()=>setEditing(true)}>Edit script</button>}
+      {!running&&!trustUnknown&&<button type="button" className="text-button" onClick={()=>setEditing(true)}>Edit script</button>}
     </div>}
     {(!showResult||editing)&&!readOnly&&<div className="script-author">
-      <label>Name<input aria-label="Script name" value={row.label} maxLength={120} onChange={event=>onChange({label:event.target.value})}/></label>
+      <label>Name<input ref={nameRef} aria-label="Script name" value={row.label} maxLength={120} onChange={event=>onChange({label:event.target.value})}/></label>
       <div className="script-code-label"><span>Script · JavaScript</span><button type="button" className="text-button" onClick={()=>onChange({source:SCRIPT_EXAMPLE})}>Example code</button></div>
       <ScriptSource source={row.source} onChange={source=>onChange({source})}/>
       {view.block?.kind==='syntax'&&<p className="script-inline-error script-code-error" role="alert">✕ {view.block.message}</p>}
@@ -109,6 +113,7 @@ export type RunScriptModel={
   scrubFailed:boolean;
   failedAtScript:boolean;
   trustBlockCount:number;
+  trustLoadFailed?:boolean;
   workspaceName:string;
   onAdd:(anchor:ScriptAnchor)=>string;
   onUpdate:(rowId:string,patch:{label?:string;source?:string})=>void;
@@ -116,6 +121,7 @@ export type RunScriptModel={
   onDelete:(rowId:string)=>void;
   onReplace:(rows:ScriptRow[])=>void;
   onTrust:(rowId:string)=>Promise<void>;
+  onRetryTrust?:()=>void;
   onStop?:()=>void;
   onRunAgain?:()=>void;
   onOpenLog?:()=>void;
