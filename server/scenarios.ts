@@ -221,7 +221,9 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       validateFlowInputs(derived?.yaml??workspace.yaml,workspace.flows??{},selection?.inputs??runtimeInputs);
       for (const flow of Object.values(workspace.flows ?? {})) { if (validate(flow, workspace.flows).appId !== appId) throw new Error('Reusable flows must declare the same appId as the scenario.'); }
       if ((input.captureId === undefined) !== (input.pickerReviewId === undefined)) throw new Error('Provide both capture and reviewed step identity.');
-      const scriptPlan=buildRunPlan({yaml:workspace.yaml,flows:workspace.flows,scripts:selection?.scenario.scripts,trust:scriptTrust,automation:derived,mockAvailable:!!workspace.mock});
+      // PR B anchors count canvas operations, excluding synthetic/unassociated commands such as launchApp.
+      const anchorSteps=selection?.scenario.authoring==='canvas'?canvas?.execution?.occurrences.map(item=>({index:item.reference.index!,fingerprint:item.reference.fingerprint})):undefined;
+      const scriptPlan=buildRunPlan({yaml:workspace.yaml,flows:workspace.flows,scripts:selection?.scenario.scripts,trust:scriptTrust,anchorSteps,automation:derived,mockAvailable:!!workspace.mock});
       if(scriptPlan.blocked.length)throw new ScriptBlocked(scriptPlan.blocked);
       if(scriptPlan.scriptFiles.length)validateFlowInputs(scriptPlan.executionYaml,workspace.flows??{},selection?.inputs??runtimeInputs,[],true);
       const hasScripts=scriptPlan.scriptFiles.length>0;
