@@ -10,6 +10,17 @@ function marker(message:unknown,rowId:string):string|undefined{
  const normalized=message.startsWith('Error: ')?message.slice('Error: '.length):message;
  return normalized.startsWith(prefix)?normalized.slice(prefix.length):undefined;
 }
+function logError(log:string,rowId:string):string|undefined{
+ const lines=log.split(/\r?\n/);
+ const start=lines.findIndex(line=>line.startsWith('TNT_SCRIPT_FAILED row='+rowId+' '));
+ if(start<0)return;
+ let end=start+1;
+ // Maestro logback entries start with a timestamp and a level/thread. Continuation
+ // lines belong to the error; the next entry (or another script marker) does not.
+ const entry=/^(?:(?:\d{4}-\d{2}-\d{2}[ T])?\d{2}:\d{2}:\d{2}[.,]\d+\s+(?:\[|TRACE\b|DEBUG\b|INFO\b|WARN\b|ERROR\b)|\[(?:TRACE|DEBUG|INFO|WARN|ERROR)\]|TNT_SCRIPT_FAILED row=)/;
+ while(end<lines.length&&!entry.test(lines[end]))end++;
+ return marker(lines.slice(start,end).join('\n').trimEnd(),rowId);
+}
 /** Consume sanitized metadata only. Return an authored-only view for protected legacy mappers. */
 export function mapScriptResults(plan:RunPlan,commands:any[],log:string,confidential:boolean){
  const top=events(commands);const scriptSteps:Record<string,ScriptStepResult>={};const omitted=new Set<any>();const notRunIndexes:number[]=[];
@@ -22,8 +33,7 @@ export function mapScriptResults(plan:RunPlan,commands:any[],log:string,confiden
    continue;
   }
   const result:ScriptStepResult={kind:'runScript',rowId:item.rowId,status:'not-run'};scriptSteps[item.rowId]=result;
-  const fromLog=log.split(/\r?\n/).findIndex(line=>line.startsWith('TNT_SCRIPT_FAILED row='+item.rowId+' '));
-  const logMessage=fromLog<0?undefined:marker(log.split(/\r?\n/).slice(fromLog).join('\n'),item.rowId);
+  const logMessage=logError(log,item.rowId);
   if(entry&&!scriptCommand(entry)){ambiguous=true;continue;}
   if(entry){
    const start=commands.indexOf(entry);let end=start+1;

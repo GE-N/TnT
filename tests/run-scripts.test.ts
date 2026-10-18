@@ -72,6 +72,16 @@ test('multi-line thrown errors stay whole, and a completed script logging a mark
   assert.equal(unrelated.failure,undefined);assert.equal(unrelated.toolFailure,'Unmarked failure');
  }finally{await f.cleanup();}
 });
+test('missing-message fallback keeps multiline errors but stops at the next Maestro log entry',async()=>{
+ const f=await scriptFixture();try{
+  const plan=buildRunPlan({yaml:f.workspace.yaml,scripts:[f.row],trust:[{rowId:f.row.id,origin:'local',hash:scriptHash(f.row.source),trusted:true}]});
+  for(const message of [undefined,'Unknown error'])for(const next of ['09:42:01.123 [main] INFO maestro.cli - Finishing','2026-10-18 09:42:01.123 [main] ERROR maestro.cli - Done','[INFO] Closing driver','TNT_SCRIPT_FAILED row=other other failure']){
+   const log='Earlier output\nTNT_SCRIPT_FAILED row=script-one First line\nSecond line\n\nไทย\n\n'+next+'\nUnrelated output';
+   const commands=[{command:{launchAppCommand:{}},metadata:{depth:0,status:'COMPLETED'}},{command:{runScriptCommand:{}},metadata:{depth:0,status:'FAILED',error:{message}}}];
+   const mapped=mapScriptResults(plan,commands,log,false);assert.equal(mapped.failure,'First line\nSecond line\n\nไทย');assert.equal(mapped.scriptSteps[f.row.id].message,mapped.failure);
+  }
+ }finally{await f.cleanup();}
+});
 test('artifact allow-list excludes adbkey, HOME, telemetry and downloads even when tools write them into a run',async()=>{
  const f=await scriptFixture({customRun:async({directory})=>{
   for(const folder of ['.maestro-home/.android','raw/deps','raw/time/.tnt-execution'])await mkdir(join(directory,folder),{recursive:true});
