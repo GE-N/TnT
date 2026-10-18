@@ -12,7 +12,7 @@ import type {Automation} from '../server/default-actions.js';
 import {canvasAfterDeletion,restoreDeletionReferences} from './yaml-forms.js';
 import {YamlDraftProvider,YamlEditor} from './yaml-editor.js';
 import { runnerClient,RunnerRequestError } from './runner-client.js';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { Run, Workspace } from '../server/scenarios.js';
 import type {WorkspaceDraft} from '../server/workspace-store.js';
@@ -21,6 +21,11 @@ import type {CanvasGraph,CanvasDiagnostic,CatalogEntry} from '../server/canvas.j
 import { MockSetup } from './mock-setup.js';
 import type { MockPlan } from '../server/mockoon.js';
 import { parseAllDocuments } from 'yaml';
+import {addStoredScript,approveScriptTrust,copyStoredScripts,deleteStoredScript,getRunScriptSnapshot,hydrateScenarioScripts,moveStoredScript,pullScriptTrust,resetRunScripts,restoreStoredScripts,scriptsFor,subscribeRunScripts,takeStoredScripts,updateStoredScript} from './run-script-client.js';
+import {batchSummary,batchWithScriptBlocks,blocksFor,evidenceScrubFailed,orderedScenarioSteps,readScriptRun,reservedPlacements,runBlockedLabel,runHitCap,untrustedCount,type BatchLine} from './run-script.js';
+import type {RunScriptModel} from './run-script-ui.js';
+import {RedactedText} from './run-script-ui.js';
+import type {ScriptBlockReason,ScriptOrigin} from '../server/run-script-contract.js';
 
 export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, recoverSession=false, simulatorConnected=!!deviceId&&!!token }: { token: string; deviceId: string; bundleId: string; launchBusy: boolean; onRunning: (running: boolean) => void; recoverSession?: boolean; simulatorConnected?: boolean }) {
   simulatorConnected=simulatorConnected&&!!deviceId&&!!token;
@@ -48,7 +53,12 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const [expectedPage,setExpectedPage]=useState('');
   const setMockPlan=useCallback((plan:MockPlan|undefined,error:string)=>{setMock(plan);setMockError(error);},[]);
   const [noWorkspace,setNoWorkspace]=useState(false);
+  const scriptSnapshot=useSyncExternalStore(subscribeRunScripts,getRunScriptSnapshot,getRunScriptSnapshot);
+  const scriptOrigin=useRef<ScriptOrigin>('local');
+  const [revealBlocks,setRevealBlocks]=useState(false);
+  const [reservedVisible,setReservedVisible]=useState(false);
   const [workspaceId, setWorkspaceId] = useState('');
+  useEffect(()=>{if(!workspaceId||!token||!scriptSnapshot.scripts.some(row=>row.origin==='imported'))return;void pullScriptTrust(workspaceId,token);},[workspaceId,token,scriptSnapshot]);
   const [inputs, setInputs] = useState('');
   const [sourceRepair,setSourceRepair]=useState<{ownerId:string}>();
   const advanced=useRef<HTMLDetailsElement>(null);
@@ -230,13 +240,31 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     const timer=setInterval(()=>{void api('/api/batches/'+batch.id).then(next=>{if(!stopped)return receiveBatch(next);}).catch(error=>{if(!stopped)setError(error.message);});},1000);
     return()=>{stopped=true;clearInterval(timer);};
   },[batch?.id,batchRunning,token]);
+  function scriptBlockMap(){
+    const map=new Map<string,ScriptBlockReason>();
+    for(const item of definitions){
+      if(item.skipInRunAll)continue;
+      const reasons=blocksFor(scriptsFor(item.id),canvas&&item.pathId?orderedScenarioSteps(canvas,item.pathId):[],getRunScriptSnapshot().trust);
+      const reason=reasons.find(entry=>entry.kind==='untrusted')??reasons[0];
+      if(reason)map.set(item.id,reason);
+    }
+    return map;
+  }
   async function runAll(){
     if(running||submitting||pickerBusy||launchBusy||!definitions.some(item=>!item.skipInRunAll))return;
     setSubmitting(true);setRunError('');
     try{
       const workspace=await save();
-      const scenarioIds=workspace.scenarios?.filter(item=>!item.skipInRunAll).map(item=>item.id)??[];
-      if(!scenarioIds.length)throw new Error('No scenarios are included in Run All.');
+      if(!workspace)return;
+      const included=workspace.scenarios?.filter(item=>!item.skipInRunAll).map(item=>item.id)??[];
+      if(!included.length)throw new Error('No scenarios are included in Run All.');
+      const blocked=scriptBlockMap();
+      if(blocked.size)setRevealBlocks(true);
+      const scenarioIds=included.filter(id=>!blocked.has(id));
+      if(!scenarioIds.length){
+        setBatch({id:'script-blocks',workspaceId:workspace.id,deviceId,startedAt:new Date().toISOString(),finishedAt:new Date().toISOString(),status:'completed',entries:[],snapshot:{workspace,resetApp,runtimeInputPolicy:'Saved inputs only; no additional reset or server-session guarantee.'}});
+        return;
+      }
       await receiveBatch(await api('/api/batches',{workspaceId:workspace.id,deviceId,scenarioIds,resetApp,runtimeInputs:inputs.trim()?JSON.parse(inputs):undefined}));
       setInputs('');
     }catch(error){setRunError(error instanceof Error?error.message:'Batch request failed.');}
@@ -262,6 +290,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     const original=canvas?.paths.find(path=>path.id===target.pathId);
     const pathId=original?'sequence-'+crypto.randomUUID():undefined;
     const name=(target.name+' copy').slice(0,120);
+    copyStoredScripts(targetId,id);
     setDefinitions(current=>[...current,{...structuredClone(target),id,name,pathId}]);
     setCanvas(current=>current&&({...current,screens:current.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.scenarioIds?.includes(target.id)?{...test,scenarioIds:[...test.scenarioIds,id]}:test)})),paths:original?[...current.paths,{...structuredClone(original),id:pathId!,scenarioId:id,name,visits:routeVisits(current,original).map(visit=>({...structuredClone(visit),id:crypto.randomUUID()}))}]:current.paths}));
     setScenarioId(id);setInputs('');
@@ -273,11 +302,13 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     const pathPosition=path?canvas!.paths.indexOf(path):-1;
     const removedPath=path&&!definitions.some(item=>item.id!==targetId&&item.pathId===path.id)?structuredClone(path):undefined;
     const memberships=canvas?.screens.flatMap(screen=>screen.tests.filter(test=>test.scenarioIds?.includes(targetId)).map(test=>({screenId:screen.id,testId:test.id,position:test.scenarioIds!.indexOf(targetId)})))??[];
+    const removedScripts=takeStoredScripts(targetId);
     setDefinitions(current=>current.filter(item=>item.id!==targetId));
     setCanvas(current=>current&&({...current,screens:current.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.scenarioIds?{...test,scenarioIds:test.scenarioIds.filter(id=>id!==targetId)}:test)})),paths:current.paths.filter(path=>path.id!==removedPath?.id)}));
     if(scenarioId===targetId){setScenarioId(definitions.find(item=>item.id!==targetId)?.id??'');setInputs('');}
     // Restoration only merges the references removed by this command.
     const restore=()=>{
+      restoreStoredScripts(removedScripts.scripts,removedScripts.trust);
       setScenarioId(current=>current||targetId);
       setDefinitions(current=>{if(current.some(item=>item.id===targetId))return current;const next=[...current];next.splice(position,0,structuredClone(target));return next;});
       setCanvas(current=>{
@@ -294,6 +325,10 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   }
   function loadWorkspace(workspace:Workspace&{draft?:WorkspaceDraft|null;draftError?:string;view?:Record<string,unknown>|null}){
     setNoWorkspace(false);
+    resetRunScripts(workspace.id);
+    const origin=scriptOrigin.current;
+    scriptOrigin.current='local';
+    for(const scenario of workspace.scenarios??[])hydrateScenarioScripts(scenario.id,(scenario as {scripts?:unknown}).scripts,origin);
     persistence.current={id:workspace.id,revision:workspace.metadata?.revision??0,draftRevision:workspace.draft?.draftRevision??0,epoch:persistence.current.epoch+1};
     failedKey.current='';failedDraftKey.current='';setSaveProblem('');setConflict(false);setConflictBar(false);setSaveFailed(false);setDraftFailed(false);
     const view=workspace.view&&typeof workspace.view==='object'&&!Array.isArray(workspace.view)?workspace.view:{format:1};
@@ -321,7 +356,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     if(running||submitting||pickerBusy||launchBusy)throw new Error('Wait for execution and cleanup before managing the workspace.');
     if(action.kind==='restore'||(action.kind==='trash'&&action.id!==workspaceId)||action.kind==='rename'||(action.kind==='copy'&&conflict&&!pendingDraft)||(!pendingDraft&&!dirty))return;
     setSubmitting(true);
-    try{if(pendingDraft){await persistDraft();return lastValid.current;}return await save(scenarioId,true);}
+    try{if(pendingDraft){await persistDraft();return lastValid.current;}const saved=await save(scenarioId,true);if(!saved)throw new Error('Reserved TnT variable');return saved;}
     finally{setSubmitting(false);}
   }
   async function workspaceAction(action:WorkspaceAction,saved?:Workspace,options?:{discard?:boolean}){
@@ -340,7 +375,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
         await api('/api/workspaces/'+action.id+'/restore',{});
       }
       else if(action.kind==='open')receive(await api('/api/workspaces/'+action.id+'/open',{}));
-      else if(action.kind==='import')receive(await api('/api/workspaces/import',{package:action.package,name:action.name}));
+      else if(action.kind==='import'){scriptOrigin.current='imported';const imported=await api('/api/workspaces/import',{package:action.package,name:action.name});receive(imported);if(reservedPlacements({yaml:imported.yaml??'',flows:JSON.stringify(imported.flows??{}),scenarios:imported.scenarios??[],runtimeText:''}).length)setReservedVisible(true);}
       else if(action.kind==='new')loadWorkspace({id:'',name:action.name,yaml:'appId: com.example.HybridApp\n---\n- launchApp\n',flows:{},scenarios:[],canvas:emptyCanvas()});
       else if(action.kind==='rename')setName(action.name);
       else{
@@ -349,10 +384,13 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       }
     }finally{setSubmitting(false);}
   }
-  async function manualSave(){setSubmitting(true);setError('');try{return await save(scenarioId,true);}catch(error){setSaveFailed(true);setError(error instanceof Error?error.message:'Save failed. Current work is retained.');throw error;}finally{setSubmitting(false);}}
+  async function manualSave(){setSubmitting(true);setError('');try{const workspace=await save(scenarioId,true);if(!workspace)throw new Error('Reserved TnT variable');return workspace;}catch(error){if(error instanceof Error&&error.message==='Reserved TnT variable')throw error;setSaveFailed(true);setError(error instanceof Error?error.message:'Save failed. Current work is retained.');throw error;}finally{setSubmitting(false);}}
   async function save(targetId=scenarioId,requireCurrent=false,pickedYaml?:string) {
     requireAppliedDrafts();
     const savingKey=pickedYaml===undefined?latestKey.current:contentKey({...authoredContent,yaml:pickedYaml});
+    const reserved=reservedPlacements({yaml:pickedYaml??yaml,flows,scenarios:definitions,runtimeText:inputs});
+    if(reserved.length){setReservedVisible(true);failedKey.current=savingKey;return;}
+    setReservedVisible(false);
     const target=definitions.find(item=>item.id===targetId);
     if(definitionError)throw new Error(definitionError);
     if(mockError) throw new Error(mockError);
@@ -508,11 +546,15 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       setRunError('');
       if(!token){setRunError('Connect to the runner before running a scenario.');return;}
       if(!deviceId){setRunError('Select a device before running a scenario.');return;}
+      const targetPath=definitions.find(item=>item.id===targetId)?.pathId??pathId;
+      const reasons=blocksFor(scriptsFor(targetId),canvas?orderedScenarioSteps(canvas,targetPath):[],getRunScriptSnapshot().trust);
+      if(reasons.length){setRevealBlocks(true);return;}
       artifactSequence.current++; setArtifact(undefined);
     }
     setError(''); setSubmitting(true);
     try {
       const workspace = await save(targetId);
+      if(!workspace)return;
       if (execute) {
         const runtimeInputs = inputs.trim() ? JSON.parse(inputs) : undefined;
         setArtifact(undefined);
@@ -523,7 +565,9 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
         setInputs('');
       }
     } catch (error) {
+      if(execute&&error instanceof RunnerRequestError&&Array.isArray(error.blocked)&&error.blocked.length){setRevealBlocks(true);return;}
       const message=error instanceof Error ? error.message : 'Scenario request failed.';
+      if(message==='Reserved TnT variable')return;
       if(execute)setRunError(message);else {setError(message);setSaveFailed(true);}
     }
     finally { setSubmitting(false); }
@@ -567,11 +611,22 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       setFlows(JSON.stringify(nextFlows,null,2));setYaml(docs[0].toString()+docs[1].toString());setError('');
     } catch(error){setError(error instanceof Error?error.message:'Cannot add assertion.');}
   }
+  const scriptRows=scriptsFor(scenarioId);
+  const scriptTrustCount=untrustedCount(scriptRows,scriptSnapshot.trust);
+  const placements=reservedVisible?reservedPlacements({yaml,flows,scenarios:definitions,runtimeText:inputs}):[];
+  const inputReserved=placements.find(item=>item.target==='scenario-input'||item.target==='parameters');
+  const runtimeReserved=placements.find(item=>item.target==='runtime');
+  const flowReserved=placements.find(item=>item.target==='flows');
+  const scriptRun=run?readScriptRun(run):{scriptSteps:{},executionOrder:[]};
+  const currentResults=Object.values(scriptRun.scriptSteps);
+  const runIsCurrent=!!run&&(run.snapshot.scenario?.id===scenarioId||!run.snapshot.scenario);
+  const runScripts:RunScriptModel|undefined=scenarioId?{scenarioId,rows:scriptRows,trust:scriptSnapshot.trust,results:runIsCurrent?currentResults:[],executionOrder:runIsCurrent?scriptRun.executionOrder:[],hasMock:!!selectedScenario?.mockResponseId,revealBlocks,running:!!runIsCurrent&&run?.status==='running',passedRun:!!runIsCurrent&&run?.status==='passed',timedOut:runIsCurrent&&runHitCap(run),scrubFailed:runIsCurrent&&evidenceScrubFailed(run),failedAtScript:runIsCurrent&&currentResults.some(item=>item.status==='script-error'&&scriptRows.some(row=>row.id===item.rowId)),trustBlockCount:scriptTrustCount,workspaceName:name,onAdd:anchor=>addStoredScript(scenarioId,anchor),onUpdate:updateStoredScript,onMove:moveStoredScript,onDelete:deleteStoredScript,onTrust:async rowId=>{const row=scriptsFor(scenarioId).find(item=>item.id===rowId);if(!row)return;await approveScriptTrust({workspace:workspaceId,rowId,hash:row.hash,token});},onStop:()=>void cancel(),onRunAgain:()=>void submit(true),onOpenLog:()=>{const reports=document.querySelector('.report-tools');if(reports instanceof HTMLDetailsElement)reports.open=true;document.getElementById('run-log')?.querySelector('summary')?.focus();}}:undefined;
+  const batchLines=batch?batchWithScriptBlocks(definitions.filter(item=>!item.skipInRunAll).map(item=>item.id),batch.entries as BatchLine[],scriptBlockMap(),new Map(definitions.map(item=>[item.id,item.name]))):undefined;
   const recoveryNote=showRecovery&&recoveryOpen&&<div ref={recoveryNoteRef} className="recovery-note" role="dialog" aria-label="Recovered draft" data-recovery-for="workspace" style={recoveryBox?{top:Math.max(8,Math.min(recoveryBox.bottom+6,window.innerHeight-8)),left:Math.max(8,Math.min(recoveryBox.left,window.innerWidth-288))}:undefined}><p>Unsaved changes from <time dateTime={draftSavedAt}>{draftSavedAt?new Date(draftSavedAt).toLocaleString():'earlier'}</time> were recovered.{staleDraft?' Based on an older version.':''}</p><div className="recovery-note-actions">{staleDraft?<button type="button" className="primary" onClick={()=>void copyWithDraft()}>Restore as a copy</button>:<button type="button" className="primary" onClick={()=>draftRecord.current&&restoreDraft(draftRecord.current)}>Restore draft</button>}<button type="button" onClick={()=>void keepSaved()}>Keep saved version</button></div></div>;
   return <WorkspaceDrafts.Provider value={reportDraft}><RecoveredFields.Provider value={recoveredFields}><YamlDraftProvider resetToken={loadRevision} yaml={yaml}><section className="panel scenario-panel" aria-labelledby="scenario-heading">
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Scenario workspace</h2><p>Design scenarios on the shared canvas. Connect a simulator when ready to run.</p></div></div>
     {!!lastValid.current?.omittedValues?.length&&missingValues({...lastValid.current,scenarios:definitions,automation}).length>0&&<aside className="draft-banner" role="status"><p>Imported values need repair before execution: {missingValues({...lastValid.current,scenarios:definitions,automation}).join(' ')}</p><button onClick={()=>{if(advanced.current)advanced.current.open=true;}}>Review required values</button></aside>}
-    <div className="canvas-workspace"><details className="scenario-controls"><summary>Scenarios</summary>{!noWorkspace&&<ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={simulatorConnected&&!draftInvalid} runBlockedReason={runBlockedReason} runningId={run?.status==='running'&&!batchRunning?run.snapshot.scenario?.id:undefined} onStop={()=>void cancel()} onSelect={selectScenario} onCreate={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);rememberView({scenarioId:id,scenarioName:'Scenario '+(definitions.length+1),pathId:path});}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item))} key={'sidebar-'+loadRevision}>{run?.status==='running'&&!batchRunning&&!run.snapshot.scenario?.id&&<button className="confirm scenario-stop" aria-label="Stop scenario" onClick={()=>void cancel()}>Stop</button>}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</ScenarioSidebar>}</details><div className="workspace-canvas"><WorkspaceManager empty={noWorkspace} token={token} id={workspaceId} name={name} status={persistenceStatus} statusNote={pauseNote} dirty={dirty} busy={submitting||pickerBusy} blocked={running||launchBusy||pickerBusy} onAction={workspaceAction} onSave={manualSave} onPrepare={prepareSwitch} onExport={async({includeValues,savedOnly})=>{
+    <div className="canvas-workspace"><details className="scenario-controls"><summary>Scenarios</summary>{!noWorkspace&&<ScenarioSidebar items={definitions} selected={scenarioId} disabled={running||submitting||pickerBusy||launchBusy} canRun={simulatorConnected&&!draftInvalid} runBlockedReason={runBlockedReason} trustBlock={scriptTrustCount?runBlockedLabel(scriptTrustCount):undefined} runningId={run?.status==='running'&&!batchRunning?run.snapshot.scenario?.id:undefined} onStop={()=>void cancel()} onSelect={selectScenario} onCreate={()=>{setLegacyCanvas(false);const id='scenario-'+crypto.randomUUID().slice(0,8);const path='sequence-'+crypto.randomUUID();setDefinitions(current=>[...current,{id,name:'Scenario '+(current.length+1),authoring:'canvas',steps:[],pathId:path,inputs:{},parameters:{},setup:automation?.setup,enabledHandlerIds:automation?.actions.filter(action=>action.enabled).map(action=>action.id)??[]}]);setCanvas(current=>({...current??emptyCanvas(),paths:[...current?.paths??[],{id:path,scenarioId:id,name:'Scenario '+(definitions.length+1),edgeIds:[]}]}));setScenarioId(id);rememberView({scenarioId:id,scenarioName:'Scenario '+(definitions.length+1),pathId:path});}} onRun={id=>void submit(true,id)} onRunAll={()=>void runAll()} onRename={renameScenario} onDuplicate={duplicateScenario} onDelete={deleteScenario} onToggleSkip={id=>setDefinitions(current=>current.map(item=>item.id===id?{...item,skipInRunAll:!item.skipInRunAll}:item))} key={'sidebar-'+loadRevision}>{run?.status==='running'&&!batchRunning&&!run.snapshot.scenario?.id&&<button className="confirm scenario-stop" aria-label="Stop scenario" onClick={()=>void cancel()}>Stop</button>}{batchRunning&&<button className="confirm" onClick={()=>void cancelBatch()}>Cancel batch</button>}</ScenarioSidebar>}</details><div className="workspace-canvas"><WorkspaceManager empty={noWorkspace} token={token} id={workspaceId} name={name} status={persistenceStatus} statusNote={pauseNote} dirty={dirty} busy={submitting||pickerBusy} blocked={running||launchBusy||pickerBusy} onAction={workspaceAction} onSave={manualSave} onPrepare={prepareSwitch} onExport={async({includeValues,savedOnly})=>{
       let source=lastValid.current;
       if(!savedOnly&&!running&&!launchBusy){source=await manualSave();}
       if(!source?.id)throw new Error('Save valid authored work before exporting. Repair incomplete drafts first.');
@@ -583,45 +638,45 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     {draftError&&<div className="draft-banner danger" role="alert"><p>A recovered draft couldn't be read.</p>{confirmCorrupt?<><p>Discard the unreadable draft? This can't be undone.</p><button type="button" className="workspace-danger" onClick={()=>void discardCorrupt()}>Discard</button><button type="button" ref={corruptCancelButton} onClick={()=>setConfirmCorrupt(false)}>Cancel</button></>:<button type="button" ref={discardDraftButton} onClick={()=>setConfirmCorrupt(true)}>Discard draft</button>}</div>}
     {recoveryNote&&createPortal(recoveryNote,document.body)}
     {conflictBar&&<div className="draft-banner conflict-bar" role="status"><p>This workspace was changed in another tab.</p><button type="button" className="primary" onClick={()=>void loadLatest()}>Load latest</button><button type="button" onClick={()=>void (pendingDraft?copyWithDraft():copyConflict())}>Restore as a copy</button></div>}
-    <CanvasEditor yamlDeletionWarnings={yamlDeletionWarnings} onYamlDelete={deleteYamlStep} initialView={initialCanvasView} cards={cardPositions} onCardPosition={(card,position)=>rememberView({cards:{[card]:position}})} picker={{token,deviceId,disabled:running||submitting||launchBusy,onBusy:setPickerBusy}} onViewChange={next=>rememberView({canvas:next})} onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={simulatorConnected&&!draftInvalid?()=>void submit(true):undefined} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));rememberView({pathId:id});}} disabled={submitting||pickerBusy||launchBusy} run={run?.snapshot.workspaceId===workspaceId?{status:run.status,canvas:run.canvas}:undefined} draftInvalid={draftInvalid}/>
+    <CanvasEditor yamlDeletionWarnings={yamlDeletionWarnings} onYamlDelete={deleteYamlStep} initialView={initialCanvasView} cards={cardPositions} onCardPosition={(card,position)=>rememberView({cards:{[card]:position}})} picker={{token,deviceId,disabled:running||submitting||launchBusy,onBusy:setPickerBusy}} onViewChange={next=>rememberView({canvas:next})} onRepairSource={ownerId=>setSourceRepair({ownerId})} scenarios={definitions} scenarioId={scenarioId} scenarioMode={!legacyCanvas} onRun={simulatorConnected&&!draftInvalid?()=>void submit(true):undefined} key={'canvas-'+loadRevision} yaml={yaml} onYamlChange={setYaml} graph={canvas} onChange={setCanvas} catalog={catalog} diagnostics={canvasDiagnostics} pathId={selectedScenario?.pathId??pathId} onPathChange={id=>{setPathId(id);if(selectedScenario)setDefinitions(current=>current.map(item=>item.id===scenarioId?{...item,pathId:id}:item));rememberView({pathId:id});}} disabled={submitting||pickerBusy||launchBusy} run={run?.snapshot.workspaceId===workspaceId?{status:run.status,canvas:run.canvas}:undefined} draftInvalid={draftInvalid} runScripts={runScripts} reservedLines={placements.filter(item=>item.target==='yaml'&&item.line).map(item=>item.line!)}/>
     </>}
     </div></div>
     {!noWorkspace&&<>
 
     <details ref={advanced} className="workspace-advanced" onToggle={event=>rememberView({panels:{advanced:(event.currentTarget as HTMLDetailsElement).open}})}><summary>Advanced mode · legacy authoring and settings</summary><button className="confirm" onClick={()=>{setLegacyCanvas(value=>!value);if(advanced.current)advanced.current.open=false;}}>{legacyCanvas?'Return to contextual canvas':'Show legacy canvas controls'}</button>
-    <ScenarioLibrary key={'scenarios-'+loadRevision} items={definitions} onChange={setDefinitions} selected={scenarioId} onSelect={selectScenario} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} canvas={canvas} automation={automation} mock={mock} disabled={running||submitting||pickerBusy||launchBusy} onError={setDefinitionError}/>
+    <ScenarioLibrary key={'scenarios-'+loadRevision} items={definitions} onChange={setDefinitions} selected={scenarioId} onSelect={selectScenario} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} canvas={canvas} automation={automation} mock={mock} disabled={running||submitting||pickerBusy||launchBusy} onError={setDefinitionError} inputAlert={inputReserved?{message:inputReserved.reason.message,testId:inputReserved.reason.kind==='reserved-input'?'reserved-input-error':'reserved-variable-error'}:undefined}/>
     <MockSetup key={loadRevision} initialPlan={loadedMock} disabled={running||submitting||pickerBusy} onChange={setMockPlan}/>
     <div className="scenario-editor">
       <label htmlFor="expected-page">Expected page text for reusable assertion</label><input id="expected-page" value={expectedPage} onChange={event=>setExpectedPage(event.target.value)} disabled={running||submitting||pickerBusy}/><button className="confirm" disabled={running||submitting||pickerBusy} onClick={addAssertion}>Append reusable assertion</button>
-      <label htmlFor="reusable-flows">Reusable YAML flows (JSON filename → YAML)</label><textarea id="reusable-flows" value={flows} onChange={event=>setFlows(event.target.value)} disabled={running||submitting||pickerBusy} spellCheck={false}/>
+      <label htmlFor="reusable-flows">Reusable YAML flows (JSON filename → YAML)</label><textarea id="reusable-flows" value={flows} onChange={event=>setFlows(event.target.value)} disabled={running||submitting||pickerBusy} spellCheck={false} aria-invalid={flowReserved?true:undefined}/>{flowReserved&&<p className="script-inline-error" data-testid="reserved-variable-error" role="alert">✕ {flowReserved.reason.message}{flowReserved.line?' · line '+flowReserved.line:''}</p>}
       <div className="label-row"><span>Executable flow</span><button className="text-button" disabled={!bundleId || pickerBusy || submitting} onClick={() => setYaml(`appId: ${bundleId}\n---\n- launchApp\n- assertVisible: Home\n`)}>Use launch app ID</button></div>
       <DefaultActions key={'automation-'+loadRevision} value={automation} onChange={setAutomation} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} disabled={pickerBusy||submitting} onError={setAutomationError}/>
-      {(automation||selectedScenario||canvas)&&<><button type="button" className="confirm" disabled={pickerBusy||submitting||!!automationError} onClick={async()=>{try{const source=JSON.stringify({yaml,flows,automation,definitions,scenarioId,resetApp,inputs,canvas,pathId});const result=await api('/api/automation/preview',{yaml,flows:JSON.parse(flows),automation,canvas,mock,pathId,scenarios:definitions,scenarioId:definitions.length?scenarioId:undefined,resetApp,runtimeInputs:inputs.trim()?JSON.parse(inputs):undefined});setPreview({source,yaml:result.executionYaml});setError('');}catch(error){setError(error instanceof Error?error.message:'Cannot preview execution.');}}}>Preview execution YAML</button>{preview&&<details open><summary>Derived execution preview{preview.source!==JSON.stringify({yaml,flows,automation,definitions,scenarioId,resetApp,inputs,canvas,pathId})?' · outdated, refresh before running':''}</summary><pre className="execution-yaml">{preview.yaml}</pre></details>}</>}
-      <YamlEditor key={loadRevision} yaml={yaml} onChange={setYaml} disabled={pickerBusy||submitting} deletionWarnings={yamlDeletionWarnings} onDelete={deleteYamlStep}/>
+      {(automation||selectedScenario||canvas)&&<><button type="button" className="confirm" disabled={pickerBusy||submitting||!!automationError} onClick={async()=>{const found=reservedPlacements({yaml,flows,scenarios:definitions,runtimeText:inputs});if(found.length){setReservedVisible(true);return;}try{const source=JSON.stringify({yaml,flows,automation,definitions,scenarioId,resetApp,inputs,canvas,pathId});const result=await api('/api/automation/preview',{yaml,flows:JSON.parse(flows),automation,canvas,mock,pathId,scenarios:definitions,scenarioId:definitions.length?scenarioId:undefined,resetApp,runtimeInputs:inputs.trim()?JSON.parse(inputs):undefined});setPreview({source,yaml:result.executionYaml});setError('');}catch(error){setError(error instanceof Error?error.message:'Cannot preview execution.');}}}>Preview execution YAML</button>{preview&&<details open><summary>Derived execution preview{preview.source!==JSON.stringify({yaml,flows,automation,definitions,scenarioId,resetApp,inputs,canvas,pathId})?' · outdated, refresh before running':''}</summary><pre className="execution-yaml">{preview.yaml}</pre></details>}</>}
+      <YamlEditor key={loadRevision} yaml={yaml} onChange={setYaml} disabled={pickerBusy||submitting} deletionWarnings={yamlDeletionWarnings} onDelete={deleteYamlStep} reservedLines={placements.filter(item=>item.target==='yaml'&&item.line).map(item=>item.line!)}/>
 
       <p className="field-hint">Reusable files declared above are snapshotted with the scenario; other external files and custom artifact paths are unsupported. Edits during a run apply to the next run.</p>
       <label className="checkbox-label"><input type="checkbox" checked={resetApp} disabled={running||submitting||pickerBusy||!selectedScenario} onChange={event=>setResetApp(event.target.checked)}/>Reset app data before setup (default: No)</label><p className="field-hint">No preserves app data and relaunches before declared setup. Setup must establish required app/session state. Reset clears app data; it does not clear the simulator Keychain or server-side sessions.</p>
-      <label htmlFor="runtime-inputs">Confidential runtime inputs (optional JSON)</label><input id="runtime-inputs" type="password" value={inputs} onChange={event => setInputs(event.target.value)} autoComplete="off" placeholder={'{"PASSWORD":"value"}'} />
+      <label htmlFor="runtime-inputs">Confidential runtime inputs (optional JSON)</label><input id="runtime-inputs" type="password" value={inputs} aria-invalid={runtimeReserved?true:undefined} onChange={event => setInputs(event.target.value)} autoComplete="off" placeholder={'{"PASSWORD":"value"}'} />{runtimeReserved&&<p className="script-inline-error" data-testid={runtimeReserved.reason.kind==='reserved-input'?'reserved-input-error':'reserved-variable-error'} role="alert">✕ {runtimeReserved.reason.message}</p>}
       <p className="field-hint">Use uppercase names and reference them as ${'{NAME}'} in YAML. Values are never saved. Runs with inputs withhold raw logs and images. Keep secrets out of authored YAML.</p>
     </div></details>
       {error && <div role="alert" className="notice error">{error}</div>}
 
-    <details className="report-tools"><summary>Reports &amp; evidence</summary>      {batch&&batch.workspaceId===workspaceId&&<section aria-label="Batch report" aria-live="polite"><h3>Batch · {batch.status}</h3><p>Saved order · separate reports · {batch.snapshot.resetApp?'Declared app reset':'No additional app reset'}</p>{batch.entries.map(entry=><div key={entry.scenarioId}><p>{entry.name} · {entry.status}</p>{entry.reason&&<p>{entry.reason}</p>}{entry.runId&&<button className="confirm" onClick={()=>void openReport(entry.runId!)}>Open report for {entry.name}</button>}</div>)}</section>}    {reports.some(item=>item.snapshot.workspaceId===workspaceId)&&<nav aria-label="Scenario reports"><p>Reports from this workspace session · selecting a scenario leaves the inspected report open.</p>{reports.filter(item=>item.snapshot.workspaceId===workspaceId).map((item,index)=><button className="confirm" key={item.id} disabled={submitting} aria-pressed={run?.id===item.id} onClick={()=>setRun(item)}>{item.snapshot.scenario?.name??item.snapshot.name} · {item.status} · Run {index+1}</button>)}</nav>}<div className="scenario-result" aria-live="polite">
+    <details className="report-tools"><summary>Reports &amp; evidence</summary>      {batch&&batch.workspaceId===workspaceId&&<section aria-label="Batch report" aria-live="polite"><h3>Batch · {batch.status}</h3><p>Saved order · separate reports · {batch.snapshot.resetApp?'Declared app reset':'No additional app reset'}</p>{(batchLines??batch.entries).map(entry=>{const summary=batchSummary(entry);return <div key={entry.scenarioId} className={summary.tone==='trust'?'batch-script-untrusted':summary.tone==='failed'?'batch-script-failed':undefined} data-testid={summary.testId}><p>{entry.name} · {summary.statusText}</p>{summary.reason&&<p>{summary.reason}</p>}{entry.runId&&<button className="confirm" onClick={()=>void openReport(entry.runId!)}>Open report for {entry.name}</button>}</div>;})}</section>}    {reports.some(item=>item.snapshot.workspaceId===workspaceId)&&<nav aria-label="Scenario reports"><p>Reports from this workspace session · selecting a scenario leaves the inspected report open.</p>{reports.filter(item=>item.snapshot.workspaceId===workspaceId).map((item,index)=><button className="confirm" key={item.id} disabled={submitting} aria-pressed={run?.id===item.id} onClick={()=>setRun(item)}>{item.snapshot.scenario?.name??item.snapshot.name} · {item.status} · Run {index+1}</button>)}</nav>}<div className="scenario-result" aria-live="polite">
       {workspaceId && <details><summary>Workspace diagnostic details</summary><p className="artifact-id">Workspace: {workspaceId}</p></details>}
       {!run ? <div className="empty-state"><h3>Your scenario result</h3><p>Run a saved flow on the selected simulator to see its real outcome and artifacts.</p></div> : <>
         {run.snapshot.expectedPath && <div className="expected-path"><span>{run.snapshot.expectedPath.from}</span><span>→</span><span>Expected: {run.snapshot.expectedPath.to} · {run.status}</span></div>}
         {run.mock && <div className="mock-evidence"><h3>Mock intent: {run.mock.intent.status}</h3><p>{run.mock.intent.method.toUpperCase()} /{run.mock.intent.endpoint} · HTTP {run.mock.intent.httpStatus}</p><p>{run.mock.intent.failureSemantics}</p><h3>Observed requests: {run.mock.evidence.status}</h3><p className="field-hint">{run.mock.evidence.detail}</p>{run.mock.evidence.transactions.map((transaction,index)=><p key={index}>{transaction.method.toUpperCase()} {transaction.path} → {transaction.statusCode} {transaction.proxied?'(forwarded)':'(mocked)'}</p>)}<p>Mock cleanup: {run.mock.cleanup.detail}</p></div>}
         <div className="label-row"><h3>{run.snapshot.name}</h3><span className={'result-tag ' + run.status}>{run.status}</span></div>
-        {run.error && <div className="notice error">{run.error}</div>}
+        {run.error && <div className="notice error"><RedactedText text={run.error}/></div>}
         <p>Cleanup ({run.status==='running' ? 'pending' : run.cleanup.verified ? 'verified' : 'failed'}): {run.cleanup.detail}</p>
         {run.automation&&<details open><summary>Setup and default action outcomes</summary><p>Setup: {run.automation.setup.status}</p>{run.automation.actions.map(action=><p key={action.id+':'+action.beforeStep}>{action.name} · before step {action.beforeStep+1}: {action.status} · {action.detail}</p>)}</details>}
         {run.snapshot.executionYaml&&<details><summary>Derived execution YAML</summary><pre className="execution-yaml">{run.snapshot.executionYaml}</pre></details>}
         <ExecutedCanvas key={run.id} run={run} onArtifact={name=>void inspect(name)}/>
         <p className="field-hint">{run.mappingNote}</p>
-        <ol className="step-results">{run.steps.map(step => <li key={step.id}><code>{step.command}</code><span className={'outcome '+step.status}>{step.status}</span></li>)}</ol>
+        <ol className="step-results">{run.steps.map(step => {const evidence=typeof step.detail==='string'&&step.detail?step.detail:typeof step.actual==='string'?step.actual:'';return <li key={step.id}><code>{step.command}</code><span className={'outcome '+step.status}>{step.status}</span>{evidence&&<span className="step-evidence"><RedactedText text={evidence}/></span>}</li>;})}</ol>
         {run.expectedFailure && <details open><summary>Failed expected assertion</summary><pre>{JSON.stringify(run.expectedFailure, null, 2)}</pre></details>}
         <details><summary>Executed snapshot &amp; versions</summary><p className="artifact-id">Run: {run.id}<br />Snapshot: {run.snapshot.id}<br />Maestro: {run.snapshot.toolVersions.maestro} · Node: {run.snapshot.toolVersions.node}</p><pre>{run.snapshot.yaml}</pre>{Object.entries(run.snapshot.flows??{}).map(([name,yaml])=><div key={name}><h4>{name}</h4><pre>{yaml}</pre></div>)}<p>{run.snapshot.scenario&&<>Scenario: {run.snapshot.scenario.name} · Reset app: {run.snapshot.resetApp?'Yes':'No'} · Declared setup: {run.snapshot.scenario.setup?.file??'Ordinary app launch'}</>}</p><p>{run.snapshot.runtimeInputPolicy}</p></details>
-        <details open={run.status !== 'passed'}><summary>Raw runner log</summary><pre>{run.log || 'Waiting for Maestro to finish…'}</pre></details>
+        <details id="run-log" open={run.status !== 'passed'}><summary>Raw runner log</summary><pre>{run.log?<RedactedText text={run.log}/>:'Waiting for Maestro to finish…'}</pre></details>
         <div className="artifact-list">{run.artifacts.map(name => <button className="text-button" key={name} disabled={submitting || run.status==='running'} onClick={() => void inspect(name)}>{name}</button>)}</div>
         {artifact && <div className="artifact-view"><p className="artifact-id">{artifact.name}</p>{artifact.image ? <img className="device-screen" src={artifact.image} alt="Captured failure screen" /> : <pre>{artifact.text}</pre>}</div>}
       </>}

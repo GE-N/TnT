@@ -2,11 +2,13 @@ import {createPortal} from 'react-dom';
 import {appendVisitStep,isCommittableSelector,moveAboveNavigation,reorderVisitStep} from './inspector-operations.js';
 import {FloatingCard,type CardPosition} from './floating-card.js';
 import {AddStepMenu,RunStatusBadge,VisitStep,type PickerSession} from './visit-steps.js';
+import {ScriptEditor,ScriptStepRow,type RunScriptModel} from './run-script-ui.js';
+import {anchorForNewScript,endAnchorFingerprint,orderedScenarioSteps,runBlockedLabel,SCRUB_FAILED_TEXT,scriptRowView,stepNotRun,type ScriptRecord} from './run-script.js';
 import {YamlEditor} from './yaml-editor.js';
 import {RecoveredFields,useWorkspaceDraft} from './workspace-drafts.js';
 import {inspectorRunView,type InspectorRunFeed} from './inspector-run-state.js';
 import {planCanvasDeletion,type CanvasDeletion,connectVisitAction,connectionVisitActions,freezeVisitOperations,visitOperations,updateVisitOperations,privateVisitOperation,refreshChecks,writeChecks,backControl,canvasTestLabel,connectCanvasAction,appendCanvasConnection,edgeActions,routeVisits,visitChecks,visitScreenId,screenChecks,appendRouteTransition,isAuthored,type ScreenCheck} from '../shared/canvas-authoring.js';
-import {useContext,useEffect,useId,useLayoutEffect,useRef,useState,type ReactNode,type MouseEvent,type PointerEvent,type CSSProperties} from 'react';
+import {Fragment,useContext,useEffect,useId,useLayoutEffect,useRef,useState,type ReactNode,type MouseEvent,type PointerEvent,type CSSProperties} from 'react';
 import type {YAMLReference,CanvasGraph,CanvasTest,CanvasDiagnostic,CanvasResult,CatalogEntry,ScreenNode} from '../server/canvas.js';
 import {inspectorWidth,placeInspector,visibleBounds,type InspectorPlacement,type Rect} from './inspector-placement.js';
 const runLockReason='Unavailable while the scenario is running.';
@@ -222,7 +224,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  </div>;
 }
 
-export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,onRun,onRepairSource,scenarioMode=false,scenarioId,scenarios=[],initialView,onViewChange,picker,cards,onCardPosition,yamlDeletionWarnings,onYamlDelete,run,draftInvalid=false}:{onRepairSource?:(ownerId:string)=>void;scenarioId?:string;scenarios?:{id:string;name:string;pathId?:string}[];scenarioMode?:boolean;onRun?:()=>void;yaml?:string;onYamlChange?:(yaml:string)=>void;graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string};onViewChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number;selectedScreenId:string;selectedVisitId:string})=>void;picker?:PickerSession;cards?:{picker?:CardPosition;yaml?:CardPosition};onCardPosition?:(card:'picker'|'yaml',position:CardPosition)=>void;yamlDeletionWarnings?:(index:number)=>string[];onYamlDelete?:(yaml:string,index:number)=>()=>void;run?:InspectorRunFeed;draftInvalid?:boolean}){
+export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,onRun,onRepairSource,scenarioMode=false,scenarioId,scenarios=[],initialView,onViewChange,picker,cards,onCardPosition,yamlDeletionWarnings,onYamlDelete,run,draftInvalid=false,runScripts,reservedLines}:{onRepairSource?:(ownerId:string)=>void;scenarioId?:string;scenarios?:{id:string;name:string;pathId?:string}[];scenarioMode?:boolean;onRun?:()=>void;yaml?:string;onYamlChange?:(yaml:string)=>void;graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string};onViewChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number;selectedScreenId:string;selectedVisitId:string})=>void;picker?:PickerSession;cards?:{picker?:CardPosition;yaml?:CardPosition};onCardPosition?:(card:'picker'|'yaml',position:CardPosition)=>void;yamlDeletionWarnings?:(index:number)=>string[];onYamlDelete?:(yaml:string,index:number)=>()=>void;run?:InspectorRunFeed;draftInvalid?:boolean;runScripts?:RunScriptModel;reservedLines?:number[]}){
  const [pending,setPending]=useState<{graph:CanvasGraph;source?:string;warnings:string[]}>();
  const [clearPending,setClearPending]=useState<{graph:CanvasGraph;source?:string;title:string;visits:string[]}>();
  const [linkedEdgeId,setLinkedEdgeId]=useState<string>();
@@ -236,7 +238,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  function endDrag(){dragging.current=undefined;setDropTarget(undefined);}
  const discardedVisit=useRef('');
  useEffect(()=>{if(newStep||!discardedVisit.current)return;const visitId=discardedVisit.current;discardedVisit.current='';Array.from(document.querySelectorAll<HTMLElement>('[data-visit-id]')).find(element=>element.dataset.visitId===visitId)?.querySelector<HTMLButtonElement>('.add-visit-step')?.focus();},[newStep]);
- const [expandedRow,setExpandedRow]=useState('');const [announcement,setAnnouncement]=useState('');
+ const [expandedRow,setExpandedRow]=useState('');const [openScriptId,setOpenScriptId]=useState('');const [announcement,setAnnouncement]=useState('');
  const [nodeInfoId,setNodeInfoId]=useState('');const [yamlHost,setYamlHost]=useState(false);const [yamlOpen,setYamlOpen]=useState(false);const yamlOpener=useRef<HTMLButtonElement|null>(null);
  let displayGraph=graph;try{if(graph&&yaml)displayGraph=refreshChecks(graph,yaml);}catch{ /* Retain graph while invalid YAML is repaired. */ }
  graph=displayGraph;
@@ -283,7 +285,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  const referenceDiagnostics=diagnostics.filter(item=>item.code!=='missing-destination');
  const liveDiagnostics=graph?diagnostics.filter(item=>item.code!=='missing-destination'||missingDestination(item.actionId!)):diagnostics;
  const seenPath=useRef(pathId);
- useEffect(()=>{if(seenPath.current===pathId)return;seenPath.current=pathId;setNewStep(undefined);setSelectedVisit('');setSelected('');setRepairTarget(undefined);},[pathId]);
+ useEffect(()=>{if(seenPath.current===pathId)return;seenPath.current=pathId;setNewStep(undefined);setSelectedVisit('');setSelected('');setRepairTarget(undefined);setOpenScriptId('');},[pathId]);
  useEffect(()=>{
   if(!repairTarget)return;
   const operation=Array.from(document.querySelectorAll<HTMLElement>('.canvas-editor [data-operation-id]')).find(node=>node.dataset.operationId===repairTarget.ownerId);
@@ -498,6 +500,13 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  }
  function membershipControl(test:CanvasTest){return <details className="operation-scenarios"><summary>Scenarios</summary>{scenarios.map(item=><label className="checkbox-label" key={item.id}><input type="checkbox" aria-label={'Use '+canvasTestLabel(test)+' in '+item.name} checked={assignedScenarios(test).includes(item.id)} onChange={event=>perform(()=>assignOperation(test,item.id,event.target.checked))}/>{item.name}</label>)}</details>;}
  function addVisitStep(visitId:string,command:string){
+  if(command==='runScript'){
+    if(!runScripts||!graph)return;
+    const current=graph.paths.find(item=>item.id===pathId);if(!current)return;
+    const visitIndex=routeVisits(graph,current).findIndex(visit=>visit.id===visitId);
+    setOpenScriptId(runScripts.onAdd(anchorForNewScript(orderedScenarioSteps(graph,current.id),visitIndex<0?current.edgeIds.length:visitIndex)));
+    return;
+  }
   const test:CanvasTest={...draftNavigationAction(),scenarioIds:scenarioId?[scenarioId]:undefined};
   if(command==='inputText'){test.tap=undefined;test.input='';}
   if(command==='back'){test.tap=undefined;test.back=true;test.backSelector={target:'text',match:'exact',value:'Back'};}
@@ -534,13 +543,48 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
    return next;
   });
  }
+ function orderedSteps(){return graph&&path?orderedScenarioSteps(graph,path.id):[];}
+ function renderScript(row:ScriptRecord){
+  if(!runScripts)return null;
+  const ordered=orderedSteps();
+  const view=scriptRowView(row,runScripts.rows,ordered,runScripts.trust,runScripts.results,runScripts.running,runScripts.passedRun,runScripts.executionOrder);
+  const group=runScripts.rows.filter(item=>item.beforeStep.index===row.beforeStep.index);
+  const position=group.findIndex(item=>item.id===row.id);
+  const canMoveUp=position>0||row.beforeStep.index>0;
+  const canMoveDown=position<group.length-1||row.beforeStep.index<ordered.length;
+  const afterLast=row.beforeStep.index>=ordered.length;
+  return <ScriptStepRow key={row.id} row={row} view={view} reveal={runScripts.revealBlocks} open={openScriptId===row.id} runLocked={runLocked} stepNumber={afterLast?ordered.length:row.beforeStep.index+1} afterLast={afterLast} canMoveUp={canMoveUp} canMoveDown={canMoveDown} onOpen={()=>setOpenScriptId(row.id)} onMove={direction=>runScripts.onMove(row.id,direction,ordered.length,index=>index>=ordered.length?endAnchorFingerprint(ordered.at(-1)?.fingerprint):ordered[index]?.fingerprint??'')} onDelete={()=>{runScripts.onDelete(row.id);if(openScriptId===row.id)setOpenScriptId('');}}/>;
+ }
+ function scriptsBefore(testId:string,visitId:string){
+  if(!runScripts)return [];
+  const step=orderedSteps().find(item=>item.id===testId&&item.visitId===visitId);
+  if(!step)return [];
+  return runScripts.rows.filter(row=>row.beforeStep.index===step.globalIndex);
+ }
+ function pendingScripts(visitId:string){
+  if(!runScripts||!graph||!path)return [];
+  const ordered=orderedSteps();
+  const visits=routeVisits(graph,path);
+  const visitIndex=visits.findIndex(visit=>visit.id===visitId);
+  if(visitIndex<0)return [];
+  const end=ordered.filter(step=>step.visitIndex<=visitIndex).length;
+  const last=visitIndex===visits.length-1;
+  return runScripts.rows.filter(row=>row.beforeStep.index>=ordered.length&&(last?row.beforeStep.index>=end:row.beforeStep.index===end));
+ }
+ function stepRunStatus(visitId:string,testId:string){
+  const base=runView?.stepStatus(visitId,testId);
+  if(!runScripts)return base;
+  const step=orderedSteps().find(item=>item.id===testId&&item.visitId===visitId);
+  if(step&&stepNotRun(step,runScripts.rows,runScripts.results,runScripts.executionOrder))return {tone:'not-run' as const};
+  return base;
+ }
  function renderChecks(screenId:string,edgeId?:string,visitIndex?:number){const node=graph!.screens.find(screen=>screen.id===screenId);if(!node)return <p>Restore the missing source screen before editing its actions.</p>;const visit=visitIndex!==undefined&&path?routeVisits(graph!,path)[visitIndex]:undefined;const visitIds=visitIndex!==undefined&&path?visitOperations(graph!,path,visitIndex):undefined;const edge=graph!.edges.find(edge=>edge.id===edgeId);const operations=visitIds?visitIds.flatMap(id=>node.tests.filter(test=>test.id===id)):(scenarioMode?node.tests.filter(isAuthored):edge?edgeActions(edge).flatMap(id=>node.tests.filter(test=>test.id===id)):node.tests.filter(test=>isAuthored(test)&&!graph!.edges.some(edge=>edge.actionTestIds?.includes(test.id)))).filter(test=>visitIds!==undefined||visibleOperation(test));if(visitIds&&visitIndex===0)operations.push(...node.tests.filter(test=>!visitIds.includes(test.id)&&destinationWarning(test)));const preview=visit&&newStep?.pathId===pathId&&newStep.visitId===visit.id?appendVisitStep(graph!,pathId,visit.id,newStep.test):graph!;if(preview!==graph)operations.push(newStep!.test);const checks=operations.filter(test=>test.check);const taps=operations.filter(test=>!test.check);return <fieldset className={edge?'canvas-checks canvas-navigation-actions':'canvas-checks'} disabled={disabled&&!runLocked}>
  {scenarioMode&&!edge&&path?.screenId&&!path.finished&&(visitIndex===undefined||visitIndex===path.edgeIds.length)&&visitScreenId(graph!,path,path.edgeIds.length)===screenId&&graph!.edges.filter(edge=>edge.from===screenId&&!path.edgeIds.includes(edge.id)).map(edge=><button key={edge.id} aria-label={'Append connection '+edge.responseCondition} onClick={()=>perform(()=>appendConnection(edge.id))}>Continue → {graph!.screens.find(screen=>screen.id===edge.to)?.title} · {edge.responseCondition}</button>)}{scenarioMode&&!edge&&(visitIndex===undefined||visitIndex===0)&&<button aria-label={'Use '+node.title+' as scenario start'} disabled={!path||path.screenId===screenId} onClick={()=>perform(()=>setScenarioStart(screenId))}>{path?.screenId===screenId?'Scenario start':'Use as scenario start'}</button>}
  {edge&&!scenarioMode&&<><legend>Actions to reach {graph!.screens.find(screen=>screen.id===edge.to)?.title??'Missing screen'}</legend><details className="connection-name"><summary>Connection name</summary><input aria-label={'Connection name '+edge.id} value={edge.responseCondition} maxLength={300} onChange={event=>onChange({...graph!,edges:graph!.edges.map(item=>item.id===edge.id?{...item,responseCondition:event.target.value}:item)})}/></details></>}
- {operations.map((test,index)=>{const selector=test.check??test.tap??backControl(test);const stepIndex=visitIds?(visitIds.includes(test.id)?visitIds.indexOf(test.id):visitIds.length):index;const name=edge&&!scenarioMode?edge.responseCondition+' action '+(index+1):(!test.check?'Action '+(taps.indexOf(test)+1):'Check '+(checks.indexOf(test)+1));const owner=visitIds?.includes(test.id)?visit:undefined;const stepRun=owner?runView?.stepStatus(owner.id,test.id):undefined;const stays=!test.check&&staysOnScreen(test.id);if(visit&&!destinationWarning(test)&&!stays)return <VisitStep key={test.id} graph={preview} pathId={pathId} visitId={visit.id} test={test} index={stepIndex} name={name} screenId={screenId} last={stepIndex>=(visitIds?.length??operations.length)-1} isNew={newStep?.test.id===test.id} moveDisabled={disabled||runLocked||!!newStep} editing={!runLocked&&expandedRow===test.id} onEdit={()=>{if(runLocked)return;if(!newStep||newStep.test.id===test.id)setExpandedRow(test.id);}} onClose={()=>setExpandedRow('')} onSave={(draft,to,connection,title)=>saveVisitStep(screenId,visit.id,draft,to,connection,title)} onDestinationChange={to=>destinationChange(screenId,test,visit.id,to)} onCreateDestination={title=>createDestination(screenId,test,visit.id,title)} onMoveAbove={()=>perform(()=>{const next=moveAboveNavigation(graph!,pathId,visit.id,test.id);changeChecks(next,true);setAnnouncement('Step moved to position '+(routeVisits(next,next.paths.find(item=>item.id===pathId)! ).find(item=>item.id===visit.id)!.operationIds!.indexOf(test.id)+1)+', above navigating actions.');})} onMove={direction=>{const neighbor=visitIds![stepIndex+direction];if(neighbor)moveOperation(screenId,test.id,neighbor,visit.id);}} onDelete={()=>newStep?.test.id===test.id?discardVisitStep(visit.id):deleteOperation(test,visit.id)} onDiscard={()=>perform(()=>discardVisitStep(visit.id))} dropPosition={dropTarget?.visitId===visit.id&&dropTarget.id===test.id?(dropTarget.after?'after':'before'):undefined} onDragStart={()=>{dragging.current={visitId:visit.id,id:test.id};}} onDragEnd={endDrag} onDragLeave={()=>setDropTarget(undefined)} onDragOver={after=>{if(disabled||runLocked||newStep||dragging.current?.visitId!==visit.id)return false;setDropTarget({visitId:visit.id,id:test.id,after});return true;}} onDrop={after=>{
+ {operations.map((test,index)=>{const selector=test.check??test.tap??backControl(test);const stepIndex=visitIds?(visitIds.includes(test.id)?visitIds.indexOf(test.id):visitIds.length):index;const name=edge&&!scenarioMode?edge.responseCondition+' action '+(index+1):(!test.check?'Action '+(taps.indexOf(test)+1):'Check '+(checks.indexOf(test)+1));const owner=visitIds?.includes(test.id)?visit:undefined;const stepRun=owner?runView?.stepStatus(owner.id,test.id):undefined;const stays=!test.check&&staysOnScreen(test.id);if(visit&&!destinationWarning(test)&&!stays)return <Fragment key={test.id}>{scriptsBefore(test.id,visit.id).map(renderScript)}<VisitStep key={test.id} graph={preview} pathId={pathId} visitId={visit.id} test={test} index={stepIndex} name={name} screenId={screenId} last={stepIndex>=(visitIds?.length??operations.length)-1} isNew={newStep?.test.id===test.id} moveDisabled={disabled||runLocked||!!newStep} editing={!runLocked&&expandedRow===test.id} onEdit={()=>{if(runLocked)return;if(!newStep||newStep.test.id===test.id)setExpandedRow(test.id);}} onClose={()=>setExpandedRow('')} onSave={(draft,to,connection,title)=>saveVisitStep(screenId,visit.id,draft,to,connection,title)} onDestinationChange={to=>destinationChange(screenId,test,visit.id,to)} onCreateDestination={title=>createDestination(screenId,test,visit.id,title)} onMoveAbove={()=>perform(()=>{const next=moveAboveNavigation(graph!,pathId,visit.id,test.id);changeChecks(next,true);setAnnouncement('Step moved to position '+(routeVisits(next,next.paths.find(item=>item.id===pathId)! ).find(item=>item.id===visit.id)!.operationIds!.indexOf(test.id)+1)+', above navigating actions.');})} onMove={direction=>{const neighbor=visitIds![stepIndex+direction];if(neighbor)moveOperation(screenId,test.id,neighbor,visit.id);}} onDelete={()=>newStep?.test.id===test.id?discardVisitStep(visit.id):deleteOperation(test,visit.id)} onDiscard={()=>perform(()=>discardVisitStep(visit.id))} dropPosition={dropTarget?.visitId===visit.id&&dropTarget.id===test.id?(dropTarget.after?'after':'before'):undefined} onDragStart={()=>{dragging.current={visitId:visit.id,id:test.id};}} onDragEnd={endDrag} onDragLeave={()=>setDropTarget(undefined)} onDragOver={after=>{if(disabled||runLocked||newStep||dragging.current?.visitId!==visit.id)return false;setDropTarget({visitId:visit.id,id:test.id,after});return true;}} onDrop={after=>{
  const source=dragging.current;endDrag();if(disabled||runLocked||newStep||!source||source.visitId!==visit.id)return;
  perform(()=>{const from=visitIds!.indexOf(source.id);const insertion=stepIndex+(after?1:0);const position=insertion-(from<insertion?1:0);const next=reorderVisitStep(graph!,pathId,visit.id,source.id,position);if(next===graph)return;changeChecks(next,true);focusStep.current={visitId:visit.id,id:source.id};setAnnouncement('Step '+(from+1)+' moved to position '+(position+1)+'.');});
- }} picker={picker} sourceYaml={yaml} cardPosition={cards?.picker} onCardPosition={position=>onCardPosition?.('picker',position)} runLocked={runLocked} runStatus={runView?.stepStatus(visit.id,test.id)} showDraftErrors={draftInvalid}/>;return <div key={test.id} className="canvas-operation" data-operation-id={test.id}>
+ }} picker={picker} sourceYaml={yaml} cardPosition={cards?.picker} onCardPosition={position=>onCardPosition?.('picker',position)} runLocked={runLocked} runStatus={stepRunStatus(visit.id,test.id)} showDraftErrors={draftInvalid}/></Fragment>;return <div key={test.id} className="canvas-operation" data-operation-id={test.id}>
  {destinationWarning(test)&&<div className="destination-warning" role="status"><p id={apiId+'-missing-'+test.id}>⚠ "{test.label}" has no destination. Choose a screen, or set it to Stays on this screen.</p><button disabled={runLocked} aria-describedby={apiId+'-missing-'+test.id} onClick={event=>openDestination(event.currentTarget,test.id)}>Choose destination</button></div>}
  {test.check&&!test.check.value&&<p className="field-hint">Screen condition: choose what must be visible or absent when this screen is reached.</p>}
  {stepRun&&<RunStatusBadge status={stepRun}/>}
@@ -560,7 +604,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  </details>
  </div>;})}
  {edge&&<button aria-label={'Add action to connection '+edge.responseCondition} disabled={operations.length>=30||node.tests.length>=600} onClick={()=>perform(()=>addAction(screenId,edge.id))}>Add action</button>}
- {!edge&&<>{!scenarioMode&&graph!.edges.filter(edge=>edge.from===screenId&&edge.actionTestIds!==undefined).map(edge=><div key={edge.id}>{renderChecks(screenId,edge.id)}</div>)}{visit?(!runLocked&&<AddStepMenu disabled={!!newStep||operations.length>=30||node.tests.length>=600} onAdd={command=>perform(()=>addVisitStep(visit.id,command))}/>):<><button aria-label={'Add action to '+node.title} disabled={operations.length>=30||node.tests.length>=600} onClick={()=>perform(()=>addAction(screenId,undefined,visitIndex))}>Add action</button>
+ {!edge&&<>{!scenarioMode&&graph!.edges.filter(edge=>edge.from===screenId&&edge.actionTestIds!==undefined).map(edge=><div key={edge.id}>{renderChecks(screenId,edge.id)}</div>)}{visit&&pendingScripts(visit.id).map(renderScript)}{visit?(!runLocked&&<AddStepMenu disabled={!!newStep||operations.length>=30||node.tests.length>=600} onAdd={command=>perform(()=>addVisitStep(visit.id,command))}/>):<><button aria-label={'Add action to '+node.title} disabled={operations.length>=30||node.tests.length>=600} onClick={()=>perform(()=>addAction(screenId,undefined,visitIndex))}>Add action</button>
  <button aria-label={'Add check to '+node.title} disabled={operations.length>=30||node.tests.length>=600} onClick={()=>perform(()=>addCheck(screenId,visitIndex))}>Add check</button></>}
 {visit&&node.tests.some(test=>isAuthored(test)&&!visitIds?.includes(test.id))&&<details className="unused-operations"><summary>Copy existing steps</summary>{node.tests.filter(test=>isAuthored(test)&&!visitIds?.includes(test.id)).map(test=><button key={test.id} aria-label={'Copy '+canvasTestLabel(test)+' to Visit '+(visitIndex!+1)} onClick={()=>perform(()=>copyToVisit(screenId,test,visitIndex!))}>{canvasTestLabel(test)}</button>)}</details>}
 {scenarioMode&&!visit&&scenarioId&&node.tests.some(test=>isAuthored(test)&&!visibleOperation(test))&&<details className="unused-operations"><summary>Use existing actions/checks</summary>{node.tests.filter(test=>isAuthored(test)&&!visibleOperation(test)).map(test=><div key={test.id}><p>{canvasTestLabel(test)}</p>{membershipControl(test)}</div>)}</details>}
@@ -616,6 +660,9 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  <svg className="sequence-scenario-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg>
  <div className="sequence-scenario-copy">
  <p className="sequence-scenario-name">{scenarios.find(item=>item.id===scenarioId)?.name??path.name}</p>
+ {runScripts?.scrubFailed&&<p className="run-scrub-failed" data-testid="evidence-scrub-failed" role="alert">{SCRUB_FAILED_TEXT}</p>}
+ {runScripts&&!runScripts.scrubFailed&&runScripts.failedAtScript&&<p className="run-script-stop" data-testid="failed-at-script">✕ Failed at Run script</p>}
+ {!!runScripts?.trustBlockCount&&<p className="run-blocked" data-testid="run-blocked">{runBlockedLabel(runScripts.trustBlockCount)}</p>}
  <div className="sequence-trail">
  <ol aria-label="Scenario sequence">{path.screenId&&routeVisits(graph,path).map((visit,index)=>{const id=visitScreenId(graph!,path,index);const title=graph!.screens.find(screen=>screen.id===id)?.title??'Missing screen';return <li key={visit.id}><button className="sequence-step" aria-label={'Visit '+(index+1)+' · '+title} aria-pressed={selectedVisit===visit.id} onClick={()=>{setSelected(id??'');setSelectedVisit(visit.id);}}>{index+1} · {title}</button></li>;})}</ol>
  {path.screenId&&routeVisits(graph,path).length>0&&<span className="sequence-separator" aria-hidden="true">&gt;</span>}
@@ -659,7 +706,8 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  {undoAvailable&&(undo.step?<div className="step-undo-toast" role="status">Step {undo.step.position} deleted · <button aria-label="Undo canvas deletion" onPointerDown={()=>setExpandedRow('')} onClick={undoChange}>Undo</button></div>:<button className="canvas-undo" onPointerDown={()=>setExpandedRow('')} onClick={undoChange}>Undo canvas deletion</button>)}
  {infoScreen&&<NodeInfo screen={infoScreen} disabled={disabled} error={error} onImage={file=>void image(infoScreen.id,file)} onRemove={()=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===infoScreen.id?{...screen,referenceScreenshot:undefined}:screen)})} onClose={()=>{setNodeInfoId('');setError('');}}/>}
  {error&&!infoScreen&&<div className="notice error" role="alert">{error}</div>}
- {yamlHost&&yaml!==undefined&&onYamlChange&&createPortal(<FloatingCard open={yamlOpen} label="YAML" position={cards?.yaml} onPosition={position=>onCardPosition?.('yaml',position)} opener={yamlOpener.current} onClose={()=>setYamlOpen(false)}><YamlEditor yaml={yaml} onChange={onYamlChange} disabled={disabled||runLocked} inputId="yaml-card" deletionWarnings={yamlDeletionWarnings} onDelete={onYamlDelete}/></FloatingCard>,document.body)}
+ {yamlHost&&yaml!==undefined&&onYamlChange&&createPortal(<FloatingCard open={yamlOpen} label="YAML" position={cards?.yaml} onPosition={position=>onCardPosition?.('yaml',position)} opener={yamlOpener.current} onClose={()=>setYamlOpen(false)}><YamlEditor yaml={yaml} onChange={onYamlChange} disabled={disabled||runLocked} inputId="yaml-card" deletionWarnings={yamlDeletionWarnings} onDelete={onYamlDelete} reservedLines={reservedLines}/></FloatingCard>,document.body)}
+ {openScriptId&&runScripts&&(()=>{const row=runScripts.rows.find(item=>item.id===openScriptId);if(!row)return null;const ordered=orderedSteps();const view=scriptRowView(row,runScripts.rows,ordered,runScripts.trust,runScripts.results,runScripts.running,runScripts.passedRun,runScripts.executionOrder);const afterLast=row.beforeStep.index>=ordered.length;return createPortal(<ScriptEditor row={row} view={view} workspaceName={runScripts.workspaceName} stepNumber={afterLast?ordered.length:row.beforeStep.index+1} afterLast={afterLast} hasMock={runScripts.hasMock} untrustedLeft={runScripts.trustBlockCount} running={runScripts.running} timedOut={runScripts.timedOut} onChange={patch=>runScripts.onUpdate(row.id,patch)} onTrust={()=>runScripts.onTrust(row.id)} onStop={runScripts.onStop} onRunAgain={runScripts.onRunAgain} onOpenLog={runScripts.onOpenLog} onClose={()=>setOpenScriptId('')}/>,document.body);})()}
  </>}
  </section>;
 }

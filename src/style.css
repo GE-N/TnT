@@ -763,6 +763,49 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .workbench [hidden]{display:none!important}
 
 .screen-capture-label,.node-outcome{font-size:calc(12px / var(--canvas-zoom,1))!important}
+
+/* Run script (GE-N/TnT #10). */
+.add-step-new{display:inline-block;margin-left:8px;padding:0 6px;border-radius:8px;background:#e7f3ff;color:#0a63d1;font-size:12px;font-weight:700;line-height:18px}
+.add-step-hint{margin-left:8px;color:#596579;font-size:12px}
+.add-step-dialog [role=option]{display:flex;align-items:center;gap:8px}
+.script-mark{color:#0a63d1;font-family:ui-monospace,monospace;font-size:12px;font-weight:700}
+.script-row{position:relative;margin:6px 0;padding:6px 40px 6px 8px;border:1px solid #d7e3f4;border-radius:8px;background:#f7fbff}
+.script-row-open{border-color:#0a84ff;background:#e7f3ff}
+.script-row-failed{border-color:#b3261e;background:#fdecea}
+.script-row-muted{color:#5f6368}
+.script-row-summary{display:flex;align-items:flex-start;gap:8px;width:100%;min-height:44px;padding:4px 0;border:0;background:transparent;text-align:left}
+.script-row-copy{display:flex;flex-direction:column;min-width:0}
+.script-preview{color:#596579;font-family:ui-monospace,monospace;font-size:12px}
+.script-untrusted{margin:0 0 4px 28px;color:#8a4b00;font-size:12px;font-weight:600}
+.script-inline-error{margin:4px 0;color:#b3261e;font-size:12px;font-weight:600;overflow-wrap:anywhere}
+.script-row-actions{top:4px}
+.script-editor{position:fixed;z-index:41;top:108px;right:24px;width:360px;max-height:calc(100dvh - 140px);overflow:auto;box-sizing:border-box;padding:0 14px 14px;background:#fff;border-radius:12px;box-shadow:0 12px 32px #25304129,0 1px 3px #2530411f;font-size:13px}
+.script-editor-header{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;margin:0 -14px;padding:4px 4px 4px 14px;background:#fff;border-bottom:1px solid var(--border)}
+.script-editor-header h3{margin:0;font-size:16px}
+.script-editor-header button{min-width:44px;min-height:44px;border:0;background:transparent}
+.script-code{display:flex;gap:8px;border:1px solid #0a84ff;border-radius:8px;background:#fff;overflow:auto}
+.script-gutter{display:flex;flex-direction:column;padding:8px 0 8px 8px;color:#596579;font:12px/1.5 ui-monospace,monospace;text-align:right;user-select:none}
+.script-source{flex:1;min-height:160px;margin:0;padding:8px;border:0;resize:vertical;font:12px/1.5 ui-monospace,monospace;white-space:pre;background:transparent}
+.script-code-label{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+.script-readonly-badge{color:#596579;font-size:12px}
+.script-trust-button{width:auto;margin-top:8px}
+.script-trust-note,.script-secret-warning,.script-timeout,.script-provided{font-size:12px;color:#596579}
+.script-secret-warning{color:#8a4b00}
+.script-timeout{margin-bottom:0}
+.script-running{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+.script-running-label{color:#0a63d1;font-weight:700}
+.script-stop{color:#b3261e;border-color:#b3261e;min-height:44px}
+.script-passed{color:#256747;font-weight:700}
+.script-error-box{margin:8px 0;padding:8px;border-radius:8px;background:#fdecea;color:#b3261e}
+.script-muted{color:#5f6368}
+.script-result-actions{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.run-blocked,.run-scrub-failed,.run-script-stop{margin:0;color:#b3261e;font-size:12px;font-weight:700}
+.batch-script-untrusted{color:#8a4b00;font-weight:700}
+.batch-script-failed{color:#b3261e;font-weight:700}
+.scenario-row-actions .run-blocked{max-width:140px;line-height:1.3}
+.redacted-chip{display:inline-block;margin:0 2px;padding:0 4px;border-radius:4px;background:#f1f3f4;color:#5f6368;font-size:12px;font-weight:600;line-height:1.4}
+.run-status-badge.not-run{color:#5f6368;font-weight:500}
+.step-evidence{display:block;margin-top:4px;font-size:12px}
 .workbench .screen-node-heading{font-size:calc(14px / var(--canvas-zoom,1))}
 .workbench .screen-node-title{font-size:calc(14px / var(--canvas-zoom,1))}
 
