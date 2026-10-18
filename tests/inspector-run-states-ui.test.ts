@@ -1,4 +1,4 @@
-import {addVisitStep,commitVisitEdits,editVisitField,inspectorCard,inspectorOwner,inspectScreen,workspaceCommand} from './workspace-ui-helpers.js';
+import {addVisitStep,commitVisitEdits,editVisitField,inspectorCard,inspectorOwner,inspectScreen,openScenarioPanel,workspaceCommand} from './workspace-ui-helpers.js';
 import assert from 'node:assert/strict';
 import {test,describe} from 'node:test';
 import {JSDOM} from 'jsdom';
@@ -99,6 +99,8 @@ async function journey(work:(ui:{
   if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',settle);
   if(await addVisitStep(document,label))return;
   await commitVisitEdits(document);
+  const ready=()=>[...document.querySelectorAll<HTMLElement>('button,summary')].some(item=>item.getAttribute('data-testid')!=='scenario-bar-trigger'&&(item.getAttribute('aria-label')??item.textContent)===label);
+  if(!ready())await openScenarioPanel(document,act);
   return act(async()=>{
    const node=[...document.querySelectorAll<HTMLElement>('button,summary')].find(item=>(item.getAttribute('aria-label')??item.textContent)===label);
    assert.ok(node,label);

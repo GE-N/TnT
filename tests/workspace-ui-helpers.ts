@@ -64,3 +64,15 @@ export async function commitVisitEdits(document:Document){
  const row=document.querySelector('.visit-step-summary[aria-expanded=true]')?.closest('.visit-step');
  const done=[...row?.querySelectorAll<HTMLButtonElement>('button')??[]].find(button=>button.textContent==='Done');if(done)await act(async()=>done.click());
 }
+/** The scenario sidebar is mounted only while Scenario details is open. A legacy canvas has no bar, so return to the contextual canvas first. */
+export async function openScenarioPanel(document:Document,act:(callback:()=>void|Promise<void>)=>Promise<unknown>){
+ if(document.querySelector('[data-testid="scenario-panel"]'))return;
+ let trigger=document.querySelector<HTMLButtonElement>('[data-testid="scenario-bar-trigger"]');
+ if(!trigger){
+  const back=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)==='Return to contextual canvas');
+  if(back)await act(async()=>{back.click();});
+  trigger=document.querySelector<HTMLButtonElement>('[data-testid="scenario-bar-trigger"]');
+ }
+ if(!trigger)return;
+ await act(async()=>{trigger.click();});
+}

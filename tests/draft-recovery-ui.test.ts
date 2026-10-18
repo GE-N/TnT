@@ -1,4 +1,4 @@
-import {addVisitStep,inspectScreen} from './workspace-ui-helpers.js';
+import {addVisitStep,inspectScreen,openScenarioPanel} from './workspace-ui-helpers.js';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import type {CanvasGraph} from '../server/canvas.js';
 import {DraftConflict,WorkspaceConflict,WorkspacePayloadTooLarge,createWriteFaults} from '../server/workspace-store.js';
@@ -42,7 +42,7 @@ async function mount(options?:{afterRestore?:()=>void;recoverSession?:boolean;fa
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetchImpl:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');let root=createRoot(dom.window.document.getElementById('root')!);const document=dom.window.document;
  const settle=async()=>{do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);};
- const click=async(label:string)=>act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();await settle();});
+ const click=async(label:string)=>{const ready=()=>[...document.querySelectorAll<HTMLButtonElement>('button')].some(node=>node.getAttribute('data-testid')!=='scenario-bar-trigger'&&(node.getAttribute('aria-label')??node.textContent)===label);if(!ready())await openScenarioPanel(document,act);return act(async()=>{const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>node.getAttribute('data-testid')!=='scenario-bar-trigger'&&(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(button,label);button.click();await settle();});};
  const render=async(overrides?:{token?:string;recoverSession?:boolean})=>{await act(async()=>{root.render(createElement(Scenarios,{token:overrides?.token??options?.token??'local',deviceId:options?.deviceId??'',bundleId:'com.example.App',launchBusy:false,onRunning:()=>{},recoverSession:overrides?.recoverSession??options?.recoverSession??false}));});await act(async()=>{for(let attempt=0;attempt<12;attempt++)await settle();});};
  const reload=async()=>{await act(async()=>{root.unmount();});root=createRoot(document.getElementById('root')!);await render({recoverSession:true});};
  const editYaml=async(value:string)=>act(async()=>{const node=document.getElementById('scenario-yaml') as HTMLTextAreaElement;Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
@@ -263,13 +263,16 @@ test('each workspace restores its own scenario, zoom, and screen, and a deleted 
   await page.service.saveView(second.id,{scenarioId:'alpha',scenarioName:'Alpha',pathId:'path-a',canvas:{zoom:0.5,scrollLeft:0,scrollTop:0,selectedScreenId:'home'}});
   await page.service.setSession(first.id);
   await page.render();
+  await openScenarioPanel(page.document,act);
   assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'Beta');
   assert.match(page.document.querySelector('.canvas-surface')?.getAttribute('style')??'',/scale\(1\.2\)/);
   assert.ok(page.document.querySelector('[data-screen-id="away"]')?.className.includes('selected-screen'));
   await page.openNamed('Workspace B');
+  await openScenarioPanel(page.document,act);
   assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'Alpha');
   assert.match(page.document.querySelector('.canvas-surface')?.getAttribute('style')??'',/scale\(0\.5\)/);
   await page.openNamed('Workspace A');
+  await openScenarioPanel(page.document,act);
   assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'Beta');
   assert.ok(page.document.querySelector('[data-screen-id="away"]')?.className.includes('selected-screen'));
   await page.service.saveView(first.id,{scenarioId:'gone',scenarioName:'Gone'});
@@ -285,6 +288,7 @@ test('a workspace without view.json uses the first scenario and the default canv
   const saved=await page.service.save({name:'Imported stand-in',yaml,canvas,scenarios:[{id:'alpha',name:'Alpha',steps:[],inputs:{},parameters:{},enabledHandlerIds:[]},{id:'beta',name:'Beta',steps:[],inputs:{},parameters:{},enabledHandlerIds:[]}]});
   await page.service.setSession(saved.id);
   await page.render();
+  await openScenarioPanel(page.document,act);
   assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'Alpha');
   assert.match(page.document.querySelector('.canvas-surface')?.getAttribute('style')??'',/scale\(0\.85\)/);
   assert.equal(page.document.body.textContent!.includes('was deleted'),false);
@@ -292,6 +296,7 @@ test('a workspace without view.json uses the first scenario and the default canv
   await page.service.saveView(empty.id,{scenarioId:'gone',scenarioName:'Gone'});
   await page.service.setSession(empty.id);
   await page.openNamed('No scenarios');
+  await openScenarioPanel(page.document,act);
   assert.match(page.document.body.textContent!,/No scenarios yet/);
  }finally{await page.close();}
 });
@@ -360,10 +365,11 @@ test('switching workspaces clears undo history and the selected report',async()=
   const second=await page.service.save({name:'Other workspace',yaml,scenarios});
   await page.service.setSession(first.id);
   await page.render();
+  await openScenarioPanel(page.document,act);
   const row=page.document.querySelector('.scenario-row')!;
   await act(async()=>{row.dispatchEvent(new page.dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:20,clientY:20}));});
   await page.click('Delete');
-  assert.match(page.document.body.textContent!,/Deleted Alpha/);
+  assert.match(page.document.body.textContent!,/\u201CAlpha\u201D deleted/);
   await act(async()=>{page.document.querySelector('.canvas-surface')!.dispatchEvent(new page.dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120}));});
   await page.click('Run scenario');
   await page.click('Command forms');
@@ -385,6 +391,7 @@ test('an imported workspace opens with the first scenario and the default canvas
   const imported=await page.service.save({name:'Imported workspace',yaml,canvas,scenarios:[{id:'alpha',name:'Alpha',steps:[],inputs:{},parameters:{},enabledHandlerIds:[]},{id:'beta',name:'Beta',steps:[],inputs:{},parameters:{},enabledHandlerIds:[]}]});
   await page.render();
   await page.openNamed('Imported workspace');
+  await openScenarioPanel(page.document,act);
   assert.equal(page.document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'Alpha');
   assert.match(page.document.querySelector('.canvas-surface')?.getAttribute('style')??'',/scale\(0\.85\)/);
   await assert.rejects(readFile(join(page.directory,'workspaces',imported.id,'view.json')));
