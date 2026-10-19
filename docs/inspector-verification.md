@@ -20,6 +20,7 @@ The #51 edits stay in the inspector UI, these tests, and this review. This branc
 - discarding a new active row restores a surviving stop
 - running keeps one list stop and arrow navigation without unlocking edits
 - edit tab order is observed by walking focus: matching, then Destination, then Pick from screen, then Open YAML, then Close. The test does not assert CSS ancestry.
+- a persisted legacy stay row before a visit step, and a focused visit step that becomes a stay row, each leave one reachable summary stop. Warning and destination controls stay on the legacy rows. The in-memory missing-destination UI cases remain as a supplement.
 - shortcut suppression in a focused selector; failed run announces `role="status"` / `role="alert"`
 
 `tests/match-by-ui.test.ts` keeps the original assertion that Pick lives in `.element-field` beside the selector. A separate test checks that Tab from Destination focuses Pick, and the next Tab focuses Done. Existing floating-inspector and run-state UI journeys remain green.

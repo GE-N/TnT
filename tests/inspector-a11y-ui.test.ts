@@ -10,13 +10,28 @@ import {parseAllDocuments} from 'yaml';
 import {Scenarios} from '../src/scenarios.js';
 import {createScenarios} from '../server/scenarios.js';
 import {createRunner} from '../server/runner.js';
-import {writeChecks} from '../shared/canvas-authoring.js';
-import type {CanvasGraph} from '../server/canvas.js';
+import {refreshChecks,writeChecks} from '../shared/canvas-authoring.js';
+import type {CanvasGraph,CanvasTest} from '../server/canvas.js';
 
 const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
 const same=(actual:unknown,expected:unknown,message='same node')=>assert.ok(actual===expected,message);
 
 describe('inspector a11y keyboard journeys',{concurrency:false},()=>{
+
+const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
+const tap=(id:string,label:string,value:string):CanvasTest=>({id,label,role:'action',reference,tap:{target:'text',match:'exact',value}});
+const check=(id:string,label:string,value:string):CanvasTest=>({id,label,role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value}});
+function legacyCanvas(linked:boolean):CanvasGraph{
+ return {
+  screens:[
+   {id:'home',title:'Home',x:0,y:0,tests:[tap('gear','tap Gear','Gear'),tap('profile','open Profile','Profile'),check('home-ready','Home','Home')]},
+   {id:'settings',title:'Settings',x:400,y:0,tests:[check('settings-ready','Settings','Settings')]},
+  ],
+  edges:linked?[{id:'go',from:'home',to:'settings',actionTestId:'gear',assertionTestId:'settings-ready',responseCondition:'Home → Settings'}]:[],
+  paths:[{id:'route',name:'Home checks',screenId:'home',edgeIds:linked?['go']:[],visits:linked?[{id:'visit-1',operationIds:['gear','home-ready']},{id:'visit-2',operationIds:['settings-ready']}]:[{id:'visit-1',operationIds:['gear','home-ready']}]}],
+ };
+}
+const hostScenario={id:'scenario-host',name:'Legacy host',authoring:'canvas' as const,steps:[],inputs:{},parameters:{},enabledHandlerIds:[]};
 
 async function journey(work:(ui:{
  document:Document;
@@ -27,7 +42,7 @@ async function journey(work:(ui:{
  holdNext:()=>void;
  failNext:(index?:number)=>void;
  settle:()=>Promise<void>;
-})=>Promise<void>){
+})=>Promise<void>,legacy?:'stay'|'linked'){
  const directory=await mkdtemp(join(tmpdir(),'tnt-a11y-'));
  let fail=false;let failIndex=3;let hold=false;let returnRunning=false;let releaseHold:(()=>void)|undefined;
  const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=>'2.11.0',run:async({directory:dir,flow,signal})=>{
@@ -40,8 +55,7 @@ async function journey(work:(ui:{
   await writeFile(join(dir,'commands.json'),JSON.stringify(commands.map((command:any,index:number)=>({command:{[command==='back'?'backPressCommand':command==='launchApp'||command.launchApp?'launchAppCommand':command.tapOn?'tapOnElement':command.inputText?'inputTextCommand':'assertConditionCommand']:{}},metadata:{depth:0,status:failing&&index===failedAt?'FAILED':failing&&index>failedAt?'SKIPPED':'COMPLETED',error:failing&&index===failedAt?{message:'Assertion failed at visit 3'}:undefined}}))));
   return {code:failing?1:0,log:'Simulator boundary fixture',cleanup:{verified:true,detail:'Fixture exited'}};
  }}});
- const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
- const canvas:CanvasGraph={
+ const canvas:CanvasGraph=legacy?legacyCanvas(legacy==='linked'):{
   screens:[
    {id:'1',title:'Home',x:0,y:0,tests:[{id:'home-ready',label:'Home',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Home'}},{id:'go-2',label:'Go 2',role:'action',reference,tap:{target:'text',match:'exact',value:'Go 2'}},{id:'stay',label:'Stay',role:'action',reference,tap:{target:'text',match:'exact',value:'Stay'}}]},
    {id:'2',title:'Mid',x:400,y:0,tests:[{id:'mid-ready',label:'Mid',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Mid'}},{id:'go-3',label:'Go 3',role:'action',reference,tap:{target:'text',match:'exact',value:'Go 3'}}]},
@@ -53,7 +67,10 @@ async function journey(work:(ui:{
   ],
   paths:[],
  };
- await service.save({name:'A11y keyboard',yaml:writeChecks('appId: com.example.App\n---\n- launchApp\n',{screens:[],edges:[],paths:[]},canvas),canvas,scenarios:[]});
+ const blank={screens:[],edges:[],paths:[]};
+ const yaml=writeChecks('appId: com.example.App\n---\n- launchApp\n',blank,canvas);
+ const saved=await service.save({name:'A11y keyboard',yaml,canvas:refreshChecks(canvas,yaml),scenarios:legacy?[hostScenario]:[]});
+ if(legacy)await service.saveView(saved.id,{format:1,pathId:'route',scenarioId:hostScenario.id,scenarioName:hostScenario.name,canvas:{selectedScreenId:'home',selectedVisitId:'visit-1',zoom:.85,scrollLeft:0,scrollTop:0}});
  const dom=new JSDOM('<div id="root"></div>');const document=dom.window.document;const window=dom.window as unknown as Window&typeof globalThis;
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];
  const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
@@ -108,16 +125,20 @@ async function journey(work:(ui:{
   await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{},simulatorConnected:true})));
   await settle();
   await click('Open saved workspace');
-  await click('New scenario');
-  await click('Use Home as scenario start');
-  await click('Append connection 1 → 2');
-  await click('Append connection 2 → 3');
-  await inspectScreen(document,{title:'Mid'},{number:2});
-  await click('Copy Visible text · Mid to Visit 2');
-  await inspectScreen(document,{title:'End'},{number:3});
-  await click('Copy Visible text · End to Visit 3');
-  await click('Finish sequence');
-  await click('Save workspace');
+  if(!legacy){
+   await click('New scenario');
+   await click('Use Home as scenario start');
+   await click('Append connection 1 → 2');
+   await click('Append connection 2 → 3');
+   await inspectScreen(document,{title:'Mid'},{number:2});
+   await click('Copy Visible text · Mid to Visit 2');
+   await inspectScreen(document,{title:'End'},{number:3});
+   await click('Copy Visible text · End to Visit 3');
+   await click('Finish sequence');
+   await click('Save workspace');
+  }else{
+   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,400));await settle();});
+  }
   await work({document,window,click,fill,press,holdNext:()=>{hold=true;returnRunning=true;},failNext:(index=5)=>{fail=true;failIndex=index;},settle});
  }finally{
   releaseHold?.();
@@ -242,5 +263,53 @@ test('shortcuts stay suppressed in fields; failed run announces status',()=>jour
  assert.match(failed.textContent??'',/Failed/);
  assert.equal(inspectorCard(document)!.querySelector('.visit-step-error')?.getAttribute('role'),'alert');
 }));
+
+const warning=(label:string)=>`⚠ "${label}" has no destination. Choose a screen, or set it to Stays on this screen.`;
+function row(document:Document,id:string){return inspectorCard(document)!.querySelector<HTMLElement>(`[data-operation-id="${id}"]`)!;}
+function summaries(document:Document){return [...inspectorCard(document)!.querySelectorAll<HTMLButtonElement>('.visit-step-summary')];}
+function assertReachableStop(document:Document,id:string){
+ const summary=row(document,id).querySelector<HTMLButtonElement>('.visit-step-summary')!;
+ assert.equal(summaries(document).filter(item=>item.tabIndex===0).length,1);
+ assert.equal(summary.tabIndex,0);
+ summary.focus();
+ assert.equal(document.activeElement,summary);
+}
+
+test('a persisted legacy stay row before visit steps keeps one reachable summary stop',()=>journey(async({document})=>{
+ await inspectScreen(document,{title:'Home'},{number:1});
+ assert.equal(row(document,'gear').querySelector('.visit-step-summary'),null);
+ assert.equal(row(document,'gear').querySelector<HTMLSelectElement>('select[aria-label$=" destination"]')!.selectedOptions[0].textContent,'Stays on this screen');
+ assert.equal(row(document,'profile').querySelector('.destination-warning p')?.textContent,warning('open Profile'));
+ assertReachableStop(document,'home-ready');
+},'stay'));
+
+test('a persisted focused visit step that becomes a legacy stay row keeps one reachable summary stop',()=>journey(async({document,window,click,settle})=>{
+ await inspectScreen(document,{title:'Home'},{number:1});
+ const gear=row(document,'gear').querySelector<HTMLButtonElement>('.visit-step-summary')!;
+ assert.equal(gear.tabIndex,0);
+ await act(async()=>gear.click());
+ const select=row(document,'gear').querySelector<HTMLSelectElement>('select[aria-label$=" destination"]')!;
+ const stays=[...select.options].find(option=>option.textContent==='Stays on this screen')!.value;
+ await act(async()=>{
+  Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype,'value')!.set!.call(select,stays);
+  select.dispatchEvent(new window.Event('change',{bubbles:true}));
+ });
+ const dialog=document.querySelector('[role=alertdialog]');
+ assert.ok(dialog);
+ await act(async()=>[...dialog.querySelectorAll('button')].find(button=>button.textContent==='Remove link')!.click());
+ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,400));await settle();});
+ assert.equal(row(document,'gear').querySelector('.visit-step-summary'),null);
+ assert.equal(row(document,'gear').querySelector<HTMLSelectElement>('select[aria-label$=" destination"]')!.selectedOptions[0].textContent,'Stays on this screen');
+ assert.equal(row(document,'profile').querySelector('.destination-warning p')?.textContent,warning('open Profile'));
+ assertReachableStop(document,'home-ready');
+ await click('Save workspace');
+ await click('Open saved workspace');
+ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,400));await settle();});
+ await inspectScreen(document,{title:'Home'},{number:1});
+ assert.equal(row(document,'gear').querySelector('.visit-step-summary'),null);
+ assert.equal(row(document,'gear').querySelector<HTMLSelectElement>('select[aria-label$=" destination"]')!.selectedOptions[0].textContent,'Stays on this screen');
+ assert.equal(row(document,'profile').querySelector('.destination-warning p')?.textContent,warning('open Profile'));
+ assertReachableStop(document,'home-ready');
+},'linked'));
 
 });
