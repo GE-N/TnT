@@ -94,6 +94,8 @@ test('the sequence bar keeps its contents and the Scenarios trigger opens the de
   const trigger=document.querySelector<HTMLButtonElement>('[data-testid="scenario-bar-trigger"]')!;
   assert.equal(trigger.getAttribute('aria-label'),'Scenarios');
   assert.equal(trigger.getAttribute('title'),'Scenarios');
+  assert.equal(trigger.querySelector('.scenario-bar-tooltip'),null);
+  assert.doesNotMatch(css,/\.scenario-bar-tooltip/);
   assert.equal(trigger.getAttribute('aria-haspopup'),'dialog');
   assert.equal(trigger.getAttribute('aria-expanded'),'false');
   assert.equal(trigger.querySelectorAll('path')[1].getAttribute('d'),'M15 14.5l2.5 2.5 2.5-2.5');
