@@ -72,6 +72,14 @@ export function createScriptTrustStore(directory:string,faults?:{beforeList?:()=
    if(trimImportedTombstones(state,workspace.id,active))changed=true;
    if(changed)await write(state);
   }),
+  // Authoring undo drops imported rows it created. Local approvals are never removed here.
+  forget:(workspaceId:string,rowIds:readonly string[])=>serialize(async()=>{
+   if(!rowIds.length)return;
+   const state=await read();const entries=state.workspaces[workspaceId];if(!entries)return;
+   let changed=false;
+   for(const id of rowIds)if(entries[id]?.origin==='imported'){delete entries[id];changed=true;}
+   if(changed)await write(state);
+  }),
   approve:(workspace:Workspace,rowId:string,hash:string)=>serialize(async()=>{
    const row=workspaceScripts(workspace).find(row=>row.id===rowId);
    if(!row)throw new Error('Unknown script row.');
