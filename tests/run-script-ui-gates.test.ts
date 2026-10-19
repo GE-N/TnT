@@ -135,7 +135,7 @@ test('duplicate posts the saved revision and adopts the server ids',async()=>{
   try{
     const document=page.dom.window.document;
     await openScenarioPanel(document,act);
-    const row=document.querySelector<HTMLElement>('[aria-label="Scenario list"] [aria-pressed="true"]')!;
+    const row=document.querySelector<HTMLElement>('[aria-label="Scenario list"] [aria-current="true"]')!;
     assert.equal(row.textContent,'Paid');
     await act(async()=>row.parentElement!.dispatchEvent(new page.dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:20,clientY:20})));
     const duplicate=[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button=>button.textContent==='Duplicate');
@@ -143,7 +143,7 @@ test('duplicate posts the saved revision and adopts the server ids',async()=>{
     await act(async()=>{duplicate.click();for(let i=0;i<12;i++)await new Promise(resolve=>setImmediate(resolve));});
     assert.deepEqual(page.duplicates,[{workspaceId:'saved',scenarioId:'paid',expectedRevision:1}]);
     await openScenarioPanel(document,act);
-    assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')?.textContent,'From server');
+    assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')?.textContent,'From server');
     await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Visit 1 · Home"]')?.click());
     assert.equal(document.querySelector('[data-script-id="script-server"]')?.getAttribute('data-script-id'),'script-server');
     assert.equal(document.querySelector('[data-script-id="script-paid"]'),null);

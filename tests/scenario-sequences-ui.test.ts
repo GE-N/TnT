@@ -39,9 +39,9 @@ async function journey(work:(ui:{document:Document;selectedCommand:(label:string
  const fetch=(path:string,options?:{body?:string})=>{const result=request(path,options);pending.push(result);return result;};
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetch:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root')!);
- const click=async(label:string)=>{const owner=inspectorOwner(label);if(owner)await inspectScreen(document,{title:owner});if(await addVisitStep(document,label))return;await commitVisitEdits(document);if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',async()=>{do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});const scenarioMatch=(node:HTMLElement)=>node.getAttribute('data-testid')!=='scenario-bar-trigger'&&(node.getAttribute('aria-label')??node.textContent)===label;const scenarioReady=()=>label.startsWith('Actions for ')?!!document.querySelector('[aria-label="Scenario list"]'):[...document.querySelectorAll<HTMLElement>('button,summary')].some(scenarioMatch);if(!scenarioReady())await openScenarioPanel(document,act);return act(async()=>{if(label.startsWith('Actions for ')){const name=label.slice('Actions for '.length);const row=[...document.querySelectorAll<HTMLElement>('[aria-label="Scenario list"] [aria-pressed]')].find(node=>node.textContent===name);assert.ok(row,name);row.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:150,clientY:150}));return;}const node=[...document.querySelectorAll<HTMLElement>('[role="menu"] button'),...document.querySelectorAll<HTMLElement>('button,summary')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(node,label);assert.ok(!(node as HTMLButtonElement).disabled,label+' is enabled');node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);})};
- const selectedCommand=async(label:string)=>{await openScenarioPanel(document,act);await click('Actions for '+document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent);await click(label);};
- const fillRaw=async(label:string,value:string)=>{if(label==='Scenario name'||label==='Search scenarios'||label==='Rename scenario')await openScenarioPanel(document,act);if(label==='Scenario name'){const selected=document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!;await click('Actions for '+selected.textContent);await click('Rename');await fill('Rename scenario',value);await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));return;}return act(async()=>{const node=document.querySelector('[aria-label="'+label+'"]')??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});};
+ const click=async(label:string)=>{const owner=inspectorOwner(label);if(owner)await inspectScreen(document,{title:owner});if(await addVisitStep(document,label))return;await commitVisitEdits(document);if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',async()=>{do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});const scenarioMatch=(node:HTMLElement)=>node.getAttribute('data-testid')!=='scenario-bar-trigger'&&(node.getAttribute('aria-label')??node.textContent)===label;const scenarioReady=()=>label.startsWith('Actions for ')?!!document.querySelector('[aria-label="Scenario list"]'):[...document.querySelectorAll<HTMLElement>('button,summary')].some(scenarioMatch);if(!scenarioReady())await openScenarioPanel(document,act);return act(async()=>{if(label.startsWith('Actions for ')){const name=label.slice('Actions for '.length);const row=[...document.querySelectorAll<HTMLElement>('[aria-label="Scenario list"] .scenario-select')].find(node=>node.textContent===name);assert.ok(row,name);row.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:150,clientY:150}));return;}const node=[...document.querySelectorAll<HTMLElement>('[role="menu"] button'),...document.querySelectorAll<HTMLElement>('button,summary')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(node,label);assert.ok(!(node as HTMLButtonElement).disabled,label+' is enabled');node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);})};
+ const selectedCommand=async(label:string)=>{await openScenarioPanel(document,act);await click('Actions for '+document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!.textContent);await click(label);};
+ const fillRaw=async(label:string,value:string)=>{if(label==='Scenario name'||label==='Search scenarios'||label==='Rename scenario')await openScenarioPanel(document,act);if(label==='Scenario name'){const selected=document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!;await click('Actions for '+selected.textContent);await click('Rename');await fill('Rename scenario',value);await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));return;}return act(async()=>{const node=document.querySelector('[aria-label="'+label+'"]')??document.getElementById([...document.querySelectorAll('label')].find(node=>node.textContent===label)?.htmlFor??'');assert.ok(node,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});};
  const fill=async(label:string,value:string)=>{await editVisitField(document,label);await fillRaw(label,value);await commitVisitEdits(document);};
  try{await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));await click('Open saved workspace');await work({document,selectedCommand,click,fill,saved:()=>service.workspace(workspace.id),service,failNext:(index=3)=>{fail=true;failIndex=index;},holdNext:()=>{hold=true;liveBatch=true;},calls:()=>runCalls});}
  finally{if(batchId){const batch=await service.batch(batchId);if(batch.status==='running'||batch.status==='cancelling')await service.cancelBatch(batchId);await service.waitBatch(batchId);}await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
@@ -262,7 +262,7 @@ test('Run all shows independent batch outcomes and opens reports without changin
  assert.match(batch.textContent!,/completed/);assert.match(batch.textContent!,/Batch journey 1 · passed/);assert.match(batch.textContent!,/Batch journey 2 · passed/);assert.match(batch.textContent!,/Batch journey 3 · passed/);
  assert.equal(document.querySelectorAll('[aria-label="Scenario reports"] button').length,3);
  await click('Open report for Batch journey 1');assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Batch journey 1');
- assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Batch journey 3');
+ assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!.textContent,'Batch journey 3');
  await fill('Scenario name','Later edit');await click('Save workspace');
  assert.match(batch.textContent!,/Batch journey 3/);assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Batch journey 1');
 }));
@@ -282,7 +282,7 @@ test('batch sidebar shows running and queued states and cancels the remaining qu
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,1100));});
  const report=document.querySelector('[aria-label="Batch report"]')!;
  assert.match(report.textContent!,/Queued 1 · running/);assert.match(report.textContent!,/Queued 2 · queued/);
- await click('Cancel batch');assert.match(report.textContent!,/Batch · cancelled/);assert.match(report.textContent!,/Queued 1 · cancelled/);assert.match(report.textContent!,/Queued 2 · not-run/);assert.equal(calls(),1);
+ await click('Stop scenario');assert.match(report.textContent!,/Batch · cancelled/);assert.match(report.textContent!,/Queued 1 · cancelled/);assert.match(report.textContent!,/Queued 2 · not-run/);assert.equal(calls(),1);
  await click('Open report for Queued 1');assert.equal(document.querySelector('.result-tag')!.textContent,'cancelled');
 }));
 
@@ -291,10 +291,10 @@ test('row run targets an unselected scenario and search leaves saved order and b
  for(let index=1;index<=12;index++){await click('New scenario');await fill('Scenario name','Case '+index);await click('Use 1 as scenario start');}
  await click('Save workspace');const before=await saved();
  await fill('Search scenarios','Case 1');
- assert.equal(document.querySelectorAll('[aria-label="Scenario list"] [aria-pressed]').length,4);
+ assert.equal(document.querySelectorAll('[aria-label="Scenario list"] .scenario-select').length,4);
  await click('Run Case 1');assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Case 1');
  await click('Clear search');await click('Actions for Case 2');await click('Run scenario');assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Case 2');
- assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Case 12');
+ assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!.textContent,'Case 12');
  await fill('Search scenarios','Case 1');await click('Run all');
  assert.deepEqual([...document.querySelectorAll('[aria-label="Batch report"] button')].map(button=>button.textContent),before.scenarios!.map(item=>'Open report for '+item.name));
  assert.deepEqual((await saved()).scenarios,before.scenarios);
@@ -309,13 +309,13 @@ test('row rename commits or cancels without changing identity, sequence or histo
  assert.ok([...document.querySelectorAll('button')].some(button=>button.textContent==='Original name'));
  await click('Actions for Original name');await click('Rename');await fill('Rename scenario','   ');
  await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
- assert.match(document.querySelector('[data-testid="scenario-panel"] [role="alert"]')!.textContent!,/nonempty/);
+ assert.match(document.querySelector('[data-testid="scenario-panel"] [role="alert"]')!.textContent!,/1.120 characters/);
  await fill('Rename scenario','  Updated name  ');await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
  await click('Save workspace');const after=await saved();
  assert.deepEqual(after.scenarios,[{...before.scenarios![0],name:'Updated name'}]);
  assert.deepEqual(after.canvas!.paths,[{...before.canvas!.paths[0],name:'Updated name'}]);
  assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Original name');
- await click('Open saved workspace');await openScenarioPanel(document,act);assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Updated name');
+ await click('Open saved workspace');await openScenarioPanel(document,act);assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!.textContent,'Updated name');
 }));
 
 
@@ -324,16 +324,19 @@ test('deleting an unselected row and undo restores saved references without over
  await click('Actions for Original');await click('Duplicate');await fill('Scenario name','Other');await click('Save workspace');const initial=await saved();initial.canvas!.screens[0].tests[0].scenarioIds=initial.scenarios!.map(item=>item.id);await service.save(initial);await click('Open saved workspace');await click('Other');await click('Run Original');const before=await saved();
  await click('Actions for Original');await click('Delete');
  assert.match(document.querySelector('[data-testid="scenario-panel"] [role="status"]')!.textContent!,/\u201COriginal\u201D deleted/);
- assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Other');
- await fill('Scenario name','Later edit');await click('Save workspace');assert.equal((await saved()).scenarios!.length,1);
- assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Original');
+ assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!.textContent,'Other');
  await click('Undo');await click('Save workspace');const restored=await saved();
- assert.deepEqual(restored.scenarios,[before.scenarios![0],{...before.scenarios![1],name:'Later edit'}]);
- assert.deepEqual(restored.canvas!.paths,[before.canvas!.paths[0],{...before.canvas!.paths[1],name:'Later edit'}]);
+ assert.deepEqual(restored.scenarios,before.scenarios);
+ assert.deepEqual(restored.canvas!.paths,before.canvas!.paths);
+ assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Original');
+ await fill('Scenario name','Later edit');assert.equal(document.querySelector('.scenario-undo'),null);
+ await click('Save workspace');const edited=await saved();
+ assert.deepEqual(edited.scenarios,[before.scenarios![0],{...before.scenarios![1],name:'Later edit'}]);
+ assert.deepEqual(edited.canvas!.paths,[before.canvas!.paths[0],{...before.canvas!.paths[1],name:'Later edit'}]);
  assert.deepEqual(restored.canvas!.screens,before.canvas!.screens);
  await click('Open saved workspace');await click('Original');await click('Actions for Original');await click('Delete');await click('Actions for Later edit');await click('Delete');
  assert.match(document.querySelector('[aria-label="Scenario list"]')!.textContent!,/No scenarios yet/);await click('Save workspace');assert.equal((await saved()).scenarios!.length,0);
- await click('Undo');assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Later edit');await click('Save workspace');await click('Open saved workspace');assert.equal((await saved()).scenarios![0].name,'Later edit');
+ await click('Undo');assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!.textContent,'Later edit');await click('Save workspace');await click('Open saved workspace');assert.equal((await saved()).scenarios![0].name,'Later edit');
 }));
 
 
@@ -348,7 +351,7 @@ test('right click and keyboard menus expose identical row commands without selec
  await act(async()=>document.activeElement!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
  await act(async()=>first.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true})));
  assert.deepEqual([...document.querySelectorAll('[role="menuitem"],[role="menuitemcheckbox"]')].map(node=>node.textContent),commands);
- assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Second');
+ assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!.textContent,'Second');
  await click('Rename');await fill('Rename scenario','Discard this');await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(document.activeElement!.textContent,'First');
 }));
 
@@ -357,7 +360,7 @@ test('an unselected row can duplicate its definition and dismissal clears the la
  await click('New scenario');await fill('Scenario name','Target');await click('Use 1 as scenario start');await click('Save workspace');const before=await saved();
  await click('New scenario');await fill('Scenario name','Selected');await click('Actions for Target');await click('Duplicate');await openScenarioPanel(document,act);await click('Save workspace');const after=await saved();
  assert.deepEqual(after.scenarios![2],{...before.scenarios![0],id:after.scenarios![2].id,pathId:after.scenarios![2].pathId,name:'Target copy'});
- assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-pressed="true"]')!.textContent,'Target copy');
+ assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!.textContent,'Target copy');
  await click('Actions for Target');await click('Delete');await act(async()=>document.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(document.querySelector('[data-testid="scenario-panel"]'),null);
  await click('Save workspace');await click('Open saved workspace');assert.deepEqual((await saved()).scenarios!.map(item=>item.name),['Selected','Target copy']);
 }));
@@ -369,12 +372,12 @@ test('authors can create, duplicate, restore and run more than twenty scenarios 
  workspace.canvas!.screens[0].tests[0].scenarioIds=workspace.scenarios!.map(item=>item.id);await service.save(workspace);await click('Open saved workspace');
  await selectedCommand('Duplicate');await fill('Scenario name','Large copy');await click('Save workspace');workspace=await saved();
  assert.equal(workspace.scenarios!.length,22);assert.equal(workspace.canvas!.paths.length,22);assert.equal(workspace.canvas!.screens[0].tests[0].scenarioIds!.length,22);
- await selectedCommand('Delete');await click('New scenario');await fill('Scenario name','Later draft');await click('Undo');await click('Save workspace');
+ await selectedCommand('Delete');await click('Undo');await click('New scenario');await fill('Scenario name','Later draft');await click('Save workspace');
  const restored=await saved();assert.equal(restored.scenarios!.length,23);assert.equal(restored.canvas!.paths.length,23);assert.deepEqual(restored.canvas!.screens[0].tests[0].scenarioIds,workspace.canvas!.screens[0].tests[0].scenarioIds);
  await click('Open saved workspace');await click('Run all');
  const batch=document.querySelector('[aria-label="Batch report"]')!;assert.match(batch.textContent!,/Later draft · not-run/);
  assert.deepEqual([...batch.querySelectorAll('button')].map(button=>button.textContent),restored.scenarios!.slice(0,-1).map(item=>'Open report for '+item.name));
- const create=document.querySelector('[aria-label="Scenarios"] button[aria-label="New scenario"]')!;assert.equal(create.textContent,'+');
+ const create=document.querySelector('[aria-label="Scenarios"] button[aria-label="New scenario"]')!;assert.equal(create.textContent,'New');
  assert.equal(document.querySelector('[aria-label="Scenarios"] button[aria-label^="Actions for "]'),null);
 }));
 
@@ -459,5 +462,5 @@ test('the workspace library remains browsable during a batch while switching, Ne
  for(const label of ['New workspace','Save a copy','Rename workspace'])assert.equal([...manager.querySelectorAll<HTMLButtonElement>('button')].find(button=>(button.getAttribute('aria-label')??button.textContent)===label)?.disabled,true);
  assert.ok(document.querySelector<HTMLButtonElement>('.workspace-library button')?.disabled);
  assert.match(manager.textContent!,/Active execution/);
- await click('Close workspace manager');await click('Cancel batch');
+ await click('Close workspace manager');await click('Stop scenario');
 }));
