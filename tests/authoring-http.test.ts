@@ -95,11 +95,12 @@ test('authoring routes enforce the session token and contract status codes witho
     const good = await goodResponse.json();
     assertNoSecrets(good);
     assert.equal(good.applicable, true);
-    const appliedResponse = await h.request('/api/authoring/apply', {workspaceId: h.workspace.id, expectedRevision: h.workspace.metadata!.revision, previewId: good.previewId, idempotencyKey: 'http', acknowledgedAssumptionKeys: []}, headers);
+    const appliedResponse = await h.request('/api/authoring/apply', {workspaceId: h.workspace.id, expectedRevision: h.workspace.metadata!.revision, previewId: good.previewId, idempotencyKey: 'http', acknowledgedAssumptionKeys: [], authoring: 'ai'}, headers);
     assert.equal(appliedResponse.status, 200);
     const applied = await appliedResponse.json();
     assertNoSecrets(applied);
-    assert.equal(applied.authoring, 'external');
+    assert.equal(applied.authoring, 'ai');
+    assert.match(applied.receiptId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     const readResponse = await h.request(`/api/authoring/flows/${applied.scenarioId}?workspaceId=${h.workspace.id}`, undefined, headers);
     assert.equal(readResponse.status, 200);
     const read = await readResponse.json();
@@ -112,10 +113,7 @@ test('authoring routes enforce the session token and contract status codes witho
     assert.equal(unknownScenario.status, 404);
     const undoResponse = await h.request('/api/authoring/undo', {workspaceId: h.workspace.id, expectedRevision: applied.revision, receiptId: '00000000-0000-4000-8000-000000000099'}, headers);
     assert.equal(undoResponse.status, 404);
-    const {readdir} = await import('node:fs/promises');
-    const {join} = await import('node:path');
-    const receiptId = (await readdir(join(h.f.root, '.tnt', 'authoring-journal'))).find(name => name.endsWith('.json'))!.replace(/\.json$/, '');
-    const undone = await h.request('/api/authoring/undo', {workspaceId: h.workspace.id, expectedRevision: applied.revision, receiptId}, headers);
+    const undone = await h.request('/api/authoring/undo', {workspaceId: h.workspace.id, expectedRevision: applied.revision, receiptId: applied.receiptId}, headers);
     assert.equal(undone.status, 200);
     const undoneBody = await undone.json();
     assertNoSecrets(undoneBody);

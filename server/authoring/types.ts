@@ -92,6 +92,7 @@ export type Preview = {
 };
 
 export type ApplyResult = {
+  receiptId: string;
   workspaceId: string;
   revision: number;
   scenarioId: string;

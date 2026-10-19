@@ -154,9 +154,10 @@ test('undo restores the pre-apply workspace byte-for-byte and removes imported t
     const opened = await openPreview(f.service, before);
     const applied = await f.service.authoring.apply({workspaceId: before.id, expectedRevision: opened.revision, previewId: opened.preview.previewId, idempotencyKey: 'undo-me', acknowledgedAssumptionKeys: []}, undefined, {authoring: 'ai'});
     assert.equal(applied.authoring, 'ai');
+    assert.equal(applied.receiptId, await journalId(f.root));
     const created = (await f.service.scriptTrust(before.id)).scripts.map(item => item.rowId);
     assert.equal(created.length, 3);
-    const undone = await f.service.authoring.undo({workspaceId: before.id, expectedRevision: applied.revision, receiptId: (await journalId(f.root))});
+    const undone = await f.service.authoring.undo({workspaceId: before.id, expectedRevision: applied.revision, receiptId: applied.receiptId});
     const restored = await f.service.workspace(before.id);
     assert.deepEqual(contentOf(restored), contentOf(before));
     assert.ok((restored.metadata?.revision ?? 0) > applied.revision);

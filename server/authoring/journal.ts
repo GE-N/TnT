@@ -69,8 +69,11 @@ export function createJournal(root: string, now: () => Date) {
     }
   }
   function view(entry: JournalEntry): JournalEntry {
-    if (Date.parse(entry.expiresAt) > now().getTime()) return entry;
-    return {...entry, status: 'expired', proposed: undefined, reverse: undefined};
+    // Receipts written before receiptId existed still undo by the journal entry id.
+    const receipt = entry.receipt?.receiptId ? entry.receipt : entry.receipt ? {...entry.receipt, receiptId: entry.id} : undefined;
+    const current = receipt && receipt !== entry.receipt ? {...entry, receipt} : entry;
+    if (Date.parse(current.expiresAt) > now().getTime()) return current;
+    return {...current, status: 'expired', proposed: undefined, reverse: undefined};
   }
   async function readAll() {
     let names: string[] = [];
@@ -119,6 +122,7 @@ export async function reconcileJournal(journal: ReturnType<typeof createJournal>
 
 export function receiptFrom(entry: JournalEntry, revision: number): ApplyResult {
   return {
+    receiptId: entry.id,
     workspaceId: entry.workspaceId,
     revision,
     scenarioId: entry.intended.scenarioId,

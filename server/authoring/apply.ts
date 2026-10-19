@@ -37,6 +37,12 @@ function assumptionKeys(value: unknown) {
   return value as string[];
 }
 
+function requestedAuthoring(value: unknown): AuthoringProvenance | undefined {
+  if (value === undefined) return;
+  if (value === 'ai' || value === 'external') return value;
+  throw authoringError(400, 'INVALID_ENVELOPE', 'authoring must be ai or external.');
+}
+
 function idempotencyKey(value: unknown) {
   if (typeof value !== 'string' || value.length < 1 || value.length > 200 || /[\u0000-\u001F\u007F]/.test(value)) throw authoringError(400, 'INVALID_ENVELOPE', 'Provide an idempotencyKey.');
   return value;
@@ -52,14 +58,14 @@ async function saveWorkspace(deps: AuthoringDeps, content: Workspace, expectedRe
 
 export async function applyFlow(deps: AuthoringDeps, previews: ReturnType<typeof createPreviewStore>, journal: ReturnType<typeof createJournal>, ready: Promise<void>, input: unknown, topKeys: string[] | undefined, options?: {clientId?: string; authoring?: AuthoringProvenance}) {
   await ready;
-  const body = assertEnvelope(input, topKeys, ['workspaceId', 'expectedRevision', 'previewId', 'idempotencyKey', 'acknowledgedAssumptionKeys']);
+  const body = assertEnvelope(input, topKeys, ['workspaceId', 'expectedRevision', 'previewId', 'idempotencyKey', 'acknowledgedAssumptionKeys', 'authoring']);
   const workspaceId = requireWorkspaceId(body.workspaceId);
   const expectedRevision = requireRevision(body.expectedRevision);
   const previewId = requireString(body.previewId, 'a previewId');
   const key = idempotencyKey(body.idempotencyKey);
   const acknowledged = assumptionKeys(body.acknowledgedAssumptionKeys);
   const clientId = options?.clientId ?? 'workbench';
-  const authoring = options?.authoring ?? 'external';
+  const authoring = requestedAuthoring(body.authoring) ?? options?.authoring ?? 'external';
   const hash = contentHash({workspaceId, expectedRevision, previewId, idempotencyKey: key, acknowledgedAssumptionKeys: acknowledged, authoring});
   const existing = await journal.find(clientId, workspaceId, key);
   if (existing) return resume(deps, journal, existing, hash);
