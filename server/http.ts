@@ -1,3 +1,6 @@
+import {AuthoringHttpError} from './authoring/errors.js';
+import {decodeAuthoringJson} from './authoring/schema.js';
+import {REQUEST_LIMIT} from './authoring/types.js';
 import {ScriptBlocked} from './script-validation.js';
 import {ScriptTrustConflict} from './script-trust-store.js';
 import {DraftConflict,WorkspaceConflict,WorkspacePayloadTooLarge} from './workspace-store.js';
@@ -81,6 +84,12 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         if(request.method==='POST'&&lifecycle)return json(200,lifecycle[2]==='trash'?await scenarios.trashWorkspace(lifecycle[1]):await scenarios.restoreWorkspace(lifecycle[1]));
         const management = /^\/api\/workspaces\/([0-9a-f-]{36})\/(open|rename)$/.exec(url.pathname);
         if(request.method==='POST' && management){const input=await readJson(request);return json(200,management[2]==='open'?await scenarios.openWorkspace(management[1]):await scenarios.renameWorkspace(management[1],input.name,input.expectedRevision));}
+        if (request.method === 'POST' && url.pathname === '/api/authoring/context') { const body = await readAuthoring(request); return json(200, await scenarios.authoring.context(body.value, body.topKeys)); }
+        if (request.method === 'POST' && url.pathname === '/api/authoring/preview') { const body = await readAuthoring(request); return json(200, await scenarios.authoring.preview(body.value, body.topKeys)); }
+        if (request.method === 'POST' && url.pathname === '/api/authoring/apply') { const body = await readAuthoring(request); return json(200, await scenarios.authoring.apply(body.value, body.topKeys)); }
+        if (request.method === 'POST' && url.pathname === '/api/authoring/undo') { const body = await readAuthoring(request); return json(200, await scenarios.authoring.undo(body.value, body.topKeys)); }
+        const flow = /^\/api\/authoring\/flows\/([A-Za-z][A-Za-z0-9_-]{0,63})$/.exec(url.pathname);
+        if (request.method === 'GET' && flow) return json(200, await scenarios.authoring.readBack(flow[1], url.searchParams.get('workspaceId')));
         const workspace = /^\/api\/workspaces\/([0-9a-f-]{36})$/.exec(url.pathname);
         if (request.method === 'GET' && workspace) return json(200, await scenarios.workspaceDetail(workspace[1]));
         if (request.method === 'POST' && url.pathname === '/api/batches') return json(202, await scenarios.startBatch(await readJson(request)));
@@ -131,12 +140,22 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       }
       return json(404, { error: 'Unknown runner operation.' });
     } catch (error) {
+      if (error instanceof AuthoringHttpError) return json(error.status, error.body);
       if(error instanceof ScriptBlocked)return json(url.pathname==='/api/runs'?422:400,{blocked:error.blocked,error:error.message});
       if(error instanceof ScriptTrustConflict)return json(409,{error:error.message});
       const code = (error as NodeJS.ErrnoException).code;
       return json(error instanceof WorkspacePayloadTooLarge?413:error instanceof WorkspaceConflict||error instanceof DraftConflict?409:code === 'ENOENT' ? 404 : 400, { error: message(error) });
     }
   };
+}
+
+async function readAuthoring(request: IncomingMessage) {
+  let body = '';
+  for await (const chunk of request) {
+    body += chunk.toString();
+    if (Buffer.byteLength(body) > REQUEST_LIMIT) throw new AuthoringHttpError(413, 'REQUEST_TOO_LARGE', `Authoring request exceeds ${REQUEST_LIMIT} bytes.`);
+  }
+  return decodeAuthoringJson(body);
 }
 
 async function readJson(request: IncomingMessage, limit = 1_100_000) {
