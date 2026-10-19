@@ -4,6 +4,8 @@ import type {FlowModelProvider} from './providers/types.js';
 import {createJobStore, type GenerationView} from './store.js';
 import type {Preview} from '../authoring/types.js';
 
+export type {GenerationView};
+
 export type AiService = {
   ready: Promise<void>;
   idle(): Promise<void>;

@@ -33,6 +33,8 @@ export type GenerationView = {
   previewId?: string;
   preview?: Preview;
   previewExpiresAt?: string;
+  /** Finished jobs only. The UI re-previews this draft without another model call. */
+  draft?: unknown;
   error?: JobError;
 };
 
@@ -163,6 +165,7 @@ export function generationView(job: StoredJob, now: number): GenerationView {
     expiresAt: job.expiresAt,
     ...(job.previewId ? {previewId: job.previewId} : {}),
     ...(previewFresh ? {preview: job.preview, previewExpiresAt: job.previewExpiresAt} : {}),
+    ...(job.state !== 'running' && job.draft !== undefined ? {draft: job.draft} : {}),
     ...(job.error ? {error: {code: job.error.code, message: job.error.message, retryable: job.error.retryable}} : {}),
   };
 }

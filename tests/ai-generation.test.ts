@@ -85,13 +85,14 @@ test('a valid draft becomes an applicable preview and the prompt stays out of lo
     assert.equal(started.phase, 'context');
     assert.equal(started.provenance, 'ai');
     assert.equal(started.contractVersion, 1);
+    assert.equal(started.draft, undefined);
     const job = await settle(g.ai, started.id);
     assert.equal(job.state, 'pending');
     assert.equal(job.preview?.applicable, true);
     assert.equal(typeof job.previewId, 'string');
+    assert.deepEqual(job.draft, exampleDraft);
     const body = JSON.stringify(job);
     assert.equal(body.includes('UNIQUE_PROMPT_SENTINEL'), false);
-    assert.equal(body.includes(exampleDraft.name), false);
     const stored = await readFile(join(g.f.root, 'ai-jobs', `${started.id}.json`), 'utf8');
     assert.equal(stored.includes('UNIQUE_PROMPT_SENTINEL'), false);
     assert.equal(stored.includes('"draft"'), true);
@@ -137,6 +138,8 @@ test('unresolved facts are not sent back for another repair round', async () => 
     assert.equal(job.state, 'needsInfo');
     assert.equal(job.preview?.applicable, false);
     assert.equal(job.preview?.diagnostics.some(item => item.code === 'UNRESOLVED_TARGET'), true);
+    assert.deepEqual(job.draft, draft);
+    assert.equal(g.logs.join('\n').includes('Home title'), false);
   } finally { await g.cleanup(); }
 });
 
@@ -313,6 +316,7 @@ test('preview bodies expire after 30 minutes and jobs expire after 7 days', asyn
     assert.equal(aged.state, 'pending');
     assert.equal(aged.preview, undefined);
     assert.equal(typeof aged.previewId, 'string');
+    assert.deepEqual(aged.draft, exampleDraft);
     clock += 8 * 24 * 60 * 60 * 1000;
     await assert.rejects(() => g.ai.get(id), (error: unknown) => (error as {status?: number}).status === 404);
   } finally { await g.cleanup(); }
