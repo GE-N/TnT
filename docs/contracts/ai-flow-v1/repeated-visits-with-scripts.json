@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "mode": "createScenario",
+  "name": "Home → Details → Home with scripts",
+  "appId": "com.example.TnTProof",
+  "parameters": [],
+  "execution": {
+    "setup": {
+      "kind": "launchApp"
+    },
+    "handlerRefs": [],
+    "mock": {
+      "kind": "none"
+    }
+  },
+  "screens": [
+    {
+      "key": "home",
+      "kind": "create",
+      "title": "Home"
+    },
+    {
+      "key": "details",
+      "kind": "create",
+      "title": "Details"
+    }
+  ],
+  "visits": [
+    {
+      "key": "homeFirst",
+      "screenKey": "home",
+      "operations": [
+        {
+          "key": "homeVisible",
+          "kind": "checkVisible",
+          "target": {
+            "kind": "selector",
+            "selector": {
+              "target": "id",
+              "match": "exact",
+              "value": "home-title"
+            }
+          }
+        },
+        {
+          "key": "openDetails",
+          "kind": "tap",
+          "target": {
+            "kind": "selector",
+            "selector": {
+              "target": "id",
+              "match": "exact",
+              "value": "open-details"
+            }
+          },
+          "destination": {
+            "kind": "visit",
+            "visitKey": "detailsVisit"
+          }
+        }
+      ]
+    },
+    {
+      "key": "detailsVisit",
+      "screenKey": "details",
+      "operations": [
+        {
+          "key": "detailsVisible",
+          "kind": "checkVisible",
+          "target": {
+            "kind": "selector",
+            "selector": {
+              "target": "id",
+              "match": "exact",
+              "value": "details-title"
+            }
+          }
+        },
+        {
+          "key": "goBack",
+          "kind": "back",
+          "target": {
+            "kind": "selector",
+            "selector": {
+              "target": "id",
+              "match": "exact",
+              "value": "back-button"
+            }
+          },
+          "destination": {
+            "kind": "visit",
+            "visitKey": "homeReturn"
+          }
+        }
+      ]
+    },
+    {
+      "key": "homeReturn",
+      "screenKey": "home",
+      "operations": [
+        {
+          "key": "homeAgain",
+          "kind": "checkVisible",
+          "target": {
+            "kind": "selector",
+            "selector": {
+              "target": "id",
+              "match": "exact",
+              "value": "home-title"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "scripts": [
+    {
+      "key": "prepare",
+      "label": "Initialize script state",
+      "language": "maestro-javascript",
+      "source": "output.tntExample = \"prepared\";",
+      "placement": {
+        "kind": "beforeOperation",
+        "visitKey": "homeFirst",
+        "operationKey": "openDetails"
+      },
+      "requires": {
+        "parameters": [],
+        "mockSession": false
+      }
+    },
+    {
+      "key": "verifyState",
+      "label": "Check prepared script state",
+      "language": "maestro-javascript",
+      "source": "if (output.tntExample !== \"prepared\") throw new Error(\"State missing\");",
+      "placement": {
+        "kind": "beforeOperation",
+        "visitKey": "homeFirst",
+        "operationKey": "openDetails"
+      },
+      "requires": {
+        "parameters": [],
+        "mockSession": false
+      }
+    },
+    {
+      "key": "finish",
+      "label": "Finish after returning Home",
+      "language": "maestro-javascript",
+      "source": "output.tntExample = \"finished\";",
+      "placement": {
+        "kind": "scenarioEnd"
+      },
+      "requires": {
+        "parameters": [],
+        "mockSession": false
+      }
+    }
+  ],
+  "assumptions": []
+}
