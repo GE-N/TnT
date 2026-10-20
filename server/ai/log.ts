@@ -5,9 +5,13 @@ export type AiLogEvent = {
   durationMs: number;
   inputTokens?: number;
   outputTokens?: number;
+  cost?: number;
   contractVersion: number;
   diagnosticCodes: string[];
   outcome: string;
+  requestId?: string;
+  upstreamProvider?: string;
+  callCount?: number;
 };
 
 export function formatAiLog(event: AiLogEvent) {
@@ -20,7 +24,11 @@ export function formatAiLog(event: AiLogEvent) {
     diagnosticCodes: event.diagnosticCodes,
     outcome: event.outcome,
   };
+  if (event.requestId !== undefined) line.requestId = event.requestId;
+  if (event.upstreamProvider !== undefined) line.upstreamProvider = event.upstreamProvider;
+  if (event.callCount !== undefined) line.callCount = event.callCount;
   if (event.inputTokens !== undefined) line.inputTokens = event.inputTokens;
   if (event.outputTokens !== undefined) line.outputTokens = event.outputTokens;
+  if (event.cost !== undefined) line.cost = event.cost;
   return JSON.stringify(line);
 }

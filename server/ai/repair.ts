@@ -1,6 +1,7 @@
 import type {Diagnostic} from '../authoring/types.js';
 
-export const MAX_REPAIR_ROUNDS = 2;
+/** One repair call per submission. It counts against the two-post budget. */
+export const MAX_REPAIR_ROUNDS = 1;
 
 /** Facts the user must supply. Another model round cannot discover them. */
 const MISSING_FACT = new Set(['UNRESOLVED_TARGET', 'UNRESOLVED_VALUE']);

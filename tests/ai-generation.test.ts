@@ -4,9 +4,10 @@ import {readFile, stat, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {test} from 'node:test';
 import {createAi} from '../server/ai/index.js';
-import {CALL_TIMEOUT_MS, FIRST_TOKEN_MS, JOB_TIMEOUT_MS, MAX_PROVIDER_RETRIES, RETRY_BACKOFF_MS} from '../server/ai/job.js';
-import {PROMPT_CHAR_LIMIT, packPrompt} from '../server/ai/prompt.js';
+import {MAX_OUTPUT_TOKENS, MAX_PROVIDER_RETRIES, MAX_UPSTREAM_POSTS, RESPONSE_BYTE_LIMIT, SUBMISSION_DEADLINE_MS} from '../server/ai/job.js';
+import {PROMPT_CHAR_LIMIT, REQUEST_BYTE_LIMIT, USER_PROMPT_CHAR_LIMIT, packPrompt} from '../server/ai/prompt.js';
 import {createFakeProvider, type FakeResult} from '../server/ai/providers/fake.js';
+import {createOpenAiCompatibleProvider} from '../server/ai/providers/openai-compatible.js';
 import {ProviderRequestError} from '../server/ai/providers/types.js';
 import {MAX_REPAIR_ROUNDS} from '../server/ai/repair.js';
 import {createApiHandler} from '../server/http.js';
@@ -26,7 +27,7 @@ function abortError() {
   return error;
 }
 
-async function generation(handle: (input: {call: number; system: string; messages: {role: string; content: string}[]}) => FakeResult | Promise<FakeResult>, options: {now?: () => Date; timeouts?: {firstTokenMs?: number; callMs?: number; jobMs?: number}; holdDelay?: boolean} = {}) {
+async function generation(handle: (input: {call: number; system: string; messages: {role: string; content: string}[]}) => FakeResult | Promise<FakeResult>, options: {now?: () => Date; timeouts?: {deadlineMs?: number}; holdDelay?: boolean} = {}) {
   const logs: string[] = [];
   const waits: number[] = [];
   const f = await authoringFixture(options.now ? {now: options.now} : {});
@@ -68,13 +69,15 @@ async function settle<T extends {state: string}>(ai: {get(id: string): Promise<T
 }
 
 test('generation limits match the provider budget', () => {
-  assert.equal(FIRST_TOKEN_MS, 20_000);
-  assert.equal(CALL_TIMEOUT_MS, 90_000);
-  assert.equal(JOB_TIMEOUT_MS, 180_000);
-  assert.deepEqual([...RETRY_BACKOFF_MS], [1_000, 4_000]);
-  assert.equal(MAX_PROVIDER_RETRIES, 2);
-  assert.equal(MAX_REPAIR_ROUNDS, 2);
+  assert.equal(SUBMISSION_DEADLINE_MS, 120_000);
+  assert.equal(MAX_UPSTREAM_POSTS, 2);
+  assert.equal(MAX_PROVIDER_RETRIES, 1);
+  assert.equal(MAX_REPAIR_ROUNDS, 1);
+  assert.equal(MAX_OUTPUT_TOKENS, 8_192);
   assert.equal(PROMPT_CHAR_LIMIT, 4_000);
+  assert.equal(USER_PROMPT_CHAR_LIMIT, 4_000);
+  assert.equal(REQUEST_BYTE_LIMIT, 128 * 1024);
+  assert.equal(RESPONSE_BYTE_LIMIT, 256 * 1024);
 });
 
 test('a valid draft becomes an applicable preview and the prompt stays out of logs and the job file', async () => {
@@ -112,8 +115,8 @@ test('an invalid draft is repaired and a later call stays inside the prompt budg
   let calls = 0;
   const g = await generation(({call, system, messages}) => {
     calls = call;
-    const size = system.length + messages.reduce((total, message) => total + message.content.length, 0);
-    assert.ok(size <= PROMPT_CHAR_LIMIT, `prompt is ${size}`);
+    const size = Buffer.byteLength(system) + messages.reduce((total, message) => total + Buffer.byteLength(message.content), 0);
+    assert.ok(size <= REQUEST_BYTE_LIMIT, `prompt is ${size}`);
     if (call === 1) return {kind: 'ok', text: JSON.stringify(bad)};
     assert.equal(messages.some(message => message.content.includes('INVALID_TRANSITION')), true);
     return {kind: 'ok', text: JSON.stringify(exampleDraft)};
@@ -143,21 +146,21 @@ test('unresolved facts are not sent back for another repair round', async () => 
   } finally { await g.cleanup(); }
 });
 
-test('repair stops after two rounds and keeps the last preview', async () => {
+test('repair stops after one round and keeps the last preview', async () => {
   const bad = structuredClone(exampleDraft) as {visits: {operations: {destination?: {visitKey?: string}}[]}[]};
   bad.visits[0].operations[1].destination!.visitKey = 'missingVisit';
   let calls = 0;
   const g = await generation(({call}) => { calls = call; return {kind: 'ok', text: JSON.stringify(bad)}; });
   try {
     const job = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace))).id);
-    assert.equal(calls, 3);
+    assert.equal(calls, 2);
     assert.equal(job.state, 'needsInfo');
     assert.equal(job.preview?.applicable, false);
     assert.equal(typeof job.previewId, 'string');
   } finally { await g.cleanup(); }
 });
 
-test('a 429 is retried once after Retry-After, ahead of the 1s backoff', async () => {
+test('a 429 is retried once after Retry-After', async () => {
   let calls = 0;
   const g = await generation(({call}) => {
     calls = call;
@@ -172,7 +175,7 @@ test('a 429 is retried once after Retry-After, ahead of the 1s backoff', async (
   } finally { await g.cleanup(); }
 });
 
-test('provider failures stop after two retries and auth failures are not retried', async () => {
+test('a 503 is retried once and auth failures are not retried', async () => {
   let unavailable = 0;
   const busy = await generation(() => {
     unavailable++;
@@ -185,27 +188,29 @@ test('provider failures stop after two retries and auth failures are not retried
   });
   try {
     const failed = await settle(busy.ai, (await busy.ai.start(inputOf(busy.f.workspace))).id);
-    assert.equal(unavailable, 3);
-    assert.deepEqual(busy.waits, [3_000, 4_000]);
+    assert.equal(unavailable, 2);
+    assert.deepEqual(busy.waits, [3_000]);
     assert.equal(failed.state, 'failed');
     assert.equal(failed.error?.code, 'PROVIDER_UNAVAILABLE');
     assert.equal(failed.error?.retryable, true);
     const rejected = await settle(auth.ai, (await auth.ai.start(inputOf(auth.f.workspace))).id);
     assert.equal(authCalls, 1);
     assert.deepEqual(auth.waits, []);
-    assert.equal(rejected.error?.code, 'PROVIDER_AUTH');
+    assert.equal(rejected.error?.code, 'AUTH_FAILED');
     assert.equal(rejected.error?.retryable, false);
   } finally { await busy.cleanup(); await auth.cleanup(); }
 });
 
-test('the first-token timeout fails the job and a late draft is ignored', async () => {
-  const g = await generation(() => ({kind: 'delay', ms: 200, text: JSON.stringify(exampleDraft)}), {timeouts: {firstTokenMs: 40, callMs: 5_000, jobMs: 5_000}});
+test('a timeout fails the job after one call and a late draft is ignored', async () => {
+  let calls = 0;
+  const g = await generation(() => { calls += 1; return {kind: 'delay', ms: 200, text: JSON.stringify(exampleDraft)}; }, {timeouts: {deadlineMs: 40}});
   try {
     const started = await g.ai.start(inputOf(g.f.workspace));
     const job = await settle(g.ai, started.id);
+    assert.equal(calls, 1);
     assert.equal(job.state, 'failed');
-    assert.equal(job.error?.code, 'PROVIDER_TIMEOUT');
-    assert.match(job.error?.message ?? '', /first token/);
+    assert.equal(job.error?.code, 'TIMEOUT');
+    assert.equal(job.error?.retryable, true);
     assert.equal(job.previewId, undefined);
     await new Promise(resolve => setTimeout(resolve, 250));
     const late = await g.ai.get(started.id);
@@ -266,18 +271,19 @@ test('a second generation for the same workspace is GENERATION_BUSY until the fi
   } finally { await g.cleanup(); }
 });
 
-test('packed context stays within 4000 characters', () => {
+test('packed context stays within 128 KiB and reports trimmed optional context', () => {
   const screens = Array.from({length: 80}, (_, index) => ({screenId: `screen${index}`, title: 'T'.repeat(80)}));
-  const targets = Array.from({length: 200}, (_, index) => ({ref: `target${index}`, screenId: 'screen0', role: 'tap', selector: {target: 'id', match: 'exact', value: 'x'.repeat(40)}}));
+  const targets = Array.from({length: 4_000}, (_, index) => ({ref: `target${index}`, screenId: 'screen0', role: 'tap', selector: {target: 'id', match: 'exact', value: 'x'.repeat(80)}}));
+  const prompt = 'Open the home screen';
   const packed = packPrompt({
-    prompt: 'Open the home screen', appId: 'com.example.TnTProof',
+    prompt, appId: 'com.example.TnTProof', extraBytes: 16_000,
     context: {screens, targets, setups: [{ref: 'setup-1', file: 'launch.yaml', parameterNames: ['EMAIL']}], handlers: [], mocks: [], omissions: [{kind: 'mock', reason: 'secret-values-omitted'}], availableScreens: 40, availableTransitions: 80},
   });
-  assert.ok(packed.system.length + packed.user.length <= PROMPT_CHAR_LIMIT);
+  assert.ok(Buffer.byteLength(packed.system) + Buffer.byteLength(packed.user) + 16_000 <= REQUEST_BYTE_LIMIT);
+  assert.equal(packed.contextTrimmed, true);
   assert.equal(packed.user.includes('com.example.TnTProof'), true);
-  assert.equal(packed.user.includes('Open the home screen'), true);
-  assert.equal(packed.user.includes('EMAIL'), true);
-  assert.equal(packed.user.includes('targets omitted:'), true);
+  assert.equal(packed.user.includes(prompt), true);
+  assert.equal(packed.user.includes('targets omitted:') || packed.user.includes('optional context omitted'), true);
 });
 
 test('a restarted workbench drops a poisoned key from a retained job', async () => {
@@ -367,4 +373,380 @@ test('HTTP generation routes poll, reject a busy workspace, and cancel', async (
     await new Promise<void>(resolve => server.close(() => resolve()));
     await g.cleanup();
   }
+});
+
+test('a prompt over 4000 characters is rejected and a 4000 character prompt is sent whole', async () => {
+  let seen = '';
+  const g = await generation(({messages}) => {
+    seen = messages.map(message => message.content).join('\n');
+    return {kind: 'ok', text: JSON.stringify(exampleDraft)};
+  });
+  try {
+    await assert.rejects(() => g.ai.start(inputOf(g.f.workspace, 'x'.repeat(4001))), (error: unknown) => {
+      assert.equal((error as {status?: number; code?: string}).status, 400);
+      assert.equal((error as {code?: string}).code, 'PROMPT_TOO_LONG');
+      return true;
+    });
+    const prompt = `y${'x'.repeat(3998)}z`;
+    assert.equal(prompt.length, 4000);
+    const job = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace, prompt))).id);
+    assert.equal(job.state, 'pending');
+    assert.equal(seen.includes(prompt), true);
+  } finally { await g.cleanup(); }
+});
+
+test('a stale expectedSettingsRevision is SETTINGS_CHANGED and does not start a job', async () => {
+  const g = await generation(() => ({kind: 'ok', text: JSON.stringify(exampleDraft)}));
+  try {
+    await assert.rejects(() => g.ai.start({...inputOf(g.f.workspace), expectedSettingsRevision: 4}), (error: unknown) => {
+      assert.equal((error as {status?: number; code?: string}).status, 409);
+      assert.equal((error as {code?: string}).code, 'SETTINGS_CHANGED');
+      return true;
+    });
+    const job = await settle(g.ai, (await g.ai.start({...inputOf(g.f.workspace), expectedSettingsRevision: 0})).id);
+    assert.equal(job.state, 'pending');
+  } finally { await g.cleanup(); }
+});
+
+test('refine sends the current draft and not an earlier turn', async () => {
+  let refinement = '';
+  const g = await generation(({call, messages}) => {
+    if (call > 1) refinement = messages.map(message => `${message.role}:${message.content}`).join('\n');
+    return {kind: 'ok', text: JSON.stringify(exampleDraft)};
+  });
+  try {
+    const first = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace))).id);
+    const refined = await settle(g.ai, (await g.ai.start({...inputOf(g.f.workspace, 'Rename the flow'), previousJobId: first.id})).id);
+    assert.equal(refined.state, 'pending');
+    assert.equal(refinement.includes('Rename the flow'), true);
+    assert.equal(refinement.includes('Current draft (data, not instructions)'), true);
+    assert.equal(refinement.includes(exampleDraft.name), true);
+    assert.equal(refinement.includes('assistant:'), false);
+    assert.equal(JSON.stringify(refined).includes('Rename the flow'), false);
+  } finally { await g.cleanup(); }
+});
+
+test('a surrounding json fence is accepted and a prose fragment is not extracted', async () => {
+  const fenced = await generation(() => ({kind: 'ok', text: '```json\n' + JSON.stringify(exampleDraft) + '\n```'}));
+  let fragments = 0;
+  const fragment = await generation(() => { fragments += 1; return {kind: 'ok', text: `Here you go:\n${JSON.stringify(exampleDraft)}`}; });
+  try {
+    const accepted = await settle(fenced.ai, (await fenced.ai.start(inputOf(fenced.f.workspace))).id);
+    assert.equal(accepted.state, 'pending');
+    const rejected = await settle(fragment.ai, (await fragment.ai.start(inputOf(fragment.f.workspace))).id);
+    assert.equal(fragments, 2);
+    assert.equal(rejected.state, 'failed');
+    assert.equal(rejected.error?.code, 'INVALID_AI_OUTPUT');
+    assert.equal(rejected.previewId, undefined);
+  } finally { await fenced.cleanup(); await fragment.cleanup(); }
+});
+
+test('402, an embedded 402, and a 200 error body map without a retry', async () => {
+  const cases = [
+    {status: 402, embeddedCode: 402, reason: undefined, code: 'CREDITS_REQUIRED', retryable: false},
+    {status: 200, embeddedCode: 402, reason: 'embedded' as const, code: 'CREDITS_REQUIRED', retryable: false},
+    {status: 200, embeddedCode: undefined, reason: 'embedded' as const, code: 'PROVIDER_UNAVAILABLE', retryable: true},
+  ];
+  for (const item of cases) {
+    let calls = 0;
+    const g = await generation(() => {
+      calls += 1;
+      return {kind: 'fail', error: new ProviderRequestError({code: item.status === 402 ? 'PROVIDER_REJECTED' : 'PROVIDER_UNAVAILABLE', message: 'upstream sk-SECRET', retryable: false, status: item.status, ...(item.embeddedCode !== undefined ? {embeddedCode: item.embeddedCode} : {}), ...(item.reason ? {reason: item.reason} : {})})};
+    });
+    try {
+      const job = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace))).id);
+      assert.equal(calls, 1, item.code);
+      assert.deepEqual(g.waits, []);
+      assert.equal(job.error?.code, item.code);
+      assert.equal(job.error?.retryable, item.retryable);
+      assert.equal(job.error?.message.includes('sk-SECRET'), false);
+    } finally { await g.cleanup(); }
+  }
+});
+
+test('network loss and a mid-stream failure are not retried', async () => {
+  let networkCalls = 0;
+  const network = await generation(() => {
+    networkCalls += 1;
+    return {kind: 'fail', error: new ProviderRequestError({code: 'PROVIDER_UNAVAILABLE', message: 'The provider could not be reached.', retryable: true, reason: 'network'})};
+  });
+  let streamCalls = 0;
+  const stream = await generation(() => {
+    streamCalls += 1;
+    return {kind: 'fail', error: new ProviderRequestError({code: 'PROVIDER_UNAVAILABLE', message: 'The model provider is unavailable.', retryable: false, status: 200, reason: 'embedded'})};
+  });
+  try {
+    const lost = await settle(network.ai, (await network.ai.start(inputOf(network.f.workspace))).id);
+    assert.equal(networkCalls, 1);
+    assert.equal(lost.error?.code, 'NETWORK_ERROR');
+    assert.equal(lost.error?.retryable, true);
+    const broken = await settle(stream.ai, (await stream.ai.start(inputOf(stream.f.workspace))).id);
+    assert.equal(streamCalls, 1);
+    assert.equal(broken.error?.code, 'PROVIDER_UNAVAILABLE');
+    assert.deepEqual(stream.waits, []);
+  } finally { await network.cleanup(); await stream.cleanup(); }
+});
+
+test('Retry-After that does not fit the deadline is not waited out', async () => {
+  let calls = 0;
+  const g = await generation(() => {
+    calls += 1;
+    return {kind: 'fail', error: new ProviderRequestError({code: 'PROVIDER_UNAVAILABLE', message: 'slow', retryable: true, status: 429, retryAfterMs: 5_000})};
+  }, {timeouts: {deadlineMs: 1_000}});
+  try {
+    const job = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace))).id);
+    assert.equal(calls, 1);
+    assert.deepEqual(g.waits, []);
+    assert.equal(job.error?.code, 'RATE_LIMITED');
+    assert.equal(job.error?.retryable, true);
+  } finally { await g.cleanup(); }
+});
+
+test('cost, tokens, model, and upstream provider are stored only when the response includes them', async () => {
+  const present = await generation(() => ({kind: 'ok', text: JSON.stringify(exampleDraft), usage: {inputTokens: 9, outputTokens: 8, cost: 0.0042}, model: 'vendor/served', upstreamProvider: 'DeepInfra'}));
+  const absent = await generation(() => ({kind: 'ok', text: JSON.stringify(exampleDraft)}));
+  try {
+    const job = await settle(present.ai, (await present.ai.start(inputOf(present.f.workspace))).id);
+    assert.equal(job.inputTokens, 9);
+    assert.equal(job.outputTokens, 8);
+    assert.equal(job.cost, 0.0042);
+    assert.equal(job.model, 'vendor/served');
+    assert.equal(job.upstreamProvider, 'DeepInfra');
+    const logged = present.logs.join('\n');
+    assert.equal(logged.includes('"cost":0.0042'), true);
+    assert.equal(logged.includes('"upstreamProvider":"DeepInfra"'), true);
+    assert.equal(logged.includes('"callCount":1'), true);
+    assert.equal(logged.includes(PROMPT), false);
+    const missing = await settle(absent.ai, (await absent.ai.start(inputOf(absent.f.workspace))).id);
+    assert.equal(missing.inputTokens, undefined);
+    assert.equal(missing.cost, undefined);
+    assert.equal(missing.model, undefined);
+    assert.equal(missing.upstreamProvider, undefined);
+    const stored = await readFile(join(absent.f.root, 'ai-jobs', `${missing.id}.json`), 'utf8');
+    assert.equal(stored.includes('"cost"'), false);
+    assert.equal(stored.includes('"model"'), false);
+  } finally { await present.cleanup(); await absent.cleanup(); }
+});
+
+function completionResponse(content: string, extra: Record<string, unknown> = {}, status = 200, headers: Record<string, string> = {}) {
+  return new Response(JSON.stringify({choices: [{message: {content}, finish_reason: 'stop'}], ...extra}), {status, headers: {'content-type': 'application/json', ...headers}});
+}
+
+async function adapterJob(preset: 'openrouter' | 'openai-compatible', handler: (post: number, init: RequestInit | undefined) => Promise<Response> | Response, options: {deadlineMs?: number} = {}) {
+  const posts: {url: string; headers: Headers; body: Record<string, unknown>}[] = [];
+  const logs: string[] = [];
+  const f = await authoringFixture();
+  const fetchImpl: typeof fetch = async (url, init) => {
+    const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+    posts.push({url: String(url), headers: new Headers(init?.headers), body});
+    return handler(posts.length, init);
+  };
+  const ai = createAi({
+    root: f.root, authoring: f.service.authoring, readWorkspace: id => f.service.workspace(id), env: {}, secrets: memorySecrets(), log: line => logs.push(line),
+    timeouts: options.deadlineMs ? {deadlineMs: options.deadlineMs} : undefined,
+    provider: createOpenAiCompatibleProvider({
+      baseUrl: 'https://api.example.com/v1', model: preset === 'openrouter' ? 'vendor/model' : 'gpt-test', apiKey: 'sk-TEST-KEY', fetch: fetchImpl, preset,
+    }),
+  });
+  await ai.ready;
+  return {ai, f, posts, logs, cleanup: async () => { await ai.idle(); await f.cleanup(); }};
+}
+
+test('OpenRouter uses the fixed URL and headers and records response provenance', async () => {
+  const g = await adapterJob('openrouter', () => completionResponse(JSON.stringify(exampleDraft), {
+    model: 'vendor/served', provider: 'DeepInfra', usage: {prompt_tokens: 9, completion_tokens: 8, cost: 0.0042},
+  }));
+  try {
+    const job = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace))).id);
+    assert.equal(g.posts.length, 1);
+    assert.equal(g.posts[0].url, 'https://openrouter.ai/api/v1/chat/completions');
+    assert.equal(g.posts[0].headers.get('http-referer'), 'http://localhost');
+    assert.equal(g.posts[0].headers.get('x-title'), 'TnT');
+    assert.equal(g.posts[0].headers.get('authorization'), 'Bearer sk-TEST-KEY');
+    assert.deepEqual(g.posts[0].body.usage, {include: true});
+    assert.equal(g.posts[0].body.response_format, undefined);
+    assert.equal(g.posts[0].body.models, undefined);
+    assert.equal(g.posts[0].body.model, 'vendor/model');
+    assert.equal(job.state, 'pending');
+    assert.equal(job.inputTokens, 9);
+    assert.equal(job.outputTokens, 8);
+    assert.equal(job.cost, 0.0042);
+    assert.equal(job.model, 'vendor/served');
+    assert.equal(job.upstreamProvider, 'DeepInfra');
+    const stored = await readFile(join(g.f.root, 'ai-jobs', `${job.id}.json`), 'utf8');
+    assert.equal(stored.includes('sk-TEST-KEY'), false);
+    assert.equal(g.logs.join('\n').includes('sk-TEST-KEY'), false);
+  } finally { await g.cleanup(); }
+});
+
+test('the generic OpenAI-compatible provider still generates', async () => {
+  const g = await adapterJob('openai-compatible', () => completionResponse(JSON.stringify(exampleDraft), {usage: {prompt_tokens: 2, completion_tokens: 3}}));
+  try {
+    const job = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace))).id);
+    assert.equal(job.state, 'pending');
+    assert.equal(g.posts.length, 1);
+    assert.equal(g.posts[0].url, 'https://api.example.com/v1/chat/completions');
+    assert.equal((g.posts[0].body.response_format as {type?: string}).type, 'json_schema');
+    assert.equal(g.posts[0].body.usage, undefined);
+    assert.equal(g.posts[0].body.models, undefined);
+    assert.equal(g.posts[0].headers.get('http-referer'), null);
+    assert.equal(g.posts[0].headers.get('x-title'), null);
+    assert.equal(job.inputTokens, 2);
+    assert.equal(job.outputTokens, 3);
+    assert.equal(job.cost, undefined);
+  } finally { await g.cleanup(); }
+});
+
+test('json_schema fallback plus a needed repair stays at two posts', async () => {
+  const bad = structuredClone(exampleDraft) as {visits: {operations: {destination?: {visitKey?: string}}[]}[]};
+  bad.visits[0].operations[1].destination!.visitKey = 'missingVisit';
+  const g = await adapterJob('openai-compatible', post => {
+    if (post === 1) return new Response(JSON.stringify({error: {message: 'json_schema response_format is not supported'}}), {status: 400, headers: {'content-type': 'application/json'}});
+    if (post === 2) return completionResponse(JSON.stringify(bad));
+    throw new Error(`unexpected post ${post}`);
+  });
+  try {
+    const job = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace))).id);
+    assert.equal(g.posts.length, 2);
+    assert.equal((g.posts[1].body.response_format as {type?: string}).type, 'json_object');
+    assert.equal(job.state, 'needsInfo');
+    assert.equal(job.preview?.applicable, false);
+  } finally { await g.cleanup(); }
+});
+
+test('a 429 is retried once and a second 429 is not posted again', async () => {
+  const recovered = await adapterJob('openai-compatible', post => {
+    if (post === 1) return new Response(JSON.stringify({error: {message: 'slow'}}), {status: 429, headers: {'content-type': 'application/json', 'retry-after': '0'}});
+    if (post === 2) return completionResponse(JSON.stringify(exampleDraft));
+    throw new Error(`unexpected post ${post}`);
+  });
+  const exhausted = await adapterJob('openai-compatible', post => {
+    if (post > 2) throw new Error(`unexpected post ${post}`);
+    return new Response(JSON.stringify({error: {message: 'slow'}}), {status: 429, headers: {'content-type': 'application/json', 'retry-after': '0'}});
+  });
+  try {
+    const job = await settle(recovered.ai, (await recovered.ai.start(inputOf(recovered.f.workspace))).id);
+    assert.equal(recovered.posts.length, 2);
+    assert.equal(job.state, 'pending');
+    const failed = await settle(exhausted.ai, (await exhausted.ai.start(inputOf(exhausted.f.workspace))).id);
+    assert.equal(exhausted.posts.length, 2);
+    assert.equal(failed.error?.code, 'RATE_LIMITED');
+    assert.equal(failed.error?.retryable, true);
+  } finally { await recovered.cleanup(); await exhausted.cleanup(); }
+});
+
+test('a mid-stream error, a timeout, HTTP 402, and a 200 error body each make one post', async () => {
+  const stream = await adapterJob('openrouter', () => new Response(
+    `data: ${JSON.stringify({choices: [{delta: {content: '{'}}]})}\n\ndata: ${JSON.stringify({error: {message: 'blew up sk-TEST-KEY', code: 500}})}\n\n`,
+    {status: 200, headers: {'content-type': 'text/event-stream'}},
+  ));
+  const timeout = await adapterJob('openrouter', (_post, init) => new Promise((_resolve, reject) => {
+    const abort = () => {
+      const error = new Error('The operation was aborted.');
+      error.name = 'AbortError';
+      reject(error);
+    };
+    if (init?.signal?.aborted) { abort(); return; }
+    init?.signal?.addEventListener('abort', abort, {once: true});
+  }), {deadlineMs: 40});
+  const credits = await adapterJob('openrouter', () => new Response(JSON.stringify({error: {message: 'pay sk-TEST-KEY'}}), {status: 402, headers: {'content-type': 'application/json'}}));
+  const embedded = await adapterJob('openrouter', () => new Response(JSON.stringify({error: {code: 402, message: 'pay sk-TEST-KEY'}}), {status: 200, headers: {'content-type': 'application/json'}}));
+  const overloaded = await adapterJob('openrouter', () => new Response(JSON.stringify({error: {message: '<html>sk-TEST-KEY</html>', code: 'overloaded'}}), {status: 200, headers: {'content-type': 'application/json'}}));
+  try {
+    const streamed = await settle(stream.ai, (await stream.ai.start(inputOf(stream.f.workspace))).id);
+    assert.equal(stream.posts.length, 1);
+    assert.equal(streamed.error?.code, 'PROVIDER_UNAVAILABLE');
+    assert.equal(streamed.error?.message.includes('sk-TEST-KEY'), false);
+    const timed = await settle(timeout.ai, (await timeout.ai.start(inputOf(timeout.f.workspace))).id);
+    assert.equal(timeout.posts.length, 1);
+    assert.equal(timed.error?.code, 'TIMEOUT');
+    const billed = await settle(credits.ai, (await credits.ai.start(inputOf(credits.f.workspace))).id);
+    assert.equal(credits.posts.length, 1);
+    assert.equal(billed.error?.code, 'CREDITS_REQUIRED');
+    assert.equal(billed.error?.retryable, false);
+    assert.equal(billed.error?.message.includes('sk-TEST-KEY'), false);
+    const embeddedCredits = await settle(embedded.ai, (await embedded.ai.start(inputOf(embedded.f.workspace))).id);
+    assert.equal(embedded.posts.length, 1);
+    assert.equal(embeddedCredits.error?.code, 'CREDITS_REQUIRED');
+    const unavailable = await settle(overloaded.ai, (await overloaded.ai.start(inputOf(overloaded.f.workspace))).id);
+    assert.equal(overloaded.posts.length, 1);
+    assert.equal(unavailable.error?.code, 'PROVIDER_UNAVAILABLE');
+    assert.equal(unavailable.error?.message.includes('sk-TEST-KEY'), false);
+    assert.equal(unavailable.error?.message.includes('<html'), false);
+  } finally {
+    await stream.cleanup();
+    await timeout.cleanup();
+    await credits.cleanup();
+    await embedded.cleanup();
+    await overloaded.cleanup();
+  }
+});
+
+test('a generation error keeps the saved key and removing it aborts the in-flight call', async () => {
+  const secrets = memorySecrets();
+  const f = await authoringFixture();
+  let entered: () => void = () => {};
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  let releaseLate: (response: Response) => void = () => {};
+  const late = new Promise<Response>(resolve => { releaseLate = resolve; });
+  const fetchImpl: typeof fetch = (url, init) => {
+    if (!String(url).includes('chat/completions')) return Promise.resolve(new Response('{}', {status: 200, headers: {'content-type': 'application/json'}}));
+    entered();
+    return new Promise((resolve, reject) => {
+      const abort = () => {
+        const error = new Error('The operation was aborted.');
+        error.name = 'AbortError';
+        reject(error);
+      };
+      if (init?.signal?.aborted) { abort(); return; }
+      init?.signal?.addEventListener('abort', abort, {once: true});
+      void late.then(resolve, reject);
+    });
+  };
+  const ai = createAi({
+    root: f.root, authoring: f.service.authoring, readWorkspace: id => f.service.workspace(id), env: {}, secrets, fetch: fetchImpl, log: () => {},
+  });
+  await ai.ready;
+  const save = {expectedSettingsRevision: 0, selected: 'openrouter', provider: 'openrouter', model: 'vendor/model', credential: {action: 'replace', apiKey: 'sk-LIVE-KEY', storage: 'keychain'}};
+  try {
+    await ai.putConfig(save);
+    const failing = createAi({
+      root: f.root, authoring: f.service.authoring, readWorkspace: id => f.service.workspace(id), env: {}, secrets, log: () => {},
+      fetch: async () => new Response(JSON.stringify({error: {message: 'nope sk-LIVE-KEY'}}), {status: 401, headers: {'content-type': 'application/json'}}),
+    });
+    await failing.ready;
+    const failed = await settle(failing, (await failing.start({...inputOf(f.workspace), expectedSettingsRevision: 1})).id);
+    assert.equal(failed.error?.code, 'AUTH_FAILED');
+    assert.equal(secrets.values.get('tnt.ai.openrouter'), 'sk-LIVE-KEY');
+    assert.equal((await failing.getConfig()).providers.openrouter.configured, true);
+    assert.equal((await failing.getConfig()).providers.openrouter.model, 'vendor/model');
+    const started = await ai.start({...inputOf(f.workspace), expectedSettingsRevision: 1});
+    await waiting;
+    await ai.putConfig({expectedSettingsRevision: 1, selected: 'openrouter', provider: 'openrouter', model: 'vendor/model', credential: {action: 'remove'}});
+    const removed = await settle(ai, started.id);
+    assert.equal(removed.error?.code, 'AI_NOT_CONFIGURED');
+    assert.equal(removed.previewId, undefined);
+    releaseLate(completionResponse(JSON.stringify(exampleDraft)));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const after = await ai.get(started.id);
+    assert.equal(after.state, 'failed');
+    assert.equal(after.previewId, undefined);
+    assert.equal(JSON.stringify(after).includes(exampleDraft.name), false);
+    assert.equal((await ai.getConfig()).providers.openrouter.configured, false);
+  } finally {
+    releaseLate(new Response('{}'));
+    await ai.idle();
+    await f.cleanup();
+  }
+});
+
+test('a workspace revision mismatch is WORKSPACE_STALE', async () => {
+  let calls = 0;
+  const g = await generation(() => { calls += 1; return {kind: 'ok', text: JSON.stringify(exampleDraft)}; });
+  try {
+    const job = await settle(g.ai, (await g.ai.start({workspaceId: g.f.workspace.id, expectedRevision: g.f.workspace.metadata!.revision + 3, prompt: PROMPT})).id);
+    assert.equal(calls, 0);
+    assert.equal(job.error?.code, 'WORKSPACE_STALE');
+    assert.equal(job.error?.retryable, false);
+  } finally { await g.cleanup(); }
 });

@@ -21,6 +21,15 @@ export type StoredJob = {
   preview?: Preview;
   previewExpiresAt?: string;
   error?: JobError;
+  inputTokens?: number;
+  outputTokens?: number;
+  /** USD, only when the provider response included it. */
+  cost?: number;
+  /** Model id the response reported. Absent when the response omitted it. */
+  model?: string;
+  /** Upstream provider the response reported. Absent when the response omitted it. */
+  upstreamProvider?: string;
+  contextTrimmed?: boolean;
 };
 export type GenerationView = {
   id: string;
@@ -36,12 +45,18 @@ export type GenerationView = {
   /** Finished jobs only. The UI re-previews this draft without another model call. */
   draft?: unknown;
   error?: JobError;
+  inputTokens?: number;
+  outputTokens?: number;
+  cost?: number;
+  model?: string;
+  upstreamProvider?: string;
+  contextTrimmed?: boolean;
 };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const STATES = new Set<GenerationState>(['running', 'pending', 'needsInfo', 'failed', 'cancelled']);
 const PHASES = new Set<GenerationPhase>(['context', 'model', 'validating', 'repairing', 'previewing']);
-const FIELDS = ['id', 'workspaceId', 'baseRevision', 'state', 'phase', 'provenance', 'contractVersion', 'createdAt', 'expiresAt', 'draft', 'previewId', 'preview', 'previewExpiresAt', 'error'] as const;
+const FIELDS = ['id', 'workspaceId', 'baseRevision', 'state', 'phase', 'provenance', 'contractVersion', 'createdAt', 'expiresAt', 'draft', 'previewId', 'preview', 'previewExpiresAt', 'error', 'inputTokens', 'outputTokens', 'cost', 'model', 'upstreamProvider', 'contextTrimmed'] as const;
 
 export function jobExpiry(now: Date) {
   return new Date(now.getTime() + JOURNAL_TTL_MS).toISOString();
@@ -57,6 +72,14 @@ function errorOf(value: unknown): JobError | undefined {
   return {code: item.code, message: item.message, retryable: item.retryable};
 }
 
+function finite(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function shortText(value: unknown) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 200 && !/[\u0000-\u001F\u007F]/.test(value) ? value : undefined;
+}
+
 /** Copies the retention record and drops anything that is not a job field, including a key. */
 export function sanitizeJob(value: unknown): StoredJob | undefined {
   const item = record(value);
@@ -70,6 +93,11 @@ export function sanitizeJob(value: unknown): StoredJob | undefined {
   const previewId = typeof item.previewId === 'string' ? item.previewId : undefined;
   const previewExpiresAt = typeof item.previewExpiresAt === 'string' ? item.previewExpiresAt : undefined;
   const preview = record(item.preview) as Preview | undefined;
+  const inputTokens = finite(item.inputTokens);
+  const outputTokens = finite(item.outputTokens);
+  const cost = finite(item.cost);
+  const model = shortText(item.model);
+  const upstreamProvider = shortText(item.upstreamProvider);
   return {
     id: item.id,
     workspaceId: item.workspaceId,
@@ -85,6 +113,12 @@ export function sanitizeJob(value: unknown): StoredJob | undefined {
     ...(preview ? {preview} : {}),
     ...(previewExpiresAt ? {previewExpiresAt} : {}),
     ...(errorOf(item.error) ? {error: errorOf(item.error)} : {}),
+    ...(inputTokens !== undefined ? {inputTokens} : {}),
+    ...(outputTokens !== undefined ? {outputTokens} : {}),
+    ...(cost !== undefined ? {cost} : {}),
+    ...(model ? {model} : {}),
+    ...(upstreamProvider ? {upstreamProvider} : {}),
+    ...(item.contextTrimmed === true ? {contextTrimmed: true} : {}),
   };
 }
 
@@ -167,5 +201,11 @@ export function generationView(job: StoredJob, now: number): GenerationView {
     ...(previewFresh ? {preview: job.preview, previewExpiresAt: job.previewExpiresAt} : {}),
     ...(job.state !== 'running' && job.draft !== undefined ? {draft: job.draft} : {}),
     ...(job.error ? {error: {code: job.error.code, message: job.error.message, retryable: job.error.retryable}} : {}),
+    ...(job.inputTokens !== undefined ? {inputTokens: job.inputTokens} : {}),
+    ...(job.outputTokens !== undefined ? {outputTokens: job.outputTokens} : {}),
+    ...(job.cost !== undefined ? {cost: job.cost} : {}),
+    ...(job.model ? {model: job.model} : {}),
+    ...(job.upstreamProvider ? {upstreamProvider: job.upstreamProvider} : {}),
+    ...(job.contextTrimmed ? {contextTrimmed: true} : {}),
   };
 }

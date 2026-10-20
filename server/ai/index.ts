@@ -41,7 +41,10 @@ export function createAi(deps: {
     readWorkspace: deps.readWorkspace,
     store: createJobStore(deps.root),
     now, log, scheduler: deps.scheduler ?? realScheduler(), timeouts: deps.timeouts,
-    resolveProvider: () => deps.provider ? Promise.resolve({provider: deps.provider, model: deps.provider.id}) : config.connect(),
+    settingsRevision: () => config.settingsRevision(),
+    resolveProvider: () => deps.provider
+      ? Promise.resolve({provider: deps.provider, model: deps.provider.id, providerId: deps.provider.id})
+      : config.connect(),
   });
   return {
     ready: jobs.ready,

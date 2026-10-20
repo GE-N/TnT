@@ -229,6 +229,7 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
   const file = join(deps.root, 'ai-config.json');
   const sessionKeys = new Map<ProviderId, string>();
   const catalogCache = new Map<string, {at: number; models: AiModelInfo[]}>();
+  const inflight = new Set<{provider: ProviderId; abort: () => void}>();
   let pending: Promise<unknown> = Promise.resolve();
 
   function exclusive<T>(work: () => Promise<T>): Promise<T> {
@@ -380,7 +381,23 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     };
   }
 
-  async function connect(): Promise<{provider: FlowModelProvider; model: string}> {
+  function bindRemoval(provider: ProviderId) {
+    return (abort: () => void) => {
+      const entry = {provider, abort};
+      inflight.add(entry);
+      return () => { inflight.delete(entry); };
+    };
+  }
+
+  function abortInflight(provider: ProviderId) {
+    for (const entry of [...inflight]) if (entry.provider === provider) entry.abort();
+  }
+
+  async function settingsRevision() {
+    return (await readFileConfig()).settingsRevision;
+  }
+
+  async function connect(): Promise<{provider: FlowModelProvider; model: string; providerId: ProviderId; bindRemoval: (abort: () => void) => () => void}> {
     const config = await readFileConfig();
     const selected = config.selected;
     const entry = config.providers[selected];
@@ -395,7 +412,12 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     }
     const resolved = await resolveKey(selected, entry);
     if (!resolved) throw new AiHttpError(400, 'PROVIDER_CONFIG', 'Add an API key.');
-    return {model: entry.model, provider: createOpenAiCompatibleProvider({baseUrl, model: entry.model, apiKey: resolved.key, fetch: deps.fetch})};
+    return {
+      model: entry.model,
+      providerId: selected,
+      bindRemoval: bindRemoval(selected),
+      provider: createOpenAiCompatibleProvider({baseUrl, model: entry.model, apiKey: resolved.key, fetch: deps.fetch, preset: selected}),
+    };
   }
 
   async function put(input: unknown): Promise<AiPublicConfig> {
@@ -412,6 +434,7 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
       try {
         await applyCredential(body.provider, body.credential);
         await writeFileConfig(next);
+        if (body.credential.action === 'remove') abortInflight(body.provider);
       } catch (error) {
         try { await restoreCredential(body.provider, snapshot); }
         catch { /* the original failure is the one the caller can act on */ }
@@ -467,5 +490,5 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     return {provider, models};
   }
 
-  return {file, get: publicConfig, put, connect, testConnection, listModels};
+  return {file, get: publicConfig, put, connect, testConnection, listModels, settingsRevision};
 }

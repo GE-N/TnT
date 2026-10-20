@@ -4,26 +4,32 @@ import {randomUUID} from 'node:crypto';
 import {parseAllDocuments} from 'yaml';
 import {AuthoringHttpError} from '../authoring/errors.js';
 import {assertUniqueMembers, requireRevision, requireWorkspaceId} from '../authoring/schema.js';
-import {CONTRACT_VERSION, REQUEST_LIMIT, type Preview} from '../authoring/types.js';
-import {AiHttpError} from './errors.js';
+import {CONTRACT_VERSION, type Preview} from '../authoring/types.js';
+import {AiHttpError, canAutoRetry, mapProviderFailure} from './errors.js';
 import {formatAiLog, type AiLogEvent} from './log.js';
 import {assertUserPrompt, assembleCall, packPrompt, type PromptContext} from './prompt.js';
 import {MAX_REPAIR_ROUNDS, repairDecision, repairNote} from './repair.js';
-import {abortError, isAbortError, ProviderRequestError, type FlowModelProvider, type Msg, type Usage} from './providers/types.js';
+import {abortError, isAbortError, MAX_UPSTREAM_POSTS, ProviderRequestError, RESPONSE_BYTE_LIMIT, type FlowModelProvider, type Msg, type UpstreamBudget, type Usage} from './providers/types.js';
 import {createJobStore, generationView, jobExpiry, type GenerationView, type StoredJob} from './store.js';
 
-export const FIRST_TOKEN_MS = 20_000;
-export const CALL_TIMEOUT_MS = 90_000;
-export const JOB_TIMEOUT_MS = 180_000;
-export const RETRY_BACKOFF_MS = [1_000, 4_000] as const;
-export const MAX_PROVIDER_RETRIES = 2;
+export const SUBMISSION_DEADLINE_MS = 120_000;
+export const MAX_PROVIDER_RETRIES = 1;
 export const MAX_OUTPUT_TOKENS = 8_192;
+export {MAX_UPSTREAM_POSTS, RESPONSE_BYTE_LIMIT};
 
 const FLOW_SCHEMA = JSON.parse(readFileSync(fileURLToPath(new URL('../../docs/contracts/ai-flow-v1/flow-draft.schema.json', import.meta.url)), 'utf8')) as object;
 const APP_ID = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-export type Timeouts = {firstTokenMs: number; callMs: number; jobMs: number};
+export type Timeouts = {deadlineMs: number};
+
+export type ResolvedModel = {
+  provider: FlowModelProvider;
+  model: string;
+  providerId: string;
+  /** Fires if this provider's key is removed while the call is in flight. */
+  bindRemoval?: (abort: () => void) => () => void;
+};
 export type Scheduler = {
   now(): number;
   delay(ms: number, signal?: AbortSignal): Promise<void>;
@@ -108,6 +114,7 @@ function factsFrom(context: unknown): PromptContext {
   };
 }
 
+/** Exactly one JSON document. One surrounding fence is tolerated; a fragment inside prose is not. */
 function unwrap(text: string) {
   const trimmed = text.trim();
   const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(trimmed);
@@ -116,7 +123,7 @@ function unwrap(text: string) {
 
 function parseModelDraft(text: string): {ok: true; value: unknown} | {ok: false; code: string} {
   const source = unwrap(text);
-  if (Buffer.byteLength(source) > REQUEST_LIMIT) return {ok: false, code: 'OUTPUT_TOO_LARGE'};
+  if (Buffer.byteLength(source) > RESPONSE_BYTE_LIMIT) return {ok: false, code: 'OUTPUT_TOO_LARGE'};
   try { assertUniqueMembers(source); }
   catch (error) {
     if (error instanceof AuthoringHttpError && error.code === 'DUPLICATE_MEMBER') return {ok: false, code: 'DUPLICATE_MEMBER'};
@@ -132,14 +139,55 @@ function parseModelDraft(text: string): {ok: true; value: unknown} | {ok: false;
 function requestOf(input: unknown) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Provide a generation request.');
   const body = input as Record<string, unknown>;
-  if (Object.keys(body).some(key => !['workspaceId', 'expectedRevision', 'prompt'].includes(key))) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Unknown generation field.');
-  return {workspaceId: requireWorkspaceId(body.workspaceId), expectedRevision: requireRevision(body.expectedRevision), prompt: assertUserPrompt(body.prompt)};
+  if (Object.keys(body).some(key => !['workspaceId', 'expectedRevision', 'expectedSettingsRevision', 'prompt', 'previousJobId'].includes(key))) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Unknown generation field.');
+  let expectedSettingsRevision: number | undefined;
+  if (body.expectedSettingsRevision !== undefined) {
+    if (!Number.isInteger(body.expectedSettingsRevision) || (body.expectedSettingsRevision as number) < 0) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Provide the settings revision.');
+    expectedSettingsRevision = body.expectedSettingsRevision as number;
+  }
+  let previousJobId: string | undefined;
+  if (body.previousJobId !== undefined) {
+    if (typeof body.previousJobId !== 'string' || !ID.test(body.previousJobId)) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Provide the previous generation.');
+    previousJobId = body.previousJobId;
+  }
+  return {
+    workspaceId: requireWorkspaceId(body.workspaceId),
+    expectedRevision: requireRevision(body.expectedRevision),
+    prompt: assertUserPrompt(body.prompt),
+    expectedSettingsRevision,
+    previousJobId,
+  };
 }
 
-function retryableProvider(error: unknown) {
-  if (error instanceof ProviderRequestError) return error.retryable ? error : undefined;
-  if (error instanceof TypeError) return new ProviderRequestError({code: 'PROVIDER_UNAVAILABLE', message: 'The model provider is unavailable.', retryable: true});
-  return undefined;
+function submissionBudget(deadlineAt: number, now: () => number): UpstreamBudget & {used(): number} {
+  let used = 0;
+  return {
+    used: () => used,
+    remaining() {
+      if (now() >= deadlineAt) return 0;
+      return Math.max(0, MAX_UPSTREAM_POSTS - used);
+    },
+    tryConsume() {
+      if (now() >= deadlineAt || used >= MAX_UPSTREAM_POSTS) return false;
+      used += 1;
+      return true;
+    },
+  };
+}
+
+function rememberUsage(job: StoredJob, usage: Usage | undefined) {
+  if (usage?.inputTokens !== undefined) job.inputTokens = usage.inputTokens;
+  else delete job.inputTokens;
+  if (usage?.outputTokens !== undefined) job.outputTokens = usage.outputTokens;
+  else delete job.outputTokens;
+  if (usage?.cost !== undefined) job.cost = usage.cost;
+  else delete job.cost;
+}
+
+function asProviderError(error: unknown) {
+  if (error instanceof ProviderRequestError) return error;
+  if (error instanceof TypeError) return new ProviderRequestError({code: 'PROVIDER_UNAVAILABLE', message: 'The provider could not be reached.', retryable: true, reason: 'network'});
+  return;
 }
 
 export function createJobs(deps: {
@@ -150,10 +198,11 @@ export function createJobs(deps: {
   log: (line: string) => void;
   scheduler?: Scheduler;
   timeouts?: Partial<Timeouts>;
-  resolveProvider: () => Promise<{provider: FlowModelProvider; model: string}>;
+  resolveProvider: () => Promise<ResolvedModel>;
+  settingsRevision: () => Promise<number>;
 }) {
   const scheduler = deps.scheduler ?? realScheduler();
-  const timeouts: Timeouts = {firstTokenMs: FIRST_TOKEN_MS, callMs: CALL_TIMEOUT_MS, jobMs: JOB_TIMEOUT_MS, ...deps.timeouts};
+  const timeouts: Timeouts = {deadlineMs: SUBMISSION_DEADLINE_MS, ...deps.timeouts};
   const memory = new Map<string, StoredJob>();
   const active = new Map<string, string>();
   const runtimes = new Map<string, AbortController>();
@@ -200,57 +249,64 @@ export function createJobs(deps: {
     return job;
   }
 
-  async function oneCall(job: StoredJob, provider: FlowModelProvider, model: string, system: string, messages: Msg[], parent: AbortSignal) {
+  async function oneCall(job: StoredJob, resolved: ResolvedModel, system: string, messages: Msg[], parent: AbortSignal, budget: UpstreamBudget) {
     if (job.state !== 'running') return 'stopped' as const;
     const call = new AbortController();
     const onParent = () => call.abort();
     if (parent.aborted) call.abort();
     else parent.addEventListener('abort', onParent, {once: true});
-    let sawToken = false;
-    const cancelFirst = scheduler.schedule(timeouts.firstTokenMs, () => {
-      if (sawToken || !fail(job, 'PROVIDER_TIMEOUT', 'Timed out before the first token.', true)) return;
-      call.abort();
-    });
-    const cancelCall = scheduler.schedule(timeouts.callMs, () => {
-      if (!fail(job, 'PROVIDER_TIMEOUT', 'The model call timed out.', true)) return;
-      call.abort();
-    });
     let text = '';
     let usage: Usage | undefined;
+    let reportedModel: string | undefined;
+    let upstreamProvider: string | undefined;
     const started = scheduler.now();
     try {
-      for await (const event of provider.generate({system, messages, schema: FLOW_SCHEMA, maxOutputTokens: MAX_OUTPUT_TOKENS, signal: call.signal})) {
+      for await (const event of resolved.provider.generate({system, messages, schema: FLOW_SCHEMA, maxOutputTokens: MAX_OUTPUT_TOKENS, signal: call.signal, budget})) {
         if (job.state !== 'running') return 'stopped' as const;
-        if (!sawToken) { sawToken = true; cancelFirst(); }
         if (event.delta) text += event.delta;
+        if (Buffer.byteLength(text) > RESPONSE_BYTE_LIMIT) throw new ProviderRequestError({code: 'PROVIDER_REJECTED', message: 'The model output was too large.', retryable: false, outputTooLarge: true});
         if (event.done) {
           if (event.done.text) text = event.done.text;
           if (event.done.usage) usage = event.done.usage;
+          if (event.done.model) reportedModel = event.done.model;
+          if (event.done.upstreamProvider) upstreamProvider = event.done.upstreamProvider;
         }
       }
     } catch (error) {
       if (job.state !== 'running' || isAbortError(error)) return 'stopped' as const;
       throw error;
     } finally {
-      cancelFirst();
-      cancelCall();
       parent.removeEventListener('abort', onParent);
     }
     if (job.state !== 'running') return 'stopped' as const;
-    logEvent({provider: provider.id, model, durationMs: Math.max(0, scheduler.now() - started), inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, contractVersion: CONTRACT_VERSION, diagnosticCodes: [], outcome: 'model'});
-    return {text, usage};
+    if (Buffer.byteLength(text) > RESPONSE_BYTE_LIMIT) throw new ProviderRequestError({code: 'PROVIDER_REJECTED', message: 'The model output was too large.', retryable: false, outputTooLarge: true});
+    rememberUsage(job, usage);
+    if (reportedModel) job.model = reportedModel;
+    else delete job.model;
+    if (upstreamProvider) job.upstreamProvider = upstreamProvider;
+    else delete job.upstreamProvider;
+    logEvent({
+      requestId: job.id, provider: resolved.providerId, model: job.model ?? resolved.model, upstreamProvider: job.upstreamProvider,
+      durationMs: Math.max(0, scheduler.now() - started), inputTokens: job.inputTokens, outputTokens: job.outputTokens, cost: job.cost,
+      contractVersion: CONTRACT_VERSION, diagnosticCodes: job.contextTrimmed ? ['CONTEXT_TRIMMED'] : [], outcome: 'model',
+    });
+    return {text};
   }
 
-  async function callWithRetries(job: StoredJob, provider: FlowModelProvider, model: string, system: string, messages: Msg[], parent: AbortSignal) {
-    for (let attempt = 0; attempt <= MAX_PROVIDER_RETRIES; attempt++) {
+  async function callWithRetries(job: StoredJob, resolved: ResolvedModel, system: string, messages: Msg[], parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number) {
+    let retried = false;
+    for (;;) {
       if (job.state !== 'running') return 'stopped' as const;
       try {
-        return await oneCall(job, provider, model, system, messages, parent);
+        return await oneCall(job, resolved, system, messages, parent, budget);
       } catch (error) {
         if (job.state !== 'running' || isAbortError(error)) return 'stopped' as const;
-        const retryable = retryableProvider(error);
-        if (!retryable || attempt === MAX_PROVIDER_RETRIES) throw retryable ?? error;
-        const wait = Math.max(RETRY_BACKOFF_MS[attempt] ?? RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1], retryable.retryAfterMs ?? 0);
+        const providerError = asProviderError(error);
+        if (!providerError) throw error;
+        const wait = providerError.retryAfterMs ?? 0;
+        const fits = scheduler.now() + wait <= deadlineAt && budget.remaining() >= 1;
+        if (retried || !canAutoRetry(providerError) || !fits) throw providerError;
+        retried = true;
         try { await scheduler.delay(wait, parent); }
         catch (delayError) {
           if (job.state !== 'running' || isAbortError(delayError)) return 'stopped' as const;
@@ -258,10 +314,18 @@ export function createJobs(deps: {
         }
       }
     }
-    return 'stopped' as const;
   }
 
-  async function execute(job: StoredJob, provider: FlowModelProvider, model: string, prompt: string, parent: AbortSignal) {
+  function keepLast(job: StoredJob) {
+    if (job.preview) {
+      job.state = job.preview.applicable ? 'pending' : 'needsInfo';
+      release(job);
+      return;
+    }
+    fail(job, 'INVALID_AI_OUTPUT', 'The model did not return a flow draft.', false);
+  }
+
+  async function execute(job: StoredJob, resolved: ResolvedModel, prompt: string, draft: unknown, parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number) {
     job.phase = 'context';
     const context = await deps.authoring.context({workspaceId: job.workspaceId, expectedRevision: job.baseRevision});
     if (job.state !== 'running') return;
@@ -270,21 +334,38 @@ export function createJobs(deps: {
     const appId = appIdOf(workspace.yaml);
     if (!appId) { fail(job, 'APP_ID_MISMATCH', 'This workspace has no app id to author against.', false); return; }
     const contextId = record(context)?.contextId;
-    if (typeof contextId !== 'string' || !contextId) { fail(job, 'INTERNAL', 'Generation failed.', true); return; }
-    const packed = packPrompt({prompt, appId, context: factsFrom(context)});
+    if (typeof contextId !== 'string' || !contextId) { fail(job, 'AUTHORING_INVALID', 'The workspace could not be prepared for generation.', false); return; }
+    const schemaBytes = Buffer.byteLength(JSON.stringify(FLOW_SCHEMA));
+    const packed = packPrompt({prompt, appId, context: factsFrom(context), ...(draft !== undefined ? {draft} : {}), extraBytes: schemaBytes});
+    if (packed.contextTrimmed) job.contextTrimmed = true;
     let round = 0;
     let previous = '';
     let note = '';
     while (job.state === 'running') {
       job.phase = round === 0 ? 'model' : 'repairing';
-      const messages = assembleCall({system: packed.system, user: packed.user, previous: round === 0 ? undefined : previous, repair: round === 0 ? undefined : note});
-      const result = await callWithRetries(job, provider, model, packed.system, messages, parent);
+      const assembled = assembleCall({
+        system: packed.system,
+        user: packed.user,
+        previous: round === 0 ? undefined : previous,
+        repair: round === 0 ? undefined : note,
+        extraBytes: schemaBytes,
+      });
+      if (!assembled.fits || budget.remaining() < 1) {
+        if (round === 0 && !assembled.fits) { fail(job, 'PROMPT_TOO_LONG', 'The prompt does not fit the model budget.', false); return; }
+        if (round === 0) { fail(job, 'TIMEOUT', 'The generation timed out.', true); return; }
+        keepLast(job);
+        return;
+      }
+      const result = await callWithRetries(job, resolved, packed.system, assembled.messages, parent, budget, deadlineAt);
       if (result === 'stopped' || job.state !== 'running') return;
       previous = result.text;
       job.phase = 'validating';
       const parsed = parseModelDraft(result.text);
       if (!parsed.ok) {
-        if (round >= MAX_REPAIR_ROUNDS) { fail(job, 'INVALID_MODEL_OUTPUT', 'The model did not return a flow draft.', false); return; }
+        if (parsed.code === 'OUTPUT_TOO_LARGE' || round >= MAX_REPAIR_ROUNDS || budget.remaining() < 1) {
+          fail(job, 'INVALID_AI_OUTPUT', parsed.code === 'OUTPUT_TOO_LARGE' ? 'The model output was too large.' : 'The model did not return a flow draft.', false);
+          return;
+        }
         note = repairNote([{code: parsed.code, path: '', severity: 'error'}]);
         round++;
         continue;
@@ -294,7 +375,15 @@ export function createJobs(deps: {
       if (job.state !== 'running') return;
       job.draft = parsed.value;
       const decision = preview.applicable ? 'accept' : repairDecision(preview.diagnostics);
-      if (decision === 'repair' && round < MAX_REPAIR_ROUNDS) {
+      if (decision === 'repair' && round < MAX_REPAIR_ROUNDS && budget.remaining() >= 1) {
+        const repairAssembled = assembleCall({system: packed.system, user: packed.user, previous: result.text, repair: repairNote(preview.diagnostics), extraBytes: schemaBytes});
+        if (!repairAssembled.fits) {
+          job.preview = preview;
+          job.previewId = preview.previewId;
+          job.previewExpiresAt = preview.expiresAt;
+          keepLast(job);
+          return;
+        }
         note = repairNote(preview.diagnostics);
         round++;
         continue;
@@ -309,32 +398,43 @@ export function createJobs(deps: {
     }
   }
 
-  async function run(job: StoredJob, resolved: {provider: FlowModelProvider; model: string}, prompt: string) {
+  async function run(job: StoredJob, resolved: ResolvedModel, prompt: string, draft: unknown) {
     const controller = new AbortController();
     runtimes.set(job.id, controller);
     const started = scheduler.now();
-    const cancelJob = scheduler.schedule(timeouts.jobMs, () => {
-      if (fail(job, 'PROVIDER_TIMEOUT', 'The generation timed out.', true)) controller.abort();
+    const deadlineAt = started + timeouts.deadlineMs;
+    const budget = submissionBudget(deadlineAt, () => scheduler.now());
+    const releaseRemoval = resolved.bindRemoval?.(() => {
+      if (fail(job, 'AI_NOT_CONFIGURED', 'The API key was removed.', false)) controller.abort();
     });
-    try { await execute(job, resolved.provider, resolved.model, prompt, controller.signal); }
+    const cancelJob = scheduler.schedule(timeouts.deadlineMs, () => {
+      if (fail(job, 'TIMEOUT', 'The generation timed out.', true)) controller.abort();
+    });
+    try { await execute(job, resolved, prompt, draft, controller.signal, budget, deadlineAt); }
     catch (error) {
       if (job.state === 'running') {
-        if (error instanceof AuthoringHttpError) fail(job, error.code, error.message, error.status === 409 || error.status === 410 || error.status >= 500);
-        else if (error instanceof ProviderRequestError) {
-          const retryable = error.code === 'PROVIDER_TIMEOUT' || error.code === 'PROVIDER_UNAVAILABLE';
-          fail(job, error.code, error.message, retryable);
+        if (error instanceof AuthoringHttpError) {
+          const stale = error.status === 409 && (error.code === 'REVISION_CONFLICT' || error.code === 'CONTEXT_CHANGED');
+          fail(job, stale ? 'WORKSPACE_STALE' : 'AUTHORING_INVALID', stale ? 'The workspace changed. Refresh and try again.' : 'The draft could not be checked against the workspace.', false);
+        } else if (error instanceof ProviderRequestError) {
+          const mapped = mapProviderFailure(error);
+          fail(job, mapped.code, mapped.message, mapped.retryable);
         } else if (error instanceof AiHttpError) fail(job, error.code, error.message, false);
-        else fail(job, 'INTERNAL', 'Generation failed.', true);
+        else fail(job, 'PROVIDER_UNAVAILABLE', 'Generation failed.', true);
       }
     } finally {
       cancelJob();
+      releaseRemoval?.();
       runtimes.delete(job.id);
       release(job);
       try { await deps.store.save(job); } catch { /* retention is best-effort; the in-memory job still answers GET */ }
       const errorCode = job.error?.code;
+      const diagnosticCodes = job.preview?.diagnostics.map(item => item.code) ?? (errorCode ? [errorCode] : []);
+      if (job.contextTrimmed && !diagnosticCodes.includes('CONTEXT_TRIMMED')) diagnosticCodes.push('CONTEXT_TRIMMED');
       logEvent({
-        provider: resolved.provider.id, model: resolved.model, durationMs: Math.max(0, scheduler.now() - started), contractVersion: CONTRACT_VERSION,
-        diagnosticCodes: job.preview?.diagnostics.map(item => item.code) ?? (errorCode ? [errorCode] : []),
+        requestId: job.id, provider: resolved.providerId, model: job.model ?? resolved.model, upstreamProvider: job.upstreamProvider,
+        durationMs: Math.max(0, scheduler.now() - started), inputTokens: job.inputTokens, outputTokens: job.outputTokens, cost: job.cost,
+        callCount: budget.used(), contractVersion: CONTRACT_VERSION, diagnosticCodes,
         outcome: job.state === 'failed' ? errorCode ?? 'failed' : job.state,
       });
     }
@@ -344,7 +444,17 @@ export function createJobs(deps: {
     ready: recover(),
     async start(input: unknown): Promise<GenerationView> {
       const request = requestOf(input);
+      if (request.expectedSettingsRevision !== undefined && request.expectedSettingsRevision !== await deps.settingsRevision()) {
+        throw new AiHttpError(409, 'SETTINGS_CHANGED', 'Settings changed in another session. Refresh and try again.');
+      }
       if (active.has(request.workspaceId)) throw new AiHttpError(409, 'GENERATION_BUSY', 'A generation is already running for this workspace.');
+      let draft: unknown;
+      if (request.previousJobId) {
+        const previous = await load(request.previousJobId);
+        if (previous.workspaceId !== request.workspaceId) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Refine against a generation from this workspace.');
+        if (previous.draft === undefined) throw new AiHttpError(409, 'INVALID_ENVELOPE', 'That generation has no draft to refine.');
+        draft = previous.draft;
+      }
       const now = deps.now();
       const job: StoredJob = {
         id: randomUUID(), workspaceId: request.workspaceId, baseRevision: request.expectedRevision, state: 'running', phase: 'context',
@@ -352,14 +462,17 @@ export function createJobs(deps: {
       };
       active.set(job.workspaceId, job.id);
       memory.set(job.id, job);
-      let resolved: {provider: FlowModelProvider; model: string};
+      let resolved: ResolvedModel;
       try { resolved = await deps.resolveProvider(); }
       catch (error) {
         memory.delete(job.id);
         release(job);
+        if (error instanceof AiHttpError && error.code === 'PROVIDER_CONFIG' && (error.message === 'Add an API key.' || error.message === 'Choose a model.')) {
+          throw new AiHttpError(400, 'AI_NOT_CONFIGURED', error.message);
+        }
         throw error;
       }
-      const promise = run(job, resolved, request.prompt).catch(() => { if (job.state === 'running') fail(job, 'INTERNAL', 'Generation failed.', true); });
+      const promise = run(job, resolved, request.prompt, draft).catch(() => { if (job.state === 'running') fail(job, 'PROVIDER_UNAVAILABLE', 'Generation failed.', true); });
       runs.set(job.id, promise);
       void promise.finally(() => { if (runs.get(job.id) === promise) runs.delete(job.id); });
       return generationView(job, deps.now().getTime());
