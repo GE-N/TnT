@@ -2,6 +2,18 @@ import {forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useS
 import {AiFlowRequestError, createAiFlowClient, type AiPublicConfig, type ProviderId} from './ai-flow-client.js';
 
 const PROVIDERS: ProviderId[] = ['openrouter', 'openai-compatible'];
+const configListeners = new Set<(config: AiPublicConfig) => void>();
+
+/** Settings Save and the composer share one config snapshot. Keys stay out of this store. */
+export function subscribeAiConfig(listener: (config: AiPublicConfig) => void) {
+  configListeners.add(listener);
+  return () => { configListeners.delete(listener); };
+}
+
+export function publishAiConfig(config: AiPublicConfig) {
+  if (!config?.providers?.openrouter || !config.providers['openai-compatible']) return;
+  for (const listener of configListeners) listener(config);
+}
 const DEFAULT_BASE = 'https://api.openai.com/v1';
 const MODEL_PATTERN = /^[A-Za-z0-9._:/@+-]{1,200}$/;
 
@@ -133,6 +145,7 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
       }
       forms.current = seeded;
       setForm(seeded);
+      publishAiConfig(next);
       if (!booted.current) { booted.current = true; setProvider(next.selected); }
     }).catch(() => { /* A missing config leaves the form editable. Save reports the failure. */ });
     return () => { cancelled = true; };
@@ -169,6 +182,7 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
     }
     forms.current = seeded;
     setForm(seeded);
+    publishAiConfig(next);
   }
 
   function choose(next: ProviderId) {
