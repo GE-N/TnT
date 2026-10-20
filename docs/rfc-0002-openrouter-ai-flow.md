@@ -1,7 +1,9 @@
 # RFC #2: OpenRouter for AI flow authoring
 
-Status: Proposed — ready for review; specification only, not implementation authorization  
-Date: 2026-10-20  
+Status: Proposed — ready for review; specification only, not implementation authorization
+
+Date: 2026-10-20
+
 Related: [Authoring RFC](ai-flow-authoring-rfc.md), [v1 contract](ai-flow-authoring-contract-v1.md), [canonical schema](contracts/ai-flow-v1/flow-draft.schema.json)
 
 ## Decision and scope
