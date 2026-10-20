@@ -144,7 +144,8 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       if (ai) {
         if (request.method === 'GET' && url.pathname === '/api/ai/config') return json(200, await ai.getConfig());
         if (request.method === 'PUT' && url.pathname === '/api/ai/config') return json(200, await ai.putConfig(await readJson(request)));
-        if (request.method === 'POST' && url.pathname === '/api/ai/config/check') return json(200, await ai.check());
+        if (request.method === 'POST' && url.pathname === '/api/ai/config/test') return json(200, await ai.testConnection(await readJson(request)));
+        if (request.method === 'GET' && url.pathname === '/api/ai/models') return json(200, await ai.listModels(url.searchParams.get('provider')));
         if (request.method === 'POST' && url.pathname === '/api/ai/generations') return json(202, await ai.start(await readJson(request)));
         const generation = /^\/api\/ai\/generations\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(cancel))?$/.exec(url.pathname);
         if (generation) {

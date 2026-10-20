@@ -56,6 +56,7 @@ function defaultSecuritySpawn(request: SecurityRequest): Promise<SecurityResult>
     child.stderr.on('data', chunk => { stderr += chunk; });
     child.on('error', () => finish({code: null, stdout: '', stderr: ''}));
     child.on('close', code => finish({code, stdout, stderr}));
+    child.stdin.on('error', () => undefined);
     if (request.input) child.stdin.write(request.input);
     child.stdin.end();
   });
