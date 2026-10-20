@@ -1,3 +1,4 @@
+import {createAuthoring} from './authoring/index.js';
 import {protectRunEvidence,verifyEvidence,redact,removeRunEvidence,assertEvidenceRoot} from './run-script-evidence.js';
 import {mapScriptResults} from './run-script-results.js';
 import {EVIDENCE_SCRUB_FAILED,type ScriptRunResults} from './run-script-contract.js';
@@ -417,7 +418,17 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     persist: async batch => writeRecord(join(await directory('batches', batch.id), 'result.json'), batch),
     read: async id => readRecord(await directory('batches', id), 'result.json'),
   });
-  return {...service, startBatch: batches.start, batch: batches.result, waitBatch: batches.wait, cancelBatch: batches.cancel};
+  const authoringFaults: {afterPublish?: () => unknown} = {};
+  const authoring = createAuthoring({
+    root: options.root, now: options.now, faults: authoringFaults,
+    read: id => workspaceStore.read(id),
+    save: (content, expectedRevision, beforePublish) => workspaceStore.save(authoredWorkspace(content), expectedRevision, undefined, beforePublish),
+    register: (next, previous, origins) => trustStore.register(next, previous, origins),
+    forget: (workspaceId, rowIds) => trustStore.forget(workspaceId, rowIds),
+    listTrust: workspace => trustStore.list(workspace),
+    busy: id => activeWorkspaces.has(id) || batches.activeWorkspaceId === id || deleting.has(id),
+  });
+  return {...service, authoring, startBatch: batches.start, batch: batches.result, waitBatch: batches.wait, cancelBatch: batches.cancel};
 }
 function sourceContext(workspace:Workspace){return workspace.metadata?.sourceWorkspace?{sourceWorkspace:workspace.metadata.sourceWorkspace}:{};}
 async function readRecord(base: string, name: string) {
