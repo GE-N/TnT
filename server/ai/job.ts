@@ -136,10 +136,26 @@ function parseModelDraft(text: string): {ok: true; value: unknown} | {ok: false;
   } catch { return {ok: false, code: 'INVALID_JSON'}; }
 }
 
+const MODEL_ID_LIMIT = 200;
+
+function generationProvider(value: unknown): 'openrouter' | 'openai-compatible' | undefined {
+  if (value === undefined) return;
+  if (value === 'openrouter' || value === 'openai-compatible') return value;
+  throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Choose OpenRouter or an OpenAI-compatible provider.');
+}
+
+function generationModel(value: unknown) {
+  if (value === undefined) return;
+  if (typeof value !== 'string') throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Provide a model name.');
+  const model = value.trim();
+  if (!model || model.length > MODEL_ID_LIMIT) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Provide a model name.');
+  return model;
+}
+
 function requestOf(input: unknown) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Provide a generation request.');
   const body = input as Record<string, unknown>;
-  if (Object.keys(body).some(key => !['workspaceId', 'expectedRevision', 'expectedSettingsRevision', 'prompt', 'previousJobId'].includes(key))) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Unknown generation field.');
+  if (Object.keys(body).some(key => !['workspaceId', 'expectedRevision', 'expectedSettingsRevision', 'prompt', 'previousJobId', 'provider', 'model'].includes(key))) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Unknown generation field.');
   let expectedSettingsRevision: number | undefined;
   if (body.expectedSettingsRevision !== undefined) {
     if (!Number.isInteger(body.expectedSettingsRevision) || (body.expectedSettingsRevision as number) < 0) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Provide the settings revision.');
@@ -156,6 +172,8 @@ function requestOf(input: unknown) {
     prompt: assertUserPrompt(body.prompt),
     expectedSettingsRevision,
     previousJobId,
+    provider: generationProvider(body.provider),
+    model: generationModel(body.model),
   };
 }
 
@@ -198,7 +216,8 @@ export function createJobs(deps: {
   log: (line: string) => void;
   scheduler?: Scheduler;
   timeouts?: Partial<Timeouts>;
-  resolveProvider: () => Promise<ResolvedModel>;
+  /** Optional provider and model apply to this job only. Omit both to use the saved selection. */
+  resolveProvider: (override?: {provider?: 'openrouter' | 'openai-compatible'; model?: string}) => Promise<ResolvedModel>;
   settingsRevision: () => Promise<number>;
 }) {
   const scheduler = deps.scheduler ?? realScheduler();
@@ -463,7 +482,7 @@ export function createJobs(deps: {
       active.set(job.workspaceId, job.id);
       memory.set(job.id, job);
       let resolved: ResolvedModel;
-      try { resolved = await deps.resolveProvider(); }
+      try { resolved = await deps.resolveProvider({provider: request.provider, model: request.model}); }
       catch (error) {
         memory.delete(job.id);
         release(job);
