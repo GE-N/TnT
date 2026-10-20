@@ -28,7 +28,7 @@ test('AI flow authoring UI', async t => {
       await h.until(() => h.confirmEnabled(), 'confirm');
       await h.click('[data-testid="ai-confirm"]');
       await h.until(() => !!h.document.querySelector('[data-testid="ai-provenance"]'), 'provenance');
-      assert.match(h.document.querySelector('[data-testid="ai-provenance"]')!.textContent ?? '', /Added from a description/);
+      assert.match(h.document.querySelector('[data-testid="ai-provenance"]')!.textContent ?? '', /Applied as/);
       assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]'), null);
       const workspace = await h.saved();
       assert.equal(workspace.scenarios?.some(item => item.name === 'Pay a bill' && item.authoring === 'canvas'), true);
@@ -182,15 +182,16 @@ test('AI flow authoring UI', async t => {
     const h = await harness('ready');
     try {
       await h.render();
-      await h.click('[data-testid="ai-flow-button"]');
-      await h.clickText('Provider settings');
-      await h.until(() => h.document.querySelector('[data-testid="ai-has-key"]')?.textContent === 'A key is saved.', 'has key');
+      await h.click('.workspace-advanced > summary');
+      await h.until(() => h.document.querySelector('[data-testid="ai-has-key"]')?.textContent?.startsWith('API key saved') === true, 'has key');
       const key = h.document.querySelector('[data-testid="ai-api-key"]') as HTMLInputElement;
       assert.equal(key.value, '');
       assert.equal(key.type, 'password');
       assert.equal(h.document.body.innerHTML.includes(SECRET), false);
-      assert.match(h.document.querySelector('[data-testid="ai-flow"]')!.textContent ?? '', /OpenAI-compatible/);
-      assert.doesNotMatch(h.document.body.textContent ?? '', /ollama|lm studio|anthropic/i);
+      const settings = h.document.querySelector('[data-testid="ai-settings"]')?.textContent ?? '';
+      assert.match(settings, /OpenRouter/);
+      assert.match(settings, /OpenAI-compatible/);
+      assert.doesNotMatch(h.document.body.textContent ?? '', /ollama|lm studio/i);
     } finally { await h.cleanup(); }
   });
 
@@ -203,6 +204,76 @@ test('AI flow authoring UI', async t => {
       assert.match(h.document.querySelector('[data-testid="ai-error"]')!.textContent ?? '', /workspace was changed/);
       assert.equal(h.ai.generations, 0);
       assert.ok(h.document.querySelector('[data-testid="ai-retry"]'));
+    } finally { await h.cleanup(); }
+  });
+
+  // Pre-fix (2f67ffe ProviderSettings.save(thenCheck)): Test connection called save(true),
+  // which PUT /api/ai/config and then setApiKey(''). The typed key disappeared and a save was sent.
+  await t.test('typing a key and testing the connection does not save or clear it', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.click('.workspace-advanced > summary');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-api-key"]'), 'key field');
+      await h.fill('API key', 'sk-typed-key');
+      h.ai.holdNextTest();
+      await h.click('[data-testid="ai-test-connection"]');
+      await h.until(() => /Testing connection/.test(h.document.body.textContent ?? ''), 'testing');
+      const field = () => h.document.querySelector('[data-testid="ai-api-key"]') as HTMLInputElement;
+      assert.equal(field().value, 'sk-typed-key');
+      assert.equal(h.ai.puts.length, 0);
+      await h.fill('API key', 'sk-typed-key-edited');
+      h.ai.releaseTest();
+      await h.until(() => !/Testing connection/.test(h.document.body.textContent ?? ''), 'test finished');
+      assert.equal(field().value, 'sk-typed-key-edited');
+      assert.equal(h.ai.puts.length, 0);
+      assert.doesNotMatch(h.document.querySelector('[data-testid="ai-settings"]')?.textContent ?? '', /Connected to OpenRouter/);
+      assert.equal(JSON.stringify(h.ai.tests[0]).includes('sk-typed-key-edited'), false);
+      assert.equal((h.ai.tests[0] as {source?: string}).source, 'replacement');
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('a failed save keeps the typed key and never sends an empty apiKey', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.click('.workspace-advanced > summary');
+      await h.until(() => h.document.querySelector('[data-testid="ai-save"]')?.hasAttribute('disabled') === false, 'save ready');
+      await h.click('[data-testid="ai-save"]');
+      await h.until(() => h.ai.puts.length === 1, 'keep save');
+      assert.equal((h.ai.puts[0] as {credential?: {action?: string; apiKey?: string}}).credential?.action, 'keep');
+      assert.equal(JSON.stringify(h.ai.puts[0]).includes('apiKey'), false);
+      h.ai.failNextPut();
+      await h.fill('API key', 'sk-keep-me');
+      await h.click('[data-testid="ai-save"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-save-error"]'), 'save failed');
+      assert.equal((h.document.querySelector('[data-testid="ai-api-key"]') as HTMLInputElement).value, 'sk-keep-me');
+      const sent = h.ai.puts[1] as {credential?: {action?: string; apiKey?: string}};
+      assert.equal(sent.credential?.action, 'replace');
+      assert.equal(sent.credential?.apiKey, 'sk-keep-me');
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('a pending draft survives a workspace switch and back', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.generate('Pay the electric bill');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-draft-chip"]'), 'overlay');
+      const origin = h.workspaceId;
+      await h.service.save({name: 'Other workspace', yaml: 'appId: com.example.HybridApp\n---\n- launchApp\n'});
+      await h.click('[aria-label="Manage workspace"]');
+      await h.clickText('View all workspaces');
+      await h.until(() => !!h.document.querySelector('button[aria-label^="Open Other workspace"]'), 'library');
+      await h.click('button[aria-label^="Open Other workspace"]');
+      await h.until(() => (h.document.body.textContent ?? '').includes('Other workspace') && h.document.querySelector('[data-testid="ai-draft-chip"]') === null, 'switched away');
+      assert.equal(h.ai.cancels, 0);
+      await h.click('[aria-label="Manage workspace"]');
+      await h.clickText('View all workspaces');
+      await h.until(() => !!h.document.querySelector('button[aria-label^="Open Untitled workspace"]'), 'origin listed');
+      await h.click('button[aria-label^="Open Untitled workspace"]');
+      await h.until(() => (h.document.body.textContent ?? '').includes('Untitled workspace') && h.workspaceId === origin && !!h.document.querySelector('[data-testid="ai-draft-chip"]'), 'draft returned');
+      assert.equal(h.document.querySelector('[data-testid="ai-confirm"]')?.getAttribute('aria-disabled') ?? null, null);
     } finally { await h.cleanup(); }
   });
 });
@@ -231,8 +302,11 @@ async function harness(mode: Mode, options: {deviceId?: string; failSave?: boole
     const method = init?.method ?? 'GET';
     const body = init?.body ? JSON.parse(init.body) as Record<string, unknown> : undefined;
     try {
+      if (method === 'GET' && url.pathname === '/api/workspaces') return Response.json(await service.listWorkspaces(url.searchParams.get('q') ?? ''));
+      const opened = /^\/api\/workspaces\/([0-9a-f-]{36})\/open$/.exec(url.pathname);
+      if (method === 'POST' && opened) return Response.json(await service.openWorkspace(opened[1]));
       if (url.pathname.startsWith('/api/ai/') || url.pathname.startsWith('/api/authoring/')) {
-        const result = await ai.route(method, url.pathname, body);
+        const result = await ai.route(method, url.pathname + url.search, body);
         if (method === 'POST' && url.pathname === '/api/ai/generations' && body && typeof body.workspaceId === 'string') workspaceId = body.workspaceId;
         return Response.json(result.body, {status: result.status});
       }
@@ -293,7 +367,20 @@ async function harness(mode: Mode, options: {deviceId?: string; failSave?: boole
     saved: () => service.workspace(workspaceId),
     documentOf: (workspace: {name: string; yaml: string; flows?: unknown; scenarios?: unknown; canvas?: unknown; automation?: unknown; mock?: unknown}) => JSON.stringify({name: workspace.name, yaml: workspace.yaml, flows: workspace.flows ?? {}, scenarios: workspace.scenarios ?? [], canvas: workspace.canvas ?? null, automation: workspace.automation ?? null, mock: workspace.mock ?? null}),
     render, click, clickText, fill, until,
-    generate: async (prompt: string) => { await click('[data-testid="ai-flow-button"]'); await fill('Flow description', prompt); await click('[data-testid="ai-generate"]'); },
+    generate: async (prompt: string) => {
+      await click('[data-testid="ai-flow-button"]');
+      await fill('Flow description', prompt);
+      await click('[data-testid="ai-generate"]');
+      for (let attempt = 0; attempt < 20; attempt++) {
+        if (document.querySelector('[data-testid="ai-disclosure-continue"]')) {
+          await click('[data-testid="ai-disclosure-continue"]');
+          return;
+        }
+        const status = document.querySelector('[data-testid="ai-flow"]')?.getAttribute('data-ai-status');
+        if (status === 'generating' || status === 'failed' || document.querySelector('[data-testid="ai-error"]')) return;
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
+      }
+    },
     addNode: async () => {
       await act(async () => document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu', {bubbles: true, cancelable: true, clientX: 120, clientY: 120})));
       await clickText('Add node');
@@ -307,7 +394,18 @@ async function harness(mode: Mode, options: {deviceId?: string; failSave?: boole
       await act(async () => root.unmount());
       dom.window.close();
       for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
-      await rm(directory, {recursive: true, force: true});
+      await rm(directory, {recursive: true, force: true, maxRetries: 5, retryDelay: 50});
+    },
+  };
+}
+
+function savedConfig() {
+  return {
+    settingsRevision: 2,
+    selected: 'openrouter' as const,
+    providers: {
+      openrouter: {model: 'vendor/model', configured: true, keySource: 'keychain' as const, credentialRevision: 1, storageAvailable: true},
+      'openai-compatible': {model: 'gpt-test', baseUrl: 'https://api.openai.com/v1', configured: false, credentialRevision: 0, storageAvailable: true},
     },
   };
 }
@@ -317,7 +415,12 @@ function createFake(mode: Mode, service: ScenarioService) {
   const applied = new Map<string, unknown>();
   const snapshots = new Map<string, Awaited<ReturnType<ScenarioService['workspace']>>>();
   const waiters: Array<() => void> = [];
+  const testWaiters: Array<() => void> = [];
+  const puts: unknown[] = [];
+  const tests: unknown[] = [];
   let released = false;
+  let holdTest = false;
+  let failPut = false;
   const counts = {generations: 0, previews: 0, applies: 0, cancels: 0, undos: 0, inflight: 0};
   return {
     get generations() { return counts.generations; },
@@ -326,22 +429,37 @@ function createFake(mode: Mode, service: ScenarioService) {
     get cancels() { return counts.cancels; },
     get undos() { return counts.undos; },
     get inflight() { return counts.inflight; },
+    get puts() { return puts; },
+    get tests() { return tests; },
+    holdNextTest() { holdTest = true; },
+    releaseTest() { holdTest = false; for (const resolve of testWaiters.splice(0)) resolve(); },
+    failNextPut() { failPut = true; },
     release() {
       released = true;
       for (const job of jobs.values()) finish(job, mode);
       for (const resolve of waiters.splice(0)) resolve();
     },
     async route(method: string, pathname: string, body?: Record<string, unknown>) {
-      if (method === 'GET' && pathname === '/api/ai/config') return {status: 200, body: {provider: 'openai-compatible', model: 'gpt-test', baseUrl: 'https://api.openai.com/v1', hasKey: true, apiKey: SECRET}};
-      if (method === 'PUT' && pathname === '/api/ai/config') return {status: 200, body: {provider: 'openai-compatible', model: body?.model, baseUrl: body?.baseUrl, hasKey: true}};
-      if (method === 'POST' && pathname === '/api/ai/config/check') return {status: 200, body: {ok: true, model: 'gpt-test'}};
-      if (method === 'POST' && pathname === '/api/ai/generations') {
+      const path = pathname.split('?')[0];
+      if (method === 'GET' && path === '/api/ai/config') return {status: 200, body: savedConfig()};
+      if (method === 'GET' && path === '/api/ai/models') return {status: 200, body: {provider: 'openrouter', models: [{id: 'vendor/model'}, {id: 'openai/gpt-test'}]}};
+      if (method === 'PUT' && path === '/api/ai/config') {
+        puts.push(body);
+        if (failPut) { failPut = false; return {status: 500, body: {error: 'The settings service did not answer.', code: 'REQUEST_FAILED'}}; }
+        return {status: 200, body: savedConfig()};
+      }
+      if (method === 'POST' && path === '/api/ai/config/test') {
+        tests.push(body);
+        if (holdTest) await new Promise<void>(resolve => testWaiters.push(resolve));
+        return {status: 200, body: {testId: body?.testId, ok: true, message: "Connected to OpenRouter. The model hasn't been tested yet."}};
+      }
+      if (method === 'POST' && path === '/api/ai/generations') {
         counts.generations++;
         const job: Job = {id: crypto.randomUUID(), workspaceId: String(body?.workspaceId), baseRevision: Number(body?.expectedRevision), state: 'running', phase: 'model', draft: mode === 'needs' ? needsDraft() : happyDraft()};
         jobs.set(job.id, job);
         return {status: 202, body: viewOf(job, mode)};
       }
-      const generation = /^\/api\/ai\/generations\/([^/]+)(?:\/(cancel))?$/.exec(pathname);
+      const generation = /^\/api\/ai\/generations\/([^/]+)(?:\/(cancel))?$/.exec(path);
       if (generation && method === 'GET') {
         const job = jobs.get(generation[1]);
         if (!job) return {status: 404, body: {error: 'Missing job.', code: 'NOT_FOUND'}};
@@ -359,13 +477,13 @@ function createFake(mode: Mode, service: ScenarioService) {
         if (job) job.state = 'cancelled';
         return {status: 200, body: job ? viewOf(job, mode) : {error: 'Missing job.', code: 'NOT_FOUND'}};
       }
-      if (method === 'POST' && pathname === '/api/authoring/context') return {status: 200, body: {contextId: crypto.randomUUID(), workspaceId: body?.workspaceId, revision: body?.expectedRevision, expiresAt: new Date(Date.now() + 60_000).toISOString()}};
-      if (method === 'POST' && pathname === '/api/authoring/preview') {
+      if (method === 'POST' && path === '/api/authoring/context') return {status: 200, body: {contextId: crypto.randomUUID(), workspaceId: body?.workspaceId, revision: body?.expectedRevision, expiresAt: new Date(Date.now() + 60_000).toISOString()}};
+      if (method === 'POST' && path === '/api/authoring/preview') {
         counts.previews++;
         return {status: 200, body: previewFor(String(body?.workspaceId), Number(body?.expectedRevision), body?.draft as FlowDraft)};
       }
-      if (method === 'POST' && pathname === '/api/authoring/apply') return {status: 200, body: await applyDraft(service, counts, applied, snapshots, body ?? {})};
-      if (method === 'POST' && pathname === '/api/authoring/undo') return {status: 200, body: await undoDraft(service, counts, snapshots, body ?? {})};
+      if (method === 'POST' && path === '/api/authoring/apply') return {status: 200, body: await applyDraft(service, counts, applied, snapshots, body ?? {})};
+      if (method === 'POST' && path === '/api/authoring/undo') return {status: 200, body: await undoDraft(service, counts, snapshots, body ?? {})};
       return {status: 404, body: {error: 'Unknown authoring route.', code: 'NOT_FOUND'}};
     },
   };
