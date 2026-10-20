@@ -1,10 +1,12 @@
 import type {ApplyResult, Diagnostic, Preview} from '../server/authoring/types.js';
-import type {AiPublicConfig} from '../server/ai/config.js';
+import type {AiModelInfo, AiPublicConfig, AiTestResult, ProviderId, StorageKind} from '../server/ai/config.js';
 import type {GenerationPhase, GenerationState, GenerationView, JobError} from '../server/ai/store.js';
 
-export type {AiPublicConfig, ApplyResult, Diagnostic, GenerationPhase, GenerationState, GenerationView, JobError, Preview};
+export type {AiModelInfo, AiPublicConfig, AiTestResult, ApplyResult, Diagnostic, GenerationPhase, GenerationState, GenerationView, JobError, Preview, ProviderId, StorageKind};
 
 export const AI_POLL_MS = 500;
+export const PROMPT_CHAR_LIMIT = 4000;
+export const PROMPT_COUNTER_AT = 3600;
 
 export class AiFlowRequestError extends Error {
   constructor(message: string, readonly status: number, readonly code: string, readonly diagnostics?: Diagnostic[]) {
@@ -13,7 +15,31 @@ export class AiFlowRequestError extends Error {
   }
 }
 
-export type GenerationRequest = {workspaceId: string; expectedRevision: number; prompt: string};
+export type CredentialAction =
+  | {action: 'keep'}
+  | {action: 'replace'; apiKey: string; storage: StorageKind}
+  | {action: 'remove'};
+
+export type ConfigPut = {
+  expectedSettingsRevision: number;
+  selected: ProviderId;
+  provider: ProviderId;
+  model: string;
+  baseUrl?: string;
+  credential: CredentialAction;
+};
+
+export type TestInput =
+  | {provider: ProviderId; testId: string; source: 'stored'; credentialRevision: number}
+  | {provider: ProviderId; testId: string; source: 'replacement'; apiKey: string};
+
+export type GenerationRequest = {
+  workspaceId: string;
+  expectedRevision: number;
+  expectedSettingsRevision: number;
+  prompt: string;
+  previousJobId?: string;
+};
 export type ContextRequest = {workspaceId: string; expectedRevision: number; screenIds?: string[]};
 export type AuthoringContext = {contextId: string; workspaceId: string; revision: number; expiresAt: string};
 export type PreviewRequest = {workspaceId: string; expectedRevision: number; contextId: string; draft: unknown};
@@ -21,8 +47,7 @@ export type ApplyRequest = {workspaceId: string; expectedRevision: number; previ
 export type ApplyResponse = ApplyResult & {receiptId?: string};
 export type UndoRequest = {workspaceId: string; expectedRevision: number; receiptId: string};
 export type UndoResponse = {workspaceId: string; revision: number; receiptId: string; scenarioId: string; undone: true};
-export type ConfigInput = {provider: 'openai-compatible'; model: string; baseUrl: string; apiKey?: string};
-export type ConnectionCheck = {ok: boolean; model?: string; error?: string};
+export type ModelCatalog = {provider: ProviderId; models: AiModelInfo[]};
 
 /** Same-origin runner calls. The session token is a header, never part of the URL. */
 export function createAiFlowClient(token: string) {
@@ -31,8 +56,9 @@ export function createAiFlowClient(token: string) {
     getGeneration: (id: string) => request<GenerationView>(token, 'GET', '/api/ai/generations/' + encodeURIComponent(id)),
     cancelGeneration: (id: string) => request<GenerationView>(token, 'POST', '/api/ai/generations/' + encodeURIComponent(id) + '/cancel', {}),
     getConfig: () => request<AiPublicConfig>(token, 'GET', '/api/ai/config'),
-    putConfig: (body: ConfigInput) => request<AiPublicConfig>(token, 'PUT', '/api/ai/config', body),
-    checkConfig: () => request<ConnectionCheck>(token, 'POST', '/api/ai/config/check', {}),
+    putConfig: (body: ConfigPut) => request<AiPublicConfig>(token, 'PUT', '/api/ai/config', body),
+    testConnection: (body: TestInput) => request<AiTestResult>(token, 'POST', '/api/ai/config/test', body),
+    listModels: (provider: ProviderId) => request<ModelCatalog>(token, 'GET', '/api/ai/models?provider=' + encodeURIComponent(provider)),
     /** Preview requires a contextId. Refresh creates one at the saved revision, then posts the stored draft. */
     createContext: (body: ContextRequest) => request<AuthoringContext>(token, 'POST', '/api/authoring/context', body),
     preview: (body: PreviewRequest) => request<Preview>(token, 'POST', '/api/authoring/preview', body),
