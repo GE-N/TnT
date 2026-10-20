@@ -271,7 +271,7 @@ Before publication, persist intended IDs and explicitly untrusted script provena
 5. Apply is an authorized write, not a grant to run or trust scripts. In-app preview uses an explicit Apply action; external clients use their established write authorization and show the proposed changes. Assumption acknowledgements are acknowledgements of interpretation only.
 6. Optional model/provider choice does not change this contract. Agents get the schema, current capabilities, semantics, and examples at runtime; skills explain the workflow but are not required for schema enforcement.
 
-These are proposed defaults reviewers can accept or change; they are no longer unspecified holes in the design. Model choice and quantitative generation-quality targets remain release configuration decisions, not field-semantics decisions.
+These are proposed defaults reviewers can accept or change; they are no longer unspecified holes in the design. The [OpenRouter specification](rfc-0002-openrouter-ai-flow.md) defines unrestricted user model choice and provider integration checks. Model-quality certification is not a release gate and does not change field semantics.
 
 ## 10. Phases and acceptance fixtures
 

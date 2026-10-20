@@ -1,12 +1,14 @@
 # RFC: AI-assisted flow authoring and MCP access
 
 Status: Proposed — ready for review, not approved for implementation
-Date: 2026-10-18; revised 2026-10-19
+Date: 2026-10-18; revised 2026-10-20
 Scope: TnT authoring contract, natural-language generation, and external AI access
 
 ## Contract revision
 
 The [detailed v1 authoring contract](ai-flow-authoring-contract-v1.md), [JSON Schema](contracts/ai-flow-v1/flow-draft.schema.json), and [script/repeated-visit example](contracts/ai-flow-v1/repeated-visits-with-scripts.json) supersede the illustrative contract in this RFC. The detailed design is based on fetched main `8ca86e7`, including Run script. It is a concrete proposal for implementation review, not an approved or implemented API. Where the initial RFC leaves a choice open, the detailed contract selects the proposed v1 behavior.
+
+The [OpenRouter specification](rfc-0002-openrouter-ai-flow.md) selects provider settings, unrestricted model choice, credential test/save behavior (including the disappearing-key bug), generation limits and acceptance criteria. It supersedes model-quality eligibility gates below; implementation remains subject to review.
 
 ## Summary
 
@@ -165,7 +167,7 @@ Reference: [MCP tools specification](https://github.com/modelcontextprotocol/mod
 
 ## Model integration and data handling
 
-Use one initial provider adapter behind an explicit interface. Keep the authoring contract provider-independent, but do not promise equal behavior from every model. Support additional providers only after they pass the same evaluation suite.
+Use one initial provider adapter behind an explicit interface. Keep the authoring contract provider-independent, but do not promise equal behavior from every model. Validate provider adapter compatibility and authoring correctness. Users choose models freely; model quality scores and native structured-output support are not eligibility gates.
 
 Provide schema, semantics, examples, and bounded workspace context at generation time. Native structured output may help where available; server validation remains mandatory. Return structured diagnostics for a bounded repair loop. Unavailable real-world information must result in clarification or an unresolved draft, not repeated guessing.
 
@@ -179,7 +181,7 @@ Define request size, operation count, token/cost budget, timeout, retry ceiling,
 | --- | --- | --- |
 | 0 — Contract and integration design | Schema, semantic rules, examples, unresolved-target representation, context identity, concurrency, script trust/publication, and review of the proposed MCP transport/auth design | Reviewers agree contract and golden fixtures; open product choices below are resolved |
 | 1 — Deterministic authoring foundation | Shared module, validator, translator including script anchors, preview/apply/read-back, untrusted script publication, editor integration and revision handling | Fixtures create flows that render, edit, save/reopen, and project correctly without an LLM; no unrelated scenario changes |
-| 2 — In-app generation | Provider adapter, natural-language UI, preview/clarification, cancellation, bounded repair and data-sharing controls | Thai/English evaluations meet an agreed release threshold; complete fixtures run on the simulator with evidence |
+| 2 — In-app generation | Provider adapter, natural-language UI, preview/clarification, cancellation, bounded repair and data-sharing controls | Provider integration and authoring safety checks pass; real generation reaches Canvas and Apply; complete fixtures run on the simulator with evidence |
 | 3 — MCP release | Adapter, discovery/docs, local setup, authorization, companion guide/skill, client compatibility tests | An external client creates the same editable flow through the shared module; retries/conflicts and open-editor refresh work |
 | 4 — Follow-on proposals | Existing-flow edits, richer context, exploration, execution or repair tools | Separate scope and authorization review before implementation |
 
@@ -200,7 +202,7 @@ Test the public authoring interface and the resulting user-visible behavior:
 - HTTP and MCP adapters exercise equivalent authoring behavior; malformed inputs cannot bypass validation.
 - Existing workspace and runner regression checks pass. Representative generated scenarios execute against a known test app with immutable run evidence.
 
-Maintain a versioned evaluation corpus with expected operations, visits, assertions, and unresolved facts. Evaluate meaning rather than exact generated wording. Report structural validity, semantic completeness, invented-target rate, clarification quality, successful application, and real-run outcomes separately. Set sample size and numeric release thresholds during Phase 0; do not select a model from anecdotes or schema-validity alone.
+Maintain a versioned evaluation corpus with expected operations, visits, assertions, and unresolved facts. Evaluate meaning rather than exact generated wording. Report structural validity, semantic completeness, invented-target rate, clarification quality, successful application, and real-run outcomes separately. Use these measurements for diagnostics and improvement, not an approved-model list or a model-quality release gate. Software correctness and real-provider integration remain required checks.
 
 ## Alternatives considered
 
@@ -219,9 +221,9 @@ Maintain a versioned evaluation corpus with expected operations, visits, asserti
 2. Accept the proposed separate persistent generation-draft store, with unresolved targets/values repaired before apply?
 3. Is the saved-revision requirement acceptable for the first release, including external edits and autosave interaction?
 4. Should MCP ship alongside in-app generation or immediately afterward, and which external clients define its acceptance matrix?
-5. Which provider configuration and data-sharing policy should the first in-app release support?
+5. Does the proposed OpenRouter configuration, credential lifecycle and data-sharing policy cover the supported deployment?
 6. What persistent target identity is appropriate, and which picker data may be included?
 7. Accept local stdio MCP with paired authoring scopes, no trust/run tools, and mandatory untrusted registration of generated scripts?
-8. Which evaluation corpus, thresholds, and real-app journeys establish release readiness?
+8. Do the deterministic regression matrix and real-provider smoke journey establish software release readiness without restricting model choice?
 
 Review acceptance should record decisions and unresolved blockers in this document or its linked review record before implementation tickets are assigned. No external review request has been sent as part of drafting this RFC.
