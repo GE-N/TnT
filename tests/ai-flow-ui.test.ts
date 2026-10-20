@@ -276,13 +276,109 @@ test('AI flow authoring UI', async t => {
       assert.equal(h.document.querySelector('[data-testid="ai-confirm"]')?.getAttribute('aria-disabled') ?? null, null);
     } finally { await h.cleanup(); }
   });
+
+  await t.test('the composer chip provider and model are sent with the next request only', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.click('[data-testid="ai-flow-button"]');
+      await h.fill('Flow description', 'Pay the electric bill');
+      await h.click('[data-testid="ai-provider-chip"]');
+      await h.click('[data-testid="ai-chip-openai-compatible"]');
+      await h.fill('Model for the next request', 'gpt-next');
+      h.ai.holdNextJob();
+      await h.click('[data-testid="ai-generate"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-disclosure-continue"]') || h.status() === 'generating', 'disclosure or start');
+      if (h.document.querySelector('[data-testid="ai-disclosure-continue"]')) await h.click('[data-testid="ai-disclosure-continue"]');
+      await h.until(() => h.status() === 'generating', 'generating with the chip');
+      assert.match(h.document.querySelector('[data-testid="ai-progress-model"]')?.textContent ?? '', /OpenAI-compatible · gpt-next/);
+      const sent = h.ai.generationBodies[0] as {provider?: string; model?: string};
+      assert.equal(sent.provider, 'openai-compatible');
+      assert.equal(sent.model, 'gpt-next');
+      assert.equal(h.ai.puts.length, 0);
+      h.ai.release();
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-draft-chip"]'), 'draft ready');
+      assert.match(h.document.querySelector('[data-testid="ai-usage"]')?.textContent ?? '', /gpt-next/);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('saving a key then generating uses the new settings without a reload', async () => {
+    const h = await harness('ready', {unconfigured: true});
+    try {
+      await h.render();
+      await h.click('.workspace-advanced > summary');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-api-key"]'), 'key field');
+      await h.fill('Model', 'vendor/model');
+      await h.fill('API key', 'sk-fresh-key');
+      await h.click('[data-testid="ai-save"]');
+      await h.until(() => /API key saved/.test(h.document.querySelector('[data-testid="ai-has-key"]')?.textContent ?? ''), 'key saved');
+      await h.click('[data-testid="ai-flow-button"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-generate"]'), 'generate enabled');
+      await h.fill('Flow description', 'Pay the electric bill');
+      await h.click('[data-testid="ai-generate"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-disclosure-continue"]') || h.ai.generations === 1, 'disclosure or start');
+      if (h.document.querySelector('[data-testid="ai-disclosure-continue"]')) await h.click('[data-testid="ai-disclosure-continue"]');
+      await h.until(() => h.ai.generations === 1, 'generation started');
+      assert.equal((h.ai.generationBodies.at(-1) as {expectedSettingsRevision?: number}).expectedSettingsRevision, 1);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('refresh after settings changed sends the new revision', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      h.ai.rejectNextGeneration();
+      await h.generate('Pay the electric bill');
+      await h.until(() => /Refresh and generate again/.test(h.document.body.textContent ?? ''), 'refresh offered');
+      const first = h.ai.generationBodies[0] as {expectedSettingsRevision?: number};
+      await h.click('[data-testid="ai-retry"]');
+      await h.until(() => h.ai.generationBodies.length >= 2, 'retried');
+      const second = h.ai.generationBodies[1] as {expectedSettingsRevision?: number};
+      assert.equal(second.expectedSettingsRevision, (first.expectedSettingsRevision ?? 0) + 1);
+      await h.until(() => h.ai.generations === 1, 'generation started');
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('switching workspace during refine keeps the previous draft and ignores the late result', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.generate('Pay the electric bill');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-draft-chip"]'), 'overlay');
+      const origin = h.workspaceId;
+      await h.click('[data-testid="ai-refine"]');
+      await h.fill('Flow description', 'Add a receipt');
+      h.ai.holdNextJob();
+      await h.click('[data-testid="ai-generate"]');
+      await h.until(() => h.status() === 'generating', 'refining');
+      await h.service.save({name: 'Other workspace', yaml: 'appId: com.example.HybridApp\n---\n- launchApp\n'});
+      await h.click('[aria-label="Manage workspace"]');
+      await h.clickText('View all workspaces');
+      await h.until(() => !!h.document.querySelector('button[aria-label^="Open Other workspace"]'), 'library');
+      await h.click('button[aria-label^="Open Other workspace"]');
+      await h.until(() => (h.document.body.textContent ?? '').includes('Other workspace') && h.document.querySelector('[data-testid="ai-draft-chip"]') === null, 'switched away');
+      assert.equal(h.ai.cancels, 1);
+      await h.click('[aria-label="Manage workspace"]');
+      await h.clickText('View all workspaces');
+      await h.until(() => !!h.document.querySelector('button[aria-label^="Open Untitled workspace"]'), 'origin listed');
+      await h.click('button[aria-label^="Open Untitled workspace"]');
+      await h.until(() => (h.document.body.textContent ?? '').includes('Untitled workspace') && h.workspaceId === origin && !!h.document.querySelector('[data-testid="ai-draft-chip"]'), 'draft returned');
+      assert.equal(h.status(), 'pending');
+      assert.equal(h.document.querySelector('[data-testid="ai-confirm"]')?.getAttribute('aria-disabled') ?? null, null);
+      h.ai.release();
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)); });
+      assert.equal(h.status(), 'pending');
+      assert.equal(h.document.body.textContent?.includes('Late refine'), false);
+      assert.ok(h.document.querySelector('[data-testid="ai-draft-chip"]'));
+    } finally { await h.cleanup(); }
+  });
 });
 
 type Mode = 'ready' | 'hold' | 'expired' | 'needs';
-type Job = {id: string; workspaceId: string; baseRevision: number; state: 'running' | 'pending' | 'needsInfo' | 'cancelled'; phase: GenerationView['phase']; draft?: FlowDraft; preview?: Preview};
+type Job = {id: string; workspaceId: string; baseRevision: number; state: 'running' | 'pending' | 'needsInfo' | 'cancelled'; phase: GenerationView['phase']; draft?: FlowDraft; preview?: Preview; model?: string; upstreamProvider?: string};
 type ScenarioService = ReturnType<typeof createScenarios>;
 
-async function harness(mode: Mode, options: {deviceId?: string; failSave?: boolean} = {}) {
+async function harness(mode: Mode, options: {deviceId?: string; failSave?: boolean; unconfigured?: boolean} = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'tnt-ai-flow-ui-'));
   const service = createScenarios({
     root: directory,
@@ -294,7 +390,7 @@ async function harness(mode: Mode, options: {deviceId?: string; failSave?: boole
   const keys = ['window', 'document', 'HTMLElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event', 'ResizeObserver', 'IS_REACT_ACT_ENVIRONMENT', 'fetch'];
   const previous = keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
   class ResizeObserver { observe() {} disconnect() {} }
-  const ai = createFake(mode, service);
+  const ai = createFake(mode, service, options);
   let workspaceId = '';
   const runs = new Map<string, unknown>();
   const fetchImpl = async (path: string, init?: {method?: string; body?: string}) => {
@@ -399,18 +495,54 @@ async function harness(mode: Mode, options: {deviceId?: string; failSave?: boole
   };
 }
 
-function savedConfig() {
+type FakeConfig = {
+  settingsRevision: number;
+  selected: 'openrouter' | 'openai-compatible';
+  providers: Record<'openrouter' | 'openai-compatible', {model: string; baseUrl?: string; configured: boolean; keySource?: 'keychain' | 'session'; credentialRevision: number; storageAvailable: boolean}>;
+};
+
+function unconfiguredConfig(): FakeConfig {
+  return {
+    settingsRevision: 0,
+    selected: 'openrouter',
+    providers: {
+      openrouter: {model: '', configured: false, credentialRevision: 0, storageAvailable: true},
+      'openai-compatible': {model: '', baseUrl: 'https://api.openai.com/v1', configured: false, credentialRevision: 0, storageAvailable: true},
+    },
+  };
+}
+
+function applyPut(config: FakeConfig, body: Record<string, unknown> | undefined) {
+  const id = body?.provider === 'openai-compatible' ? 'openai-compatible' : 'openrouter';
+  const entry = config.providers[id];
+  if (typeof body?.model === 'string') entry.model = body.model;
+  if (typeof body?.baseUrl === 'string' && id === 'openai-compatible') entry.baseUrl = body.baseUrl;
+  if (body?.selected === 'openrouter' || body?.selected === 'openai-compatible') config.selected = body.selected;
+  const credential = body?.credential as {action?: string; apiKey?: string; storage?: string} | undefined;
+  if (credential?.action === 'replace' && credential.apiKey) {
+    entry.configured = true;
+    entry.keySource = credential.storage === 'session' ? 'session' : 'keychain';
+    entry.credentialRevision += 1;
+  } else if (credential?.action === 'remove') {
+    entry.configured = false;
+    entry.keySource = undefined;
+  }
+  config.settingsRevision += 1;
+  return structuredClone(config);
+}
+
+function savedConfig(): FakeConfig {
   return {
     settingsRevision: 2,
     selected: 'openrouter' as const,
     providers: {
       openrouter: {model: 'vendor/model', configured: true, keySource: 'keychain' as const, credentialRevision: 1, storageAvailable: true},
-      'openai-compatible': {model: 'gpt-test', baseUrl: 'https://api.openai.com/v1', configured: false, credentialRevision: 0, storageAvailable: true},
+      'openai-compatible': {model: 'gpt-test', baseUrl: 'https://api.openai.com/v1', configured: true, keySource: 'keychain' as const, credentialRevision: 1, storageAvailable: true},
     },
   };
 }
 
-function createFake(mode: Mode, service: ScenarioService) {
+function createFake(mode: Mode, service: ScenarioService, options: {unconfigured?: boolean} = {}) {
   const jobs = new Map<string, Job>();
   const applied = new Map<string, unknown>();
   const snapshots = new Map<string, Awaited<ReturnType<ScenarioService['workspace']>>>();
@@ -418,9 +550,14 @@ function createFake(mode: Mode, service: ScenarioService) {
   const testWaiters: Array<() => void> = [];
   const puts: unknown[] = [];
   const tests: unknown[] = [];
+  const generationBodies: unknown[] = [];
+  const heldJobs = new Set<string>();
+  let config: FakeConfig = options.unconfigured ? unconfiguredConfig() : savedConfig();
   let released = false;
   let holdTest = false;
+  let holdNext = false;
   let failPut = false;
+  let rejectGeneration = false;
   const counts = {generations: 0, previews: 0, applies: 0, cancels: 0, undos: 0, inflight: 0};
   return {
     get generations() { return counts.generations; },
@@ -431,22 +568,28 @@ function createFake(mode: Mode, service: ScenarioService) {
     get inflight() { return counts.inflight; },
     get puts() { return puts; },
     get tests() { return tests; },
+    get generationBodies() { return generationBodies; },
     holdNextTest() { holdTest = true; },
+    holdNextJob() { holdNext = true; },
+    rejectNextGeneration() { rejectGeneration = true; },
     releaseTest() { holdTest = false; for (const resolve of testWaiters.splice(0)) resolve(); },
     failNextPut() { failPut = true; },
     release() {
       released = true;
-      for (const job of jobs.values()) finish(job, mode);
+      for (const job of jobs.values()) {
+        if (heldJobs.has(job.id) && job.state === 'running') job.draft = lateDraft();
+        finish(job, mode);
+      }
       for (const resolve of waiters.splice(0)) resolve();
     },
     async route(method: string, pathname: string, body?: Record<string, unknown>) {
       const path = pathname.split('?')[0];
-      if (method === 'GET' && path === '/api/ai/config') return {status: 200, body: savedConfig()};
+      if (method === 'GET' && path === '/api/ai/config') return {status: 200, body: structuredClone(config)};
       if (method === 'GET' && path === '/api/ai/models') return {status: 200, body: {provider: 'openrouter', models: [{id: 'vendor/model'}, {id: 'openai/gpt-test'}]}};
       if (method === 'PUT' && path === '/api/ai/config') {
         puts.push(body);
         if (failPut) { failPut = false; return {status: 500, body: {error: 'The settings service did not answer.', code: 'REQUEST_FAILED'}}; }
-        return {status: 200, body: savedConfig()};
+        return {status: 200, body: applyPut(config, body)};
       }
       if (method === 'POST' && path === '/api/ai/config/test') {
         tests.push(body);
@@ -454,8 +597,15 @@ function createFake(mode: Mode, service: ScenarioService) {
         return {status: 200, body: {testId: body?.testId, ok: true, message: "Connected to OpenRouter. The model hasn't been tested yet."}};
       }
       if (method === 'POST' && path === '/api/ai/generations') {
+        generationBodies.push(structuredClone(body));
+        if (rejectGeneration) {
+          rejectGeneration = false;
+          config = {...config, settingsRevision: config.settingsRevision + 1};
+          return {status: 409, body: {error: 'Settings changed in another session. Refresh and try again.', code: 'SETTINGS_CHANGED'}};
+        }
         counts.generations++;
-        const job: Job = {id: crypto.randomUUID(), workspaceId: String(body?.workspaceId), baseRevision: Number(body?.expectedRevision), state: 'running', phase: 'model', draft: mode === 'needs' ? needsDraft() : happyDraft()};
+        const job: Job = {id: crypto.randomUUID(), workspaceId: String(body?.workspaceId), baseRevision: Number(body?.expectedRevision), state: 'running', phase: 'model', draft: mode === 'needs' ? needsDraft() : happyDraft(), ...(typeof body?.model === 'string' ? {model: body.model} : {}), ...(body?.provider === 'openrouter' ? {upstreamProvider: 'openrouter-upstream'} : {})};
+        if (holdNext) { heldJobs.add(job.id); holdNext = false; }
         jobs.set(job.id, job);
         return {status: 202, body: viewOf(job, mode)};
       }
@@ -465,9 +615,10 @@ function createFake(mode: Mode, service: ScenarioService) {
         if (!job) return {status: 404, body: {error: 'Missing job.', code: 'NOT_FOUND'}};
         counts.inflight++;
         try {
-          if (mode === 'hold' && job.state === 'running' && !released) await new Promise<void>(resolve => waiters.push(resolve));
+          const parked = mode === 'hold' || heldJobs.has(job.id);
+          if (parked && job.state === 'running' && !released) await new Promise<void>(resolve => waiters.push(resolve));
           const view = viewOf(job, mode);
-          if (mode !== 'hold' && job.state === 'running') finish(job, mode);
+          if (!parked && job.state === 'running') finish(job, mode);
           return {status: 200, body: view};
         } finally { counts.inflight--; }
       }
@@ -581,8 +732,20 @@ function viewOf(job: Job, mode: Mode): GenerationView {
   return {
     id: job.id, workspaceId: job.workspaceId, state: job.state, phase: job.phase, provenance: 'ai', contractVersion: 1,
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    ...(job.model ? {model: job.model} : {}),
+    ...(job.upstreamProvider ? {upstreamProvider: job.upstreamProvider} : {}),
     ...(finished && mode !== 'expired' && job.preview ? {previewId: job.preview.previewId, preview: job.preview} : {}),
     ...(finished && job.draft ? {draft: job.draft} : {}),
+  };
+}
+
+function lateDraft(): FlowDraft {
+  return {
+    schemaVersion: 1, mode: 'createScenario', name: 'Late refine', appId: 'com.example.HybridApp', parameters: [],
+    execution: {setup: {kind: 'launchApp'}, handlerRefs: [], mock: {kind: 'none'}},
+    screens: [{key: 'late', kind: 'create', title: 'Late refine'}],
+    visits: [{key: 'v1', screenKey: 'late', operations: [{key: 'see', kind: 'checkVisible', target: {kind: 'selector', selector: {target: 'text', match: 'exact', value: 'Late refine'}}}]}],
+    scripts: [], assumptions: [],
   };
 }
 
