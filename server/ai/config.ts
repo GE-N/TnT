@@ -1,48 +1,22 @@
-import {execFile} from 'node:child_process';
 import {chmod, mkdir, open, readFile, rename, rm} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {join} from 'node:path';
-import {promisify} from 'node:util';
 import {AiHttpError} from './errors.js';
+import {createKeychainStore, type SecretStore} from './keychain.js';
 import {formatAiLog} from './log.js';
 import {createOpenAiCompatibleProvider} from './providers/openai-compatible.js';
 import type {FlowModelProvider} from './providers/types.js';
 
-const exec = promisify(execFile);
+export type {SecretStore};
+export {createKeychainStore};
+
 const PROVIDER = 'openai-compatible';
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
-
-export type SecretStore = {
-  get(service: string): Promise<string | undefined>;
-  set(service: string, value: string): Promise<void>;
-  delete(service: string): Promise<void>;
-};
 
 export type AiPublicConfig = {provider: typeof PROVIDER; model: string; baseUrl: string; hasKey: boolean};
 
 export function secretService(provider: string) {
   return `tnt.ai.${provider}`;
-}
-
-export function createKeychainStore(): SecretStore {
-  const account = 'tnt';
-  return {
-    async get(service) {
-      try {
-        const {stdout} = await exec('security', ['find-generic-password', '-s', service, '-a', account, '-w'], {timeout: 5_000, encoding: 'utf8'});
-        const value = stdout.endsWith('\n') ? stdout.slice(0, -1) : stdout;
-        return value || undefined;
-      } catch { return undefined; }
-    },
-    async set(service, value) {
-      await exec('security', ['delete-generic-password', '-s', service, '-a', account], {timeout: 5_000}).catch(() => undefined);
-      try { await exec('security', ['add-generic-password', '-s', service, '-a', account, '-w', value, '-U'], {timeout: 5_000}); }
-      catch { throw new AiHttpError(500, 'KEYCHAIN_UNAVAILABLE', 'The API key could not be saved to the Keychain.'); }
-    },
-    async delete(service) {
-      await exec('security', ['delete-generic-password', '-s', service, '-a', account], {timeout: 5_000}).catch(() => undefined);
-    },
-  };
 }
 
 type FileConfig = {provider: typeof PROVIDER; model: string; baseUrl: string};

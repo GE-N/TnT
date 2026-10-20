@@ -3,6 +3,7 @@ import {createServer} from 'node:http';
 import {readFile, stat, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {test} from 'node:test';
+import {createKeychainStore} from '../server/ai/keychain.js';
 import {createAi} from '../server/ai/index.js';
 import {createFakeProvider} from '../server/ai/providers/fake.js';
 import {createApiHandler} from '../server/http.js';
@@ -25,6 +26,33 @@ async function configFixture(env: NodeJS.ProcessEnv = {}, fetchImpl?: typeof fet
   await ai.ready;
   return {ai, f, logs, secrets, cleanup: async () => { await ai.idle(); await f.cleanup(); }};
 }
+
+test('keychain writes put the key on stdin and never in argv or env', async () => {
+  const secret = 'sk-STDIN-ONLY';
+  const previous = process.env.TNT_AI_API_KEY;
+  process.env.TNT_AI_API_KEY = secret;
+  const calls: {args: string[]; input?: string; env?: NodeJS.ProcessEnv}[] = [];
+  const store = createKeychainStore(async request => {
+    calls.push({args: request.args, input: request.input, env: request.env});
+    if (request.args[0] === 'find-generic-password') return {code: 0, stdout: `${secret}\n`, stderr: ''};
+    return {code: 0, stdout: '', stderr: ''};
+  });
+  try {
+    await store.set('tnt.ai.openrouter', secret);
+    assert.equal(await store.get('tnt.ai.openrouter'), secret);
+    const write = calls.find(call => call.args[0] === '-i');
+    assert.deepEqual(write?.args, ['-i']);
+    assert.equal(write?.input?.includes(secret), true);
+    for (const call of calls) {
+      assert.equal(call.args.some(arg => arg.includes(secret)), false);
+      assert.equal(Object.values(call.env ?? {}).some(value => typeof value === 'string' && value.includes(secret)), false);
+      assert.equal(call.env?.TNT_AI_API_KEY, undefined);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.TNT_AI_API_KEY;
+    else process.env.TNT_AI_API_KEY = previous;
+  }
+});
 
 test('config round-trip keeps the key out of the file, response, and logs', async () => {
   const seen: {url: string; authorization: string | null}[] = [];
