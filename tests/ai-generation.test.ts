@@ -579,6 +579,22 @@ test('OpenRouter uses the fixed URL and headers and records response provenance'
   } finally { await g.cleanup(); }
 });
 
+test('an embedded 4xx code is UNSUPPORTED_REQUEST and posts once', async () => {
+  const numeric = await adapterJob('openrouter', () => new Response(JSON.stringify({error: {code: 400}}), {status: 200, headers: {'content-type': 'application/json'}}));
+  const text = await adapterJob('openrouter', () => new Response(JSON.stringify({error: {code: '400'}}), {status: 200, headers: {'content-type': 'application/json'}}));
+  try {
+    const job = await settle(numeric.ai, (await numeric.ai.start(inputOf(numeric.f.workspace))).id);
+    assert.equal(numeric.posts.length, 1);
+    assert.equal(job.error?.code, 'UNSUPPORTED_REQUEST');
+    assert.equal(job.error?.retryable, false);
+    assert.equal(job.error?.message, 'The provider rejected the request.');
+    const stringCode = await settle(text.ai, (await text.ai.start(inputOf(text.f.workspace))).id);
+    assert.equal(text.posts.length, 1);
+    assert.equal(stringCode.error?.code, 'UNSUPPORTED_REQUEST');
+    assert.equal(stringCode.error?.retryable, false);
+  } finally { await numeric.cleanup(); await text.cleanup(); }
+});
+
 test('the generic OpenAI-compatible provider still generates', async () => {
   const g = await adapterJob('openai-compatible', () => completionResponse(JSON.stringify(exampleDraft), {usage: {prompt_tokens: 2, completion_tokens: 3}}));
   try {

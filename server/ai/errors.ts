@@ -40,6 +40,7 @@ export function mapProviderFailure(error: ProviderRequestError): AppFailure {
   if (lookup === 402) return {code: 'CREDITS_REQUIRED', message: 'The provider account needs credits.', retryable: false};
   if (lookup === 404 || error.embeddedCode === 'model_not_found') return {code: 'MODEL_UNAVAILABLE', message: 'The model is not available at this provider.', retryable: false};
   if (lookup === 429) return {code: 'RATE_LIMITED', message: 'The provider rate limit was reached.', retryable: true};
+  if (lookup !== undefined && Number.isInteger(lookup) && lookup >= 400 && lookup < 500) return {code: 'UNSUPPORTED_REQUEST', message: 'The provider rejected the request.', retryable: false};
   if (error.reason === 'embedded' || error.reason === 'budget') return {code: 'PROVIDER_UNAVAILABLE', message: 'The model provider is unavailable.', retryable: error.reason !== 'budget'};
   if (lookup !== undefined && lookup >= 400 && lookup < 500) return {code: 'UNSUPPORTED_REQUEST', message: 'The provider rejected the request.', retryable: false};
   if (error.code === 'PROVIDER_CONFIG') return {code: 'MODEL_UNAVAILABLE', message: 'The model is not available at this provider.', retryable: false};
