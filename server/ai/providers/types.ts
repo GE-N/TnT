@@ -28,6 +28,8 @@ export type ModelDone = {
 /** A provider only moves bytes. The job owns prompts, validation, repair, and retries. */
 export interface FlowModelProvider {
   id: string;
+  /** True when generate() sends `schema` as response_format json_schema. Otherwise the job puts the schema in the instructions. */
+  sendsJsonSchema?: boolean;
   generate(req: {
     system: string;
     messages: Msg[];

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
+import {readFileSync} from 'node:fs';
 import {readFile, stat, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {test} from 'node:test';
 import {createAi} from '../server/ai/index.js';
 import {MAX_OUTPUT_TOKENS, MAX_PROVIDER_RETRIES, MAX_UPSTREAM_POSTS, RESPONSE_BYTE_LIMIT, SUBMISSION_DEADLINE_MS} from '../server/ai/job.js';
-import {PROMPT_CHAR_LIMIT, REQUEST_BYTE_LIMIT, USER_PROMPT_CHAR_LIMIT, packPrompt} from '../server/ai/prompt.js';
+import {PROMPT_CHAR_LIMIT, REQUEST_BYTE_LIMIT, USER_PROMPT_CHAR_LIMIT, packPrompt, schemaAttachment} from '../server/ai/prompt.js';
 import {createFakeProvider, type FakeResult} from '../server/ai/providers/fake.js';
 import {createOpenAiCompatibleProvider} from '../server/ai/providers/openai-compatible.js';
 import {ProviderRequestError} from '../server/ai/providers/types.js';
@@ -139,6 +140,7 @@ test('unresolved facts are not sent back for another repair round', async () => 
     const job = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace))).id);
     assert.equal(calls, 1);
     assert.equal(job.state, 'needsInfo');
+    assert.equal(job.error, undefined);
     assert.equal(job.preview?.applicable, false);
     assert.equal(job.preview?.diagnostics.some(item => item.code === 'UNRESOLVED_TARGET'), true);
     assert.deepEqual(job.draft, draft);
@@ -154,8 +156,12 @@ test('repair stops after one round and keeps the last preview', async () => {
   try {
     const job = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace))).id);
     assert.equal(calls, 2);
-    assert.equal(job.state, 'needsInfo');
+    assert.equal(job.state, 'failed');
+    assert.equal(job.error?.code, 'AUTHORING_INVALID');
+    assert.equal(job.error?.retryable, false);
     assert.equal(job.preview?.applicable, false);
+    assert.ok(job.preview?.diagnostics.length);
+    assert.ok(job.draft);
     assert.equal(typeof job.previewId, 'string');
   } finally { await g.cleanup(); }
 });
@@ -625,8 +631,15 @@ test('json_schema fallback plus a needed repair stays at two posts', async () =>
     const job = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace))).id);
     assert.equal(g.posts.length, 2);
     assert.equal((g.posts[1].body.response_format as {type?: string}).type, 'json_object');
-    assert.equal(job.state, 'needsInfo');
+    const compact = JSON.stringify(JSON.parse(readFileSync(new URL('../docs/contracts/ai-flow-v1/flow-draft.schema.json', import.meta.url), 'utf8')));
+    const systemOf = (body: Record<string, unknown>) => (body.messages as {content: string}[])[0].content;
+    assert.equal(systemOf(g.posts[0].body).includes(compact), false);
+    assert.equal(systemOf(g.posts[1].body).includes(compact), true);
+    assert.equal(job.state, 'failed');
+    assert.equal(job.error?.code, 'AUTHORING_INVALID');
+    assert.equal(job.error?.retryable, false);
     assert.equal(job.preview?.applicable, false);
+    assert.ok(job.draft);
   } finally { await g.cleanup(); }
 });
 
@@ -754,6 +767,72 @@ test('a generation error keeps the saved key and removing it aborts the in-fligh
     await ai.idle();
     await f.cleanup();
   }
+});
+
+function systemOf(body: Record<string, unknown>) {
+  const messages = body.messages as {role: string; content: string}[];
+  assert.equal(messages[0].role, 'system');
+  return messages[0].content;
+}
+
+test('schema text in the instructions is counted once toward the request limit', () => {
+  const schema = JSON.parse(readFileSync(new URL('../docs/contracts/ai-flow-v1/flow-draft.schema.json', import.meta.url), 'utf8')) as object;
+  const compact = JSON.stringify(schema);
+  const context = {screens: [{screenId: 'screen0', title: 'Home'}], targets: [], setups: [], handlers: [], mocks: [], omissions: []};
+  const input = {prompt: 'Open the home screen', appId: 'com.example.TnTProof', context, extraBytes: 0};
+  const plain = packPrompt(input);
+  const withSchema = packPrompt({...input, schema});
+  const plainBytes = Buffer.byteLength(plain.system) + Buffer.byteLength(plain.user);
+  const schemaBytes = Buffer.byteLength(withSchema.system) + Buffer.byteLength(withSchema.user);
+  assert.equal(withSchema.system.split(compact).length, 2);
+  assert.equal(schemaBytes - plainBytes, Buffer.byteLength(schemaAttachment(schema)));
+  assert.ok(schemaBytes <= REQUEST_BYTE_LIMIT);
+  assert.equal(withSchema.contextTrimmed, false);
+});
+
+test('OpenRouter sends the flow schema in both calls and fails a draft that stays schema-invalid', async () => {
+  const schema = JSON.parse(await readFile(new URL('../docs/contracts/ai-flow-v1/flow-draft.schema.json', import.meta.url), 'utf8')) as object;
+  const compact = JSON.stringify(schema);
+  const bad = await readFile(new URL('./fixtures/deepseek-invalid-draft.json', import.meta.url), 'utf8');
+  const g = await adapterJob('openrouter', () => completionResponse(bad));
+  try {
+    const job = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace))).id);
+    assert.equal(g.posts.length, 2);
+    for (const post of g.posts) {
+      assert.equal(post.body.response_format, undefined);
+      const system = systemOf(post.body);
+      assert.equal(system.split(compact).length, 2);
+      assert.equal(system.includes('"handlerRefs"'), true);
+      assert.equal(system.includes('"mock"'), true);
+      assert.equal(system.includes('"key"'), true);
+      assert.equal(system.includes('"title"'), true);
+      const messages = post.body.messages as {content: string}[];
+      const bytes = messages.reduce((total, message) => total + Buffer.byteLength(message.content), 0);
+      assert.ok(bytes <= REQUEST_BYTE_LIMIT);
+    }
+    assert.equal(job.state, 'failed');
+    assert.equal(job.error?.code, 'AUTHORING_INVALID');
+    assert.equal(job.error?.retryable, false);
+    assert.equal(typeof job.error?.message, 'string');
+    assert.ok(job.draft);
+    assert.equal(typeof job.previewId, 'string');
+    assert.equal(typeof job.previewExpiresAt, 'string');
+    assert.ok(job.preview?.diagnostics.some(item => item.code === 'INVALID_DRAFT' && item.path === '/execution' && item.message.includes('handlerRefs')));
+    assert.ok(job.preview?.diagnostics.some(item => item.code === 'INVALID_DRAFT' && item.message.includes("property 'key'")));
+  } finally { await g.cleanup(); }
+});
+
+test('provider and model on a generation are unknown fields', async () => {
+  const g = await generation(() => ({kind: 'ok', text: JSON.stringify(exampleDraft)}));
+  try {
+    for (const extra of [{provider: 'openrouter'}, {model: 'vendor/model'}, {provider: 'openrouter', model: 'vendor/model'}]) {
+      await assert.rejects(() => g.ai.start({...inputOf(g.f.workspace), ...extra}), (error: unknown) => {
+        assert.equal((error as {status?: number}).status, 400);
+        assert.equal((error as {code?: string}).code, 'INVALID_ENVELOPE');
+        return true;
+      });
+    }
+  } finally { await g.cleanup(); }
 });
 
 test('a workspace revision mismatch is WORKSPACE_STALE', async () => {

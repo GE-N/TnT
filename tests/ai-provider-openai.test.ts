@@ -67,13 +67,16 @@ test('the OpenAI-compatible adapter streams a json_schema chat completion', asyn
 test('structured output falls back to a plain JSON response format', async () => {
   const server = await listen((_request, response, body) => {
     const format = body.response_format as {type?: string; json_schema?: unknown};
+    const system = (body.messages as {content: string}[])[0].content;
     if (format?.type === 'json_schema') {
+      assert.equal(system.includes('FlowDraftProbe'), false);
       response.writeHead(400, {'content-type': 'application/json'});
       response.end(JSON.stringify({error: {message: 'json_schema response_format is not supported', code: 'invalid_request_error'}}));
       return;
     }
     assert.equal(format?.type, 'json_object');
     assert.equal(format?.json_schema, undefined);
+    assert.equal(system.includes('{"title":"FlowDraftProbe","type":"object"}'), true);
     sse(response, ['{"ok":true}'], {prompt_tokens: 1, completion_tokens: 2});
   });
   try {

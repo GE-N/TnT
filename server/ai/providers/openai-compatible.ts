@@ -1,4 +1,5 @@
 import {redactSecrets} from '../errors.js';
+import {appendSchemaInstruction} from '../prompt.js';
 import {OPENROUTER_BASE_URL} from '../probe.js';
 import {MAX_UPSTREAM_POSTS, ProviderRequestError, RESPONSE_BYTE_LIMIT, type FlowModelProvider, type ModelDone, type UpstreamBudget, type Usage} from './types.js';
 
@@ -143,6 +144,12 @@ function jsonSchemaFormat(schema: object) {
   return {type: 'json_schema', json_schema: {name: SCHEMA_NAME, strict: true, schema}};
 }
 
+function withSchemaInstructions(messages: {role: string; content: string}[], schema: object) {
+  const first = messages[0];
+  if (!first || first.role !== 'system') return messages;
+  return [{role: first.role, content: appendSchemaInstruction(first.content, schema)}, ...messages.slice(1)];
+}
+
 function withoutStreamOptions(body: Record<string, unknown>) {
   const next = {...body};
   delete next.stream_options;
@@ -205,6 +212,7 @@ export function createOpenAiCompatibleProvider(options: {
 
   return {
     id: openRouter ? 'openrouter' : 'openai-compatible',
+    sendsJsonSchema: openRouter ? options.structuredOutput === true : true,
     async check() {
       let response: Response;
       try {
@@ -253,7 +261,7 @@ export function createOpenAiCompatibleProvider(options: {
       if (!openRouter && response.status === 400) {
         const payload = await errorPayload(response);
         let nextBody: Record<string, unknown> | undefined;
-        if (structuredOutputRejected(payload)) nextBody = {...body, response_format: {type: 'json_object'}};
+        if (structuredOutputRejected(payload)) nextBody = {...body, messages: withSchemaInstructions(messages, req.schema), response_format: {type: 'json_object'}};
         else if (streamOptionsRejected(payload)) nextBody = withoutStreamOptions(body);
         else throw failure(400, payload, undefined, secret);
         const fallback = await send(nextBody, req.signal, req.budget, used);

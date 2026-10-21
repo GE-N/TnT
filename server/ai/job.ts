@@ -7,7 +7,7 @@ import {assertUniqueMembers, requireRevision, requireWorkspaceId} from '../autho
 import {CONTRACT_VERSION, type Preview} from '../authoring/types.js';
 import {AiHttpError, canAutoRetry, mapProviderFailure} from './errors.js';
 import {formatAiLog, type AiLogEvent} from './log.js';
-import {assertUserPrompt, assembleCall, packPrompt, type PromptContext} from './prompt.js';
+import {assertUserPrompt, assembleCall, packPrompt, schemaAttachment, type PromptContext} from './prompt.js';
 import {MAX_REPAIR_ROUNDS, repairDecision, repairNote} from './repair.js';
 import {abortError, isAbortError, MAX_UPSTREAM_POSTS, ProviderRequestError, RESPONSE_BYTE_LIMIT, type FlowModelProvider, type Msg, type UpstreamBudget, type Usage} from './providers/types.js';
 import {createJobStore, generationView, jobExpiry, type GenerationView, type StoredJob} from './store.js';
@@ -316,10 +316,24 @@ export function createJobs(deps: {
     }
   }
 
+  function applyOutcome(job: StoredJob, preview: Preview) {
+    job.preview = preview;
+    job.previewId = preview.previewId;
+    job.previewExpiresAt = preview.expiresAt;
+    job.phase = 'previewing';
+    const decision = preview.applicable ? 'accept' : repairDecision(preview.diagnostics);
+    if (preview.applicable || decision === 'accept') job.state = 'pending';
+    else if (decision === 'needs-info') job.state = 'needsInfo';
+    else {
+      job.state = 'failed';
+      job.error = {code: 'AUTHORING_INVALID', message: 'The draft still has validation issues.', retryable: false};
+    }
+    release(job);
+  }
+
   function keepLast(job: StoredJob) {
     if (job.preview) {
-      job.state = job.preview.applicable ? 'pending' : 'needsInfo';
-      release(job);
+      applyOutcome(job, job.preview);
       return;
     }
     fail(job, 'INVALID_AI_OUTPUT', 'The model did not return a flow draft.', false);
@@ -335,8 +349,14 @@ export function createJobs(deps: {
     if (!appId) { fail(job, 'APP_ID_MISMATCH', 'This workspace has no app id to author against.', false); return; }
     const contextId = record(context)?.contextId;
     if (typeof contextId !== 'string' || !contextId) { fail(job, 'AUTHORING_INVALID', 'The workspace could not be prepared for generation.', false); return; }
-    const schemaBytes = Buffer.byteLength(JSON.stringify(FLOW_SCHEMA));
-    const packed = packPrompt({prompt, appId, context: factsFrom(context), ...(draft !== undefined ? {draft} : {}), extraBytes: schemaBytes});
+    const carriesSchema = resolved.provider.sendsJsonSchema === true;
+    // response_format carries the schema, or the instructions do. Reserve whichever copy is not already in the prompt text.
+    const schemaReserve = carriesSchema ? Buffer.byteLength(schemaAttachment(FLOW_SCHEMA)) : 0;
+    const packed = packPrompt({
+      prompt, appId, context: factsFrom(context), ...(draft !== undefined ? {draft} : {}),
+      ...(carriesSchema ? {} : {schema: FLOW_SCHEMA}),
+      extraBytes: schemaReserve,
+    });
     if (packed.contextTrimmed) job.contextTrimmed = true;
     let round = 0;
     let previous = '';
@@ -348,7 +368,7 @@ export function createJobs(deps: {
         user: packed.user,
         previous: round === 0 ? undefined : previous,
         repair: round === 0 ? undefined : note,
-        extraBytes: schemaBytes,
+        extraBytes: schemaReserve,
       });
       if (!assembled.fits || budget.remaining() < 1) {
         if (round === 0 && !assembled.fits) { fail(job, 'PROMPT_TOO_LONG', 'The prompt does not fit the model budget.', false); return; }
@@ -376,24 +396,16 @@ export function createJobs(deps: {
       job.draft = parsed.value;
       const decision = preview.applicable ? 'accept' : repairDecision(preview.diagnostics);
       if (decision === 'repair' && round < MAX_REPAIR_ROUNDS && budget.remaining() >= 1) {
-        const repairAssembled = assembleCall({system: packed.system, user: packed.user, previous: result.text, repair: repairNote(preview.diagnostics), extraBytes: schemaBytes});
+        const repairAssembled = assembleCall({system: packed.system, user: packed.user, previous: result.text, repair: repairNote(preview.diagnostics), extraBytes: schemaReserve});
         if (!repairAssembled.fits) {
-          job.preview = preview;
-          job.previewId = preview.previewId;
-          job.previewExpiresAt = preview.expiresAt;
-          keepLast(job);
+          applyOutcome(job, preview);
           return;
         }
         note = repairNote(preview.diagnostics);
         round++;
         continue;
       }
-      job.preview = preview;
-      job.previewId = preview.previewId;
-      job.previewExpiresAt = preview.expiresAt;
-      job.phase = 'previewing';
-      job.state = preview.applicable || decision === 'accept' ? 'pending' : 'needsInfo';
-      release(job);
+      applyOutcome(job, preview);
       return;
     }
   }
