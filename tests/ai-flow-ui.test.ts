@@ -553,6 +553,109 @@ test('AI flow authoring UI', async t => {
       assert.ok(h.document.querySelector('[data-testid="ai-draft-chip"]'));
     } finally { await h.cleanup(); }
   });
+
+  await t.test('a new draft sits in empty chrome-free space, stays above the pills, and can be dragged', async () => {
+    const h = await harness('ready');
+    const proto = h.dom.window.HTMLElement.prototype;
+    const originalRect = proto.getBoundingClientRect;
+    const box = (left: number, top: number, width: number, height: number) => ({x: left, y: top, left, top, width, height, right: left + width, bottom: top + height, toJSON() { return {}; }});
+    const chrome = [
+      ['workspace-manager', box(24, 24, 340, 76)],
+      ['scenario-sequence-bar', box(390, 24, 610, 72)],
+      ['canvas-toolbar', box(24, 724, 220, 52)],
+      ['ai-launch', box(1212, 676, 44, 44)],
+      ['workspace-advanced', box(340, 732, 280, 44)],
+      ['canvas-viewport', box(0, 0, 1280, 800)],
+      ['canvas-surface', box(0, 0, 2295, 1402.5)],
+    ] as const;
+    proto.getBoundingClientRect = function (this: HTMLElement) {
+      for (const [name, value] of chrome) if (this.classList?.contains(name)) return value;
+      return originalRect.call(this);
+    } as typeof proto.getBoundingClientRect;
+    Object.defineProperty(h.dom.window, 'innerWidth', {configurable: true, value: 1280});
+    Object.defineProperty(h.dom.window, 'innerHeight', {configurable: true, value: 800});
+    const overlaps = (a: {left: number; top: number; right: number; bottom: number}, b: {left: number; top: number; right: number; bottom: number}) => a.left < b.right - 0.5 && a.right > b.left + 0.5 && a.top < b.bottom - 0.5 && a.bottom > b.top + 0.5;
+    try {
+      await h.render();
+      const viewport = h.document.querySelector<HTMLElement>('.canvas-viewport')!;
+      Object.defineProperty(viewport, 'clientWidth', {configurable: true, value: 1280});
+      Object.defineProperty(viewport, 'clientHeight', {configurable: true, value: 800});
+      const zoomLabel = [...h.document.querySelectorAll('.canvas-toolbar span')].map(node => node.textContent?.trim() ?? '').find(text => /^\d+%$/.test(text));
+      const zoom = Number.parseInt(zoomLabel ?? '85', 10) / 100;
+      await act(async () => h.document.querySelector('.canvas-surface')!.dispatchEvent(new h.dom.window.MouseEvent('contextmenu', {bubbles: true, cancelable: true, clientX: 40 * zoom, clientY: 40 * zoom})));
+      await h.clickText('Add node');
+      await h.until(() => {
+        const node = h.document.querySelector<HTMLElement>('[data-screen-id]');
+        return !!node && Math.abs(parseFloat(node.style.left) - 40) < 1 && Math.abs(parseFloat(node.style.top) - 40) < 1;
+      }, 'existing screen at the old draft origin');
+      await h.until(async () => {
+        if (!h.workspaceId) return false;
+        const saved = await h.saved();
+        return saved.canvas?.screens.some(screen => screen.x === 40 && screen.y === 40) === true;
+      }, 'existing screen saved');
+      const savedBefore = JSON.stringify((await h.saved()).canvas);
+      const existingBefore = h.positions();
+      await h.generate('Pay the electric bill');
+      await h.until(() => h.document.querySelectorAll('[data-testid="ai-draft-screen"]').length === 3 && !!h.document.querySelector('[data-testid="ai-draft-review"]'), 'placed draft');
+      const origin = viewport.getBoundingClientRect();
+      const scroll = {left: viewport.scrollLeft || 0, top: viewport.scrollTop || 0};
+      const obstacles = chrome.filter(([name]) => name !== 'canvas-viewport' && name !== 'canvas-surface').map(([, value]) => value);
+      const draftNodes = [...h.document.querySelectorAll<HTMLElement>('[data-testid="ai-draft-screen"]')];
+      const existing = h.document.querySelector<HTMLElement>('[data-screen-id]')!;
+      const existingBox = {left: parseFloat(existing.style.left), top: parseFloat(existing.style.top), right: parseFloat(existing.style.left) + 250, bottom: parseFloat(existing.style.top) + 120};
+      for (const node of draftNodes) {
+        const x = parseFloat(node.style.left);
+        const y = parseFloat(node.style.top);
+        const canvasBox = {left: x, top: y, right: x + 250, bottom: y + 120};
+        assert.equal(overlaps(canvasBox, existingBox), false, node.dataset.draftScreen + ' overlaps an existing screen');
+        const screenBox = {left: origin.left + x * zoom - scroll.left, top: origin.top + y * zoom - scroll.top, right: 0, bottom: 0};
+        screenBox.right = screenBox.left + 250 * zoom;
+        screenBox.bottom = screenBox.top + 92 * zoom;
+        assert.ok(screenBox.left >= origin.left - 1 && screenBox.top >= origin.top - 1 && screenBox.right <= origin.right + 1 && screenBox.bottom <= origin.bottom + 1, node.dataset.draftScreen + ' is outside the viewport');
+        for (const obstacle of obstacles) assert.equal(overlaps(screenBox, obstacle), false, node.dataset.draftScreen + ' is under floating chrome');
+      }
+      const review = h.document.querySelector<HTMLElement>('[data-testid="ai-draft-review"]')!;
+      assert.equal(review.style.position, 'fixed');
+      assert.ok(Number(review.style.zIndex) > 12);
+      const reviewBox = {left: parseFloat(review.style.left), top: parseFloat(review.style.top), right: parseFloat(review.style.left) + parseFloat(review.style.width), bottom: parseFloat(review.style.top) + 44};
+      for (const obstacle of obstacles) assert.equal(overlaps(reviewBox, obstacle), false, 'review intersects ' + obstacle.top);
+      for (const id of ['ai-confirm', 'ai-refine', 'ai-discard']) {
+        const button = h.document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+        assert.ok(button, id);
+        assert.equal(button.closest('[data-testid="ai-draft-review"]'), review);
+        assert.notEqual(button.getAttribute('aria-hidden'), 'true');
+        assert.equal(button.hidden, false);
+      }
+      const home = h.document.querySelector<HTMLElement>('[data-draft-screen="home"]')!;
+      const startX = parseFloat(home.style.left);
+      const startY = parseFloat(home.style.top);
+      const pointer = (type: string, x: number, y: number) => home.dispatchEvent(new h.dom.window.PointerEvent(type, {bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, pointerId: 1}));
+      await act(async () => { pointer('pointerdown', 0, 0); pointer('pointermove', 100 * zoom, 0); pointer('pointerup', 100 * zoom, 0); });
+      assert.ok(Math.abs(parseFloat(home.style.left) - (startX + 100)) < 1, 'pointer drag moves the draft screen');
+      home.focus();
+      await act(async () => home.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true})));
+      assert.ok(Math.abs(parseFloat(home.style.top) - (startY + 10)) < 1, 'arrow key moves the draft screen');
+      assert.equal(h.positions(), existingBefore);
+      assert.equal(JSON.stringify((await h.saved()).canvas), savedBefore);
+      const left = home.style.left;
+      const top = home.style.top;
+      await h.until(async () => {
+        const detail = await h.service.workspaceDetail(h.workspaceId);
+        const stored = detail.view && typeof detail.view === 'object' ? (detail.view as {aiDraft?: {positions?: Record<string, {x: number; y: number}>}}).aiDraft : undefined;
+        const point = stored?.positions?.home;
+        return !!point && Math.abs(point.x - parseFloat(left)) < 0.5 && Math.abs(point.y - parseFloat(top)) < 0.5;
+      }, 'dragged position persisted');
+      await h.remount();
+      await h.until(() => {
+        const node = h.document.querySelector<HTMLElement>('[data-draft-screen="home"]');
+        return !!node && Math.abs(parseFloat(node.style.left) - parseFloat(left)) < 0.5 && Math.abs(parseFloat(node.style.top) - parseFloat(top)) < 0.5;
+      }, 'position restored');
+      assert.equal(h.positions(), existingBefore);
+    } finally {
+      proto.getBoundingClientRect = originalRect;
+      await h.cleanup();
+    }
+  });
 });
 
 type Mode = 'ready' | 'hold' | 'expired' | 'needs' | 'invalid' | 'authoring-failed';

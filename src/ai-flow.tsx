@@ -3,6 +3,7 @@ import type {CanvasGraph} from '../server/canvas.js';
 import type {Diagnostic, DraftTarget, DraftValue, FlowDraft} from '../server/authoring/types.js';
 import type {Workspace} from '../server/scenarios.js';
 import type {DraftOverlay} from './canvas.js';
+import type {DraftPositions} from './draft-placement.js';
 import {AI_POLL_MS, AiFlowRequestError, createAiFlowClient, PROMPT_CHAR_LIMIT, PROMPT_COUNTER_AT, type AiPublicConfig, type ApplyResponse, type GenerationPhase, type GenerationView, type ProviderId} from './ai-flow-client.js';
 import {subscribeAiConfig} from './ai-settings.js';
 
@@ -31,9 +32,36 @@ export type AiDraft = {
   model?: string;
   upstreamProvider?: string;
   notice?: string;
+  /** Canvas coordinates for pending create-screens. Survives reload with the draft; Apply does not read them. */
+  positions?: DraftPositions;
 };
 
-export type PersistedAiDraft = {jobId: string; prompt: string; previewId?: string; baseRevision?: number};
+export type PersistedAiDraft = {jobId: string; prompt: string; previewId?: string; baseRevision?: number; positions?: DraftPositions};
+
+function readPositions(value: unknown): DraftPositions | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  const positions: DraftPositions = {};
+  for (const [key, point] of Object.entries(value)) {
+    if (!key || !point || typeof point !== 'object' || Array.isArray(point)) continue;
+    const x = (point as {x?: unknown}).x;
+    const y = (point as {y?: unknown}).y;
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) continue;
+    positions[key] = {x: Math.max(0, Math.min(2400, x)), y: Math.max(0, Math.min(1400, y))};
+  }
+  return Object.keys(positions).length ? positions : undefined;
+}
+
+function viewDraft(draft: AiDraft): PersistedAiDraft | null {
+  if (!draft.jobId) return null;
+  const positions = readPositions(draft.positions);
+  return {
+    jobId: draft.jobId,
+    prompt: draft.prompt,
+    ...(draft.previewId ? {previewId: draft.previewId} : {}),
+    ...(typeof draft.baseRevision === 'number' ? {baseRevision: draft.baseRevision} : {}),
+    ...(positions ? {positions} : {}),
+  };
+}
 
 type LoadedWorkspace = Workspace & {view?: Record<string, unknown> | null};
 
@@ -56,11 +84,13 @@ export function persistedAiDraft(view: Record<string, unknown> | null | undefine
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
   const item = raw as Record<string, unknown>;
   if (typeof item.jobId !== 'string' || !item.jobId || typeof item.prompt !== 'string') return;
+  const positions = readPositions(item.positions);
   return {
     jobId: item.jobId,
     prompt: item.prompt,
     ...(typeof item.previewId === 'string' ? {previewId: item.previewId} : {}),
     ...(typeof item.baseRevision === 'number' ? {baseRevision: item.baseRevision} : {}),
+    ...(positions ? {positions} : {}),
   };
 }
 
@@ -103,8 +133,12 @@ function issueMarks(draft: FlowDraft, diagnostics: Diagnostic[] | undefined) {
   return marks;
 }
 
-/** Read-only overlay. New screens sit in free space. Existing screen coordinates are only used as edge anchors. */
-export function draftOverlayFor(draft: FlowDraft, canvas: CanvasGraph | undefined, diagnostics?: Diagnostic[], dimmed = false): DraftOverlay {
+/**
+ * Read-only overlay. Stored positions win. Otherwise screens sit on the legacy grid
+ * until the canvas measures the chrome-free viewport and calls placeDraft.
+ * Existing screen coordinates are only used as edge anchors.
+ */
+export function draftOverlayFor(draft: FlowDraft, canvas: CanvasGraph | undefined, diagnostics?: Diagnostic[], dimmed = false, positions?: DraftPositions): DraftOverlay {
   const marks = issueMarks(draft, diagnostics);
   const existing = new Map((canvas?.screens ?? []).map(screen => [screen.id, screen]));
   const createOrder: string[] = [];
@@ -114,9 +148,14 @@ export function draftOverlayFor(draft: FlowDraft, canvas: CanvasGraph | undefine
   }
   for (const screen of draft.screens) if (screen.kind === 'create' && !createOrder.includes(screen.key)) createOrder.push(screen.key);
   const spots = placeScreens((canvas?.screens ?? []).map(screen => ({x: screen.x, y: screen.y})), createOrder.length);
+  const settled = createOrder.length > 0 && createOrder.every(key => {
+    const point = positions?.[key];
+    return !!point && Number.isFinite(point.x) && Number.isFinite(point.y);
+  });
   const nodes = createOrder.map((key, index) => {
     const declared = draft.screens.find(screen => screen.key === key);
-    const spot = spots[index] ?? {x: 40 + (index % 8) * 280, y: 40 + Math.floor(index / 8) * 200};
+    const stored = positions?.[key];
+    const spot = stored && Number.isFinite(stored.x) && Number.isFinite(stored.y) ? stored : (spots[index] ?? {x: 40 + (index % 8) * 280, y: 40 + Math.floor(index / 8) * 200});
     return {key, title: declared && declared.kind === 'create' ? declared.title : key, x: spot.x, y: spot.y, ...(marks.get(key)?.length ? {marks: marks.get(key)} : {})};
   });
   const anchors = draft.screens.flatMap(screen => {
@@ -135,7 +174,8 @@ export function draftOverlayFor(draft: FlowDraft, canvas: CanvasGraph | undefine
     if (!known.has(from) || !known.has(to)) continue;
     edges.push({from, to, label: titleOf(from) + ' → ' + titleOf(to)});
   }
-  return {nodes, edges, anchors, ...(dimmed ? {dimmed: true} : {})};
+  const hasNotes = (diagnostics ?? []).some(item => item.severity === 'error' || item.blocks.includes('apply')) || draft.assumptions.some(item => item.requiresConfirmation);
+  return {nodes, edges, anchors, ...(dimmed ? {dimmed: true} : {}), ...(settled ? {settled: true} : {}), ...(hasNotes ? {hasNotes: true} : {})};
 }
 
 export function fillUnresolved(draft: FlowDraft, path: string, next: DraftTarget | DraftValue): FlowDraft {
@@ -310,7 +350,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
 
   const reviewing = REVIEW.includes(draft.status) && !draft.refining;
   const showOverlay = !!draft.draft && overlayRenders(draft.draft, input.canvas) && (reviewing || !!draft.refining);
-  const overlay = showOverlay && draft.draft ? draftOverlayFor(draft.draft, input.canvas, draft.diagnostics, !!draft.refining) : undefined;
+  const overlay = showOverlay && draft.draft ? draftOverlayFor(draft.draft, input.canvas, draft.diagnostics, !!draft.refining, draft.positions) : undefined;
+  const positionKey = JSON.stringify(draft.positions ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -325,13 +366,9 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   useEffect(() => {
     if (!draft.jobId || draft.status === 'idle') return;
     if (draft.workspaceId && input.workspaceId && draft.workspaceId !== input.workspaceId) return;
-    callbacks.current.rememberView({aiDraft: {
-      jobId: draft.jobId,
-      prompt: draft.prompt,
-      ...(draft.previewId ? {previewId: draft.previewId} : {}),
-      ...(draft.baseRevision !== undefined ? {baseRevision: draft.baseRevision} : {}),
-    }});
-  }, [draft.jobId, draft.prompt, draft.previewId, draft.baseRevision, draft.status, draft.workspaceId, input.workspaceId]);
+    const persisted = viewDraft(draft);
+    if (persisted) callbacks.current.rememberView({aiDraft: persisted});
+  }, [draft.jobId, draft.prompt, draft.previewId, draft.baseRevision, draft.status, draft.workspaceId, input.workspaceId, positionKey]);
 
   useEffect(() => {
     if (reviewing && showOverlay) setOpen(false);
@@ -393,9 +430,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
             : undefined;
       if (review?.draft) held.current.delete(previousId);
       if (inflight) {
-        const persisted = review?.draft && review.jobId
-          ? {jobId: review.jobId, prompt: review.prompt, ...(review.previewId ? {previewId: review.previewId} : {}), ...(review.baseRevision !== undefined ? {baseRevision: review.baseRevision} : {})}
-          : null;
+        const persisted = review?.draft && review.jobId ? viewDraft(review) : null;
         const write = () => void persistLeftWorkspace(previousId, persisted);
         write();
         persistTimers.current.push(setTimeout(write, 400));
@@ -421,7 +456,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     }
     let cancelled = false;
     jobGuard.current = stored.jobId;
-    setDraft({status: 'generating', prompt: stored.prompt, jobId: stored.jobId, previewId: stored.previewId, baseRevision: stored.baseRevision, acknowledged: [], workspaceId: currentId});
+    setDraft({status: 'generating', prompt: stored.prompt, jobId: stored.jobId, previewId: stored.previewId, baseRevision: stored.baseRevision, acknowledged: [], workspaceId: currentId, ...(stored.positions ? {positions: stored.positions} : {})});
     setOpen(true);
     void (async () => {
       try {
@@ -459,7 +494,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     callbacks.current.rememberView({aiDraft: null});
   }
 
-  async function persistLeftWorkspace(workspaceId: string, aiDraft: {jobId: string; prompt: string; previewId?: string; baseRevision?: number} | null) {
+  async function persistLeftWorkspace(workspaceId: string, aiDraft: PersistedAiDraft | null) {
     try {
       const detail = await callbacks.current.fetchWorkspace(workspaceId);
       const view = detail.view && typeof detail.view === 'object' ? detail.view : {format: 1};
@@ -746,6 +781,23 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     setDraft(current => current.status === 'prompting' && !current.refining ? {...current, status: 'idle'} : current);
   }
 
+  function placeDraft(positions: DraftPositions) {
+    setDraft(current => {
+      const previous = current.positions ?? {};
+      const keys = Object.keys(positions);
+      if (keys.length && keys.every(key => previous[key]?.x === positions[key].x && previous[key]?.y === positions[key].y) && Object.keys(previous).length === keys.length) return current;
+      return {...current, positions: {...positions}};
+    });
+  }
+
+  function moveDraft(key: string, x: number, y: number) {
+    setDraft(current => {
+      const previous = current.positions?.[key];
+      if (previous && previous.x === x && previous.y === y) return current;
+      return {...current, positions: {...(current.positions ?? {}), [key]: {x, y}}};
+    });
+  }
+
   const reason = confirmReason(draft, input.running);
   const provider = config?.selected ?? 'openrouter';
   return {
@@ -754,6 +806,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     disclosure, continueDisclosure, dismissDisclosure,
     setPrompt: (prompt: string) => setDraft(current => ({...current, prompt})),
     openPanel, closePanel, generate, refresh, updateUnresolved, acknowledge, confirm, undoApply, cancel, discard, refine,
+    placeDraft, moveDraft,
     openSettings: (returnTo?: HTMLElement) => openSettingsRef.current?.(returnTo),
   };
 }
@@ -884,24 +937,32 @@ export function AiDraftBar({control}: {control: AiDraftControl}) {
   const unresolved = issues.filter(item => item.code === 'UNRESOLVED_TARGET' || item.code === 'UNRESOLVED_VALUE');
   const assumptions = draft.draft.assumptions.filter(item => (draft.requiredAssumptionKeys ?? []).includes(item.key));
   const known = new Set(assumptions.map(item => item.key));
+  const extraKeys = (draft.requiredAssumptionKeys ?? []).filter(key => !known.has(key));
   const usage = usageLabel(draft);
+  const usageLine = usage || draft.model || draft.upstreamProvider;
+  const hasDetails = draft.status === 'stale' || issues.length > 0 || unresolved.length > 0 || assumptions.length > 0 || extraKeys.length > 0 || !!reason || !!draft.error || !!usageLine;
   return <div className="ai-review" data-testid="ai-review">
-    <p className="ai-ask">{issues.length ? issues.length + (issues.length === 1 ? ' issue' : ' issues') + ' to fix before applying' : 'Flow ready. Use this flow?'}</p>
-    <p className="ai-meta" data-testid="ai-meta">{meta}</p>
-    <div className="ai-actions">
-      <button type="button" ref={confirmRef} className="ai-text ai-confirm" data-testid="ai-confirm" aria-disabled={reason ? true : undefined} aria-describedby={reason ? reasonId : undefined} onClick={() => { if (!reason) void control.confirm(); }}>✓ Apply</button>
-      <button type="button" className="ai-text" data-testid="ai-refine" onClick={() => control.refine()}>Refine</button>
-      {draft.status === 'stale' && <button type="button" className="ai-text" data-testid="ai-refresh" onClick={() => void control.refresh()}>Refresh</button>}
-      <button type="button" className="ai-text ai-muted-button" data-testid="ai-discard" onClick={() => void control.discard()}>✕ Dismiss</button>
+    <div className="ai-review-bar">
+      <span className="ai-draft-chip" data-testid="ai-draft-chip">✦ Draft · not run</span>
+      <p className="ai-ask">{issues.length ? issues.length + (issues.length === 1 ? ' issue' : ' issues') + ' to fix before applying' : 'Flow ready. Use this flow?'}</p>
+      <div className="ai-actions">
+        <button type="button" ref={confirmRef} className="ai-text ai-confirm" data-testid="ai-confirm" aria-disabled={reason ? true : undefined} aria-describedby={reason ? reasonId : undefined} onClick={() => { if (!reason) void control.confirm(); }}>✓ Apply</button>
+        <button type="button" className="ai-text" data-testid="ai-refine" onClick={() => control.refine()}>Refine</button>
+        {draft.status === 'stale' && <button type="button" className="ai-text" data-testid="ai-refresh" onClick={() => void control.refresh()}>Refresh</button>}
+        <button type="button" className="ai-text ai-muted-button" data-testid="ai-discard" onClick={() => void control.discard()}>✕ Dismiss</button>
+      </div>
+      <p className="ai-meta" data-testid="ai-meta">{meta}</p>
     </div>
-    {draft.status === 'stale' && <p className="ai-muted">The workspace changed since this draft was prepared.</p>}
-    {!!issues.length && <ol className="ai-issues">{issues.map((item, index) => <li key={item.path + item.code + index}><span className="ai-issue-no">{index + 1}</span> {item.message}</li>)}</ol>}
-    {unresolved.map(item => <NeedsInfo key={item.path + item.code} item={item} onSubmit={value => void control.updateUnresolved(item.path, value)} />)}
-    {assumptions.map(item => <label key={item.key} className="ai-check"><input type="checkbox" checked={draft.acknowledged.includes(item.key)} aria-label={item.message} onChange={event => control.acknowledge(item.key, event.target.checked)} />{item.message}</label>)}
-    {(draft.requiredAssumptionKeys ?? []).filter(key => !known.has(key)).map(key => <label key={key} className="ai-check"><input type="checkbox" checked={draft.acknowledged.includes(key)} aria-label={key} onChange={event => control.acknowledge(key, event.target.checked)} />{key}</label>)}
-    {reason && <p id={reasonId} className="ai-reason" data-testid="ai-confirm-reason">{reason}{issues.length ? ' Apply is off until these are fixed.' : ''}</p>}
-    {draft.error && <p className="ai-error" role="alert">{errorCopy(draft.error.code, draft.error.message, draft.model)}</p>}
-    {(usage || draft.model || draft.upstreamProvider) && <p className="ai-usage" data-testid="ai-usage">{usage}{draft.upstreamProvider || control.provider === 'openrouter' ? ' OpenRouter chooses the upstream provider.' : ''}{control.provider === 'openrouter' && <> <a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">Open OpenRouter account</a></>}</p>}
+    {hasDetails && <div className="ai-review-details" data-testid="ai-review-details">
+      {draft.status === 'stale' && <p className="ai-muted">The workspace changed since this draft was prepared.</p>}
+      {!!issues.length && <ol className="ai-issues">{issues.map((item, index) => <li key={item.path + item.code + index}><span className="ai-issue-no">{index + 1}</span> {item.message}</li>)}</ol>}
+      {unresolved.map(item => <NeedsInfo key={item.path + item.code} item={item} onSubmit={value => void control.updateUnresolved(item.path, value)} />)}
+      {assumptions.map(item => <label key={item.key} className="ai-check"><input type="checkbox" checked={draft.acknowledged.includes(item.key)} aria-label={item.message} onChange={event => control.acknowledge(item.key, event.target.checked)} />{item.message}</label>)}
+      {extraKeys.map(key => <label key={key} className="ai-check"><input type="checkbox" checked={draft.acknowledged.includes(key)} aria-label={key} onChange={event => control.acknowledge(key, event.target.checked)} />{key}</label>)}
+      {reason && <p id={reasonId} className="ai-reason" data-testid="ai-confirm-reason">{reason}{issues.length ? ' Apply is off until these are fixed.' : ''}</p>}
+      {draft.error && <p className="ai-error" role="alert">{errorCopy(draft.error.code, draft.error.message, draft.model)}</p>}
+      {usageLine && <p className="ai-usage" data-testid="ai-usage">{usage}{draft.upstreamProvider || control.provider === 'openrouter' ? ' OpenRouter chooses the upstream provider.' : ''}{control.provider === 'openrouter' && <> <a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">Open OpenRouter account</a></>}</p>}
+    </div>}
   </div>;
 }
 
