@@ -31,9 +31,6 @@ export type AiDraft = {
   model?: string;
   upstreamProvider?: string;
   notice?: string;
-  /** Provider and model sent with the in-flight or latest request. */
-  requestProvider?: ProviderId;
-  requestModel?: string;
 };
 
 export type PersistedAiDraft = {jobId: string; prompt: string; previewId?: string; baseRevision?: number};
@@ -199,6 +196,44 @@ function fromView(current: AiDraft, view: GenerationView, revision: number): AiD
   };
 }
 
+function isDiagnostic(value: unknown): value is Diagnostic {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Diagnostic;
+  return typeof item.code === 'string' && typeof item.path === 'string' && typeof item.message === 'string' && Array.isArray(item.blocks) && (item.severity === 'error' || item.severity === 'warning' || item.severity === 'info');
+}
+
+/** Diagnostics may sit on the preview or, for a failed job, directly on the generation. */
+function diagnosticsOn(view: GenerationView) {
+  const extra = (view as GenerationView & {diagnostics?: unknown}).diagnostics;
+  return Array.isArray(extra) ? extra.filter(isDiagnostic) : [];
+}
+
+function overlayRenders(draft: FlowDraft | undefined, canvas: CanvasGraph | undefined) {
+  return !!draft && draftOverlayFor(draft, canvas).nodes.length > 0;
+}
+
+/**
+ * A review status closes the composer only when the canvas can draw the draft.
+ * needsInfo with a non-applicable, non-rendering preview (INVALID_DRAFT) and
+ * failed AUTHORING_INVALID / INVALID_AI_OUTPUT stay in the composer with the prompt.
+ */
+function presentResult(current: AiDraft, view: GenerationView, revision: number, canvas: CanvasGraph | undefined): AiDraft {
+  const base = fromView(current, view, revision);
+  const diagnostics = base.diagnostics?.length ? base.diagnostics : diagnosticsOn(view);
+  const next = diagnostics.length ? {...base, diagnostics} : base;
+  if (view.state === 'running' || view.state === 'cancelled') return next;
+  if (view.state === 'failed') return {...next, status: 'failed'};
+  if (next.status !== 'pending' && next.status !== 'needsInfo' && next.status !== 'stale') return next;
+  if (overlayRenders(next.draft, canvas)) return next;
+  const blocking = (next.diagnostics ?? []).some(item => item.blocks.includes('apply') || item.severity === 'error');
+  if (!blocking && next.applicable !== false && view.state !== 'needsInfo') return next;
+  return {
+    ...next,
+    status: 'failed',
+    error: next.error ?? {code: 'AUTHORING_INVALID', message: 'The reply didn’t fit TnT’s format, even after one repair.', retryable: false},
+  };
+}
+
 function screenCount(draft: FlowDraft | undefined) {
   return draft?.screens.length ?? 0;
 }
@@ -241,7 +276,7 @@ function writeDisclosure(id: string) {
   try { sessionStorage.setItem(DISCLOSURE_KEY, JSON.stringify([...next])); } catch { /* The in-memory set still skips it for this page. */ }
 }
 
-export function useAiDraft(input: Callbacks & {token: string; workspaceId: string; revision: number; running: boolean; canvas: CanvasGraph | undefined; contentKey: string; loadRevision: number; onOpenSettings?: () => void}) {
+export function useAiDraft(input: Callbacks & {token: string; workspaceId: string; revision: number; running: boolean; canvas: CanvasGraph | undefined; contentKey: string; loadRevision: number; onOpenSettings?: (returnTo?: HTMLElement) => void}) {
   const client = useMemo(() => createAiFlowClient(input.token), [input.token]);
   const callbacks = useRef<Callbacks>(input);
   callbacks.current = input;
@@ -252,8 +287,6 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const [provenanceName, setProvenanceName] = useState('');
   const [undoOffer, setUndoOffer] = useState<{receiptId: string; revision: number; workspaceId: string}>();
   const [config, setConfig] = useState<AiPublicConfig>();
-  const [chip, setChip] = useState<ProviderId>();
-  const [requestModels, setRequestModels] = useState<Partial<Record<ProviderId, string>>>({});
   const [disclosure, setDisclosure] = useState<string | null>(null);
   const jobGuard = useRef<string | undefined>(undefined);
   const draftRef = useRef(draft);
@@ -265,10 +298,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const provenanceBaseline = useRef<string | undefined>(undefined);
   const configRef = useRef(config);
   configRef.current = config;
-  const chipRef = useRef(chip);
-  chipRef.current = chip;
-  const requestModelsRef = useRef(requestModels);
-  requestModelsRef.current = requestModels;
+  const canvasRef = useRef(input.canvas);
+  canvasRef.current = input.canvas;
   const memory = useRef(new Map<string, AiDraft>());
   const workspaceRef = useRef(input.workspaceId);
   const held = useRef(new Map<string, AiDraft>());
@@ -278,7 +309,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   openSettingsRef.current = input.onOpenSettings;
 
   const reviewing = REVIEW.includes(draft.status) && !draft.refining;
-  const showOverlay = !!draft.draft && (reviewing || !!draft.refining);
+  const showOverlay = !!draft.draft && overlayRenders(draft.draft, input.canvas) && (reviewing || !!draft.refining);
   const overlay = showOverlay && draft.draft ? draftOverlayFor(draft.draft, input.canvas, draft.diagnostics, !!draft.refining) : undefined;
 
   useEffect(() => {
@@ -303,8 +334,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   }, [draft.jobId, draft.prompt, draft.previewId, draft.baseRevision, draft.status, draft.workspaceId, input.workspaceId]);
 
   useEffect(() => {
-    if (reviewing) setOpen(false);
-  }, [reviewing]);
+    if (reviewing && showOverlay) setOpen(false);
+  }, [reviewing, showOverlay]);
 
   useEffect(() => {
     setDraft(current => {
@@ -328,7 +359,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       setDraft(current => {
         if (current.jobId !== id) return current;
         if (current.status !== 'generating' && current.status !== 'stale') return current;
-        const next = fromView(current, view, revisionRef.current);
+        const next = presentResult(current, view, revisionRef.current, canvasRef.current);
         if (view.state !== 'running') {
           if (current.workspaceId) held.current.delete(current.workspaceId);
           return {...next, refining: false};
@@ -401,7 +432,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
           await repreview(view.draft, revision, currentId, false);
           return;
         }
-        setDraft(current => current.jobId === stored.jobId ? fromView({...current, prompt: stored.prompt, acknowledged: [], workspaceId: currentId}, view, revision) : current);
+        setDraft(current => current.jobId === stored.jobId ? presentResult({...current, prompt: stored.prompt, acknowledged: [], workspaceId: currentId}, view, revision, canvasRef.current) : current);
       } catch (error) {
         if (cancelled || hydrateToken.current !== token || jobGuard.current !== stored.jobId) return;
         setDraft(current => current.jobId === stored.jobId ? {...current, status: 'failed', prompt: stored.prompt, error: errorOf(error, 'The draft could not be restored.')} : current);
@@ -473,10 +504,9 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       setSubmitting(false);
       return;
     }
-    const provider = chipRef.current ?? settings.selected;
+    const provider = settings.selected;
     const entry = settings.providers[provider];
-    const typed = requestModelsRef.current[provider];
-    const model = (typeof typed === 'string' ? typed.trim() : '') || entry?.model || '';
+    const model = entry?.model?.trim() || '';
     if (!entry?.configured || !model) {
       setDraft(current => ({...current, status: 'prompting', prompt: text, refining, error: {code: 'AI_NOT_CONFIGURED', message: 'Add an API key and model in AI settings. Your text is kept here.', retryable: false}}));
       setSubmitting(false);
@@ -510,8 +540,6 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         expectedRevision: baseRevision,
         expectedSettingsRevision: settings.settingsRevision,
         prompt: text,
-        provider,
-        model,
         ...(previousJobId ? {previousJobId} : {}),
       });
       jobGuard.current = started.id;
@@ -526,8 +554,6 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         acknowledged: refining ? current.acknowledged : [],
         refining,
         draft: refining ? current.draft : undefined,
-        requestProvider: provider,
-        requestModel: model,
         error: started.error,
         notice: undefined,
       }));
@@ -721,20 +747,14 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   }
 
   const reason = confirmReason(draft, input.running);
-  const provider = chip ?? config?.selected ?? 'openrouter';
-  const requestModel = requestModels[provider] ?? config?.providers?.[provider]?.model ?? '';
+  const provider = config?.selected ?? 'openrouter';
   return {
     draft, open, submitting, overlay, provenanceId, provenanceName, undoOffer, reason, token: input.token,
-    config, provider, requestModel, setProvider: setChip,
-    setRequestModel: (value: string) => setRequestModels(current => {
-      const next = {...current, [provider]: value};
-      requestModelsRef.current = next;
-      return next;
-    }),
+    config, provider,
     disclosure, continueDisclosure, dismissDisclosure,
     setPrompt: (prompt: string) => setDraft(current => ({...current, prompt})),
     openPanel, closePanel, generate, refresh, updateUnresolved, acknowledge, confirm, undoApply, cancel, discard, refine,
-    openSettings: () => openSettingsRef.current?.(),
+    openSettings: (returnTo?: HTMLElement) => openSettingsRef.current?.(returnTo),
   };
 }
 
@@ -768,9 +788,8 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   const count = draft.prompt.length;
   const over = count > PROMPT_CHAR_LIMIT;
   const entry = control.config?.providers?.[control.provider];
-  const sentProvider = draft.requestProvider ?? control.provider;
-  const sentModel = draft.requestModel || control.requestModel || entry?.model;
-  const configured = !control.config || (!!entry?.configured && !!(control.requestModel.trim() || entry?.model));
+  const savedModel = entry?.model ?? '';
+  const configured = !control.config || (!!entry?.configured && !!savedModel.trim());
   const busy = generating || draft.status === 'applying';
   const kind = retryKind(draft.error?.code);
   const neutral = draft.error?.code === 'CANCELLED' || draft.error?.code === 'INTERRUPTED' || (!draft.error && !!draft.notice);
@@ -807,6 +826,7 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   }
 
   const copy = draft.error ? errorCopy(draft.error.code, draft.error.message, control.config?.providers?.[control.provider]?.model || draft.model) : draft.notice;
+  const composerIssues = (draft.diagnostics ?? []).filter(item => item.blocks.includes('apply') || item.severity === 'error');
   return <div className="ai-flow" data-testid="ai-flow" data-ai-status={draft.status}>
     <p className="sr-only" aria-live="polite" data-testid="ai-live">{live}</p>
     {draft.status === 'stale' && <p className="ai-muted">The workspace changed since this draft was prepared.</p>}
@@ -821,16 +841,17 @@ export function AiFlow({control}: {control: AiDraftControl}) {
         <p className="ai-hint">Enter generates · Shift+Enter new line · Esc closes</p>
         {count >= PROMPT_COUNTER_AT && <p className={over ? 'ai-error' : 'ai-muted'} data-testid="ai-char-count">{over ? (count - PROMPT_CHAR_LIMIT) + ' characters over the limit. Shorten the text to generate. Nothing is trimmed for you.' : count.toLocaleString('en-US') + ' / ' + PROMPT_CHAR_LIMIT.toLocaleString('en-US')}</p>}
         {generating && <div className="ai-progress" role="progressbar" aria-valuetext={refining ? 'Refining…' : PHASE_LABEL[draft.phase ?? 'model']} aria-label={refining ? 'Refining draft' : 'Generating flow'} />}
-        {generating && <p className="ai-status" aria-live="polite"><span className="ai-spinner" aria-hidden="true" /> {refining ? 'Refining…' : 'Generating flow…'} <span className="ai-muted" data-testid="ai-progress-model">{providerLabel(sentProvider, sentModel)}</span></p>}
+        {generating && <p className="ai-status" aria-live="polite"><span className="ai-spinner" aria-hidden="true" /> {refining ? 'Refining…' : 'Generating flow…'} <span className="ai-muted" data-testid="ai-progress-model">{providerLabel(control.provider, savedModel || draft.model)}</span></p>}
         {!configured && <p className="ai-error" role="alert" data-testid="ai-error">✕ AI isn’t set up <span className="ai-muted">Add an API key and model in AI settings. Your text is kept here.</span></p>}
         {copy && <p id={errorId} className={neutral ? 'ai-muted' : 'ai-error'} role={neutral ? 'status' : 'alert'} data-testid={draft.error && !neutral ? 'ai-error' : 'ai-notice'}>{neutral ? '' : '✕ '}{copy}</p>}
+        {failed && !!composerIssues.length && <ol className="ai-issues" data-testid="ai-composer-issues">{composerIssues.map((item, index) => <li key={item.path + item.code + index}><span className="ai-issue-no">{index + 1}</span> {item.message}</li>)}</ol>}
         {draft.error?.code === 'CREDITS_REQUIRED' && <p><a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">Open OpenRouter account</a></p>}
         {draft.error?.code === 'AUTH_FAILED' && <p><a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">Open OpenRouter keys</a></p>}
-        <ProviderChip control={control} />
+        <SavedModelLine control={control} />
         <div className="ai-actions">
           {generating ? <button type="button" className="ai-text" data-testid="ai-cancel" onClick={() => void control.cancel()}>Cancel</button>
             : kind === 'retry' || kind === 'network' ? <button type="button" className="ai-text" data-testid="ai-retry" onClick={() => void control.generate()}>{kind === 'network' ? 'Retry · may send another request' : 'Retry'}</button>
-            : kind === 'settings' || !configured ? <button type="button" className="ai-text" data-testid="ai-open-settings" onClick={() => control.openSettings()}>Open AI settings</button>
+            : kind === 'settings' || !configured ? <button type="button" className="ai-text" data-testid="ai-open-settings" onClick={event => control.openSettings(event.currentTarget)}>Open AI settings</button>
             : kind === 'refine' ? <button type="button" className="ai-text" data-testid="ai-refine" onClick={() => control.refine()}>Refine</button>
             : kind === 'refresh' ? <button type="button" className="ai-text" data-testid="ai-retry" onClick={() => void control.generate()}>Refresh and generate again</button>
             : <button type="button" className="ai-text" data-testid="ai-generate" disabled={!draft.prompt.trim() || busy || over || !configured} onClick={() => void control.generate()}>✦ Generate</button>}
@@ -899,22 +920,10 @@ function Disclosure({control}: {control: AiDraftControl}) {
   </div>;
 }
 
-function ProviderChip({control}: {control: AiDraftControl}) {
-  const [openList, setOpenList] = useState(false);
-  const label = providerLabel(control.provider, control.requestModel);
+function SavedModelLine({control}: {control: AiDraftControl}) {
+  const model = control.config?.providers?.[control.provider]?.model;
   return <div className="ai-chip-wrap">
-    <button type="button" className="ai-text" data-testid="ai-provider-chip" aria-expanded={openList} onClick={() => setOpenList(value => !value)}>{label}</button>
-    {openList && control.config && <ul className="ai-chip-list">
-      {(['openrouter', 'openai-compatible'] as ProviderId[]).map(id => {
-        const entry = control.config?.providers?.[id];
-        const ready = !!entry?.configured && !!entry.model;
-        return <li key={id}><button type="button" data-testid={'ai-chip-' + id} onClick={() => { control.setProvider(id); setOpenList(false); }}>{providerLabel(id, entry?.model)} <span className="ai-muted">{id === control.provider ? 'current' : ready ? 'recent' : 'not set up'}</span></button></li>;
-      })}
-    </ul>}
-    <label className="ai-field">Model for the next request
-      <input className="ai-request-model" aria-label="Model for the next request" data-testid="ai-request-model" value={control.requestModel} spellCheck={false} placeholder="vendor/model" onChange={event => control.setRequestModel(event.target.value)} />
-    </label>
-    <p className="ai-hint">Applies to the next request, not one already running. <button type="button" className="ai-text" data-testid="ai-open-settings" onClick={() => control.openSettings()}>AI settings</button></p>
+    <button type="button" className="ai-text" data-testid="ai-provider-chip" onClick={event => control.openSettings(event.currentTarget)}>{providerLabel(control.provider, model)}</button>
   </div>;
 }
 

@@ -182,7 +182,7 @@ test('AI flow authoring UI', async t => {
     const h = await harness('ready');
     try {
       await h.render();
-      await h.click('.workspace-advanced > summary');
+      await h.openSettings();
       await h.until(() => h.document.querySelector('[data-testid="ai-has-key"]')?.textContent?.startsWith('API key saved') === true, 'has key');
       const key = h.document.querySelector('[data-testid="ai-api-key"]') as HTMLInputElement;
       assert.equal(key.value, '');
@@ -213,7 +213,7 @@ test('AI flow authoring UI', async t => {
     const h = await harness('ready');
     try {
       await h.render();
-      await h.click('.workspace-advanced > summary');
+      await h.openSettings();
       await h.until(() => !!h.document.querySelector('[data-testid="ai-api-key"]'), 'key field');
       await h.fill('API key', 'sk-typed-key');
       h.ai.holdNextTest();
@@ -237,7 +237,7 @@ test('AI flow authoring UI', async t => {
     const h = await harness('ready');
     try {
       await h.render();
-      await h.click('.workspace-advanced > summary');
+      await h.openSettings();
       await h.until(() => h.document.querySelector('[data-testid="ai-save"]')?.hasAttribute('disabled') === false, 'save ready');
       await h.click('[data-testid="ai-save"]');
       await h.until(() => h.ai.puts.length === 1, 'keep save');
@@ -277,28 +277,113 @@ test('AI flow authoring UI', async t => {
     } finally { await h.cleanup(); }
   });
 
-  await t.test('the composer chip provider and model are sent with the next request only', async () => {
+  await t.test('the composer has no model field and does not send a provider or model', async () => {
     const h = await harness('ready');
     try {
       await h.render();
       await h.click('[data-testid="ai-flow-button"]');
-      await h.fill('Flow description', 'Pay the electric bill');
+      assert.equal(h.document.querySelector('[data-testid="ai-request-model"]'), null);
+      assert.equal(h.document.querySelector('[aria-label="Model for the next request"]'), null);
+      assert.doesNotMatch(h.document.body.textContent ?? '', /Model for the next request|Applies to the next request/);
+      await h.until(() => /OpenRouter · vendor\/model/.test(h.document.querySelector('[data-testid="ai-provider-chip"]')?.textContent ?? ''), 'saved model line');
       await h.click('[data-testid="ai-provider-chip"]');
-      await h.click('[data-testid="ai-chip-openai-compatible"]');
-      await h.fill('Model for the next request', 'gpt-next');
-      h.ai.holdNextJob();
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-settings"]'), 'settings from the model line');
+      assert.equal(h.document.querySelector('.workspace-advanced [data-testid="ai-settings"]'), null);
+      await h.click('[data-testid="ai-settings-close"]');
+      await h.until(() => !h.document.querySelector('[data-testid="ai-settings"]'), 'settings closed');
+      await h.fill('Flow description', 'Pay the electric bill');
       await h.click('[data-testid="ai-generate"]');
       await h.until(() => !!h.document.querySelector('[data-testid="ai-disclosure-continue"]') || h.status() === 'generating', 'disclosure or start');
       if (h.document.querySelector('[data-testid="ai-disclosure-continue"]')) await h.click('[data-testid="ai-disclosure-continue"]');
-      await h.until(() => h.status() === 'generating', 'generating with the chip');
-      assert.match(h.document.querySelector('[data-testid="ai-progress-model"]')?.textContent ?? '', /OpenAI-compatible · gpt-next/);
-      const sent = h.ai.generationBodies[0] as {provider?: string; model?: string};
-      assert.equal(sent.provider, 'openai-compatible');
-      assert.equal(sent.model, 'gpt-next');
+      await h.until(() => h.ai.generations === 1, 'generation started');
+      const sent = h.ai.generationBodies[0] as Record<string, unknown>;
+      assert.equal('provider' in sent, false);
+      assert.equal('model' in sent, false);
       assert.equal(h.ai.puts.length, 0);
-      h.ai.release();
-      await h.until(() => !!h.document.querySelector('[data-testid="ai-draft-chip"]'), 'draft ready');
-      assert.match(h.document.querySelector('[data-testid="ai-usage"]')?.textContent ?? '', /gpt-next/);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('AI settings are their own surface and guard an unsaved key', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.click('.workspace-advanced > summary');
+      assert.equal(h.document.querySelector('[data-testid="ai-settings"]'), null);
+      assert.match(h.document.querySelector('.workspace-advanced')?.textContent ?? '', /Show legacy canvas controls/);
+      assert.doesNotMatch(h.document.querySelector('.workspace-advanced')?.textContent ?? '', /Replace key|Model ID/);
+      await h.click('[data-testid="ai-flow-button"]');
+      const chip = h.document.querySelector<HTMLButtonElement>('[data-testid="ai-provider-chip"]');
+      assert.ok(chip);
+      await h.click('[data-testid="ai-provider-chip"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-settings"]'), 'settings');
+      const sheet = h.document.querySelector('[data-testid="ai-settings"]');
+      assert.ok(sheet);
+      assert.doesNotMatch(sheet.textContent ?? '', /Show legacy canvas controls|Scenarios over shared screens/);
+      assert.equal(h.document.activeElement, h.document.querySelector('[data-testid="ai-api-key"]'));
+      await h.fill('API key', 'sk-unsaved');
+      await h.click('[data-testid="ai-settings-close"]');
+      assert.ok(h.document.querySelector('[data-testid="ai-unsaved-guard"]'));
+      assert.ok(h.document.querySelector('[data-testid="ai-settings"]'));
+      await h.clickText('Keep editing');
+      assert.equal(h.document.querySelector('[data-testid="ai-unsaved-guard"]'), null);
+      await act(async () => { h.document.querySelector('[data-testid="ai-settings"]')!.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); });
+      assert.ok(h.document.querySelector('[data-testid="ai-unsaved-guard"]'));
+      assert.ok(h.document.querySelector('[data-testid="ai-settings"]'));
+      await h.click('[data-testid="ai-discard-key"]');
+      await h.until(() => !h.document.querySelector('[data-testid="ai-settings"]'), 'discard closed settings');
+      assert.equal(h.document.activeElement, chip);
+      await h.click('[data-testid="ai-provider-chip"]');
+      await h.until(() => h.document.activeElement === h.document.querySelector('[data-testid="ai-api-key"]'), 'key focused again');
+      await act(async () => { h.document.querySelector('[data-testid="ai-settings"]')!.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); });
+      await h.until(() => !h.document.querySelector('[data-testid="ai-settings"]'), 'escape closed settings');
+      assert.equal(h.document.activeElement, chip);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('a valid preview opens the overlay with Apply, Refine, and Dismiss', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.generate('Pay the electric bill');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-draft-chip"]'), 'overlay');
+      assert.match(h.document.body.textContent ?? '', /Flow ready\. Use this flow\?/);
+      assert.ok(h.document.querySelector('[data-testid="ai-confirm"]'));
+      assert.ok(h.document.querySelector('[data-testid="ai-refine"]'));
+      assert.ok(h.document.querySelector('[data-testid="ai-discard"]'));
+      assert.equal(h.document.querySelector('[aria-label="Flow description"]'), null);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('a non-applicable INVALID_DRAFT preview keeps the composer open with the issues', async () => {
+    const h = await harness('invalid');
+    const prompt = 'create flow to start from "home" should see Coordinator';
+    try {
+      await h.render();
+      await h.generate(prompt);
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-composer-issues"]'), 'issues stay visible');
+      assert.equal(h.status(), 'failed');
+      assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]'), null);
+      assert.equal((h.document.querySelector('[aria-label="Flow description"]') as HTMLTextAreaElement).value, prompt);
+      const issues = h.document.querySelector('[data-testid="ai-composer-issues"]')?.textContent ?? '';
+      assert.match(issues, /must have required property 'setup'/);
+      assert.match(issues, /must have required property 'key'/);
+      assert.ok(h.document.querySelector('[data-testid="ai-refine"]'));
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('a failed AUTHORING_INVALID job keeps the prompt and lists job diagnostics', async () => {
+    const h = await harness('authoring-failed');
+    const prompt = 'Guest adds Running shoes to the cart';
+    try {
+      await h.render();
+      await h.generate(prompt);
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-composer-issues"]'), 'authoring issues');
+      assert.equal(h.status(), 'failed');
+      assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]'), null);
+      assert.equal((h.document.querySelector('[aria-label="Flow description"]') as HTMLTextAreaElement).value, prompt);
+      assert.match(h.document.querySelector('[data-testid="ai-composer-issues"]')?.textContent ?? '', /swipe/);
+      assert.match(h.document.body.textContent ?? '', /Couldn.t build a flow/);
+      assert.ok(h.document.querySelector('[data-testid="ai-refine"]'));
     } finally { await h.cleanup(); }
   });
 
@@ -306,13 +391,13 @@ test('AI flow authoring UI', async t => {
     const h = await harness('ready', {unconfigured: true});
     try {
       await h.render();
-      await h.click('.workspace-advanced > summary');
+      await h.openSettings();
       await h.until(() => !!h.document.querySelector('[data-testid="ai-api-key"]'), 'key field');
       await h.fill('Model', 'vendor/model');
       await h.fill('API key', 'sk-fresh-key');
       await h.click('[data-testid="ai-save"]');
       await h.until(() => /API key saved/.test(h.document.querySelector('[data-testid="ai-has-key"]')?.textContent ?? ''), 'key saved');
-      await h.click('[data-testid="ai-flow-button"]');
+      await h.click('[data-testid="ai-settings-close"]');
       await h.until(() => !!h.document.querySelector('[data-testid="ai-generate"]'), 'generate enabled');
       await h.fill('Flow description', 'Pay the electric bill');
       await h.click('[data-testid="ai-generate"]');
@@ -374,8 +459,8 @@ test('AI flow authoring UI', async t => {
   });
 });
 
-type Mode = 'ready' | 'hold' | 'expired' | 'needs';
-type Job = {id: string; workspaceId: string; baseRevision: number; state: 'running' | 'pending' | 'needsInfo' | 'cancelled'; phase: GenerationView['phase']; draft?: FlowDraft; preview?: Preview; model?: string; upstreamProvider?: string};
+type Mode = 'ready' | 'hold' | 'expired' | 'needs' | 'invalid' | 'authoring-failed';
+type Job = {id: string; workspaceId: string; baseRevision: number; state: 'running' | 'pending' | 'needsInfo' | 'failed' | 'cancelled'; phase: GenerationView['phase']; draft?: FlowDraft | Record<string, unknown>; preview?: Preview; model?: string; upstreamProvider?: string; error?: {code: string; message: string; retryable: boolean}; diagnostics?: Preview['diagnostics']};
 type ScenarioService = ReturnType<typeof createScenarios>;
 
 async function harness(mode: Mode, options: {deviceId?: string; failSave?: boolean; unconfigured?: boolean} = {}) {
@@ -463,6 +548,13 @@ async function harness(mode: Mode, options: {deviceId?: string; failSave?: boole
     saved: () => service.workspace(workspaceId),
     documentOf: (workspace: {name: string; yaml: string; flows?: unknown; scenarios?: unknown; canvas?: unknown; automation?: unknown; mock?: unknown}) => JSON.stringify({name: workspace.name, yaml: workspace.yaml, flows: workspace.flows ?? {}, scenarios: workspace.scenarios ?? [], canvas: workspace.canvas ?? null, automation: workspace.automation ?? null, mock: workspace.mock ?? null}),
     render, click, clickText, fill, until,
+    openSettings: async () => {
+      if (!document.querySelector('[data-testid="ai-settings"]')) {
+        if (!document.querySelector('[aria-label="Flow description"]')) await click('[data-testid="ai-flow-button"]');
+        await click('[data-testid="ai-provider-chip"]');
+      }
+      await until(() => !!document.querySelector('[data-testid="ai-api-key"]'), 'ai settings');
+    },
     generate: async (prompt: string) => {
       await click('[data-testid="ai-flow-button"]');
       await fill('Flow description', prompt);
@@ -721,21 +813,64 @@ function previewFor(workspaceId: string, revision: number, draft: FlowDraft): Pr
 
 function finish(job: Job, mode: Mode) {
   if (job.state !== 'running') return;
-  job.draft = job.draft ?? (mode === 'needs' ? needsDraft() : happyDraft());
-  const diagnosed = diagnose(job.draft);
+  if (mode === 'invalid') {
+    job.draft = invalidDraft();
+    job.state = 'needsInfo';
+    job.preview = blockedPreview(job.workspaceId, job.baseRevision, invalidDiagnostics());
+    return;
+  }
+  if (mode === 'authoring-failed') {
+    job.draft = invalidDraft();
+    job.state = 'failed';
+    job.error = {code: 'AUTHORING_INVALID', message: 'The draft could not be checked against the workspace.', retryable: false};
+    job.diagnostics = [{code: 'INVALID_DRAFT', path: '/visits/2/operations/0', severity: 'error', blocks: ['apply', 'run'], message: 'Step 3 uses "swipe", which TnT can\'t author yet.', remedy: 'Describe the step with a supported action.'}];
+    return;
+  }
+  const draft = (job.draft ?? (mode === 'needs' ? needsDraft() : happyDraft())) as FlowDraft;
+  job.draft = draft;
+  const diagnosed = diagnose(draft);
   job.state = diagnosed.applicable ? 'pending' : 'needsInfo';
-  job.preview = previewFor(job.workspaceId, job.baseRevision, job.draft);
+  job.preview = previewFor(job.workspaceId, job.baseRevision, draft);
 }
 
 function viewOf(job: Job, mode: Mode): GenerationView {
   const finished = job.state !== 'running';
-  return {
+  const view: GenerationView & {diagnostics?: Preview['diagnostics']} = {
     id: job.id, workspaceId: job.workspaceId, state: job.state, phase: job.phase, provenance: 'ai', contractVersion: 1,
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
     ...(job.model ? {model: job.model} : {}),
     ...(job.upstreamProvider ? {upstreamProvider: job.upstreamProvider} : {}),
+    ...(job.error ? {error: job.error} : {}),
     ...(finished && mode !== 'expired' && job.preview ? {previewId: job.preview.previewId, preview: job.preview} : {}),
     ...(finished && job.draft ? {draft: job.draft} : {}),
+    ...(job.diagnostics ? {diagnostics: job.diagnostics} : {}),
+  };
+  return view;
+}
+
+function invalidDraft(): Record<string, unknown> {
+  return {
+    schemaVersion: 1, mode: 'createScenario', name: 'CoordinatorFromHome', appId: 'com.example.HybridApp',
+    execution: {kind: 'unresolved', description: 'Initial navigation is missing.'},
+    screens: [{kind: 'unresolved', description: 'home screen definition/id is not available in context'}],
+    visits: [{id: 'visitHome', screenId: 'home', assertions: [{type: 'visible', target: {text: 'Coordinator'}}]}],
+    assumptions: [],
+  };
+}
+
+function invalidDiagnostics(): Preview['diagnostics'] {
+  return [
+    {code: 'INVALID_DRAFT', path: '/execution', severity: 'error', blocks: ['apply', 'run'], message: "must have required property 'setup'", remedy: 'Correct the draft so it matches the v1 flow schema.'},
+    {code: 'INVALID_DRAFT', path: '/screens/0', severity: 'error', blocks: ['apply', 'run'], message: "must have required property 'key'", remedy: 'Correct the draft so it matches the v1 flow schema.'},
+  ];
+}
+
+function blockedPreview(workspaceId: string, revision: number, diagnostics: Preview['diagnostics']): Preview {
+  return {
+    previewId: crypto.randomUUID(), workspaceId, baseRevision: revision, expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    contractVersion: 1, compilerVersion: 'test', draftHash: 'invalid', applicable: false, authoringComplete: false,
+    runReadiness: 'blocked', requiredAssumptionKeys: [], diagnostics,
+    changes: {created: [], reused: [], updated: []}, identityMap: {}, timeline: [],
   };
 }
 
