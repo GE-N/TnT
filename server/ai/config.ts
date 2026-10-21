@@ -397,28 +397,26 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     return (await readFileConfig()).settingsRevision;
   }
 
-  /** A request may name another saved provider and model. This never writes settings. */
-  async function connect(override?: {provider?: ProviderId; model?: string}): Promise<{provider: FlowModelProvider; model: string; providerId: ProviderId; bindRemoval: (abort: () => void) => () => void}> {
+  async function connect(): Promise<{provider: FlowModelProvider; model: string; providerId: ProviderId; bindRemoval: (abort: () => void) => () => void}> {
     const config = await readFileConfig();
-    const providerId = override?.provider ?? config.selected;
-    const entry = config.providers[providerId];
-    const model = override?.model || entry.model;
-    if (!model) throw new AiHttpError(400, 'PROVIDER_CONFIG', 'Choose a model.');
+    const selected = config.selected;
+    const entry = config.providers[selected];
+    if (!entry.model) throw new AiHttpError(400, 'PROVIDER_CONFIG', 'Choose a model.');
     let baseUrl = OPENROUTER_BASE_URL;
-    if (providerId !== 'openrouter') {
+    if (selected !== 'openrouter') {
       try { baseUrl = assertCloudBaseUrl(entry.baseUrl ?? ''); }
       catch (error) {
         if (error instanceof AiHttpError) throw new AiHttpError(400, 'PROVIDER_CONFIG', error.message);
         throw error;
       }
     }
-    const resolved = await resolveKey(providerId, entry);
+    const resolved = await resolveKey(selected, entry);
     if (!resolved) throw new AiHttpError(400, 'PROVIDER_CONFIG', 'Add an API key.');
     return {
-      model,
-      providerId,
-      bindRemoval: bindRemoval(providerId),
-      provider: createOpenAiCompatibleProvider({baseUrl, model, apiKey: resolved.key, fetch: deps.fetch, preset: providerId}),
+      model: entry.model,
+      providerId: selected,
+      bindRemoval: bindRemoval(selected),
+      provider: createOpenAiCompatibleProvider({baseUrl, model: entry.model, apiKey: resolved.key, fetch: deps.fetch, preset: selected}),
     };
   }
 

@@ -42,9 +42,9 @@ export function createAi(deps: {
     store: createJobStore(deps.root),
     now, log, scheduler: deps.scheduler ?? realScheduler(), timeouts: deps.timeouts,
     settingsRevision: () => config.settingsRevision(),
-    resolveProvider: override => deps.provider
+    resolveProvider: () => deps.provider
       ? Promise.resolve({provider: deps.provider, model: deps.provider.id, providerId: deps.provider.id})
-      : config.connect(override),
+      : config.connect(),
   });
   return {
     ready: jobs.ready,
