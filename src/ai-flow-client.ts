@@ -47,7 +47,9 @@ export type ApplyRequest = {workspaceId: string; expectedRevision: number; previ
 export type ApplyResponse = ApplyResult & {receiptId?: string};
 export type UndoRequest = {workspaceId: string; expectedRevision: number; receiptId: string};
 export type UndoResponse = {workspaceId: string; revision: number; receiptId: string; scenarioId: string; undone: true};
-export type ModelCatalog = {provider: ProviderId; models: AiModelInfo[]};
+/** `name` is optional: a catalog row is usable from its id alone. */
+export type CatalogModel = {id: string; name?: string; capabilities?: string[]};
+export type ModelCatalog = {provider: ProviderId; models: CatalogModel[]};
 
 /** Same-origin runner calls. The session token is a header, never part of the URL. */
 export function createAiFlowClient(token: string) {

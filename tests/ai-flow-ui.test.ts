@@ -3,6 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {act, createElement} from 'react';
+import {readFileSync} from 'node:fs';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -340,6 +341,92 @@ test('AI flow authoring UI', async t => {
     } finally { await h.cleanup(); }
   });
 
+  await t.test('provider choices are visible radios and an unsaved key blocks the switch', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.openSettings();
+      await h.until(() => /API key saved/.test(h.document.querySelector('[data-testid="ai-has-key"]')?.textContent ?? ''), 'settings loaded');
+      const radios = [...h.document.querySelectorAll<HTMLInputElement>('#ai-settings input[type="radio"]')];
+      assert.deepEqual(radios.map(radio => radio.name), ['ai-provider', 'ai-provider']);
+      assert.deepEqual(radios.map(radio => radio.value), ['openrouter', 'openai-compatible']);
+      for (const radio of radios) {
+        assert.equal(radio.hidden, false);
+        assert.doesNotMatch(radio.getAttribute('style') ?? '', /display:\s*none|opacity:\s*0/);
+      }
+      const rule = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8').match(/\.ai-settings \.ai-provider-option input\[type="radio"\]\{([^}]*)\}/)?.[1] ?? '';
+      assert.match(rule, /appearance:auto/);
+      assert.match(rule, /opacity:1/);
+      assert.doesNotMatch(rule, /display:\s*none|opacity:\s*0/);
+      await h.click('#ai-settings input[value="openai-compatible"]');
+      await h.until(() => (h.document.querySelector('#ai-settings input[value="openai-compatible"]') as HTMLInputElement).checked, 'radio selects openai-compatible');
+      assert.ok(h.document.querySelector('[aria-label="Base URL"]'));
+      await act(async () => { h.document.querySelector('#ai-settings input[value="openai-compatible"]')!.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowLeft', bubbles: true, cancelable: true})); });
+      await h.until(() => (h.document.querySelector('#ai-settings input[value="openrouter"]') as HTMLInputElement).checked, 'arrow selects openrouter');
+      assert.equal(h.document.querySelector('[aria-label="Base URL"]'), null);
+      await h.fill('API key', 'sk-unsaved-provider');
+      await h.click('#ai-settings input[value="openai-compatible"]');
+      assert.ok(h.document.querySelector('[data-testid="ai-unsaved-guard"]'));
+      assert.equal((h.document.querySelector('#ai-settings input[value="openrouter"]') as HTMLInputElement).checked, true);
+      await act(async () => { h.document.querySelector('#ai-settings [role="radiogroup"]')!.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowRight', bubbles: true, cancelable: true})); });
+      assert.equal((h.document.querySelector('#ai-settings input[value="openrouter"]') as HTMLInputElement).checked, true);
+      assert.ok(h.document.querySelector('[data-testid="ai-unsaved-guard"]'));
+      await h.click('[data-testid="ai-discard-key"]');
+      await h.until(() => (h.document.querySelector('#ai-settings input[value="openai-compatible"]') as HTMLInputElement).checked, 'discard switches provider');
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('browse searches the full catalog by id or name without replacing the typed model', async () => {
+    const saved = 'deepseek/deepseek-v4.1-flash-1017';
+    const models = wideCatalog();
+    const h = await harness('ready', {savedModel: saved, catalog: models});
+    try {
+      await h.render();
+      await h.openSettings();
+      await h.until(() => (h.document.querySelector('[aria-label="Model"]') as HTMLInputElement).value === saved, 'saved model loaded');
+      await h.click('[aria-label="Browse models"]');
+      await h.until(() => h.document.querySelectorAll('.ai-catalog-row').length > 8, 'browse lists the catalog');
+      assert.equal((h.document.querySelector('[aria-label="Model"]') as HTMLInputElement).value, saved);
+      assert.match(h.ai.modelQueries[0] ?? '', /provider=openrouter/);
+      assert.equal(catalogTotal(h.document), models.length);
+      const gpt = models.filter(item => item.id.startsWith('openai/gpt-')).map(item => item.id);
+      await h.fill('Search models', 'gpt');
+      await h.until(() => gpt.every(id => h.document.querySelector(`[data-model-id="${id}"]`)), 'gpt matches');
+      assert.deepEqual(catalogIds(h.document).filter(id => id.startsWith('openai/gpt-')).sort(), [...gpt].sort());
+      assert.equal(catalogTotal(h.document), gpt.length);
+      await h.fill('Search models', 'GPT');
+      await h.until(() => catalogIds(h.document).includes('openai/gpt-4.0'), 'case-insensitive id');
+      await h.fill('Search models', 'claude');
+      await h.until(() => catalogIds(h.document).includes('custom/writer'), 'name match');
+      assert.ok(catalogIds(h.document).includes('anthropic/claude-sonnet-4.5'));
+      assert.ok(catalogIds(h.document).includes('anthropic/claude-haiku-4.5'));
+      await h.fill('Search models', 'ClAuDe');
+      await h.until(() => catalogIds(h.document).includes('custom/writer'), 'case-insensitive name');
+      assert.equal((h.document.querySelector('[aria-label="Model"]') as HTMLInputElement).value, saved);
+      await h.click('[data-testid="ai-save"]');
+      await h.until(() => h.ai.puts.length === 1, 'model saved');
+      assert.equal((h.ai.puts[0] as {model?: string}).model, saved);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('a failed catalog keeps the typed model id', async () => {
+    const h = await harness('ready', {failCatalog: true});
+    try {
+      await h.render();
+      await h.openSettings();
+      await h.until(() => (h.document.querySelector('[aria-label="Model"]') as HTMLInputElement).value === 'vendor/model', 'model field');
+      await h.click('[aria-label="Browse models"]');
+      await h.until(() => /Couldn.t load the model list/.test(h.document.querySelector('[data-testid="ai-catalog-failed"]')?.textContent ?? ''), 'catalog failed');
+      assert.match(h.document.querySelector('[data-testid="ai-catalog-failed"]')?.textContent ?? '', /Try again/);
+      assert.match(h.document.querySelector('[data-testid="ai-catalog-failed"]')?.textContent ?? '', /used exactly as typed/);
+      await h.fill('Model', 'vendor/x/experimental-model');
+      assert.equal(h.document.querySelector('.ai-catalog-row'), null);
+      await h.click('[data-testid="ai-save"]');
+      await h.until(() => h.ai.puts.length === 1, 'typed model saved');
+      assert.equal((h.ai.puts[0] as {model?: string}).model, 'vendor/x/experimental-model');
+    } finally { await h.cleanup(); }
+  });
+
   await t.test('a valid preview opens the overlay with Apply, Refine, and Dismiss', async () => {
     const h = await harness('ready');
     try {
@@ -472,7 +559,29 @@ type Mode = 'ready' | 'hold' | 'expired' | 'needs' | 'invalid' | 'authoring-fail
 type Job = {id: string; workspaceId: string; baseRevision: number; state: 'running' | 'pending' | 'needsInfo' | 'failed' | 'cancelled'; phase: GenerationView['phase']; draft?: FlowDraft | Record<string, unknown>; preview?: Preview; model?: string; upstreamProvider?: string; error?: {code: string; message: string; retryable: boolean}};
 type ScenarioService = ReturnType<typeof createScenarios>;
 
-async function harness(mode: Mode, options: {deviceId?: string; failSave?: boolean; unconfigured?: boolean} = {}) {
+type CatalogFixture = {id: string; name?: string};
+type HarnessOptions = {deviceId?: string; failSave?: boolean; unconfigured?: boolean; savedModel?: string; catalog?: CatalogFixture[]; failCatalog?: boolean};
+
+function wideCatalog(): CatalogFixture[] {
+  const models: CatalogFixture[] = [];
+  for (let index = 0; index < 300; index++) models.push({id: `other/model-${index}`, name: `Other ${index}`});
+  for (let index = 0; index < 12; index++) models.push({id: `openai/gpt-4.${index}`, name: `GPT ${index}`});
+  models.push({id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet'});
+  models.push({id: 'anthropic/claude-haiku-4.5'});
+  models.push({id: 'custom/writer', name: 'House Claude draft'});
+  return models;
+}
+
+function catalogIds(document: Document) {
+  return [...document.querySelectorAll<HTMLElement>('.ai-catalog-row')].map(row => row.dataset.modelId ?? '');
+}
+
+function catalogTotal(document: Document) {
+  const more = Number(/^(\d+) more/.exec(document.querySelector('[data-testid="ai-catalog-more"]')?.textContent ?? '')?.[1] ?? 0);
+  return document.querySelectorAll('.ai-catalog-row').length + more;
+}
+
+async function harness(mode: Mode, options: HarnessOptions = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'tnt-ai-flow-ui-'));
   const service = createScenarios({
     root: directory,
@@ -642,18 +751,18 @@ function applyPut(config: FakeConfig, body: Record<string, unknown> | undefined)
   return structuredClone(config);
 }
 
-function savedConfig(): FakeConfig {
+function savedConfig(model = 'vendor/model'): FakeConfig {
   return {
     settingsRevision: 2,
     selected: 'openrouter' as const,
     providers: {
-      openrouter: {model: 'vendor/model', configured: true, keySource: 'keychain' as const, credentialRevision: 1, storageAvailable: true},
+      openrouter: {model, configured: true, keySource: 'keychain' as const, credentialRevision: 1, storageAvailable: true},
       'openai-compatible': {model: 'gpt-test', baseUrl: 'https://api.openai.com/v1', configured: true, keySource: 'keychain' as const, credentialRevision: 1, storageAvailable: true},
     },
   };
 }
 
-function createFake(mode: Mode, service: ScenarioService, options: {unconfigured?: boolean} = {}) {
+function createFake(mode: Mode, service: ScenarioService, options: HarnessOptions = {}) {
   const jobs = new Map<string, Job>();
   const applied = new Map<string, unknown>();
   const snapshots = new Map<string, Awaited<ReturnType<ScenarioService['workspace']>>>();
@@ -662,8 +771,9 @@ function createFake(mode: Mode, service: ScenarioService, options: {unconfigured
   const puts: unknown[] = [];
   const tests: unknown[] = [];
   const generationBodies: unknown[] = [];
+  const modelQueries: string[] = [];
   const heldJobs = new Set<string>();
-  let config: FakeConfig = options.unconfigured ? unconfiguredConfig() : savedConfig();
+  let config: FakeConfig = options.unconfigured ? unconfiguredConfig() : savedConfig(options.savedModel);
   let released = false;
   let holdTest = false;
   let holdNext = false;
@@ -680,6 +790,7 @@ function createFake(mode: Mode, service: ScenarioService, options: {unconfigured
     get puts() { return puts; },
     get tests() { return tests; },
     get generationBodies() { return generationBodies; },
+    get modelQueries() { return modelQueries; },
     holdNextTest() { holdTest = true; },
     holdNextJob() { holdNext = true; },
     rejectNextGeneration() { rejectGeneration = true; },
@@ -696,7 +807,12 @@ function createFake(mode: Mode, service: ScenarioService, options: {unconfigured
     async route(method: string, pathname: string, body?: Record<string, unknown>) {
       const path = pathname.split('?')[0];
       if (method === 'GET' && path === '/api/ai/config') return {status: 200, body: structuredClone(config)};
-      if (method === 'GET' && path === '/api/ai/models') return {status: 200, body: {provider: 'openrouter', models: [{id: 'vendor/model'}, {id: 'openai/gpt-test'}]}};
+      if (method === 'GET' && path === '/api/ai/models') {
+        modelQueries.push(pathname);
+        if (options.failCatalog) return {status: 502, body: {error: 'The model catalog is unavailable.', code: 'PROVIDER_UNAVAILABLE'}};
+        const provider = new URL(pathname, 'http://tnt.local').searchParams.get('provider') ?? 'openrouter';
+        return {status: 200, body: {provider, models: options.catalog ?? [{id: 'vendor/model'}, {id: 'openai/gpt-test'}]}};
+      }
       if (method === 'PUT' && path === '/api/ai/config') {
         puts.push(body);
         if (failPut) { failPut = false; return {status: 500, body: {error: 'The settings service did not answer.', code: 'REQUEST_FAILED'}}; }
