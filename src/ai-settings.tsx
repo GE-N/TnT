@@ -1,5 +1,5 @@
-import {forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState} from 'react';
-import {AiFlowRequestError, createAiFlowClient, type AiPublicConfig, type ProviderId} from './ai-flow-client.js';
+import {forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent} from 'react';
+import {AiFlowRequestError, createAiFlowClient, type AiPublicConfig, type CatalogModel, type ProviderId} from './ai-flow-client.js';
 
 const PROVIDERS: ProviderId[] = ['openrouter', 'openai-compatible'];
 const configListeners = new Set<(config: AiPublicConfig) => void>();
@@ -16,6 +16,13 @@ export function publishAiConfig(config: AiPublicConfig) {
 }
 const DEFAULT_BASE = 'https://api.openai.com/v1';
 const MODEL_PATTERN = /^[A-Za-z0-9._:/@+-]{1,200}$/;
+const CATALOG_RENDER_CAP = 80;
+
+function catalogMatch(item: CatalogModel, query: string) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return item.id.toLowerCase().includes(needle) || (item.name ?? '').toLowerCase().includes(needle);
+}
 
 type Slice = {model: string; baseUrl: string; apiKey: string; editVersion: number; modelDirty: boolean; baseDirty: boolean; revealed: boolean; useSession: boolean};
 type TestRecord = {
@@ -112,8 +119,9 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [sessionOffer, setSessionOffer] = useState(false);
   const [pending, setPending] = useState<Pending>(null);
-  const [catalog, setCatalog] = useState<{provider: ProviderId; models: {id: string}[]; failed: boolean; query: string; open: boolean}>({provider: 'openrouter', models: [], failed: false, query: '', open: false});
+  const [catalog, setCatalog] = useState<{provider: ProviderId; models: CatalogModel[]; failed: boolean; loading: boolean; query: string; open: boolean}>({provider: 'openrouter', models: [], failed: false, loading: false, query: '', open: false});
   const revealTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const searchRef = useRef<HTMLInputElement>(null);
   const booted = useRef(false);
   const listId = useId();
 
@@ -156,6 +164,11 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
     keyRef.current?.focus();
   }, [focusNonce]);
 
+  useEffect(() => {
+    if (!catalog.open || catalog.failed) return;
+    searchRef.current?.focus();
+  }, [catalog.open, catalog.failed, catalog.provider]);
+
   useEffect(() => () => { if (revealTimer.current) clearTimeout(revealTimer.current); }, []);
 
   const slice = form[provider];
@@ -186,14 +199,25 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
   }
 
   function choose(next: ProviderId) {
-    if (next === provider) return;
-    if (slice.apiKey) { setPending({kind: 'provider', id: next}); return; }
+    if (next === provider) return true;
+    if (slice.apiKey) { setPending({kind: 'provider', id: next}); return false; }
     setProvider(next);
     setNotice('');
     setFailure('');
     setConfirmRemove(false);
     setSessionOffer(false);
     setCatalog(current => ({...current, open: false}));
+    return true;
+  }
+
+  function onProviderKey(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    const index = PROVIDERS.indexOf(provider);
+    const delta = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
+    const next = PROVIDERS[(index + delta + PROVIDERS.length) % PROVIDERS.length];
+    if (!choose(next)) return;
+    event.currentTarget.querySelector<HTMLInputElement>(`input[type="radio"][value="${next}"]`)?.focus();
   }
 
   function requestClose() {
@@ -214,13 +238,19 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
   }
 
   async function loadCatalog(id: ProviderId) {
-    setCatalog({provider: id, models: [], failed: false, query: forms.current[id].model, open: true});
+    setCatalog({provider: id, models: [], failed: false, loading: true, query: '', open: true});
     try {
       const result = await client.listModels(id);
-      setCatalog(current => current.provider === id ? {...current, models: result.models, failed: false, open: true} : current);
+      if (!Array.isArray(result?.models)) throw new Error('The model catalog is unavailable.');
+      setCatalog(current => current.provider === id && current.open ? {...current, models: result.models, failed: false, loading: false} : current);
     } catch {
-      setCatalog(current => current.provider === id ? {...current, models: [], failed: true, open: true} : current);
+      setCatalog(current => current.provider === id && current.open ? {...current, models: [], failed: true, loading: false} : current);
     }
+  }
+
+  function pickModel(id: string) {
+    write(provider, {model: id, modelDirty: true});
+    setCatalog(current => ({...current, open: false}));
   }
 
   async function runTest() {
@@ -349,9 +379,10 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
     if (on) revealTimer.current = setTimeout(() => write(providerRef.current, {revealed: false}), 8000);
   }
 
-  const matches = catalog.open && catalog.provider === provider
-    ? catalog.models.filter(item => item.id.toLowerCase().includes(slice.model.trim().toLowerCase())).slice(0, 8)
-    : [];
+  const catalogOpen = catalog.open && catalog.provider === provider;
+  const matches = catalogOpen && !catalog.failed ? catalog.models.filter(item => catalogMatch(item, catalog.query)) : [];
+  const shown = matches.slice(0, CATALOG_RENDER_CAP);
+  const hidden = matches.length - shown.length;
   const savedDetail = saved?.keySource === 'keychain' ? ' · macOS Keychain' : '';
 
   return <section className="ai-settings ai-settings-sheet" id="ai-settings" aria-label="AI settings" data-testid="ai-settings" onKeyDown={event => {
@@ -364,7 +395,7 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
       <h3 className="ai-settings-title"><span aria-hidden="true">✦</span> AI <span className="ai-settings-scope">all workspaces · this Mac only</span></h3>
       <button type="button" className="ai-settings-text" aria-label="Close AI settings" data-testid="ai-settings-close" onClick={() => requestClose()}>×</button>
     </div>
-    <div className="ai-provider-row" role="radiogroup" aria-label="Provider">
+    <div className="ai-provider-row" role="radiogroup" aria-label="Provider" onKeyDown={onProviderKey}>
       {PROVIDERS.map(id => <label key={id} className="ai-provider-option">
         <input type="radio" name="ai-provider" value={id} checked={provider === id} onChange={() => choose(id)} />
         <span data-testid={'ai-provider-' + id}>{providerName(id)}</span>
@@ -387,14 +418,16 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
     {provider === 'openrouter' && !hasSavedKey && <p className="ai-settings-hint">Stored in macOS Keychain by TnT. After saving it is never shown again. <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">Get a key</a></p>}
     <label className="ai-field">Model ID
       <span className="ai-key-row">
-        <input aria-label="Model" aria-controls={listId} aria-expanded={catalog.open && catalog.provider === provider} role="combobox" value={slice.model} spellCheck={false} placeholder="vendor/model" aria-invalid={modelProblem ? true : undefined} onChange={event => { write(provider, {model: event.target.value, modelDirty: true}); setCatalog(current => ({...current, query: event.target.value})); }} onKeyDown={event => { if (event.key === 'Escape' && catalog.open) { event.preventDefault(); event.stopPropagation(); setCatalog(current => ({...current, open: false})); } }} />
-        <button type="button" className="ai-settings-text" aria-label="Browse models" onClick={() => void loadCatalog(provider)}>Browse</button>
+        <input aria-label="Model" aria-controls={listId} aria-expanded={catalogOpen} role="combobox" value={slice.model} spellCheck={false} placeholder="vendor/model" aria-invalid={modelProblem ? true : undefined} onChange={event => { write(provider, {model: event.target.value, modelDirty: true}); }} onKeyDown={event => { if (event.key === 'Escape' && catalog.open) { event.preventDefault(); event.stopPropagation(); setCatalog(current => ({...current, open: false})); } }} />
+        <button type="button" className="ai-settings-text" aria-label="Browse models" aria-expanded={catalogOpen} onClick={() => void loadCatalog(provider)}>Browse</button>
       </span>
     </label>
-    {catalog.open && catalog.provider === provider && <div className="ai-catalog" id={listId}>
-      {catalog.failed && <p className="ai-settings-error" role="alert">✕ Couldn&apos;t load the model list. You can still type any model ID; it is used exactly as typed. <button type="button" className="ai-settings-text" onClick={() => void loadCatalog(provider)}>Try again</button></p>}
-      {!catalog.failed && matches.map(item => <button type="button" key={item.id} className="ai-catalog-row" onClick={() => { write(provider, {model: item.id, modelDirty: true}); setCatalog(current => ({...current, open: false})); }}>{item.id}</button>)}
-      {!catalog.failed && !matches.length && <p className="ai-settings-hint">No catalog match. The typed model ID is kept.</p>}
+    {catalogOpen && <div className="ai-catalog" id={listId}>
+      {catalog.failed && <p className="ai-settings-error" role="alert" data-testid="ai-catalog-failed">✕ Couldn&apos;t load the model list. You can still type any model ID; it is used exactly as typed. <button type="button" className="ai-settings-text" onClick={() => void loadCatalog(provider)}>Try again</button></p>}
+      {!catalog.failed && <input ref={searchRef} aria-label="Search models" value={catalog.query} spellCheck={false} placeholder="Search by name or id" onChange={event => setCatalog(current => ({...current, query: event.target.value}))} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setCatalog(current => ({...current, open: false})); } }} />}
+      {!catalog.failed && shown.map((item, index) => <button type="button" key={item.id + ':' + index} className="ai-catalog-row" data-model-id={item.id} onClick={() => pickModel(item.id)}>{item.id}{item.name ? <span className="ai-catalog-name">{item.name}</span> : null}</button>)}
+      {!catalog.failed && hidden > 0 && <p className="ai-catalog-more" data-testid="ai-catalog-more">{hidden} more — keep typing</p>}
+      {!catalog.failed && !catalog.loading && !matches.length && <p className="ai-settings-hint">No catalog match. The typed model ID is kept.</p>}
     </div>}
     {modelProblem && <p className="ai-settings-error" role="alert">{modelProblem}</p>}
     <p className="ai-settings-hint">Any model ID. TnT has no allow-list and never picks one for you.</p>
