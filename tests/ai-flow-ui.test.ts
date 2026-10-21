@@ -371,7 +371,7 @@ test('AI flow authoring UI', async t => {
     } finally { await h.cleanup(); }
   });
 
-  await t.test('a failed AUTHORING_INVALID job keeps the prompt and lists job diagnostics', async () => {
+  await t.test('a failed AUTHORING_INVALID job keeps the prompt and lists preview diagnostics', async () => {
     const h = await harness('authoring-failed');
     const prompt = 'Guest adds Running shoes to the cart';
     try {
@@ -384,6 +384,15 @@ test('AI flow authoring UI', async t => {
       assert.match(h.document.querySelector('[data-testid="ai-composer-issues"]')?.textContent ?? '', /swipe/);
       assert.match(h.document.body.textContent ?? '', /Couldn.t build a flow/);
       assert.ok(h.document.querySelector('[data-testid="ai-refine"]'));
+      const failedJobId = await h.untilJobId();
+      await h.click('[data-testid="ai-refine"]');
+      await h.fill('Flow description', 'Use a tap instead of swipe');
+      await h.click('[data-testid="ai-generate"]');
+      await h.until(() => h.ai.generationBodies.length >= 2, 'refine sent');
+      const sent = h.ai.generationBodies[1] as {previousJobId?: string};
+      assert.equal(sent.previousJobId, failedJobId);
+      assert.equal('provider' in sent, false);
+      assert.equal('model' in sent, false);
     } finally { await h.cleanup(); }
   });
 
@@ -460,7 +469,7 @@ test('AI flow authoring UI', async t => {
 });
 
 type Mode = 'ready' | 'hold' | 'expired' | 'needs' | 'invalid' | 'authoring-failed';
-type Job = {id: string; workspaceId: string; baseRevision: number; state: 'running' | 'pending' | 'needsInfo' | 'failed' | 'cancelled'; phase: GenerationView['phase']; draft?: FlowDraft | Record<string, unknown>; preview?: Preview; model?: string; upstreamProvider?: string; error?: {code: string; message: string; retryable: boolean}; diagnostics?: Preview['diagnostics']};
+type Job = {id: string; workspaceId: string; baseRevision: number; state: 'running' | 'pending' | 'needsInfo' | 'failed' | 'cancelled'; phase: GenerationView['phase']; draft?: FlowDraft | Record<string, unknown>; preview?: Preview; model?: string; upstreamProvider?: string; error?: {code: string; message: string; retryable: boolean}};
 type ScenarioService = ReturnType<typeof createScenarios>;
 
 async function harness(mode: Mode, options: {deviceId?: string; failSave?: boolean; unconfigured?: boolean} = {}) {
@@ -548,6 +557,16 @@ async function harness(mode: Mode, options: {deviceId?: string; failSave?: boole
     saved: () => service.workspace(workspaceId),
     documentOf: (workspace: {name: string; yaml: string; flows?: unknown; scenarios?: unknown; canvas?: unknown; automation?: unknown; mock?: unknown}) => JSON.stringify({name: workspace.name, yaml: workspace.yaml, flows: workspace.flows ?? {}, scenarios: workspace.scenarios ?? [], canvas: workspace.canvas ?? null, automation: workspace.automation ?? null, mock: workspace.mock ?? null}),
     render, click, clickText, fill, until,
+    untilJobId: async () => {
+      let jobId = '';
+      await until(async () => {
+        const detail = await service.workspaceDetail(workspaceId);
+        const stored = detail.view && typeof detail.view === 'object' ? (detail.view as {aiDraft?: {jobId?: string}}).aiDraft : undefined;
+        jobId = stored?.jobId ?? '';
+        return jobId.length > 0;
+      }, 'persisted job id');
+      return jobId;
+    },
     openSettings: async () => {
       if (!document.querySelector('[data-testid="ai-settings"]')) {
         if (!document.querySelector('[aria-label="Flow description"]')) await click('[data-testid="ai-flow-button"]');
@@ -822,8 +841,9 @@ function finish(job: Job, mode: Mode) {
   if (mode === 'authoring-failed') {
     job.draft = invalidDraft();
     job.state = 'failed';
-    job.error = {code: 'AUTHORING_INVALID', message: 'The draft could not be checked against the workspace.', retryable: false};
-    job.diagnostics = [{code: 'INVALID_DRAFT', path: '/visits/2/operations/0', severity: 'error', blocks: ['apply', 'run'], message: 'Step 3 uses "swipe", which TnT can\'t author yet.', remedy: 'Describe the step with a supported action.'}];
+    job.phase = 'previewing';
+    job.error = {code: 'AUTHORING_INVALID', message: 'The draft still has validation issues.', retryable: false};
+    job.preview = blockedPreview(job.workspaceId, job.baseRevision, [{code: 'INVALID_DRAFT', path: '/visits/2/operations/0', severity: 'error', blocks: ['apply', 'run'], message: 'Step 3 uses "swipe", which TnT can\'t author yet.', remedy: 'Describe the step with a supported action.'}]);
     return;
   }
   const draft = (job.draft ?? (mode === 'needs' ? needsDraft() : happyDraft())) as FlowDraft;
@@ -835,17 +855,16 @@ function finish(job: Job, mode: Mode) {
 
 function viewOf(job: Job, mode: Mode): GenerationView {
   const finished = job.state !== 'running';
-  const view: GenerationView & {diagnostics?: Preview['diagnostics']} = {
+  const previewFresh = finished && mode !== 'expired' && !!job.preview;
+  return {
     id: job.id, workspaceId: job.workspaceId, state: job.state, phase: job.phase, provenance: 'ai', contractVersion: 1,
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
     ...(job.model ? {model: job.model} : {}),
     ...(job.upstreamProvider ? {upstreamProvider: job.upstreamProvider} : {}),
     ...(job.error ? {error: job.error} : {}),
-    ...(finished && mode !== 'expired' && job.preview ? {previewId: job.preview.previewId, preview: job.preview} : {}),
+    ...(previewFresh && job.preview ? {previewId: job.preview.previewId, preview: job.preview, previewExpiresAt: job.preview.expiresAt} : {}),
     ...(finished && job.draft ? {draft: job.draft} : {}),
-    ...(job.diagnostics ? {diagnostics: job.diagnostics} : {}),
   };
-  return view;
 }
 
 function invalidDraft(): Record<string, unknown> {
