@@ -2,9 +2,12 @@ import {AiHttpError, redactSecrets} from './errors.js';
 
 export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 export const PROBE_TIMEOUT_MS = 15_000;
+const CATALOG_BODY_LIMIT = 8_000_000;
+const CATALOG_MODEL_CAP = 2_000;
+const MODEL_NAME_LIMIT = 200;
 
 export type ProviderId = 'openrouter' | 'openai-compatible';
-export type AiModelInfo = {id: string; capabilities?: string[]};
+export type AiModelInfo = {id: string; name?: string; capabilities?: string[]};
 export type KeyProbe = {ok: true; message: string} | {ok: false; code: string; message: string};
 
 export function providerEndpoint(baseUrl: string, path: string) {
@@ -77,9 +80,18 @@ export async function probeKey(options: {provider: ProviderId; baseUrl: string; 
   return {ok: false, code: codeFor(response.status), message: safeUpstreamMessage(response.status, body, [options.apiKey])};
 }
 
+function boundedName(value: unknown) {
+  if (typeof value !== 'string') return;
+  const name = value.trim();
+  if (!name || /[\u0000-\u001F\u007F]/.test(name)) return;
+  return name.slice(0, MODEL_NAME_LIMIT);
+}
+
 function modelInfo(item: unknown): AiModelInfo | undefined {
   if (!item || typeof item !== 'object' || !('id' in item) || typeof item.id !== 'string' || !item.id || item.id.length > 200) return;
   const info: AiModelInfo = {id: item.id};
+  const name = boundedName('name' in item ? item.name : undefined);
+  if (name) info.name = name;
   const supported = 'supported_parameters' in item && Array.isArray(item.supported_parameters)
     ? item.supported_parameters.filter((value): value is string => typeof value === 'string' && value.length > 0 && value.length <= 80).slice(0, 32)
     : [];
@@ -101,11 +113,12 @@ export async function fetchModelCatalog(options: {url: string; apiKey?: string; 
     throw new AiHttpError(502, 'NETWORK_ERROR', 'The model catalog is unreachable.');
   }
   if (response.status >= 300 && response.status < 400) throw new AiHttpError(502, 'NETWORK_ERROR', 'The model catalog redirected the request.');
-  const body = (await response.text().catch(() => '')).slice(0, 2_000_000);
+  const body = await response.text().catch(() => '');
   if (!response.ok) {
     const status = response.status === 401 || response.status === 403 ? 401 : 502;
     throw new AiHttpError(status, response.status === 401 || response.status === 403 ? 'AUTH_FAILED' : 'PROVIDER_UNAVAILABLE', safeUpstreamMessage(response.status, body, options.apiKey ? [options.apiKey] : []));
   }
+  if (body.length > CATALOG_BODY_LIMIT) throw new AiHttpError(502, 'PROVIDER_UNAVAILABLE', 'The model catalog is unavailable.');
   let parsed: unknown;
   try { parsed = JSON.parse(body); }
   catch { throw new AiHttpError(502, 'PROVIDER_UNAVAILABLE', 'The model catalog is unavailable.'); }
@@ -115,7 +128,7 @@ export async function fetchModelCatalog(options: {url: string; apiKey?: string; 
   for (const item of data) {
     const info = modelInfo(item);
     if (info) models.push(info);
-    if (models.length >= 2_000) break;
+    if (models.length >= CATALOG_MODEL_CAP) break;
   }
   return models;
 }

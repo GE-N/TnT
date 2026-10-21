@@ -486,7 +486,7 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     if (cached && now() - cached.at < CATALOG_TTL_MS) return {provider, models: cached.models};
     const apiKey = provider === 'openai-compatible' ? (await resolveKey(provider, entry))?.key : undefined;
     const models = await fetchModelCatalog({url: providerEndpoint(baseUrl, 'models'), apiKey, fetch: fetchImpl});
-    catalogCache.set(cacheKey, {at: now(), models});
+    if (models.length > 0) catalogCache.set(cacheKey, {at: now(), models});
     return {provider, models};
   }
 

@@ -405,6 +405,137 @@ test('the model catalog is cached for 15 minutes and a failure does not block se
   } finally { await g.cleanup(); }
 });
 
+async function withConfigServer(g: Awaited<ReturnType<typeof configFixture>>, run: (base: string, headers: Record<string, string>) => Promise<void>) {
+  const runner = createRunner({artifactDirectory: g.f.root, execute: async () => { throw new Error('Catalog tests must not execute.'); }});
+  const server = createServer(createApiHandler(runner, g.f.root, undefined, g.f.service, g.ai));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('No port');
+  const base = `http://127.0.0.1:${address.port}`;
+  try {
+    const token = ((await (await fetch(`${base}/api/status`)).json()) as {token: string}).token;
+    await run(base, {origin: base, 'x-tnt-token': token});
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+}
+
+test('GET /api/ai/models returns the full OpenRouter catalog with id and name', async () => {
+  const entries = Array.from({length: 320}, (_, index) => ({
+    id: index % 2 === 0 ? `openai/gpt-4o-${index}` : `anthropic/claude-3-${index}`,
+    name: index % 2 === 0 ? `OpenAI: GPT-4o ${index}` : `Anthropic: Claude 3 ${index}`,
+    description: 'x'.repeat(7_000),
+    supported_parameters: index === 0 ? ['tools', '', 12, 'x'.repeat(81), 'json_schema'] : undefined,
+  }));
+  entries[0] = {...entries[0], id: 'openai/gpt-4o-mini', name: 'OpenAI: GPT-4o mini'};
+  entries[1] = {...entries[1], id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic: Claude 3.5 Sonnet'};
+  const payload = JSON.stringify({data: entries});
+  assert.ok(payload.length > 2_000_000);
+  assert.ok(payload.length < 8_000_000);
+  let calls = 0;
+  const g = await configFixture({
+    fetch: async url => {
+      calls += 1;
+      assert.equal(String(url), 'https://openrouter.ai/api/v1/models');
+      return new Response(payload, {status: 200});
+    },
+  });
+  try {
+    await g.ai.putConfig(saveBody());
+    await withConfigServer(g, async (base, headers) => {
+      const models = await fetch(`${base}/api/ai/models?provider=openrouter`, {headers});
+      assert.equal(models.status, 200);
+      const catalog = await models.json() as {provider: string; models: {id: string; name?: string; capabilities?: string[]}[]};
+      assert.equal(catalog.provider, 'openrouter');
+      assert.equal(catalog.models.length, entries.length);
+      assert.ok(catalog.models.every(model => model.id.length > 0 && typeof model.name === 'string' && model.name.length > 0));
+      assert.deepEqual(catalog.models[0], {id: 'openai/gpt-4o-mini', name: 'OpenAI: GPT-4o mini', capabilities: ['tools', 'json_schema']});
+      assert.deepEqual(catalog.models[1], {id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic: Claude 3.5 Sonnet'});
+      assert.equal(catalog.models.at(-1)?.id, entries.at(-1)?.id);
+      assert.equal(catalog.models.at(-1)?.name, entries.at(-1)?.name);
+      const again = await fetch(`${base}/api/ai/models?provider=openrouter`, {headers});
+      assert.equal(again.status, 200);
+      assert.equal(((await again.json()) as {models: unknown[]}).models.length, entries.length);
+      assert.equal(calls, 1);
+    });
+  } finally { await g.cleanup(); }
+});
+
+test('a failed catalog fetch is not cached and GET /api/ai/models returns the catalog error', async () => {
+  let calls = 0;
+  let fail = true;
+  const g = await configFixture({
+    fetch: async url => {
+      calls += 1;
+      assert.equal(String(url), 'https://openrouter.ai/api/v1/models');
+      if (fail) return new Response(JSON.stringify({error: {message: 'down'}}), {status: 503});
+      return new Response(JSON.stringify({data: [{id: 'openai/gpt-4o-mini', name: 'OpenAI: GPT-4o mini'}]}), {status: 200});
+    },
+  });
+  try {
+    await withConfigServer(g, async (base, headers) => {
+      const failed = await fetch(`${base}/api/ai/models?provider=openrouter`, {headers});
+      assert.equal(failed.status, 502);
+      assert.deepEqual(await failed.json(), {error: 'down', code: 'PROVIDER_UNAVAILABLE'});
+      fail = false;
+      const models = await fetch(`${base}/api/ai/models?provider=openrouter`, {headers});
+      assert.equal(models.status, 200);
+      assert.deepEqual(await models.json(), {provider: 'openrouter', models: [{id: 'openai/gpt-4o-mini', name: 'OpenAI: GPT-4o mini'}]});
+      assert.equal(calls, 2);
+    });
+  } finally { await g.cleanup(); }
+});
+
+test('an empty catalog is not cached, and a name is optional and bounded', async () => {
+  let calls = 0;
+  let empty = true;
+  const longName = `OpenAI: ${'G'.repeat(250)}`;
+  const g = await configFixture({
+    fetch: async () => {
+      calls += 1;
+      if (empty) return new Response(JSON.stringify({data: []}), {status: 200});
+      return new Response(JSON.stringify({data: [
+        {id: 'vendor/no-name'},
+        {id: 'vendor/blank', name: '   '},
+        {id: 'vendor/long', name: longName},
+      ]}), {status: 200});
+    },
+  });
+  try {
+    assert.deepEqual(await g.ai.listModels('openrouter'), {provider: 'openrouter', models: []});
+    empty = false;
+    const listed = await g.ai.listModels('openrouter');
+    assert.equal(calls, 2);
+    assert.deepEqual(listed.models, [
+      {id: 'vendor/no-name'},
+      {id: 'vendor/blank'},
+      {id: 'vendor/long', name: longName.slice(0, 200)},
+    ]);
+    assert.equal(listed.models[2]?.name?.length, 200);
+  } finally { await g.cleanup(); }
+});
+
+test('a catalog body over 8 MB fails cleanly and is not cached', async () => {
+  let calls = 0;
+  let huge = true;
+  const g = await configFixture({
+    fetch: async () => {
+      calls += 1;
+      if (!huge) return new Response(JSON.stringify({data: [{id: 'openai/gpt-4o-mini', name: 'OpenAI: GPT-4o mini'}]}), {status: 200});
+      return new Response(`{"data":[{"id":"openai/gpt-4o","name":"${'n'.repeat(8_000_000)}"}]}`, {status: 200});
+    },
+  });
+  try {
+    await assert.rejects(
+      () => g.ai.listModels('openrouter'),
+      (error: unknown) => (error as {code?: string; message?: string}).code === 'PROVIDER_UNAVAILABLE' && (error as {message?: string}).message === 'The model catalog is unavailable.',
+    );
+    huge = false;
+    assert.deepEqual((await g.ai.listModels('openrouter')).models, [{id: 'openai/gpt-4o-mini', name: 'OpenAI: GPT-4o mini'}]);
+    assert.equal(calls, 2);
+  } finally { await g.cleanup(); }
+});
+
 test('HTTP config routes return metadata and never the key', async () => {
   const g = await configFixture({fetch: async url => new Response(JSON.stringify({data: [{id: 'vendor/model'}]}), {status: url.toString().endsWith('/key') ? 401 : 200})});
   const runner = createRunner({artifactDirectory: g.f.root, execute: async () => { throw new Error('Config HTTP tests must not execute.'); }});
