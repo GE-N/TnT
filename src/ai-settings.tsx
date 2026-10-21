@@ -196,6 +196,14 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
     setCatalog(current => ({...current, open: false}));
   }
 
+  function requestClose() {
+    if (forms.current[providerRef.current].apiKey.length > 0) {
+      setPending({kind: 'close'});
+      return;
+    }
+    onCloseCard();
+  }
+
   function discardPending() {
     write(provider, {apiKey: '', revealed: false});
     const action = pending;
@@ -346,8 +354,16 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
     : [];
   const savedDetail = saved?.keySource === 'keychain' ? ' · macOS Keychain' : '';
 
-  return <section className="ai-settings" id="ai-settings" aria-label="AI settings" data-testid="ai-settings">
-    <h3 className="ai-settings-title"><span aria-hidden="true">✦</span> AI <span className="ai-settings-scope">all workspaces · this Mac only</span></h3>
+  return <section className="ai-settings ai-settings-sheet" id="ai-settings" aria-label="AI settings" data-testid="ai-settings" onKeyDown={event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    requestClose();
+  }}>
+    <div className="ai-settings-bar">
+      <h3 className="ai-settings-title"><span aria-hidden="true">✦</span> AI <span className="ai-settings-scope">all workspaces · this Mac only</span></h3>
+      <button type="button" className="ai-settings-text" aria-label="Close AI settings" data-testid="ai-settings-close" onClick={() => requestClose()}>×</button>
+    </div>
     <div className="ai-provider-row" role="radiogroup" aria-label="Provider">
       {PROVIDERS.map(id => <label key={id} className="ai-provider-option">
         <input type="radio" name="ai-provider" value={id} checked={provider === id} onChange={() => choose(id)} />
@@ -371,7 +387,7 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
     {provider === 'openrouter' && !hasSavedKey && <p className="ai-settings-hint">Stored in macOS Keychain by TnT. After saving it is never shown again. <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">Get a key</a></p>}
     <label className="ai-field">Model ID
       <span className="ai-key-row">
-        <input aria-label="Model" aria-controls={listId} aria-expanded={catalog.open && catalog.provider === provider} role="combobox" value={slice.model} spellCheck={false} placeholder="vendor/model" aria-invalid={modelProblem ? true : undefined} onChange={event => { write(provider, {model: event.target.value, modelDirty: true}); setCatalog(current => ({...current, query: event.target.value})); }} onKeyDown={event => { if (event.key === 'Escape') setCatalog(current => ({...current, open: false})); }} />
+        <input aria-label="Model" aria-controls={listId} aria-expanded={catalog.open && catalog.provider === provider} role="combobox" value={slice.model} spellCheck={false} placeholder="vendor/model" aria-invalid={modelProblem ? true : undefined} onChange={event => { write(provider, {model: event.target.value, modelDirty: true}); setCatalog(current => ({...current, query: event.target.value})); }} onKeyDown={event => { if (event.key === 'Escape' && catalog.open) { event.preventDefault(); event.stopPropagation(); setCatalog(current => ({...current, open: false})); } }} />
         <button type="button" className="ai-settings-text" aria-label="Browse models" onClick={() => void loadCatalog(provider)}>Browse</button>
       </span>
     </label>

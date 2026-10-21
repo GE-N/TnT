@@ -39,9 +39,6 @@ export type GenerationRequest = {
   expectedSettingsRevision: number;
   prompt: string;
   previousJobId?: string;
-  /** This job only. Settings keeps its saved selection. */
-  provider?: ProviderId;
-  model?: string;
 };
 export type ContextRequest = {workspaceId: string; expectedRevision: number; screenIds?: string[]};
 export type AuthoringContext = {contextId: string; workspaceId: string; revision: number; expiresAt: string};
