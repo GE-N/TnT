@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {parseAllDocuments} from 'yaml';
-import {authoredChecks, checkLabel, isAuthored, tapLabel, writeChecks} from '../../shared/canvas-authoring.js';
+import {authoredChecks, backControl, checkLabel, isAuthored, tapLabel, writeChecks} from '../../shared/canvas-authoring.js';
 import {projectCanvasRoute} from '../canvas-route.js';
 import {referenceCatalog, type CanvasGraph, type CanvasTest} from '../canvas.js';
 import {selectScenario} from '../scenario-definitions.js';
@@ -163,8 +163,9 @@ function materialize(workspace: Workspace, draft: FlowDraft, context: ContextSna
     if (!test || !reference) throw new Error('Authored command is missing a fingerprint.');
     test.reference = {kind: 'step', file: 'flow.yaml', index: mark.index, fingerprint: reference.fingerprint};
   }
-  // A missing target or input is kept as a plain step. writeChecks cannot emit it, so its fingerprint stays `draft`.
-  const deferred = new Set(tests.filter(test => test.reference.fingerprint === 'draft' && (!isAuthored(test) || test.input === '')).map(test => test.id));
+  // An empty selector or input is kept for later editing. writeChecks skips it, so its fingerprint stays `draft`.
+  // A real selector that was not emitted still fails here.
+  const deferred = new Set(tests.filter(test => test.reference.fingerprint === 'draft' && unwrittenEmpty(test)).map(test => test.id));
   if (tests.some(test => test.reference.fingerprint === 'draft' && !deferred.has(test.id))) throw new Error('An operation was not written into the scenario YAML.');
   if (Buffer.byteLength(yaml) > 100_000) {
     diagnostics.push(issue('CAPACITY_EXCEEDED', '', 'error', ['apply', 'run'], 'The resulting scenario YAML exceeds 100 KB.', 'Shorten the draft. Source and steps are not truncated.'));
@@ -254,9 +255,12 @@ function canvasTest(operation: DraftOperation, id: string, scenarioId: string, c
     return {...base, role: 'action', label: `Input text · ${text}`, input: text};
   }
   if (operation.target.kind === 'unresolved') {
-    const check = operation.kind === 'checkVisible' || operation.kind === 'checkAbsent';
-    const label = check ? 'Check' : operation.kind === 'back' ? 'Back' : 'Tap';
-    return {...base, role: check ? 'assertion' : 'action', label};
+    const empty = {target: 'text' as const, match: 'exact' as const, value: ''};
+    if (operation.kind === 'checkVisible' || operation.kind === 'checkAbsent') {
+      return {...base, role: 'assertion' as const, label: 'Check', check: {...empty, visibility: operation.kind === 'checkVisible' ? 'visible' as const : 'absent' as const}};
+    }
+    if (operation.kind === 'back') return {...base, role: 'action' as const, label: 'Back', back: true, backSelector: {...empty}};
+    return {...base, role: 'action' as const, label: 'Tap', tap: {...empty}};
   }
   const selector = operation.target.kind === 'selector' ? operation.target.selector : context.targets[operation.target.ref].selector;
   if (!selector) throw new Error(`Missing selector for ${operation.key}.`);
@@ -268,7 +272,13 @@ function canvasTest(operation: DraftOperation, id: string, scenarioId: string, c
   return {...base, role: 'action', label: tapLabel(selector), tap: {...selector}};
 }
 
-/** Drops plain steps, and any transition that depends on one, so the existing route projection can run. */
+function unwrittenEmpty(test: CanvasTest) {
+  if (!isAuthored(test) || test.input === '') return true;
+  const selector = test.check ?? test.tap ?? backControl(test);
+  return selector !== undefined && selector.value.trim() === '';
+}
+
+/** Drops steps writeChecks could not emit, and any transition that depends on one, so the existing route projection can run. */
 function graphForProjection(source: CanvasGraph, deferred: ReadonlySet<string>): CanvasGraph {
   const graph = structuredClone(source);
   for (const screen of graph.screens) screen.tests = screen.tests.filter(test => !deferred.has(test.id));

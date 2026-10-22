@@ -3,13 +3,14 @@ import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {test} from 'node:test';
-import {referenceCatalog} from '../server/canvas.js';
+import {inspectCanvas, referenceCatalog, type CanvasTest} from '../server/canvas.js';
 import {projectCanvasRoute} from '../server/canvas-route.js';
 import {AuthoringHttpError} from '../server/authoring/errors.js';
 import {createApiHandler} from '../server/http.js';
 import {createRunner} from '../server/runner.js';
 import {selectScenario} from '../server/scenario-definitions.js';
-import {writeChecks} from '../shared/canvas-authoring.js';
+import {isAuthored, refreshChecks, writeChecks} from '../shared/canvas-authoring.js';
+import {stepRowLabel} from '../src/inspector-operations.js';
 import {createWriteFaults} from '../server/workspace-store.js';
 import {deviceId} from './run-script-helpers.js';
 import {authoringFixture, contentOf, exampleDraft, proofYaml} from './authoring-helpers.js';
@@ -232,12 +233,14 @@ test('unresolved targets apply as plain steps and other blocking diagnostics sti
     const input = steps.find(test => test.label === 'Input');
     assert.ok(tap && check && input);
     assert.equal(tap.role, 'action');
-    assert.equal(tap.tap, undefined);
+    assert.deepEqual(tap.tap, {target: 'text', match: 'exact', value: ''});
     assert.equal(tap.check, undefined);
     assert.equal(tap.input, undefined);
     assert.equal(tap.back, undefined);
+    assert.equal(isAuthored(tap), true);
     assert.equal(check.role, 'assertion');
-    assert.equal(check.check, undefined);
+    assert.deepEqual(check.check, {visibility: 'visible', target: 'text', match: 'exact', value: ''});
+    assert.equal(isAuthored(check), true);
     assert.equal(input.input, '');
     assert.equal(saved.yaml.includes('the button'), false);
     assert.equal(saved.yaml.includes('the title'), false);
@@ -284,12 +287,111 @@ test('an unresolved navigating tap in the example draft applies as a plain step'
     const saved = await f.service.workspace(f.workspace.id);
     const tap = saved.canvas?.screens.flatMap(screen => screen.tests).find(test => test.label === 'Tap' && test.reference.fingerprint === 'draft');
     assert.ok(tap);
-    assert.equal(tap.tap, undefined);
+    assert.deepEqual(tap.tap, {target: 'text', match: 'exact', value: ''});
     assert.equal(tap.check, undefined);
+    assert.equal(isAuthored(tap), true);
     assert.equal(saved.canvas?.edges.some(edge => edge.actionTestId === tap.id || edge.actionTestIds?.includes(tap.id)), true);
     assert.equal(saved.scenarios?.[0].scripts?.some(row => row.beforeStep.fingerprint === 'draft'), true);
     assert.equal(saved.yaml.includes('the details control'), false);
   } finally { await f.cleanup(); }
+});
+
+function navigatingUnresolved(): FlowDraft {
+  return {
+    schemaVersion: 1,
+    mode: 'createScenario',
+    name: 'Fill later',
+    appId: 'com.example.TnTProof',
+    parameters: [],
+    execution: {setup: {kind: 'launchApp'}, handlerRefs: [], mock: {kind: 'none'}},
+    screens: [
+      {key: 'home', kind: 'create', title: 'Home'},
+      {key: 'details', kind: 'create', title: 'Details'},
+    ],
+    visits: [
+      {
+        key: 'homeVisit',
+        screenKey: 'home',
+        operations: [
+          {key: 'seeHome', kind: 'checkVisible', target: {kind: 'unresolved', description: 'the title'}},
+          {key: 'openDetails', kind: 'tap', target: {kind: 'unresolved', description: 'the button'}, destination: {kind: 'visit', visitKey: 'detailsVisit'}},
+        ],
+      },
+      {
+        key: 'detailsVisit',
+        screenKey: 'details',
+        operations: [{key: 'seeDetails', kind: 'checkVisible', target: {kind: 'selector', selector: {target: 'text', match: 'exact', value: 'Details'}}}],
+      },
+    ],
+    scripts: [],
+    assumptions: [],
+  };
+}
+
+function editorKind(test: CanvasTest) {
+  return test.check ? 'check' : test.tap ? 'tap' : test.input !== undefined ? 'input' : 'back';
+}
+
+test('an unresolved navigating tap and check stay editable and project once a selector is filled', async () => {
+  const f = await authoringFixture();
+  const runner = createRunner({artifactDirectory: f.root, execute: async () => { throw new Error('no execution'); }});
+  const server = createServer(createApiHandler(runner, f.root, undefined, f.service));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('No port');
+  const base = `http://127.0.0.1:${address.port}`;
+  const token = ((await (await fetch(`${base}/api/status`)).json()) as {token: string}).token;
+  const post = (path: string, body: unknown) => fetch(base + path, {
+    method: 'POST',
+    headers: {'content-type': 'application/json', origin: base, 'x-tnt-token': token},
+    body: JSON.stringify(body),
+  });
+  try {
+    const before = await f.service.workspace(f.workspace.id);
+    const opened = await openPreview(f.service, before, navigatingUnresolved());
+    assert.equal(opened.preview.applicable, true, opened.preview.diagnostics.map(item => `${item.code} ${item.message}`).join('\n'));
+    const appliedResponse = await post('/api/authoring/apply', {
+      workspaceId: before.id, expectedRevision: opened.revision, previewId: opened.preview.previewId, idempotencyKey: 'fill-later', acknowledgedAssumptionKeys: [],
+    });
+    assert.equal(appliedResponse.status, 200);
+    const applied = await appliedResponse.json() as {revision: number; scenarioId: string};
+    const saved = await f.service.workspace(before.id);
+    const steps = saved.canvas?.screens.flatMap(screen => screen.tests) ?? [];
+    const empty = {target: 'text' as const, match: 'exact' as const, value: ''};
+    const tap = steps.find(test => test.label === 'Tap');
+    const check = steps.find(test => test.label === 'Check');
+    assert.ok(tap && check);
+    assert.equal(isAuthored(tap), true);
+    assert.equal(isAuthored(check), true);
+    assert.deepEqual(tap.tap, empty);
+    assert.equal(tap.back, undefined);
+    assert.deepEqual(check.check, {visibility: 'visible', ...empty});
+    assert.equal(editorKind(tap), 'tap');
+    assert.equal(editorKind(check), 'check');
+    assert.equal(stepRowLabel(tap, 1), '1 tapOn ""');
+    assert.equal(stepRowLabel(check, 1), '1 assertVisible ""');
+    const edge = saved.canvas?.edges.find(item => item.actionTestId === tap.id || item.actionTestIds?.includes(tap.id));
+    assert.ok(edge);
+    const filled = structuredClone(saved.canvas!);
+    for (const screen of filled.screens) for (const test of screen.tests) {
+      if (test.tap && !test.tap.value) test.tap = {...test.tap, value: 'Open'};
+      if (test.check && !test.check.value) test.check = {...test.check, value: 'Home'};
+    }
+    const yaml = writeChecks(saved.yaml, saved.canvas!, filled);
+    const refreshed = refreshChecks(filled, yaml);
+    const inspection = inspectCanvas(refreshed, yaml, saved.flows ?? {});
+    assert.equal(inspection.diagnostics.some(item => item.ownerId === edge.id), false);
+    assert.equal(inspection.diagnostics.some(item => /missing actions|stale YAML reference/i.test(item.detail ?? '')), false);
+    const pathId = saved.scenarios?.find(scenario => scenario.id === applied.scenarioId)?.pathId;
+    assert.equal(typeof pathId, 'string');
+    projectCanvasRoute(refreshed, yaml, saved.flows ?? {}, pathId, saved.automation);
+    const undoneResponse = await post('/api/authoring/undo', {workspaceId: before.id, expectedRevision: applied.revision, receiptId: await journalId(f.root)});
+    assert.equal(undoneResponse.status, 200);
+    assert.deepEqual(contentOf(await f.service.workspace(before.id)), contentOf(before));
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await f.cleanup();
+  }
 });
 
 test('mixed legacy YAML is refused', async () => {
