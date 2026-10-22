@@ -575,7 +575,7 @@ test('AI flow authoring UI', async t => {
       await h.clickText('View all workspaces');
       await h.until(() => !!h.document.querySelector('button[aria-label^="Open Untitled workspace"]'), 'origin listed');
       await h.click('button[aria-label^="Open Untitled workspace"]');
-      await h.until(() => (h.document.body.textContent ?? '').includes('Untitled workspace') && h.workspaceId === origin && !!h.document.querySelector('[data-testid="ai-draft-chip"]'), 'draft returned');
+      await h.until(() => (h.document.body.textContent ?? '').includes('Untitled workspace') && h.workspaceId === origin && h.status() === 'pending' && h.confirmEnabled(), 'draft returned');
       assert.equal(h.status(), 'pending');
       assert.equal(h.document.querySelector('[data-testid="ai-confirm"]')?.getAttribute('aria-disabled') ?? null, null);
       h.ai.release();
@@ -795,13 +795,25 @@ test('AI flow authoring UI', async t => {
         failed.document.querySelector<HTMLInputElement>('[aria-label="Ask for changes"]')!.dispatchEvent(new failed.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
       });
       await failed.until(() => !!failed.document.querySelector('[data-testid="ai-capsule-error"]'), 'capsule error');
-      assert.ok(failed.status() === 'pending' || failed.status() === 'stale', failed.status());
-      assert.ok(failed.document.querySelector('[data-draft-screen="home"]'));
-      assert.equal(failed.document.querySelectorAll('[data-testid="ai-draft-zone"]').length, 1);
-      assert.equal(failed.document.querySelector('[data-testid="ai-draft-chip"]')?.textContent, '✦ Draft');
-      assert.equal(failed.document.body.textContent?.includes('Previous draft'), false);
       assert.match(failed.document.querySelector('[data-testid="ai-capsule-error"]')?.textContent ?? '', /Settings changed/);
+      assert.ok(failed.document.querySelector('[data-draft-screen="home"]'));
+      await applyKeptDraft(failed);
     } finally { await failed.cleanup(); }
+
+    const cancelled = await harness('ready');
+    try {
+      await cancelled.render();
+      await cancelled.generate('Pay the electric bill');
+      await cancelled.until(() => !!cancelled.document.querySelector('[data-draft-screen="home"]'), 'draft before cancelled refine');
+      cancelled.ai.holdNextJob();
+      await cancelled.fill('Ask for changes', 'Rename the last screen');
+      await act(async () => {
+        cancelled.document.querySelector<HTMLInputElement>('[aria-label="Ask for changes"]')!.dispatchEvent(new cancelled.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+      });
+      await cancelled.until(() => cancelled.status() === 'generating', 'refining before cancel');
+      await cancelled.click('[data-testid="ai-cancel"]');
+      await applyKeptDraft(cancelled);
+    } finally { await cancelled.cleanup(); }
   });
 
   await t.test('steps added to an existing screen use the draft style until dismiss or apply', async () => {
@@ -1062,8 +1074,27 @@ function savedConfig(model = 'vendor/model'): FakeConfig {
   };
 }
 
+/** Clicks Apply on a kept draft, refreshing first when the draft is stale. */
+async function applyKeptDraft(h: Awaited<ReturnType<typeof harness>>) {
+  await h.until(() => h.confirmEnabled() || h.status() === 'stale', 'kept draft ready');
+  if (!h.confirmEnabled()) {
+    assert.equal(h.status(), 'stale');
+    assert.ok(h.document.querySelector('[data-testid="ai-refresh"]'));
+    await h.click('[data-testid="ai-refresh"]');
+    await h.until(() => h.confirmEnabled(), 'refreshed draft');
+  }
+  assert.ok(h.document.querySelector('[data-draft-screen="home"]'));
+  assert.equal(h.document.querySelectorAll('[data-testid="ai-draft-zone"]').length, 1);
+  assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]')?.textContent, '✦ Draft');
+  assert.equal(h.document.body.textContent?.includes('Previous draft'), false);
+  await h.click('[data-testid="ai-confirm"]');
+  await h.until(() => !!h.document.querySelector('[data-testid="ai-provenance"]'), 'applied');
+  assert.equal(h.ai.applies, 1);
+}
+
 function createFake(mode: Mode, service: ScenarioService, options: HarnessOptions = {}) {
   const jobs = new Map<string, Job>();
+  const previews = new Map<string, Preview>();
   const applied = new Map<string, unknown>();
   const snapshots = new Map<string, Awaited<ReturnType<ScenarioService['workspace']>>>();
   const waiters: Array<() => void> = [];
@@ -1101,6 +1132,7 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
       for (const job of jobs.values()) {
         if (heldJobs.has(job.id) && job.state === 'running') job.draft = lateDraft();
         finish(job, mode);
+        if (job.preview) previews.set(job.preview.previewId, job.preview);
       }
       for (const resolve of waiters.splice(0)) resolve();
     },
@@ -1156,6 +1188,7 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
           if (parked && job.state === 'running' && !released) await new Promise<void>(resolve => waiters.push(resolve));
           const view = viewOf(job, mode);
           if (!parked && job.state === 'running') finish(job, mode);
+          if (job.preview) previews.set(job.preview.previewId, job.preview);
           return {status: 200, body: view};
         } finally { counts.inflight--; }
       }
@@ -1168,9 +1201,19 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
       if (method === 'POST' && path === '/api/authoring/context') return {status: 200, body: {contextId: crypto.randomUUID(), workspaceId: body?.workspaceId, revision: body?.expectedRevision, expiresAt: new Date(Date.now() + 60_000).toISOString()}};
       if (method === 'POST' && path === '/api/authoring/preview') {
         counts.previews++;
-        return {status: 200, body: previewFor(String(body?.workspaceId), Number(body?.expectedRevision), body?.draft as FlowDraft)};
+        const preview = previewFor(String(body?.workspaceId), Number(body?.expectedRevision), body?.draft as FlowDraft);
+        previews.set(preview.previewId, preview);
+        return {status: 200, body: preview};
       }
-      if (method === 'POST' && path === '/api/authoring/apply') return {status: 200, body: await applyDraft(service, counts, applied, snapshots, body ?? {})};
+      if (method === 'POST' && path === '/api/authoring/apply') {
+        const workspace = await service.workspace(String(body?.workspaceId));
+        const currentRevision = workspace.metadata?.revision ?? 0;
+        const expected = Number(body?.expectedRevision);
+        if (expected !== currentRevision) return {status: 409, body: {error: 'The workspace revision does not match expectedRevision.', code: 'REVISION_CONFLICT'}};
+        const preview = previews.get(String(body?.previewId));
+        if (!preview || preview.baseRevision !== expected) return {status: 409, body: {error: 'The preview was created for a different revision or compiler version.', code: 'PREVIEW_STALE'}};
+        return {status: 200, body: await applyDraft(service, counts, applied, snapshots, body ?? {})};
+      }
       if (method === 'POST' && path === '/api/authoring/undo') return {status: 200, body: await undoDraft(service, counts, snapshots, body ?? {})};
       return {status: 404, body: {error: 'Unknown authoring route.', code: 'NOT_FOUND'}};
     },
