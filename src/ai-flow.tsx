@@ -1,6 +1,6 @@
 import {useEffect, useId, useMemo, useRef, useState, type KeyboardEvent} from 'react';
 import type {CanvasGraph} from '../server/canvas.js';
-import type {Diagnostic, DraftTarget, DraftValue, FlowDraft} from '../server/authoring/types.js';
+import type {Diagnostic, DraftOperation, DraftTarget, FlowDraft} from '../server/authoring/types.js';
 import type {Workspace} from '../server/scenarios.js';
 import type {DraftOverlay} from './canvas.js';
 import type {DraftPositions} from './draft-placement.js';
@@ -20,7 +20,6 @@ export type AiDraft = {
   applicable?: boolean;
   diagnostics?: Diagnostic[];
   requiredAssumptionKeys?: string[];
-  acknowledged: string[];
   error?: {code: string; message: string; retryable: boolean};
   phase?: GenerationPhase;
   draft?: FlowDraft;
@@ -76,7 +75,7 @@ const PHASE_LABEL: Record<GenerationPhase, string> = {
 const REVIEW: AiDraftStatus[] = ['pending', 'needsInfo', 'stale', 'applying'];
 
 function emptyDraft(prompt = ''): AiDraft {
-  return {status: 'idle', prompt, acknowledged: []};
+  return {status: 'idle', prompt};
 }
 
 export function persistedAiDraft(view: Record<string, unknown> | null | undefined): PersistedAiDraft | undefined {
@@ -117,29 +116,55 @@ function placeScreens(existing: {x: number; y: number}[], count: number) {
   return placed;
 }
 
-function issueMarks(draft: FlowDraft, diagnostics: Diagnostic[] | undefined) {
-  const marks = new Map<string, number[]>();
-  let number = 0;
-  for (const item of diagnostics ?? []) {
-    if (!item.blocks.includes('apply') && item.severity !== 'error') continue;
-    number += 1;
-    const visit = /^\/visits\/(\d+)\//.exec(item.path);
-    const key = visit ? draft.visits[Number(visit[1])]?.screenKey : undefined;
-    if (!key) continue;
-    const list = marks.get(key) ?? [];
-    list.push(number);
-    marks.set(key, list);
+function targetText(target: DraftTarget): string | undefined {
+  if (target.kind === 'unresolved') return;
+  if (target.kind === 'context') return target.ref.trim() || undefined;
+  return target.selector.value.trim() || undefined;
+}
+
+function valueText(value: Extract<DraftOperation, {kind: 'input'}>['value']): string | undefined {
+  if (value.kind === 'unresolved') return;
+  if (value.kind === 'literal') return value.text.trim() || undefined;
+  return value.name.trim() || undefined;
+}
+
+/** A step with no target is a plain action. Nothing marks it as missing or guessed. */
+export function draftStepText(operation: DraftOperation, index: number, destinationTitle?: string) {
+  const number = index + 1;
+  if (operation.kind === 'tap' || operation.kind === 'back') {
+    const name = operation.kind === 'back' ? 'Back' : 'Tap';
+    if (!targetText(operation.target)) return number + ' · ' + name;
+    if (operation.destination.kind === 'visit' && destinationTitle) return number + ' · Go to ' + destinationTitle;
+    return number + ' · ' + name + ' ' + targetText(operation.target);
   }
-  return marks;
+  if (operation.kind === 'input') {
+    const value = valueText(operation.value);
+    return value ? number + ' · Input ' + value : number + ' · Input';
+  }
+  const value = targetText(operation.target);
+  if (!value) return number + ' · Check';
+  return number + ' · Check "' + value + '" ' + (operation.kind === 'checkAbsent' ? 'absent' : 'visible');
+}
+
+function stepSpecified(operation: DraftOperation) {
+  if (operation.kind === 'input') return !!valueText(operation.value);
+  return !!targetText(operation.target);
+}
+
+function screenTitle(draft: FlowDraft, canvas: CanvasGraph | undefined, key: string) {
+  const screen = draft.screens.find(item => item.key === key);
+  if (!screen) return key;
+  if (screen.kind === 'create') return screen.title;
+  return canvas?.screens.find(item => item.id === screen.screenId)?.title ?? key;
 }
 
 /**
  * Read-only overlay. Stored positions win. Otherwise screens sit on the legacy grid
  * until the canvas measures the chrome-free viewport and calls placeDraft.
  * Existing screen coordinates are only used as edge anchors.
+ * Steps are the generated operations, with no review marks.
  */
-export function draftOverlayFor(draft: FlowDraft, canvas: CanvasGraph | undefined, diagnostics?: Diagnostic[], dimmed = false, positions?: DraftPositions): DraftOverlay {
-  const marks = issueMarks(draft, diagnostics);
+export function draftOverlayFor(draft: FlowDraft, canvas: CanvasGraph | undefined, dimmed = false, positions?: DraftPositions): DraftOverlay {
   const existing = new Map((canvas?.screens ?? []).map(screen => [screen.id, screen]));
   const createOrder: string[] = [];
   for (const visit of draft.visits) {
@@ -152,11 +177,22 @@ export function draftOverlayFor(draft: FlowDraft, canvas: CanvasGraph | undefine
     const point = positions?.[key];
     return !!point && Number.isFinite(point.x) && Number.isFinite(point.y);
   });
+  const stepsFor = new Map<string, DraftOverlay['nodes'][number]['steps']>();
+  for (const visit of draft.visits) {
+    if (!visit || typeof visit.screenKey !== 'string' || !Array.isArray(visit.operations)) continue;
+    const list = stepsFor.get(visit.screenKey) ?? [];
+    for (const operation of visit.operations) {
+      const linked = (operation.kind === 'tap' || operation.kind === 'back') && operation.destination.kind === 'visit' ? operation.destination.visitKey : undefined;
+      const destination = linked ? screenTitle(draft, canvas, draft.visits.find(item => item.key === linked)?.screenKey ?? '') : undefined;
+      list.push({text: draftStepText(operation, list.length, destination), specified: stepSpecified(operation)});
+    }
+    stepsFor.set(visit.screenKey, list);
+  }
   const nodes = createOrder.map((key, index) => {
     const declared = draft.screens.find(screen => screen.key === key);
     const stored = positions?.[key];
     const spot = stored && Number.isFinite(stored.x) && Number.isFinite(stored.y) ? stored : (spots[index] ?? {x: 40 + (index % 8) * 280, y: 40 + Math.floor(index / 8) * 200});
-    return {key, title: declared && declared.kind === 'create' ? declared.title : key, x: spot.x, y: spot.y, ...(marks.get(key)?.length ? {marks: marks.get(key)} : {})};
+    return {key, title: declared && declared.kind === 'create' ? declared.title : key, x: spot.x, y: spot.y, steps: stepsFor.get(key) ?? []};
   });
   const anchors = draft.screens.flatMap(screen => {
     if (screen.kind !== 'existing') return [];
@@ -164,29 +200,16 @@ export function draftOverlayFor(draft: FlowDraft, canvas: CanvasGraph | undefine
     return found ? [{key: screen.key, x: found.x, y: found.y}] : [];
   });
   const known = new Set([...nodes.map(node => node.key), ...anchors.map(anchor => anchor.key)]);
-  const titleOf = (key: string) => draft.screens.find(screen => screen.key === key)?.kind === 'create'
-    ? (draft.screens.find(screen => screen.key === key) as {title: string}).title
-    : (existing.get((draft.screens.find(screen => screen.key === key) as {screenId?: string} | undefined)?.screenId ?? '')?.title ?? key);
   const edges: DraftOverlay['edges'] = [];
   for (let index = 0; index < draft.visits.length - 1; index++) {
-    const from = draft.visits[index].screenKey;
-    const to = draft.visits[index + 1].screenKey;
-    if (!known.has(from) || !known.has(to)) continue;
-    edges.push({from, to, label: titleOf(from) + ' → ' + titleOf(to)});
+    const fromVisit = draft.visits[index];
+    const toVisit = draft.visits[index + 1];
+    if (!fromVisit || !toVisit || !Array.isArray(fromVisit.operations) || !known.has(fromVisit.screenKey) || !known.has(toVisit.screenKey)) continue;
+    const link = [...fromVisit.operations].reverse().find(operation => (operation.kind === 'tap' || operation.kind === 'back') && operation.destination.kind === 'visit' && operation.destination.visitKey === toVisit.key);
+    const verb = !link ? screenTitle(draft, canvas, fromVisit.screenKey) : link.kind === 'back' ? 'Back' : 'Tap';
+    edges.push({from: fromVisit.screenKey, to: toVisit.screenKey, label: verb + ' → ' + screenTitle(draft, canvas, toVisit.screenKey)});
   }
-  const hasNotes = (diagnostics ?? []).some(item => item.severity === 'error' || item.blocks.includes('apply')) || draft.assumptions.some(item => item.requiresConfirmation);
-  return {nodes, edges, anchors, ...(dimmed ? {dimmed: true} : {}), ...(settled ? {settled: true} : {}), ...(hasNotes ? {hasNotes: true} : {})};
-}
-
-export function fillUnresolved(draft: FlowDraft, path: string, next: DraftTarget | DraftValue): FlowDraft {
-  const copy = structuredClone(draft);
-  const match = /^\/visits\/(\d+)\/operations\/(\d+)\/(target|value)$/.exec(path);
-  if (!match) return copy;
-  const operation = copy.visits[Number(match[1])]?.operations[Number(match[2])];
-  if (!operation) return copy;
-  if (match[3] === 'target' && 'target' in operation) operation.target = next as DraftTarget;
-  if (match[3] === 'value' && operation.kind === 'input') operation.value = next as DraftValue;
-  return copy;
+  return {nodes, edges, anchors, ...(dimmed ? {dimmed: true} : {}), ...(settled ? {settled: true} : {})};
 }
 
 function needsRegeneration(code: string | undefined, diagnostics?: {code: string}[]) {
@@ -224,7 +247,6 @@ function fromView(current: AiDraft, view: GenerationView, revision: number): AiD
       diagnostics: preview.diagnostics,
       requiredAssumptionKeys: preview.requiredAssumptionKeys,
       expiresAt: preview.expiresAt,
-      acknowledged: current.acknowledged.filter(key => preview.requiredAssumptionKeys.includes(key)),
     } : {}),
     ...(draft ? {draft} : {}),
     ...(view.inputTokens !== undefined ? {inputTokens: view.inputTokens} : {}),
@@ -272,18 +294,6 @@ function presentResult(current: AiDraft, view: GenerationView, revision: number,
     status: 'failed',
     error: next.error ?? {code: 'AUTHORING_INVALID', message: 'The reply didn’t fit TnT’s format, even after one repair.', retryable: false},
   };
-}
-
-function screenCount(draft: FlowDraft | undefined) {
-  return draft?.screens.length ?? 0;
-}
-
-function stepCount(draft: FlowDraft | undefined) {
-  return draft?.visits.reduce((sum, visit) => sum + visit.operations.length, 0) ?? 0;
-}
-
-function countPhrase(count: number, singular: string, plural: string) {
-  return count + ' ' + (count === 1 ? singular : plural);
 }
 
 type Callbacks = {
@@ -350,7 +360,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
 
   const reviewing = REVIEW.includes(draft.status) && !draft.refining;
   const showOverlay = !!draft.draft && overlayRenders(draft.draft, input.canvas) && (reviewing || !!draft.refining);
-  const overlay = showOverlay && draft.draft ? draftOverlayFor(draft.draft, input.canvas, draft.diagnostics, !!draft.refining, draft.positions) : undefined;
+  const overlay = showOverlay && draft.draft ? draftOverlayFor(draft.draft, input.canvas, !!draft.refining, draft.positions) : undefined;
   const positionKey = JSON.stringify(draft.positions ?? null);
 
   useEffect(() => {
@@ -456,7 +466,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     }
     let cancelled = false;
     jobGuard.current = stored.jobId;
-    setDraft({status: 'generating', prompt: stored.prompt, jobId: stored.jobId, previewId: stored.previewId, baseRevision: stored.baseRevision, acknowledged: [], workspaceId: currentId, ...(stored.positions ? {positions: stored.positions} : {})});
+    setDraft({status: 'generating', prompt: stored.prompt, jobId: stored.jobId, previewId: stored.previewId, baseRevision: stored.baseRevision, workspaceId: currentId, ...(stored.positions ? {positions: stored.positions} : {})});
     setOpen(true);
     void (async () => {
       try {
@@ -467,7 +477,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
           await repreview(view.draft, revision, currentId, false);
           return;
         }
-        setDraft(current => current.jobId === stored.jobId ? presentResult({...current, prompt: stored.prompt, acknowledged: [], workspaceId: currentId}, view, revision, canvasRef.current) : current);
+        setDraft(current => current.jobId === stored.jobId ? presentResult({...current, prompt: stored.prompt, workspaceId: currentId}, view, revision, canvasRef.current) : current);
       } catch (error) {
         if (cancelled || hydrateToken.current !== token || jobGuard.current !== stored.jobId) return;
         setDraft(current => current.jobId === stored.jobId ? {...current, status: 'failed', prompt: stored.prompt, error: errorOf(error, 'The draft could not be restored.')} : current);
@@ -586,7 +596,6 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         workspaceId: saved?.id,
         baseRevision,
         phase: started.phase,
-        acknowledged: refining ? current.acknowledged : [],
         refining,
         draft: refining ? current.draft : undefined,
         error: started.error,
@@ -633,7 +642,6 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
           applicable: preview.applicable,
           diagnostics: preview.diagnostics,
           requiredAssumptionKeys: preview.requiredAssumptionKeys,
-          acknowledged: current.acknowledged.filter(key => preview.requiredAssumptionKeys.includes(key)),
           phase: undefined,
           error: undefined,
         };
@@ -655,16 +663,17 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     await repreview(current.draft, revisionRef.current, workspaceId, true);
   }
 
-  async function updateUnresolved(path: string, next: DraftTarget | DraftValue) {
+  function ask(prompt: string) {
+    const text = prompt.trim();
+    if (!text || text.length > PROMPT_CHAR_LIMIT) return;
     const current = draftRef.current;
-    if (!current.draft || !input.workspaceId) return;
-    const patched = fillUnresolved(current.draft, path, next);
-    setDraft(existing => ({...existing, draft: patched}));
-    await repreview(patched, current.baseRevision ?? revisionRef.current, input.workspaceId, false);
-  }
-
-  function acknowledge(key: string, on: boolean) {
-    setDraft(current => ({...current, acknowledged: on ? [...new Set([...current.acknowledged, key])] : current.acknowledged.filter(item => item !== key)}));
+    const workspaceId = current.workspaceId || input.workspaceId;
+    if (!current.draft || !current.jobId || !workspaceId || !REVIEW.includes(current.status)) return;
+    held.current.set(workspaceId, {...current, workspaceId, refining: false});
+    const next = {...current, refining: true, prompt: text, error: undefined, notice: undefined};
+    draftRef.current = next;
+    setDraft(next);
+    void generate(text);
   }
 
   async function confirm() {
@@ -681,7 +690,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         expectedRevision: current.baseRevision,
         previewId,
         idempotencyKey: key,
-        acknowledgedAssumptionKeys: current.acknowledged,
+        acknowledgedAssumptionKeys: current.requiredAssumptionKeys ?? [],
       });
     } catch (error) {
       setDraft(existing => ({...existing, status: current.applicable === false ? 'needsInfo' : 'pending', error: errorOf(error, 'The draft could not be confirmed.')}));
@@ -805,7 +814,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     config, provider,
     disclosure, continueDisclosure, dismissDisclosure,
     setPrompt: (prompt: string) => setDraft(current => ({...current, prompt})),
-    openPanel, closePanel, generate, refresh, updateUnresolved, acknowledge, confirm, undoApply, cancel, discard, refine,
+    openPanel, closePanel, generate, refresh, ask, confirm, undoApply, cancel, discard, refine,
     placeDraft, moveDraft,
     openSettings: (returnTo?: HTMLElement) => openSettingsRef.current?.(returnTo),
   };
@@ -813,17 +822,10 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
 
 export function confirmReason(draft: AiDraft, running: boolean) {
   if (!REVIEW.includes(draft.status) && draft.status !== 'failed') return undefined;
-  if (draft.status === 'applying') return 'Confirm is unavailable while the draft is being added.';
-  if (running) return 'Confirm is unavailable while a run is active.';
-  if (draft.status === 'stale') return 'Confirm is unavailable because the workspace changed. Refresh the draft.';
-  const missing = (draft.requiredAssumptionKeys ?? []).filter(key => !draft.acknowledged.includes(key));
-  const unresolved = (draft.diagnostics ?? []).some(item => item.code === 'UNRESOLVED_TARGET' || item.code === 'UNRESOLVED_VALUE');
-  const blocking = (draft.diagnostics ?? []).some(item => item.blocks.includes('apply'));
-  const blocked = draft.applicable === false || unresolved || blocking;
-  if (blocked && missing.length) return 'Confirm is unavailable until every item that needs info is filled and every assumption is acknowledged.';
-  if (blocked) return 'Confirm is unavailable until every item that needs info is filled.';
-  if (missing.length) return 'Confirm is unavailable until every assumption is acknowledged.';
-  if (draft.status === 'failed' || !draft.previewId) return 'Confirm is unavailable until a draft is ready.';
+  if (draft.status === 'applying') return 'Apply is unavailable while the draft is being added.';
+  if (running) return 'Apply is unavailable while a run is active.';
+  if (draft.status === 'stale') return 'Apply is unavailable because the workspace changed. Refresh the draft.';
+  if (draft.status === 'failed' || !draft.previewId) return 'Apply is unavailable until a draft is ready.';
   return undefined;
 }
 
@@ -882,7 +884,7 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   const composerIssues = (draft.diagnostics ?? []).filter(item => item.blocks.includes('apply') || item.severity === 'error');
   return <div className="ai-flow" data-testid="ai-flow" data-ai-status={draft.status}>
     <p className="sr-only" aria-live="polite" data-testid="ai-live">{live}</p>
-    {draft.status === 'stale' && <p className="ai-muted">The workspace changed since this draft was prepared.</p>}
+    {draft.status === 'stale' && <p className="ai-muted">The workspace changed since this draft was prepared. <button type="button" className="ai-text" data-testid="ai-refresh" onClick={() => void control.refresh()}>Refresh</button></p>}
     {provenanceId && <p className="ai-provenance" data-testid="ai-provenance">Applied as “{provenanceName || 'this flow'}” · not run yet{undoOffer && <> · <button type="button" data-testid="ai-undo" onClick={() => void control.undoApply()}>↶ Undo</button></>}</p>}
     {open && <section className={'ai-panel' + (failed && !neutral ? ' is-error' : '') + (generating ? ' is-busy' : '') + (over ? ' is-over' : '')} aria-label={refining ? 'Refine draft' : 'Describe a flow'} aria-busy={busy || undefined} onKeyDown={onPanelKeyDown}>
       <div className="ai-panel-bar">
@@ -911,58 +913,38 @@ export function AiFlow({control}: {control: AiDraftControl}) {
         </div>
       </>}
     </section>}
-    <button type="button" ref={buttonRef} className={'ai-launch' + (open ? ' is-open' : '')} data-testid="ai-flow-button" aria-label="Describe a flow" title="Describe a flow" aria-expanded={open} aria-busy={busy || undefined} onClick={() => open ? (generating ? undefined : control.closePanel()) : control.openPanel()}>
+    {REVIEW.includes(draft.status) && !refining && draft.draft ? <AiCapsule control={control} /> : <button type="button" ref={buttonRef} className={'ai-launch' + (open ? ' is-open' : '')} data-testid="ai-flow-button" aria-label="Describe a flow" title="Describe a flow" aria-expanded={open} aria-busy={busy || undefined} onClick={() => open ? (generating ? undefined : control.closePanel()) : control.openPanel()}>
       <Sparkles />
-      {REVIEW.includes(draft.status) && !refining && <span className="ai-launch-dot" data-testid="ai-flow-dot" aria-hidden="true" />}
-    </button>
+    </button>}
   </div>;
 }
 
-export function AiDraftBar({control}: {control: AiDraftControl}) {
+function AiCapsule({control}: {control: AiDraftControl}) {
   const {draft, reason} = control;
-  const review = REVIEW.includes(draft.status) && !draft.refining;
-  const confirmRef = useRef<HTMLButtonElement>(null);
+  const [text, setText] = useState('');
+  const applyRef = useRef<HTMLButtonElement>(null);
   const reasonId = useId();
   const focused = useRef('');
-  const screens = screenCount(draft.draft);
-  const steps = stepCount(draft.draft);
-  const meta = countPhrase(screens, 'screen', 'screens') + ' · ' + countPhrase(steps, 'step', 'steps') + ' · not run yet';
-  const issues = (draft.diagnostics ?? []).filter(item => item.blocks.includes('apply') || item.severity === 'error');
   useEffect(() => {
-    if (!review || !draft.previewId || focused.current === draft.previewId) return;
+    if (!draft.previewId || focused.current === draft.previewId) return;
     focused.current = draft.previewId;
-    confirmRef.current?.focus();
-  }, [review, draft.previewId]);
-  if (!review || !draft.draft) return null;
-  const unresolved = issues.filter(item => item.code === 'UNRESOLVED_TARGET' || item.code === 'UNRESOLVED_VALUE');
-  const assumptions = draft.draft.assumptions.filter(item => (draft.requiredAssumptionKeys ?? []).includes(item.key));
-  const known = new Set(assumptions.map(item => item.key));
-  const extraKeys = (draft.requiredAssumptionKeys ?? []).filter(key => !known.has(key));
-  const usage = usageLabel(draft);
-  const usageLine = usage || draft.model || draft.upstreamProvider;
-  const hasDetails = draft.status === 'stale' || issues.length > 0 || unresolved.length > 0 || assumptions.length > 0 || extraKeys.length > 0 || !!reason || !!draft.error || !!usageLine;
-  return <div className="ai-review" data-testid="ai-review">
-    <div className="ai-review-bar">
-      <span className="ai-draft-chip" data-testid="ai-draft-chip">✦ Draft · not run</span>
-      <p className="ai-ask">{issues.length ? issues.length + (issues.length === 1 ? ' issue' : ' issues') + ' to fix before applying' : 'Flow ready. Use this flow?'}</p>
-      <div className="ai-actions">
-        <button type="button" ref={confirmRef} className="ai-text ai-confirm" data-testid="ai-confirm" aria-disabled={reason ? true : undefined} aria-describedby={reason ? reasonId : undefined} onClick={() => { if (!reason) void control.confirm(); }}>✓ Apply</button>
-        <button type="button" className="ai-text" data-testid="ai-refine" onClick={() => control.refine()}>Refine</button>
-        {draft.status === 'stale' && <button type="button" className="ai-text" data-testid="ai-refresh" onClick={() => void control.refresh()}>Refresh</button>}
-        <button type="button" className="ai-text ai-muted-button" data-testid="ai-discard" onClick={() => void control.discard()}>✕ Dismiss</button>
-      </div>
-      <p className="ai-meta" data-testid="ai-meta">{meta}</p>
-    </div>
-    {hasDetails && <div className="ai-review-details" data-testid="ai-review-details">
-      {draft.status === 'stale' && <p className="ai-muted">The workspace changed since this draft was prepared.</p>}
-      {!!issues.length && <ol className="ai-issues">{issues.map((item, index) => <li key={item.path + item.code + index}><span className="ai-issue-no">{index + 1}</span> {item.message}</li>)}</ol>}
-      {unresolved.map(item => <NeedsInfo key={item.path + item.code} item={item} onSubmit={value => void control.updateUnresolved(item.path, value)} />)}
-      {assumptions.map(item => <label key={item.key} className="ai-check"><input type="checkbox" checked={draft.acknowledged.includes(item.key)} aria-label={item.message} onChange={event => control.acknowledge(item.key, event.target.checked)} />{item.message}</label>)}
-      {extraKeys.map(key => <label key={key} className="ai-check"><input type="checkbox" checked={draft.acknowledged.includes(key)} aria-label={key} onChange={event => control.acknowledge(key, event.target.checked)} />{key}</label>)}
-      {reason && <p id={reasonId} className="ai-reason" data-testid="ai-confirm-reason">{reason}{issues.length ? ' Apply is off until these are fixed.' : ''}</p>}
-      {draft.error && <p className="ai-error" role="alert">{errorCopy(draft.error.code, draft.error.message, draft.model)}</p>}
-      {usageLine && <p className="ai-usage" data-testid="ai-usage">{usage}{draft.upstreamProvider || control.provider === 'openrouter' ? ' OpenRouter chooses the upstream provider.' : ''}{control.provider === 'openrouter' && <> <a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">Open OpenRouter account</a></>}</p>}
-    </div>}
+    applyRef.current?.focus();
+  }, [draft.previewId]);
+  function submit() {
+    const next = text.trim();
+    if (!next) return;
+    setText('');
+    control.ask(next);
+  }
+  return <div className="ai-capsule-wrap">
+    <form className="ai-capsule" data-testid="ai-capsule" onSubmit={event => { event.preventDefault(); submit(); }}>
+      <Sparkles />
+      <input className="ai-capsule-input" aria-label="Ask for changes" placeholder="Ask for changes" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
+      <button type="button" ref={applyRef} className="ai-capsule-apply" data-testid="ai-confirm" aria-disabled={reason ? true : undefined} aria-describedby={reason ? reasonId : undefined} onClick={() => { if (!reason) void control.confirm(); }}>✓ Apply</button>
+      <button type="button" className="ai-capsule-dismiss" data-testid="ai-discard" aria-label="Dismiss draft" onClick={() => void control.discard()}>✕</button>
+    </form>
+    {reason && <p id={reasonId} className="ai-reason" data-testid="ai-confirm-reason">{reason}</p>}
+    {draft.error && <p className="ai-error" role="alert">{errorCopy(draft.error.code, draft.error.message, draft.model)}</p>}
   </div>;
 }
 
@@ -991,15 +973,6 @@ function SavedModelLine({control}: {control: AiDraftControl}) {
 function providerLabel(id: ProviderId, model?: string) {
   const name = id === 'openrouter' ? 'OpenRouter' : 'OpenAI-compatible';
   return model ? name + ' · ' + model : name;
-}
-
-function usageLabel(draft: AiDraft) {
-  const parts: string[] = [];
-  if (draft.inputTokens !== undefined || draft.outputTokens !== undefined) parts.push(((draft.inputTokens ?? 0) + (draft.outputTokens ?? 0)).toLocaleString('en-US') + ' tokens');
-  if (draft.cost !== undefined) parts.push(draft.cost < 0.01 ? '$' + draft.cost.toFixed(4) : '$' + draft.cost.toFixed(3));
-  if (draft.model) parts.push(draft.model);
-  if (draft.upstreamProvider) parts.push(draft.upstreamProvider);
-  return parts.join(' · ');
 }
 
 function retryKind(code: string | undefined) {
@@ -1033,31 +1006,6 @@ function errorCopy(code: string | undefined, message: string, model?: string) {
     case 'SAVE_FAILED': return message;
     default: return message;
   }
-}
-
-function NeedsInfo({item, onSubmit}: {item: Diagnostic; onSubmit: (value: DraftTarget | DraftValue) => void}) {
-  const [target, setTarget] = useState<'text' | 'id'>('text');
-  const [match, setMatch] = useState<'exact' | 'contains' | 'regex'>('exact');
-  const [value, setValue] = useState('');
-  const [kind, setKind] = useState<'literal' | 'parameter'>('literal');
-  const label = item.entityKey || item.path;
-  return <form className="ai-needs" aria-label={'Needs info for ' + label} onSubmit={event => {
-    event.preventDefault();
-    if (!value.trim()) return;
-    if (item.code === 'UNRESOLVED_VALUE') onSubmit(kind === 'literal' ? {kind: 'literal', text: value.trim()} : {kind: 'parameter', name: value.trim()});
-    else onSubmit({kind: 'selector', selector: {target, match, value: value.trim()}});
-  }}>
-    <p>Needs info · {item.message}</p>
-    {item.code === 'UNRESOLVED_VALUE' ? <>
-      <label>Value kind<select aria-label={'Needs info value kind for ' + label} value={kind} onChange={event => setKind(event.target.value as 'literal' | 'parameter')}><option value="literal">Literal</option><option value="parameter">Parameter</option></select></label>
-      <label>Value<input aria-label={'Needs info value for ' + label} value={value} onChange={event => setValue(event.target.value)} /></label>
-    </> : <>
-      <label>Target<select aria-label={'Needs info target for ' + label} value={target} onChange={event => setTarget(event.target.value as 'text' | 'id')}><option value="text">Text</option><option value="id">Id</option></select></label>
-      <label>Match<select aria-label={'Needs info match for ' + label} value={match} onChange={event => setMatch(event.target.value as 'exact' | 'contains' | 'regex')}><option value="exact">Exact</option><option value="contains">Contains</option><option value="regex">Regex</option></select></label>
-      <label>Selector<input aria-label={'Needs info selector for ' + label} value={value} onChange={event => setValue(event.target.value)} /></label>
-    </>}
-    <button type="submit" className="ai-text">Update</button>
-  </form>;
 }
 
 function Sparkles() {

@@ -17,13 +17,13 @@ import {DRAFT_REVIEW_BAR,edgeInsets,placementForDraft,type Box,type Insets} from
 const runLockReason='Unavailable while the scenario is running.';
 
 export const emptyCanvas=():CanvasGraph=>({screens:[],edges:[],paths:[]});
-export type DraftOverlay={nodes:{key:string;title:string;x:number;y:number;marks?:number[]}[];edges:{from:string;to:string;label:string}[];anchors:{key:string;x:number;y:number}[];dimmed?:boolean;settled?:boolean;hasNotes?:boolean};
-const DRAFT_CHROME='.workspace-manager,.scenario-sequence-bar,.device-toolbar,.canvas-toolbar,.ai-launch,.floating-inspector,.scenario-details-panel,.workspace-advanced,.report-tools,.launch-tools,.screenshot-tools,.script-editor,.ai-settings-sheet,.canvas-route-bar,.run-error-toast';
+export type DraftOverlay={nodes:{key:string;title:string;x:number;y:number;steps:{text:string;specified:boolean}[]}[];edges:{from:string;to:string;label:string}[];anchors:{key:string;x:number;y:number}[];dimmed?:boolean;settled?:boolean};
+const DRAFT_CHROME='.workspace-manager,.scenario-sequence-bar,.device-toolbar,.canvas-toolbar,.ai-launch,.ai-capsule,.floating-inspector,.scenario-details-panel,.workspace-advanced,.report-tools,.launch-tools,.screenshot-tools,.script-editor,.ai-settings-sheet,.canvas-route-bar,.run-error-toast';
 function chromeObstacles(viewport:Box):Box[]{
  if(typeof document==='undefined')return [];
  const boxes:Box[]=[];
  for(const element of document.querySelectorAll<HTMLElement>(DRAFT_CHROME)){
-  if(element.closest('.canvas-surface,[data-testid="ai-draft-review"]'))continue;
+  if(element.closest('.canvas-surface'))continue;
   if(element.hidden||element.getAttribute('aria-hidden')==='true'||element.getAttribute('data-inspector-yielded')==='true'||element.style.visibility==='hidden')continue;
   const rect=element.getBoundingClientRect();
   if(rect.width<8||rect.height<8)continue;
@@ -40,8 +40,9 @@ function readViewport(node:HTMLElement|null){
  if(width<40||height<40)return;
  return {left:rect.width>=40?rect.left:0,top:rect.height>=40?rect.top:0,width,height,scrollLeft:node.scrollLeft||0,scrollTop:node.scrollTop||0};
 }
-type ViewportMetrics={left:number;top:number;width:number;height:number;scrollLeft:number;scrollTop:number;insets:Insets};
-function DraftOverlayLayer({overlay,review,zoom,metrics,onMove}:{overlay:DraftOverlay;review?:ReactNode;zoom:number;metrics:ViewportMetrics;onMove?:(key:string,x:number,y:number)=>void}){
+const DRAFT_CHIP=36;
+function draftCardHeight(steps:number){return Math.max(120,56+steps*24);}
+function DraftOverlayLayer({overlay,zoom,onMove}:{overlay:DraftOverlay;zoom:number;onMove?:(key:string,x:number,y:number)=>void}){
  const points=new Map<string,{x:number;y:number}>();
  for(const anchor of overlay.anchors)points.set(anchor.key,anchor);
  for(const node of overlay.nodes)points.set(node.key,node);
@@ -49,31 +50,23 @@ function DraftOverlayLayer({overlay,review,zoom,metrics,onMove}:{overlay:DraftOv
  const minX=boxes.length?Math.min(...boxes.map(node=>node.x)):0;
  const minY=boxes.length?Math.min(...boxes.map(node=>node.y)):0;
  const maxX=boxes.length?Math.max(...boxes.map(node=>node.x)):0;
- const maxY=boxes.length?Math.max(...boxes.map(node=>node.y)):0;
- const header=DRAFT_REVIEW_BAR/zoom;
- const zone=boxes.length?{left:minX-12,top:minY-header,width:maxX+250+12-(minX-12),height:maxY+140+12-(minY-header)+(overlay.hasNotes?200:0)}:undefined;
- const height=Math.max(1650,...overlay.nodes.map(node=>node.y+220),...overlay.anchors.map(anchor=>anchor.y+220));
+ const maxBottom=boxes.length?Math.max(...boxes.map(node=>node.y+draftCardHeight(node.steps.length))):0;
+ const zone=boxes.length?{left:minX-12,top:minY-DRAFT_CHIP,width:maxX+250+12-(minX-12),height:maxBottom+12-(minY-DRAFT_CHIP)}:undefined;
+ const height=Math.max(1650,...overlay.nodes.map(node=>node.y+draftCardHeight(node.steps.length)+40),...overlay.anchors.map(anchor=>anchor.y+220));
  const drag=useRef<{key:string;x:number;y:number;clientX:number;clientY:number}|undefined>(undefined);
  const clampX=(value:number)=>Math.max(0,Math.min(2400,value));
  const clampY=(value:number)=>Math.max(0,Math.min(1400,value));
  function startDrag(event:PointerEvent<HTMLElement>,key:string,x:number,y:number){if(!onMove||event.button!==0)return;event.stopPropagation();if(typeof event.currentTarget.setPointerCapture==='function')event.currentTarget.setPointerCapture(event.pointerId);drag.current={key,x,y,clientX:event.clientX,clientY:event.clientY};}
  function dragMove(event:PointerEvent<HTMLElement>,key:string){const current=drag.current;if(!current||current.key!==key||!onMove)return;onMove(key,clampX(current.x+(event.clientX-current.clientX)/zoom),clampY(current.y+(event.clientY-current.clientY)/zoom));}
  function endDrag(){drag.current=undefined;}
- const ready=metrics.width>=40&&metrics.height>=40;
- const screenLeft=zone?(ready?metrics.left+zone.left*zoom-metrics.scrollLeft:zone.left*zoom):0;
- const screenTop=zone?(ready?metrics.top+zone.top*zoom-metrics.scrollTop:zone.top*zoom):0;
- const screenWidth=zone?Math.min(zone.width*zoom,ready?Math.max(280,metrics.width-metrics.insets.left-metrics.insets.right):zone.width*zoom):0;
- const detailsTop=zone?Math.max(DRAFT_REVIEW_BAR+8,(maxY+128-zone.top)*zoom+8):0;
- const reviewStyle={position:'fixed',zIndex:47,left:screenLeft,top:screenTop,width:Math.max(280,screenWidth),pointerEvents:'none','--ai-draft-details-top':detailsTop+'px'} as CSSProperties;
  return <>
-  {zone&&<div className={'ai-draft-zone'+(overlay.dimmed?' is-dimmed':'')} data-testid="ai-draft-zone" style={{left:zone.left,top:zone.top,width:zone.width,height:zone.height}} aria-hidden="true">{(overlay.dimmed||!review)&&<span className="ai-draft-chip" data-testid="ai-draft-chip">{overlay.dimmed?'✦ Previous draft · kept':'✦ Draft · not run'}</span>}</div>}
-  {review&&zone&&createPortal(<div className="ai-draft-review" data-testid="ai-draft-review" style={reviewStyle}>{review}</div>,document.body)}
+  {zone&&<div className={'ai-draft-zone'+(overlay.dimmed?' is-dimmed':'')} data-testid="ai-draft-zone" style={{left:zone.left,top:zone.top,width:zone.width,height:zone.height}} aria-hidden="true"><span className="ai-draft-chip" data-testid="ai-draft-chip">{overlay.dimmed?'✦ Previous draft · kept':'✦ Draft'}</span></div>}
   <svg className="ai-draft-lines" width="2700" height={height} aria-hidden="true">{overlay.edges.map(edge=>{
    const from=points.get(edge.from);const to=points.get(edge.to);if(!from||!to)return null;
    const start=[from.x+258,from.y+58];const end=[to.x-8,to.y+58];const middle=(start[0]+end[0])/2;
-   return <g key={edge.from+'>'+edge.to}><path d={`M${start[0]},${start[1]} C${middle},${start[1]} ${middle},${end[1]} ${end[0]},${end[1]}`} fill="none"/><text x={middle-70} y={Math.max(16,(start[1]+end[1])/2-10)}>{edge.label}</text></g>;
+   return <g key={edge.from+'>'+edge.to}><path d={`M${start[0]},${start[1]} C${middle},${start[1]} ${middle},${end[1]} ${end[0]},${end[1]}`} fill="none"/><foreignObject x={middle-78} y={Math.max(4,(start[1]+end[1])/2-16)} width="156" height="28"><div className="ai-draft-edge">{edge.label}</div></foreignObject></g>;
   })}</svg>
-  {overlay.nodes.map(node=><article key={node.key} className={'ai-draft-node'+(overlay.dimmed?' is-dimmed':'')+(onMove?' is-draggable':'')} data-testid="ai-draft-screen" data-draft-screen={node.key} style={{left:node.x,top:node.y}} tabIndex={onMove?0:-1} aria-label={'Draft screen '+node.title} onPointerDown={event=>startDrag(event,node.key,node.x,node.y)} onPointerMove={event=>dragMove(event,node.key)} onPointerUp={endDrag} onPointerCancel={endDrag} onKeyDown={event=>{const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const direction=vectors[event.key];if(!direction||!onMove)return;event.preventDefault();const amount=event.shiftKey?40:10;onMove(node.key,clampX(node.x+direction[0]*amount),clampY(node.y+direction[1]*amount));}}><p>{node.title}</p>{node.marks?.map(mark=><span key={mark} className="ai-draft-mark" data-testid="ai-draft-mark">{mark}</span>)}</article>)}
+  {overlay.nodes.map(node=><article key={node.key} className={'ai-draft-node'+(overlay.dimmed?' is-dimmed':'')+(onMove?' is-draggable':'')} data-testid="ai-draft-screen" data-draft-screen={node.key} style={{left:node.x,top:node.y}} tabIndex={onMove?0:-1} aria-label={'Draft screen '+node.title} onPointerDown={event=>startDrag(event,node.key,node.x,node.y)} onPointerMove={event=>dragMove(event,node.key)} onPointerUp={endDrag} onPointerCancel={endDrag} onKeyDown={event=>{const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const direction=vectors[event.key];if(!direction||!onMove)return;event.preventDefault();const amount=event.shiftKey?40:10;onMove(node.key,clampX(node.x+direction[0]*amount),clampY(node.y+direction[1]*amount));}}><p>{node.title}</p><ol className="ai-draft-steps">{node.steps.map((step,index)=><li key={index} data-testid="ai-draft-step" className={step.specified?'is-specified':undefined}>{step.text}</li>)}</ol></article>)}
  </>;
 }
 const identity=()=>crypto.randomUUID();
@@ -199,7 +192,6 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  const viewportChangeRef=useRef(onViewportChange);viewportChangeRef.current=onViewportChange;
  const placedFor=useRef('');
  const [layoutEpoch,setLayoutEpoch]=useState(0);
- const [metrics,setMetrics]=useState<ViewportMetrics>({left:0,top:0,width:0,height:0,scrollLeft:initialView?.scrollLeft??0,scrollTop:initialView?.scrollTop??0,insets:{top:12,right:12,bottom:12,left:12}});
  const draftKey=draftOverlay?.nodes.map(node=>node.key).join('\0')??'';
  useEffect(()=>{
   const node=viewportRef.current;
@@ -230,8 +222,6 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
     }
    }
   }else if(draftOverlay?.settled)placedFor.current=draftKey;
-  const next={left:Math.round(read.left),top:Math.round(read.top),width:Math.round(read.width),height:Math.round(read.height),scrollLeft,scrollTop,insets:rounded};
-  setMetrics(previous=>previous.left===next.left&&previous.top===next.top&&previous.width===next.width&&previous.height===next.height&&previous.scrollLeft===next.scrollLeft&&previous.scrollTop===next.scrollTop&&previous.insets.top===next.insets.top&&previous.insets.right===next.insets.right&&previous.insets.bottom===next.insets.bottom&&previous.insets.left===next.insets.left?previous:next);
  },[draftKey,draftOverlay,draftOverlay?.settled,zoom,layoutEpoch]);
  const drag=useRef<{id:string;x:number;y:number;clientX:number;clientY:number}|undefined>(undefined);
  function startDrag(event:PointerEvent<HTMLElement>,id:string,x:number,y:number){if(!onMove||event.button!==0)return;if(typeof event.currentTarget.setPointerCapture==='function')event.currentTarget.setPointerCapture(event.pointerId);drag.current={id,x,y,clientX:event.clientX,clientY:event.clientY};}
@@ -287,7 +277,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   (node?.tabIndex===0?node:node?.querySelector<HTMLElement>('.screen-node-heading'))?.focus();
  }
  return <div className="canvas-board-wrap"><div className="canvas-toolbar" role="toolbar" aria-label="Canvas zoom"><span>Drag screen headers or captures · scroll to pan{onAdd&&' · Right-click for node options'}</span><button onClick={()=>setZoom(value=>Math.max(.4,value-.1))} aria-label="Zoom out"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14"/></svg></button><span>{Math.round(zoom*100)}%</span><button onClick={()=>setZoom(value=>Math.min(1.4,value+.1))} aria-label="Zoom in"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14M12 5v14"/></svg></button><button onClick={()=>setZoom(.85)} aria-label="Reset zoom" title="Reset zoom"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 4v6h-6"/><path d="M20 10a8 8 0 1 0-2 8"/></svg></button></div>
- <div className="canvas-viewport" ref={viewportRef} onScroll={event=>{const node=event.currentTarget;setMetrics(current=>({...current,scrollLeft:node.scrollLeft,scrollTop:node.scrollTop}));onViewportChange?.({zoom,scrollLeft:node.scrollLeft,scrollTop:node.scrollTop});}} role="region" aria-label={result?'Executed screen canvas':'Screen test canvas'}><div style={{width:2700*zoom,height:boardHeight*zoom}}><div className="canvas-surface" tabIndex={onAdd||onRun?0:undefined} onContextMenu={event=>openMenu(event)} ref={surface} style={{height:boardHeight,transform:`scale(${zoom})`,'--canvas-zoom':zoom} as CSSProperties}>
+ <div className="canvas-viewport" ref={viewportRef} onScroll={event=>{const node=event.currentTarget;onViewportChange?.({zoom,scrollLeft:node.scrollLeft,scrollTop:node.scrollTop});}} role="region" aria-label={result?'Executed screen canvas':'Screen test canvas'}><div style={{width:2700*zoom,height:boardHeight*zoom}}><div className="canvas-surface" tabIndex={onAdd||onRun?0:undefined} onContextMenu={event=>openMenu(event)} ref={surface} style={{height:boardHeight,transform:`scale(${zoom})`,'--canvas-zoom':zoom} as CSSProperties}>
  <svg className="canvas-lines" width="2700" height={boardHeight} aria-label="Screen transitions"><defs><marker id={marker} viewBox="0 0 8 8" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" refX="7" refY="4" orient="auto"><path d="M1,1 L7,4 L1,7" fill="none" stroke="context-stroke" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/></marker></defs>{graph.edges.map(edge=>{
  const from=graph.screens.find(screen=>screen.id===edge.from);const to=graph.screens.find(screen=>screen.id===edge.to);if(!from||!to)return null;
  const parallel=graph.edges.filter(item=>item.from===edge.from&&item.to===edge.to||item.from===edge.to&&item.to===edge.from);const offset=parallel.indexOf(edge)*64;const forward=to.x>=from.x;const start=[from.x+(forward?258:-8),from.y+58+offset];const end=[to.x+(forward?-8:258),to.y+58+offset];const middle=(start[0]+end[0])/2;const status=result?.edges.find(item=>item.id===edge.id)?.status;
@@ -304,7 +294,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  {screen.referenceScreenshot?<div className="screen-reference-frame" onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>startDrag(event,screen.id,screen.x,screen.y)} onPointerMove={event=>dragMove(event,screen.id)} onPointerUp={endDrag} onPointerCancel={endDrag}><img className="screen-reference" draggable={false} src={screen.referenceScreenshot} alt={'Reference for '+screen.title}/>{onRemoveCapture&&<button type="button" className="screen-reference-delete" aria-label={'Delete capture for '+screen.title} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onRemoveCapture(screen.id);}}><DeleteIcon/></button>}</div>:<p className="screen-capture-label">No capture yet</p>}
  {(outcome==='passed'||outcome==='failed')&&<p className={'node-outcome outcome '+outcome}>{outcome==='passed'?'✓':outcome==='failed'?'✕':'○'} {outcome}</p>}
  </article>;})}
- {draftOverlay&&<DraftOverlayLayer overlay={draftOverlay} review={draftReview} zoom={zoom} metrics={metrics} onMove={onDraftMove}/>}
+ {draftOverlay&&<DraftOverlayLayer overlay={draftOverlay} zoom={zoom} onMove={onDraftMove}/>}
  {!graph.screens.length&&!draftOverlay?.nodes.length&&<div className="canvas-empty"><h3>Build your screen map</h3><p>Add a screen and describe its checks. Screen titles are descriptive.</p></div>}
  </div></div></div>
  {contextMenu&&(contextMenu.screenId?onDelete||onInfo||onAppend:onAdd||onRun)&&<div ref={menu} className="canvas-context-menu" role="menu" aria-label={contextMenu.screenId?'Node menu':'Canvas menu'} style={{left:contextMenu.left,top:contextMenu.top}} onContextMenu={event=>event.preventDefault()} onKeyDown={event=>{

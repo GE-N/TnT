@@ -22,9 +22,10 @@ test('AI flow authoring UI', async t => {
       await h.render();
       await h.generate('Pay the electric bill');
       await h.until(() => h.status() === 'generating', 'generating');
-      await h.until(() => !!h.document.querySelector('[data-testid="ai-draft-chip"]'), 'pending overlay');
-      assert.equal(h.document.querySelector('[data-testid="ai-meta"]')?.textContent, '3 screens · 3 steps · not run yet');
-      assert.ok(h.document.querySelector('[data-testid="ai-flow-dot"]'));
+      await h.until(() => h.document.querySelector('[data-testid="ai-draft-chip"]')?.textContent === '✦ Draft', 'pending overlay');
+      assert.equal(h.document.querySelector('[data-testid="ai-meta"]'), null);
+      assert.equal(h.document.querySelector('[data-testid="ai-usage"]'), null);
+      assert.ok(h.document.querySelector('[data-testid="ai-capsule"]'));
       assert.equal(h.document.querySelector('[data-draft-screen][data-screen-id]'), null);
       await h.until(() => h.confirmEnabled(), 'confirm');
       await h.click('[data-testid="ai-confirm"]');
@@ -44,22 +45,45 @@ test('AI flow authoring UI', async t => {
     } finally { await h.cleanup(); }
   });
 
-  await t.test('confirm stays disabled while a target is unresolved or an assumption is unacknowledged', async () => {
+  await t.test('apply is enabled immediately and an untargeted step stays plain', async () => {
     const h = await harness('needs');
     try {
       await h.render();
       await h.generate('Pay a bill that still needs a target');
-      await h.until(() => /needs info/.test(h.reason()), 'unresolved reason');
-      assert.equal(h.document.querySelector('[data-testid="ai-confirm"]')?.getAttribute('aria-disabled'), 'true');
-      assert.match(h.reason(), /assumption is acknowledged/);
-      await h.fill('Needs info selector for open', 'Bills');
-      await h.clickText('Update');
-      await h.until(() => h.reason() === 'Confirm is unavailable until every assumption is acknowledged.', 'ack reason');
-      assert.equal(h.ai.generations, 1);
-      assert.ok(h.ai.previews >= 1);
-      await h.click('[aria-label="Paid means the confirmation screen."]');
-      await h.until(() => h.confirmEnabled(), 'acks complete');
+      await h.until(() => h.document.querySelector('[data-testid="ai-draft-chip"]')?.textContent === '✦ Draft', 'draft label');
+      const step = h.document.querySelector('[data-testid="ai-draft-step"]');
+      assert.equal(step?.textContent, '1 · Tap');
+      assert.equal(step?.classList.contains('is-specified'), false);
+      assert.equal(h.document.querySelector('.ai-check'), null);
+      assert.equal(h.document.querySelector('[data-testid="ai-review"]'), null);
+      assert.equal(h.document.querySelector('[aria-label="Paid means the confirmation screen."]'), null);
+      assert.equal(h.document.querySelector('[data-testid="ai-flow"] input[type="checkbox"]'), null);
+      assert.equal(h.document.querySelector('[data-testid="ai-meta"]'), null);
+      assert.equal(h.document.querySelector('[data-testid="ai-usage"]'), null);
       assert.equal(h.document.querySelector('[data-testid="ai-confirm-reason"]'), null);
+      assert.equal(h.confirmEnabled(), true);
+      const shown = [
+        h.document.querySelector('[data-testid="ai-capsule"]')?.textContent ?? '',
+        h.document.querySelector('[data-testid="ai-draft-zone"]')?.textContent ?? '',
+        h.document.querySelector('[data-testid="ai-flow"]')?.textContent ?? '',
+      ].join('\n');
+      assert.doesNotMatch(shown, /Needs a target|not run yet|screens ·|tokens|Open OpenRouter account|preflight|Confirm is unavailable|assumption is acknowledged|Flow ready/);
+      const ask = h.document.querySelector<HTMLInputElement>('[aria-label="Ask for changes"]');
+      assert.ok(ask);
+      assert.equal(ask.placeholder, 'Ask for changes');
+      assert.equal(ask.closest('[data-testid="ai-capsule"]'), h.document.querySelector('[data-testid="ai-capsule"]'));
+      assert.equal(h.document.querySelector('[data-testid="ai-confirm"]')?.textContent, '✓ Apply');
+      assert.equal(h.document.querySelector('[data-testid="ai-discard"]')?.getAttribute('aria-label'), 'Dismiss draft');
+      const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+      const rules = [...css.matchAll(/([^{}]*ai-capsule-(?:input|apply)[^{}]*)\{([^{}]*)\}/g)];
+      assert.ok(rules.length >= 4, 'capsule input and apply rules');
+      for (const [, , body] of rules) {
+        assert.doesNotMatch(body, /inset 0 -2px|text-decoration:\s*underline/);
+        assert.doesNotMatch(body, /border-bottom:\s*(?!0(?:;|\}|$))/);
+      }
+      assert.ok(rules.some(([, selector, body]) => selector.trim().startsWith('.ai-flow .ai-capsule-input:focus') && body.includes('box-shadow:0 0 0 2px')));
+      assert.ok(rules.some(([, selector, body]) => selector.trim().startsWith('.ai-flow .ai-capsule-apply:focus') && body.includes('box-shadow:0 0 0 3px')));
+      assert.equal(h.ai.generations, 1);
     } finally { await h.cleanup(); }
   });
 
@@ -427,16 +451,16 @@ test('AI flow authoring UI', async t => {
     } finally { await h.cleanup(); }
   });
 
-  await t.test('a valid preview opens the overlay with Apply, Refine, and Dismiss', async () => {
+  await t.test('a valid preview opens the dashed draft and the AI capsule', async () => {
     const h = await harness('ready');
     try {
       await h.render();
       await h.generate('Pay the electric bill');
-      await h.until(() => !!h.document.querySelector('[data-testid="ai-draft-chip"]'), 'overlay');
-      assert.match(h.document.body.textContent ?? '', /Flow ready\. Use this flow\?/);
-      assert.ok(h.document.querySelector('[data-testid="ai-confirm"]'));
-      assert.ok(h.document.querySelector('[data-testid="ai-refine"]'));
-      assert.ok(h.document.querySelector('[data-testid="ai-discard"]'));
+      await h.until(() => h.document.querySelector('[data-testid="ai-draft-chip"]')?.textContent === '✦ Draft', 'overlay');
+      assert.doesNotMatch(h.document.body.textContent ?? '', /Flow ready\. Use this flow\?/);
+      assert.equal(h.document.querySelector('[data-testid="ai-confirm"]')?.textContent, '✓ Apply');
+      assert.ok(h.document.querySelector('[aria-label="Ask for changes"]'));
+      assert.equal(h.document.querySelector('[data-testid="ai-discard"]')?.getAttribute('aria-label'), 'Dismiss draft');
       assert.equal(h.document.querySelector('[aria-label="Flow description"]'), null);
     } finally { await h.cleanup(); }
   });
@@ -527,11 +551,16 @@ test('AI flow authoring UI', async t => {
       await h.generate('Pay the electric bill');
       await h.until(() => !!h.document.querySelector('[data-testid="ai-draft-chip"]'), 'overlay');
       const origin = h.workspaceId;
-      await h.click('[data-testid="ai-refine"]');
-      await h.fill('Flow description', 'Add a receipt');
+      const previousJobId = await h.untilJobId();
+      await h.fill('Ask for changes', 'Add a receipt');
       h.ai.holdNextJob();
-      await h.click('[data-testid="ai-generate"]');
+      await act(async () => {
+        const field = h.document.querySelector<HTMLInputElement>('[aria-label="Ask for changes"]');
+        assert.ok(field);
+        field.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+      });
       await h.until(() => h.status() === 'generating', 'refining');
+      assert.equal((h.ai.generationBodies.at(-1) as {previousJobId?: string}).previousJobId, previousJobId);
       await h.service.save({name: 'Other workspace', yaml: 'appId: com.example.HybridApp\n---\n- launchApp\n'});
       await h.click('[aria-label="Manage workspace"]');
       await h.clickText('View all workspaces');
@@ -596,7 +625,7 @@ test('AI flow authoring UI', async t => {
       const savedBefore = JSON.stringify((await h.saved()).canvas);
       const existingBefore = h.positions();
       await h.generate('Pay the electric bill');
-      await h.until(() => h.document.querySelectorAll('[data-testid="ai-draft-screen"]').length === 3 && !!h.document.querySelector('[data-testid="ai-draft-review"]'), 'placed draft');
+      await h.until(() => h.document.querySelectorAll('[data-testid="ai-draft-screen"]').length === 3 && !!h.document.querySelector('[data-testid="ai-capsule"]'), 'placed draft');
       const origin = viewport.getBoundingClientRect();
       const scroll = {left: viewport.scrollLeft || 0, top: viewport.scrollTop || 0};
       const obstacles = chrome.filter(([name]) => name !== 'canvas-viewport' && name !== 'canvas-surface').map(([, value]) => value);
@@ -614,15 +643,15 @@ test('AI flow authoring UI', async t => {
         assert.ok(screenBox.left >= origin.left - 1 && screenBox.top >= origin.top - 1 && screenBox.right <= origin.right + 1 && screenBox.bottom <= origin.bottom + 1, node.dataset.draftScreen + ' is outside the viewport');
         for (const obstacle of obstacles) assert.equal(overlaps(screenBox, obstacle), false, node.dataset.draftScreen + ' is under floating chrome');
       }
-      const review = h.document.querySelector<HTMLElement>('[data-testid="ai-draft-review"]')!;
-      assert.equal(review.style.position, 'fixed');
-      assert.ok(Number(review.style.zIndex) > 12);
-      const reviewBox = {left: parseFloat(review.style.left), top: parseFloat(review.style.top), right: parseFloat(review.style.left) + parseFloat(review.style.width), bottom: parseFloat(review.style.top) + 44};
-      for (const obstacle of obstacles) assert.equal(overlaps(reviewBox, obstacle), false, 'review intersects ' + obstacle.top);
-      for (const id of ['ai-confirm', 'ai-refine', 'ai-discard']) {
+      const capsule = h.document.querySelector<HTMLElement>('[data-testid="ai-capsule"]')!;
+      assert.ok(capsule);
+      const ask = h.document.querySelector<HTMLElement>('[aria-label="Ask for changes"]');
+      assert.ok(ask);
+      assert.equal(ask.closest('[data-testid="ai-capsule"]'), capsule);
+      for (const id of ['ai-confirm', 'ai-discard']) {
         const button = h.document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
         assert.ok(button, id);
-        assert.equal(button.closest('[data-testid="ai-draft-review"]'), review);
+        assert.equal(button.closest('[data-testid="ai-capsule"]'), capsule);
         assert.notEqual(button.getAttribute('aria-hidden'), 'true');
         assert.equal(button.hidden, false);
       }
