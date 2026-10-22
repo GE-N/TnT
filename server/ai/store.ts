@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {chmod, mkdir, open, readdir, readFile, rename, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {JOURNAL_TTL_MS, type Preview} from '../authoring/types.js';
+import {sanitizeQuestions, type ClarifyingQuestion} from './questions.js';
 
 export type GenerationPhase = 'context' | 'model' | 'validating' | 'repairing' | 'previewing';
 export type GenerationState = 'running' | 'pending' | 'needsInfo' | 'failed' | 'cancelled';
@@ -30,6 +31,8 @@ export type StoredJob = {
   /** Upstream provider the response reported. Absent when the response omitted it. */
   upstreamProvider?: string;
   contextTrimmed?: boolean;
+  /** Sanitized clarifying questions. Present only when the job is needsInfo and the model asked something usable. */
+  questions?: ClarifyingQuestion[];
 };
 export type GenerationView = {
   id: string;
@@ -51,12 +54,13 @@ export type GenerationView = {
   model?: string;
   upstreamProvider?: string;
   contextTrimmed?: boolean;
+  questions?: ClarifyingQuestion[];
 };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const STATES = new Set<GenerationState>(['running', 'pending', 'needsInfo', 'failed', 'cancelled']);
 const PHASES = new Set<GenerationPhase>(['context', 'model', 'validating', 'repairing', 'previewing']);
-const FIELDS = ['id', 'workspaceId', 'baseRevision', 'state', 'phase', 'provenance', 'contractVersion', 'createdAt', 'expiresAt', 'draft', 'previewId', 'preview', 'previewExpiresAt', 'error', 'inputTokens', 'outputTokens', 'cost', 'model', 'upstreamProvider', 'contextTrimmed'] as const;
+const FIELDS = ['id', 'workspaceId', 'baseRevision', 'state', 'phase', 'provenance', 'contractVersion', 'createdAt', 'expiresAt', 'draft', 'previewId', 'preview', 'previewExpiresAt', 'error', 'inputTokens', 'outputTokens', 'cost', 'model', 'upstreamProvider', 'contextTrimmed', 'questions'] as const;
 
 export function jobExpiry(now: Date) {
   return new Date(now.getTime() + JOURNAL_TTL_MS).toISOString();
@@ -98,6 +102,7 @@ export function sanitizeJob(value: unknown): StoredJob | undefined {
   const cost = finite(item.cost);
   const model = shortText(item.model);
   const upstreamProvider = shortText(item.upstreamProvider);
+  const questions = sanitizeQuestions(item.questions);
   return {
     id: item.id,
     workspaceId: item.workspaceId,
@@ -119,6 +124,7 @@ export function sanitizeJob(value: unknown): StoredJob | undefined {
     ...(model ? {model} : {}),
     ...(upstreamProvider ? {upstreamProvider} : {}),
     ...(item.contextTrimmed === true ? {contextTrimmed: true} : {}),
+    ...(questions.length ? {questions} : {}),
   };
 }
 
@@ -207,5 +213,6 @@ export function generationView(job: StoredJob, now: number): GenerationView {
     ...(job.model ? {model: job.model} : {}),
     ...(job.upstreamProvider ? {upstreamProvider: job.upstreamProvider} : {}),
     ...(job.contextTrimmed ? {contextTrimmed: true} : {}),
+    ...(job.questions?.length ? {questions: job.questions.map(question => ({...question, options: [...question.options]}))} : {}),
   };
 }

@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {test} from 'node:test';
 import {referenceCatalog} from '../server/canvas.js';
 import {projectCanvasRoute} from '../server/canvas-route.js';
 import {AuthoringHttpError} from '../server/authoring/errors.js';
+import {createApiHandler} from '../server/http.js';
+import {createRunner} from '../server/runner.js';
 import {selectScenario} from '../server/scenario-definitions.js';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import {createWriteFaults} from '../server/workspace-store.js';
@@ -168,6 +171,124 @@ test('undo restores the pre-apply workspace byte-for-byte and removes imported t
     await assert.rejects(() => f.service.authoring.undo({workspaceId: before.id, expectedRevision: undone.revision, receiptId: undone.receiptId}), (error: unknown) => { assert.equal((error as AuthoringHttpError).status, 409); return true; });
     clock += 8 * 24 * 60 * 60 * 1000;
     await assert.rejects(() => f.service.authoring.apply({workspaceId: before.id, expectedRevision: opened.revision, previewId: opened.preview.previewId, idempotencyKey: 'undo-me', acknowledgedAssumptionKeys: []}, undefined, {authoring: 'ai'}), (error: unknown) => { assert.equal((error as AuthoringHttpError).code, 'IDEMPOTENCY_EXPIRED'); return true; });
+  } finally { await f.cleanup(); }
+});
+
+function unresolvedDraft(): FlowDraft {
+  return {
+    schemaVersion: 1,
+    mode: 'createScenario',
+    name: 'Ask later',
+    appId: 'com.example.TnTProof',
+    parameters: [],
+    execution: {setup: {kind: 'launchApp'}, handlerRefs: [], mock: {kind: 'none'}},
+    screens: [{key: 'home', kind: 'create', title: 'Home'}],
+    visits: [{
+      key: 'homeVisit',
+      screenKey: 'home',
+      operations: [
+        {key: 'seeHome', kind: 'checkVisible', target: {kind: 'unresolved', description: 'the title'}},
+        {key: 'tapNext', kind: 'tap', target: {kind: 'unresolved', description: 'the button'}, destination: {kind: 'stay'}},
+        {key: 'typeName', kind: 'input', value: {kind: 'unresolved', description: 'the name'}},
+      ],
+    }],
+    scripts: [],
+    assumptions: [],
+  };
+}
+
+test('unresolved targets apply as plain steps and other blocking diagnostics still return 422', async () => {
+  const f = await authoringFixture();
+  const runner = createRunner({artifactDirectory: f.root, execute: async () => { throw new Error('no execution'); }});
+  const server = createServer(createApiHandler(runner, f.root, undefined, f.service));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('No port');
+  const base = `http://127.0.0.1:${address.port}`;
+  const token = ((await (await fetch(`${base}/api/status`)).json()) as {token: string}).token;
+  const post = (path: string, body: unknown) => fetch(base + path, {
+    method: 'POST',
+    headers: {'content-type': 'application/json', origin: base, 'x-tnt-token': token},
+    body: JSON.stringify(body),
+  });
+  try {
+    const before = await f.service.workspace(f.workspace.id);
+    const opened = await openPreview(f.service, before, unresolvedDraft());
+    assert.equal(opened.preview.applicable, true, opened.preview.diagnostics.map(item => `${item.code} ${item.message}`).join('\n'));
+    assert.equal(opened.preview.authoringComplete, false);
+    assert.equal(opened.preview.runReadiness, 'blocked');
+    assert.deepEqual(opened.preview.diagnostics.find(item => item.code === 'UNRESOLVED_TARGET')?.blocks, ['run']);
+    assert.deepEqual(opened.preview.diagnostics.find(item => item.code === 'UNRESOLVED_VALUE')?.blocks, ['run']);
+    const appliedResponse = await post('/api/authoring/apply', {
+      workspaceId: before.id, expectedRevision: opened.revision, previewId: opened.preview.previewId, idempotencyKey: 'plain-step', acknowledgedAssumptionKeys: [],
+    });
+    assert.equal(appliedResponse.status, 200);
+    const applied = await appliedResponse.json() as {revision: number; scenarioId: string; runReadiness: string};
+    assert.equal(applied.runReadiness, 'blocked');
+    const saved = await f.service.workspace(before.id);
+    const steps = saved.canvas?.screens.flatMap(screen => screen.tests) ?? [];
+    const tap = steps.find(test => test.label === 'Tap');
+    const check = steps.find(test => test.label === 'Check');
+    const input = steps.find(test => test.label === 'Input');
+    assert.ok(tap && check && input);
+    assert.equal(tap.role, 'action');
+    assert.equal(tap.tap, undefined);
+    assert.equal(tap.check, undefined);
+    assert.equal(tap.input, undefined);
+    assert.equal(tap.back, undefined);
+    assert.equal(check.role, 'assertion');
+    assert.equal(check.check, undefined);
+    assert.equal(input.input, '');
+    assert.equal(saved.yaml.includes('the button'), false);
+    assert.equal(saved.yaml.includes('the title'), false);
+    assert.equal(saved.yaml.includes('tapOn'), false);
+    assert.equal(saved.yaml.includes('assertVisible'), false);
+    const visit = saved.canvas?.paths.find(path => path.scenarioId === applied.scenarioId)?.visits?.[0];
+    assert.equal(visit?.operationIds?.includes(tap.id), true);
+    assert.equal(visit?.operationIds?.includes(check.id), true);
+    const undoneResponse = await post('/api/authoring/undo', {workspaceId: before.id, expectedRevision: applied.revision, receiptId: await journalId(f.root)});
+    assert.equal(undoneResponse.status, 200);
+    const restored = await f.service.workspace(before.id);
+    assert.deepEqual(contentOf(restored), contentOf(before));
+
+    const blockedDraft = unresolvedDraft();
+    (blockedDraft.visits[0].operations[1] as {destination: {kind: string; visitKey: string}}).destination = {kind: 'visit', visitKey: 'missing'};
+    const blocked = await openPreview(f.service, restored, blockedDraft);
+    assert.equal(blocked.preview.applicable, false);
+    const rejected = await post('/api/authoring/apply', {
+      workspaceId: restored.id, expectedRevision: blocked.revision, previewId: blocked.preview.previewId, idempotencyKey: 'still-blocked', acknowledgedAssumptionKeys: [],
+    });
+    assert.equal(rejected.status, 422);
+    const body = await rejected.json() as {code: string; diagnostics?: {code: string}[]};
+    assert.equal(body.code, 'APPLY_REJECTED');
+    assert.equal(body.diagnostics?.some(item => item.code === 'INVALID_TRANSITION'), true);
+    assert.equal((await f.service.workspace(restored.id)).scenarios?.length ?? 0, 0);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await f.cleanup();
+  }
+});
+
+test('an unresolved navigating tap in the example draft applies as a plain step', async () => {
+  const f = await authoringFixture();
+  try {
+    const value = draft();
+    (value.visits[0].operations[1] as {target: unknown}).target = {kind: 'unresolved', description: 'the details control'};
+    const opened = await openPreview(f.service, f.workspace, value);
+    assert.equal(opened.preview.applicable, true, opened.preview.diagnostics.map(item => `${item.code} ${item.message}`).join('\n'));
+    assert.equal(opened.preview.runReadiness, 'blocked');
+    const applied = await f.service.authoring.apply({
+      workspaceId: f.workspace.id, expectedRevision: opened.revision, previewId: opened.preview.previewId, idempotencyKey: 'nav-tap', acknowledgedAssumptionKeys: [],
+    });
+    assert.equal(applied.runReadiness, 'blocked');
+    const saved = await f.service.workspace(f.workspace.id);
+    const tap = saved.canvas?.screens.flatMap(screen => screen.tests).find(test => test.label === 'Tap' && test.reference.fingerprint === 'draft');
+    assert.ok(tap);
+    assert.equal(tap.tap, undefined);
+    assert.equal(tap.check, undefined);
+    assert.equal(saved.canvas?.edges.some(edge => edge.actionTestId === tap.id || edge.actionTestIds?.includes(tap.id)), true);
+    assert.equal(saved.scenarios?.[0].scripts?.some(row => row.beforeStep.fingerprint === 'draft'), true);
+    assert.equal(saved.yaml.includes('the details control'), false);
   } finally { await f.cleanup(); }
 });
 

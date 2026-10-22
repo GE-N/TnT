@@ -8,6 +8,7 @@ import {CONTRACT_VERSION, type Preview} from '../authoring/types.js';
 import {AiHttpError, canAutoRetry, mapProviderFailure} from './errors.js';
 import {formatAiLog, type AiLogEvent} from './log.js';
 import {assertUserPrompt, assembleCall, packPrompt, schemaAttachment, type PromptContext} from './prompt.js';
+import {assertAnswers, modelDraftSchema, sanitizeQuestions, splitModelDraft, type ClarifyingAnswer, type ClarifyingQuestion} from './questions.js';
 import {MAX_REPAIR_ROUNDS, repairDecision, repairNote} from './repair.js';
 import {abortError, isAbortError, MAX_UPSTREAM_POSTS, ProviderRequestError, RESPONSE_BYTE_LIMIT, type FlowModelProvider, type Msg, type UpstreamBudget, type Usage} from './providers/types.js';
 import {createJobStore, generationView, jobExpiry, type GenerationView, type StoredJob} from './store.js';
@@ -18,6 +19,8 @@ export const MAX_OUTPUT_TOKENS = 8_192;
 export {MAX_UPSTREAM_POSTS, RESPONSE_BYTE_LIMIT};
 
 const FLOW_SCHEMA = JSON.parse(readFileSync(fileURLToPath(new URL('../../docs/contracts/ai-flow-v1/flow-draft.schema.json', import.meta.url)), 'utf8')) as object;
+/** Contract schema plus clarifying questions. Sent to the model only; stripped before preview. */
+const MODEL_SCHEMA = modelDraftSchema(FLOW_SCHEMA);
 const APP_ID = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -139,7 +142,7 @@ function parseModelDraft(text: string): {ok: true; value: unknown} | {ok: false;
 function requestOf(input: unknown) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Provide a generation request.');
   const body = input as Record<string, unknown>;
-  if (Object.keys(body).some(key => !['workspaceId', 'expectedRevision', 'expectedSettingsRevision', 'prompt', 'previousJobId'].includes(key))) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Unknown generation field.');
+  if (Object.keys(body).some(key => !['workspaceId', 'expectedRevision', 'expectedSettingsRevision', 'prompt', 'previousJobId', 'answers'].includes(key))) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Unknown generation field.');
   let expectedSettingsRevision: number | undefined;
   if (body.expectedSettingsRevision !== undefined) {
     if (!Number.isInteger(body.expectedSettingsRevision) || (body.expectedSettingsRevision as number) < 0) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Provide the settings revision.');
@@ -150,12 +153,15 @@ function requestOf(input: unknown) {
     if (typeof body.previousJobId !== 'string' || !ID.test(body.previousJobId)) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Provide the previous generation.');
     previousJobId = body.previousJobId;
   }
+  const answers = body.answers === undefined ? undefined : assertAnswers(body.answers);
+  if (answers?.length && !previousJobId) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Answer a question by refining the current generation.');
   return {
     workspaceId: requireWorkspaceId(body.workspaceId),
     expectedRevision: requireRevision(body.expectedRevision),
     prompt: assertUserPrompt(body.prompt),
     expectedSettingsRevision,
     previousJobId,
+    ...(answers?.length ? {answers} : {}),
   };
 }
 
@@ -261,7 +267,7 @@ export function createJobs(deps: {
     let upstreamProvider: string | undefined;
     const started = scheduler.now();
     try {
-      for await (const event of resolved.provider.generate({system, messages, schema: FLOW_SCHEMA, maxOutputTokens: MAX_OUTPUT_TOKENS, signal: call.signal, budget})) {
+      for await (const event of resolved.provider.generate({system, messages, schema: MODEL_SCHEMA, maxOutputTokens: MAX_OUTPUT_TOKENS, signal: call.signal, budget})) {
         if (job.state !== 'running') return 'stopped' as const;
         if (event.delta) text += event.delta;
         if (Buffer.byteLength(text) > RESPONSE_BYTE_LIMIT) throw new ProviderRequestError({code: 'PROVIDER_REJECTED', message: 'The model output was too large.', retryable: false, outputTooLarge: true});
@@ -316,14 +322,18 @@ export function createJobs(deps: {
     }
   }
 
-  function applyOutcome(job: StoredJob, preview: Preview) {
+  function applyOutcome(job: StoredJob, preview: Preview, questions?: ClarifyingQuestion[]) {
     job.preview = preview;
     job.previewId = preview.previewId;
     job.previewExpiresAt = preview.expiresAt;
     job.phase = 'previewing';
-    const decision = preview.applicable ? 'accept' : repairDecision(preview.diagnostics);
-    if (preview.applicable || decision === 'accept') job.state = 'pending';
-    else if (decision === 'needs-info') job.state = 'needsInfo';
+    const decision = repairDecision(preview.diagnostics);
+    delete job.questions;
+    if (decision === 'needs-info') {
+      job.state = 'needsInfo';
+      const clean = sanitizeQuestions(questions);
+      if (clean.length) job.questions = clean;
+    } else if (preview.applicable || decision === 'accept') job.state = 'pending';
     else {
       job.state = 'failed';
       job.error = {code: 'AUTHORING_INVALID', message: 'The draft still has validation issues.', retryable: false};
@@ -331,15 +341,15 @@ export function createJobs(deps: {
     release(job);
   }
 
-  function keepLast(job: StoredJob) {
+  function keepLast(job: StoredJob, questions?: ClarifyingQuestion[]) {
     if (job.preview) {
-      applyOutcome(job, job.preview);
+      applyOutcome(job, job.preview, questions);
       return;
     }
     fail(job, 'INVALID_AI_OUTPUT', 'The model did not return a flow draft.', false);
   }
 
-  async function execute(job: StoredJob, resolved: ResolvedModel, prompt: string, draft: unknown, parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number) {
+  async function execute(job: StoredJob, resolved: ResolvedModel, prompt: string, draft: unknown, answers: ClarifyingAnswer[] | undefined, parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number) {
     job.phase = 'context';
     const context = await deps.authoring.context({workspaceId: job.workspaceId, expectedRevision: job.baseRevision});
     if (job.state !== 'running') return;
@@ -351,16 +361,18 @@ export function createJobs(deps: {
     if (typeof contextId !== 'string' || !contextId) { fail(job, 'AUTHORING_INVALID', 'The workspace could not be prepared for generation.', false); return; }
     const carriesSchema = resolved.provider.sendsJsonSchema === true;
     // response_format carries the schema, or the instructions do. Reserve whichever copy is not already in the prompt text.
-    const schemaReserve = carriesSchema ? Buffer.byteLength(schemaAttachment(FLOW_SCHEMA)) : 0;
+    const schemaReserve = carriesSchema ? Buffer.byteLength(schemaAttachment(MODEL_SCHEMA)) : 0;
     const packed = packPrompt({
       prompt, appId, context: factsFrom(context), ...(draft !== undefined ? {draft} : {}),
-      ...(carriesSchema ? {} : {schema: FLOW_SCHEMA}),
+      ...(answers?.length ? {answers} : {}),
+      ...(carriesSchema ? {} : {schema: MODEL_SCHEMA}),
       extraBytes: schemaReserve,
     });
     if (packed.contextTrimmed) job.contextTrimmed = true;
     let round = 0;
     let previous = '';
     let note = '';
+    let pendingQuestions: ClarifyingQuestion[] | undefined;
     while (job.state === 'running') {
       job.phase = round === 0 ? 'model' : 'repairing';
       const assembled = assembleCall({
@@ -373,7 +385,7 @@ export function createJobs(deps: {
       if (!assembled.fits || budget.remaining() < 1) {
         if (round === 0 && !assembled.fits) { fail(job, 'PROMPT_TOO_LONG', 'The prompt does not fit the model budget.', false); return; }
         if (round === 0) { fail(job, 'TIMEOUT', 'The generation timed out.', true); return; }
-        keepLast(job);
+        keepLast(job, pendingQuestions);
         return;
       }
       const result = await callWithRetries(job, resolved, packed.system, assembled.messages, parent, budget, deadlineAt);
@@ -391,26 +403,28 @@ export function createJobs(deps: {
         continue;
       }
       job.phase = 'previewing';
-      const preview = await deps.authoring.preview({workspaceId: job.workspaceId, expectedRevision: job.baseRevision, contextId, draft: parsed.value});
+      const split = splitModelDraft(parsed.value);
+      pendingQuestions = split.questions;
+      const preview = await deps.authoring.preview({workspaceId: job.workspaceId, expectedRevision: job.baseRevision, contextId, draft: split.draft});
       if (job.state !== 'running') return;
-      job.draft = parsed.value;
-      const decision = preview.applicable ? 'accept' : repairDecision(preview.diagnostics);
+      job.draft = split.draft;
+      const decision = repairDecision(preview.diagnostics);
       if (decision === 'repair' && round < MAX_REPAIR_ROUNDS && budget.remaining() >= 1) {
         const repairAssembled = assembleCall({system: packed.system, user: packed.user, previous: result.text, repair: repairNote(preview.diagnostics), extraBytes: schemaReserve});
         if (!repairAssembled.fits) {
-          applyOutcome(job, preview);
+          applyOutcome(job, preview, pendingQuestions);
           return;
         }
         note = repairNote(preview.diagnostics);
         round++;
         continue;
       }
-      applyOutcome(job, preview);
+      applyOutcome(job, preview, pendingQuestions);
       return;
     }
   }
 
-  async function run(job: StoredJob, resolved: ResolvedModel, prompt: string, draft: unknown) {
+  async function run(job: StoredJob, resolved: ResolvedModel, prompt: string, draft: unknown, answers?: ClarifyingAnswer[]) {
     const controller = new AbortController();
     runtimes.set(job.id, controller);
     const started = scheduler.now();
@@ -422,7 +436,7 @@ export function createJobs(deps: {
     const cancelJob = scheduler.schedule(timeouts.deadlineMs, () => {
       if (fail(job, 'TIMEOUT', 'The generation timed out.', true)) controller.abort();
     });
-    try { await execute(job, resolved, prompt, draft, controller.signal, budget, deadlineAt); }
+    try { await execute(job, resolved, prompt, draft, answers, controller.signal, budget, deadlineAt); }
     catch (error) {
       if (job.state === 'running') {
         if (error instanceof AuthoringHttpError) {
@@ -484,7 +498,7 @@ export function createJobs(deps: {
         }
         throw error;
       }
-      const promise = run(job, resolved, request.prompt, draft).catch(() => { if (job.state === 'running') fail(job, 'PROVIDER_UNAVAILABLE', 'Generation failed.', true); });
+      const promise = run(job, resolved, request.prompt, draft, request.answers).catch(() => { if (job.state === 'running') fail(job, 'PROVIDER_UNAVAILABLE', 'Generation failed.', true); });
       runs.set(job.id, promise);
       void promise.finally(() => { if (runs.get(job.id) === promise) runs.delete(job.id); });
       return generationView(job, deps.now().getTime());
