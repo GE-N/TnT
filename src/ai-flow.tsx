@@ -243,7 +243,7 @@ function fromView(current: AiDraft, view: GenerationView, revision: number): AiD
   if (view.state === 'running') status = revisionStale ? 'stale' : 'generating';
   else if (view.state === 'failed') status = 'failed';
   else if (view.state === 'cancelled') status = 'prompting';
-  else if (revisionStale || current.status === 'stale') status = 'stale';
+  else if (revisionStale || (current.status === 'stale' && !preview)) status = 'stale';
   else if (view.state === 'needsInfo' || (preview && !preview.applicable)) status = 'needsInfo';
   else status = 'pending';
   return {
@@ -367,6 +367,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const memory = useRef(new Map<string, AiDraft>());
   const workspaceRef = useRef(input.workspaceId);
   const pendingAnswers = useRef<{key: string; answer: string}[] | undefined>(undefined);
+  /** Revision written by the current refine's own save. That bump must not mark the kept draft stale. */
+  const ownSaveRevision = useRef<number | undefined>(undefined);
   const persistTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const acked = useRef(new Set<string>());
   const openSettingsRef = useRef(input.onOpenSettings);
@@ -402,6 +404,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     setDraft(current => {
       if (current.baseRevision === undefined) return current;
       if (input.revision === current.baseRevision) return current;
+      if (ownSaveRevision.current !== undefined && input.revision === ownSaveRevision.current) return current;
       if (current.status !== 'generating' && current.status !== 'pending' && current.status !== 'needsInfo') return current;
       return {...current, status: 'stale'};
     });
@@ -417,29 +420,19 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       try { view = await client.getGeneration(id); }
       catch { return; }
       if (stopped || jobGuard.current !== id || view.id !== id) return;
-      const refining = draftRef.current.refining && !!draftRef.current.draft && !!draftRef.current.restoreStatus && REVIEW.includes(draftRef.current.restoreStatus);
-      if (view.state === 'failed' && refining) {
-        pendingAnswers.current = undefined;
-        jobGuard.current = draftRef.current.previousJobId ?? draftRef.current.jobId;
+      if (view.state === 'failed' && draftRef.current.refining && draftRef.current.draft && draftRef.current.restoreStatus && REVIEW.includes(draftRef.current.restoreStatus)) {
         setOpen(false);
+        failRefine(draftRef.current.prompt, view.error ?? {code: 'REQUEST_FAILED', message: 'Couldn’t generate.', retryable: false});
+        return;
       }
       setDraft(current => {
         if (current.jobId !== id) return current;
         if (current.status !== 'generating' && current.status !== 'stale') return current;
-        if (view.state === 'failed' && current.refining && current.draft && current.restoreStatus && REVIEW.includes(current.restoreStatus)) {
-          return {
-            ...current,
-            status: current.restoreStatus,
-            jobId: current.previousJobId ?? current.jobId,
-            refining: false,
-            restoreStatus: undefined,
-            previousJobId: undefined,
-            phase: undefined,
-            error: view.error ?? {code: 'REQUEST_FAILED', message: 'Couldn’t generate.', retryable: false},
-          };
-        }
         const next = presentResult(current, view, revisionRef.current, canvasRef.current);
-        if (view.state !== 'running') return {...next, refining: false, restoreStatus: undefined, previousJobId: undefined};
+        if (view.state !== 'running') {
+          if (next.baseRevision === revisionRef.current) ownSaveRevision.current = undefined;
+          return {...next, refining: false, restoreStatus: undefined, previousJobId: undefined};
+        }
         return next;
       });
     };
@@ -461,20 +454,26 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         void client.cancelGeneration(leaving.jobId);
       }
       pendingAnswers.current = undefined;
+      const targetRevision = ownSaveRevision.current;
+      const needsRetarget = restoring && !!leaving.draft && targetRevision !== undefined && leaving.baseRevision !== targetRevision;
       const snapshot = restoring
-        ? {...leaving, status: leaving.restoreStatus!, jobId: leaving.previousJobId, refining: false, restoreStatus: undefined, previousJobId: undefined, phase: undefined, workspaceId: previousId, error: undefined, notice: undefined}
+        ? {...leaving, status: needsRetarget ? 'stale' as const : leaving.restoreStatus!, jobId: leaving.previousJobId, refining: false, restoreStatus: undefined, previousJobId: undefined, phase: undefined, workspaceId: previousId, error: undefined, notice: undefined}
         : leaving.draft && !inflight
           ? {...leaving, workspaceId: previousId}
           : (leaving.jobId || leaving.prompt)
             ? {...leaving, status: 'prompting' as const, jobId: inflight ? undefined : leaving.jobId, phase: undefined, refining: false, restoreStatus: undefined, previousJobId: undefined, draft: inflight ? undefined : leaving.draft, workspaceId: previousId, notice: inflight ? 'Cancelled. Nothing was changed.' : leaving.notice}
             : undefined;
-      if (inflight) {
+      if (inflight && !needsRetarget) {
         const persisted = restoring && snapshot?.jobId ? viewDraft(snapshot) : null;
         const write = () => void persistLeftWorkspace(previousId, persisted);
         write();
         persistTimers.current.push(setTimeout(write, 400));
       }
       if (snapshot && (snapshot.draft || snapshot.jobId || snapshot.prompt)) memory.current.set(previousId, snapshot);
+      if (needsRetarget && snapshot && leaving.draft && leaving.previousJobId && leaving.restoreStatus && typeof targetRevision === 'number') {
+        void retargetKeptDraft(snapshot, previousId, targetRevision, leaving.draft, leaving.previousJobId, leaving.restoreStatus);
+      }
+      ownSaveRevision.current = undefined;
       workspaceRef.current = currentId;
       const remembered = memory.current.get(currentId);
       if (remembered && (remembered.draft || remembered.jobId || remembered.prompt)) {
@@ -533,6 +532,40 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     callbacks.current.rememberView({aiDraft: null});
   }
 
+  /** Re-previews a kept draft for a workspace the user has already left, so switch-back can Apply it. */
+  async function retargetKeptDraft(base: AiDraft, workspaceId: string, revision: number, draft: FlowDraft, jobId: string, restoreStatus: AiDraftStatus) {
+    try {
+      const context = await client.createContext({workspaceId, expectedRevision: revision});
+      const preview = await client.preview({workspaceId, expectedRevision: revision, contextId: context.contextId, draft});
+      const ready: AiDraft = {
+        ...base,
+        status: preview.baseRevision === revision ? restoreStatus : 'stale',
+        jobId,
+        previewId: preview.previewId,
+        baseRevision: preview.baseRevision,
+        expiresAt: preview.expiresAt,
+        applicable: preview.applicable,
+        diagnostics: preview.diagnostics,
+        requiredAssumptionKeys: preview.requiredAssumptionKeys,
+        refining: false,
+        restoreStatus: undefined,
+        previousJobId: undefined,
+        phase: undefined,
+        workspaceId,
+        error: undefined,
+        notice: undefined,
+      };
+      memory.current.set(workspaceId, ready);
+      if (workspaceRef.current === workspaceId && draftRef.current.jobId === jobId) setDraft(ready);
+      const persisted = viewDraft(ready);
+      if (persisted) void persistLeftWorkspace(workspaceId, persisted);
+    } catch {
+      const stale: AiDraft = {...base, status: 'stale', jobId, workspaceId, refining: false, restoreStatus: undefined, previousJobId: undefined, phase: undefined};
+      memory.current.set(workspaceId, stale);
+      if (workspaceRef.current === workspaceId && draftRef.current.jobId === jobId) setDraft(stale);
+    }
+  }
+
   async function persistLeftWorkspace(workspaceId: string, aiDraft: PersistedAiDraft | null) {
     try {
       const detail = await callbacks.current.fetchWorkspace(workspaceId);
@@ -541,16 +574,42 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     } catch { /* The in-memory snapshot still returns on switch back. */ }
   }
 
-  /** Puts the same draft back and shows the error in the capsule. A failed first generation stays in the composer. */
+  /**
+   * Puts the kept draft back after a failed or cancelled refine.
+   * The refine's save already moved the workspace, so the old preview is re-created at that revision
+   * before Apply is enabled. Until that preview exists the draft is stale and Refresh is the way forward.
+   */
   function failRefine(text: string, error?: AiDraft['error'], notice?: string) {
     const current = draftRef.current;
     if (!current.refining || !current.draft || !current.restoreStatus || !REVIEW.includes(current.restoreStatus)) return false;
     pendingAnswers.current = undefined;
     const jobId = current.previousJobId ?? current.jobId;
+    const draft = current.draft;
+    const restoreStatus = current.restoreStatus;
+    const workspaceId = current.workspaceId || input.workspaceId;
     jobGuard.current = jobId;
+    const target = ownSaveRevision.current ?? revisionRef.current;
+    const mismatch = current.baseRevision !== target;
+    setOpen(false);
+    if (!mismatch || !workspaceId || !jobId) {
+      if (ownSaveRevision.current === target) ownSaveRevision.current = undefined;
+      setDraft({
+        ...current,
+        status: restoreStatus,
+        jobId,
+        prompt: text || current.prompt,
+        refining: false,
+        restoreStatus: undefined,
+        previousJobId: undefined,
+        phase: undefined,
+        error,
+        notice,
+      });
+      return true;
+    }
     setDraft({
       ...current,
-      status: current.restoreStatus,
+      status: 'stale',
       jobId,
       prompt: text || current.prompt,
       refining: false,
@@ -560,7 +619,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       error,
       notice,
     });
-    setOpen(false);
+    void repreview(draft, target, workspaceId, false, {status: restoreStatus, error, notice, jobId});
     return true;
   }
 
@@ -616,6 +675,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       return;
     }
     const baseRevision = saved.metadata?.revision ?? 0;
+    if (refining) ownSaveRevision.current = baseRevision;
     try {
       const started = await client.startGeneration({
         workspaceId: saved.id,
@@ -633,7 +693,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         prompt: text,
         jobId: started.id,
         workspaceId: saved?.id,
-        baseRevision,
+        ...(refining ? {} : {baseRevision}),
         phase: started.phase,
         refining,
         ...(refining && previousJobId ? {previousJobId} : {previousJobId: undefined}),
@@ -662,22 +722,26 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     setDisclosure(null);
   }
 
-  async function repreview(nextDraft: FlowDraft, revision: number, workspaceId: string, regenerate: boolean) {
+  async function repreview(nextDraft: FlowDraft, revision: number, workspaceId: string, regenerate: boolean, restore?: {status: AiDraftStatus; error?: AiDraft['error']; notice?: string; jobId?: string}) {
     const watched = jobGuard.current;
     try {
       const context = await client.createContext({workspaceId, expectedRevision: revision});
       const preview = await client.preview({workspaceId, expectedRevision: revision, contextId: context.contextId, draft: nextDraft});
       if (jobGuard.current !== watched) return;
-      if (regenerate && needsRegeneration(undefined, preview.diagnostics)) {
+      if (!restore && regenerate && needsRegeneration(undefined, preview.diagnostics)) {
         await generate(draftRef.current.prompt);
         return;
       }
+      const matched = preview.baseRevision === revision;
+      if (matched && ownSaveRevision.current === revision) ownSaveRevision.current = undefined;
       setDraft(current => {
-        if (watched && current.jobId !== watched) return current;
+        if (watched && current.jobId !== watched && current.jobId !== restore?.jobId) return current;
+        const status: AiDraftStatus = !matched ? 'stale' : restore?.status ?? (preview.applicable ? 'pending' : 'needsInfo');
         return {
           ...current,
           draft: nextDraft,
-          status: preview.baseRevision !== revision ? 'stale' : preview.applicable ? 'pending' : 'needsInfo',
+          status,
+          ...(restore?.jobId ? {jobId: restore.jobId} : {}),
           previewId: preview.previewId,
           baseRevision: preview.baseRevision,
           expiresAt: preview.expiresAt,
@@ -685,13 +749,36 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
           diagnostics: preview.diagnostics,
           requiredAssumptionKeys: preview.requiredAssumptionKeys,
           phase: undefined,
-          error: undefined,
+          refining: false,
+          restoreStatus: undefined,
+          previousJobId: undefined,
+          error: restore ? restore.error : undefined,
+          notice: restore ? restore.notice : current.notice,
         };
       });
+      if (restore) setOpen(false);
     } catch (error) {
       if (jobGuard.current !== watched) return;
-      if (regenerate && error instanceof AiFlowRequestError && needsRegeneration(error.code, error.diagnostics)) {
+      if (!restore && regenerate && error instanceof AiFlowRequestError && needsRegeneration(error.code, error.diagnostics)) {
         await generate(draftRef.current.prompt);
+        return;
+      }
+      if (restore) {
+        setDraft(current => {
+          if (watched && current.jobId !== watched && current.jobId !== restore.jobId) return current;
+          return {
+            ...current,
+            status: 'stale',
+            ...(restore.jobId ? {jobId: restore.jobId} : {}),
+            refining: false,
+            restoreStatus: undefined,
+            previousJobId: undefined,
+            phase: undefined,
+            error: restore.error ?? errorOf(error, 'The draft could not be previewed.'),
+            notice: restore.notice,
+          };
+        });
+        setOpen(false);
         return;
       }
       setDraft(current => watched && current.jobId !== watched ? current : {...current, error: errorOf(error, 'The draft could not be previewed.')});
@@ -800,20 +887,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     const inflight = current.status === 'generating' || (current.status === 'stale' && !!current.phase);
     if (current.refining && current.draft && current.previousJobId && current.restoreStatus && REVIEW.includes(current.restoreStatus)) {
       const refineId = inflight && id && id !== current.previousJobId ? id : undefined;
-      pendingAnswers.current = undefined;
-      jobGuard.current = current.previousJobId;
-      setDraft({
-        ...current,
-        status: current.restoreStatus,
-        jobId: current.previousJobId,
-        refining: false,
-        restoreStatus: undefined,
-        previousJobId: undefined,
-        phase: undefined,
-        error: undefined,
-        notice: 'Cancelled. Nothing was changed.',
-      });
-      setOpen(false);
+      failRefine(prompt, undefined, 'Cancelled. Nothing was changed.');
       if (refineId) {
         try { await client.cancelGeneration(refineId); }
         catch { /* The draft is already back. A late result is ignored. */ }
