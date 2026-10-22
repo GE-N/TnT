@@ -13,9 +13,62 @@ import type {ScenarioDetailsProps} from './scenario-details.js';
 import {Fragment,cloneElement,isValidElement,useContext,useEffect,useId,useLayoutEffect,useRef,useState,type ReactNode,type MouseEvent,type PointerEvent,type CSSProperties} from 'react';
 import type {YAMLReference,CanvasGraph,CanvasTest,CanvasDiagnostic,CanvasResult,CatalogEntry,ScreenNode} from '../server/canvas.js';
 import {inspectorWidth,placeInspector,visibleBounds,type InspectorPlacement,type Rect} from './inspector-placement.js';
+import {DRAFT_REVIEW_BAR,edgeInsets,placementForDraft,type Box,type Insets} from './draft-placement.js';
 const runLockReason='Unavailable while the scenario is running.';
 
 export const emptyCanvas=():CanvasGraph=>({screens:[],edges:[],paths:[]});
+export type DraftOverlay={nodes:{key:string;title:string;x:number;y:number;steps:{text:string;specified:boolean}[]}[];edges:{from:string;to:string;label:string}[];anchors:{key:string;x:number;y:number}[];existing:{screenId:string;key:string;steps:{text:string;specified:boolean}[]}[];settled?:boolean};
+const DRAFT_CHROME='.workspace-manager,.scenario-sequence-bar,.device-toolbar,.canvas-toolbar,.ai-launch,.ai-capsule,.floating-inspector,.scenario-details-panel,.workspace-advanced,.report-tools,.launch-tools,.screenshot-tools,.script-editor,.ai-settings-sheet,.canvas-route-bar,.run-error-toast';
+function chromeObstacles(viewport:Box):Box[]{
+ if(typeof document==='undefined')return [];
+ const boxes:Box[]=[];
+ for(const element of document.querySelectorAll<HTMLElement>(DRAFT_CHROME)){
+  if(element.closest('.canvas-surface'))continue;
+  if(element.hidden||element.getAttribute('aria-hidden')==='true'||element.getAttribute('data-inspector-yielded')==='true'||element.style.visibility==='hidden')continue;
+  const rect=element.getBoundingClientRect();
+  if(rect.width<8||rect.height<8)continue;
+  if(rect.right<viewport.left||rect.left>viewport.right||rect.bottom<viewport.top||rect.top>viewport.bottom)continue;
+  boxes.push({left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom});
+ }
+ return boxes;
+}
+function readViewport(node:HTMLElement|null){
+ if(!node)return;
+ const rect=node.getBoundingClientRect();
+ const width=rect.width>=40?rect.width:node.clientWidth;
+ const height=rect.height>=40?rect.height:node.clientHeight;
+ if(width<40||height<40)return;
+ return {left:rect.width>=40?rect.left:0,top:rect.height>=40?rect.top:0,width,height,scrollLeft:node.scrollLeft||0,scrollTop:node.scrollTop||0};
+}
+const DRAFT_CHIP=36;
+function draftCardHeight(steps:number){return Math.max(120,56+steps*24);}
+function DraftOverlayLayer({overlay,zoom,onMove}:{overlay:DraftOverlay;zoom:number;onMove?:(key:string,x:number,y:number)=>void}){
+ const points=new Map<string,{x:number;y:number}>();
+ for(const anchor of overlay.anchors)points.set(anchor.key,anchor);
+ for(const node of overlay.nodes)points.set(node.key,node);
+ const boxes=overlay.nodes;
+ const minX=boxes.length?Math.min(...boxes.map(node=>node.x)):0;
+ const minY=boxes.length?Math.min(...boxes.map(node=>node.y)):0;
+ const maxX=boxes.length?Math.max(...boxes.map(node=>node.x)):0;
+ const maxBottom=boxes.length?Math.max(...boxes.map(node=>node.y+draftCardHeight(node.steps.length))):0;
+ const zone=boxes.length?{left:minX-12,top:minY-DRAFT_CHIP,width:maxX+250+12-(minX-12),height:maxBottom+12-(minY-DRAFT_CHIP)}:undefined;
+ const height=Math.max(1650,...overlay.nodes.map(node=>node.y+draftCardHeight(node.steps.length)+40),...overlay.anchors.map(anchor=>anchor.y+220));
+ const drag=useRef<{key:string;x:number;y:number;clientX:number;clientY:number}|undefined>(undefined);
+ const clampX=(value:number)=>Math.max(0,Math.min(2400,value));
+ const clampY=(value:number)=>Math.max(0,Math.min(1400,value));
+ function startDrag(event:PointerEvent<HTMLElement>,key:string,x:number,y:number){if(!onMove||event.button!==0)return;event.stopPropagation();if(typeof event.currentTarget.setPointerCapture==='function')event.currentTarget.setPointerCapture(event.pointerId);drag.current={key,x,y,clientX:event.clientX,clientY:event.clientY};}
+ function dragMove(event:PointerEvent<HTMLElement>,key:string){const current=drag.current;if(!current||current.key!==key||!onMove)return;onMove(key,clampX(current.x+(event.clientX-current.clientX)/zoom),clampY(current.y+(event.clientY-current.clientY)/zoom));}
+ function endDrag(){drag.current=undefined;}
+ return <>
+  {zone&&<div className="ai-draft-zone" data-testid="ai-draft-zone" style={{left:zone.left,top:zone.top,width:zone.width,height:zone.height}} aria-hidden="true"><span className="ai-draft-chip" data-testid="ai-draft-chip">✦ Draft</span></div>}
+  <svg className="ai-draft-lines" width="2700" height={height} aria-hidden="true">{overlay.edges.map(edge=>{
+   const from=points.get(edge.from);const to=points.get(edge.to);if(!from||!to)return null;
+   const start=[from.x+258,from.y+58];const end=[to.x-8,to.y+58];const middle=(start[0]+end[0])/2;
+   return <g key={edge.from+'>'+edge.to}><path d={`M${start[0]},${start[1]} C${middle},${start[1]} ${middle},${end[1]} ${end[0]},${end[1]}`} fill="none"/><foreignObject x={middle-78} y={Math.max(4,(start[1]+end[1])/2-16)} width="156" height="28"><div className="ai-draft-edge">{edge.label}</div></foreignObject></g>;
+  })}</svg>
+  {overlay.nodes.map(node=><article key={node.key} className={'ai-draft-node'+(onMove?' is-draggable':'')} data-testid="ai-draft-screen" data-draft-screen={node.key} style={{left:node.x,top:node.y}} tabIndex={onMove?0:-1} aria-label={'Draft screen '+node.title} onPointerDown={event=>startDrag(event,node.key,node.x,node.y)} onPointerMove={event=>dragMove(event,node.key)} onPointerUp={endDrag} onPointerCancel={endDrag} onKeyDown={event=>{const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const direction=vectors[event.key];if(!direction||!onMove)return;event.preventDefault();const amount=event.shiftKey?40:10;onMove(node.key,clampX(node.x+direction[0]*amount),clampY(node.y+direction[1]*amount));}}><p>{node.title}</p><ol className="ai-draft-steps">{node.steps.map((step,index)=><li key={index} data-testid="ai-draft-step" className={step.specified?'is-specified':undefined}>{step.text}</li>)}</ol></article>)}
+ </>;
+}
 const identity=()=>crypto.randomUUID();
 const NEW_SCREEN='__new_screen__';
 const MISSING_DESTINATION='__missing_destination__';
@@ -86,7 +139,7 @@ const referenceLabel=(reference:YAMLReference)=>reference.kind==='setup'?'Setup 
 export type CanvasInspection={kind:'visit'|'occurrence'|'transition';id:string};
 const rectOf=(element:Element):Rect=>{const {left,top,width,height}=element.getBoundingClientRect();return {left,top,width,height};};
 const focusableSelector='button:not(:disabled),select:not(:disabled),input:not(:disabled),textarea:not(:disabled),summary,[tabindex]:not([tabindex="-1"])';
-export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selected,renderChecks,renderInspector,inspectorNote,onCloseInspector,highlightedEdgeId,onDelete,onRename,onAdd,onRun,onInfo,onAppend,onRemoveCapture,initialView,onViewportChange,inspectorYielded=false}: {onInspect?:(selection:CanvasInspection)=>void;onAppend?:(id:string)=>void;onInfo?:(id:string)=>void;graph:CanvasGraph;pathId?:string;result?:CanvasResult;onMove?:(id:string,x:number,y:number)=>void;onSelect?:(id:string)=>void;selected?:string;renderChecks?:(screenId:string)=>ReactNode;renderInspector?:(screenId:string)=>ReactNode;inspectorNote?:string;onCloseInspector?:()=>void;highlightedEdgeId?:string;onDelete?:(id:string)=>void;onRename?:(id:string,title:string)=>void;onAdd?:(x:number,y:number)=>void;onRun?:()=>void;onRemoveCapture?:(id:string)=>void;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number};onViewportChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number})=>void;inspectorYielded?:boolean}){
+export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selected,renderChecks,renderInspector,inspectorNote,onCloseInspector,highlightedEdgeId,onDelete,onRename,onAdd,onRun,onInfo,onAppend,onRemoveCapture,initialView,onViewportChange,inspectorYielded=false,draftOverlay,draftReview,onDraftPlace,onDraftMove}: {onInspect?:(selection:CanvasInspection)=>void;onAppend?:(id:string)=>void;onInfo?:(id:string)=>void;graph:CanvasGraph;pathId?:string;result?:CanvasResult;onMove?:(id:string,x:number,y:number)=>void;onSelect?:(id:string)=>void;selected?:string;renderChecks?:(screenId:string)=>ReactNode;renderInspector?:(screenId:string)=>ReactNode;inspectorNote?:string;onCloseInspector?:()=>void;highlightedEdgeId?:string;onDelete?:(id:string)=>void;onRename?:(id:string,title:string)=>void;onAdd?:(x:number,y:number)=>void;onRun?:()=>void;onRemoveCapture?:(id:string)=>void;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number};onViewportChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number})=>void;inspectorYielded?:boolean;draftOverlay?:DraftOverlay;draftReview?:ReactNode;onDraftPlace?:(positions:Record<string,{x:number;y:number}>)=>void;onDraftMove?:(key:string,x:number,y:number)=>void}){
  const [zoom,setZoom]=useState(()=>Math.max(.4,Math.min(1.4,typeof initialView?.zoom==='number'?initialView.zoom:.85)));
  const [contextMenu,setContextMenu]=useState<{left:number;top:number;x:number;y:number;screenId?:string}>();
  const menu=useRef<HTMLDivElement>(null);
@@ -133,7 +186,43 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   const node=viewportRef.current;
   onViewportChange?.({zoom,scrollLeft:node?.scrollLeft??0,scrollTop:node?.scrollTop??0});
  },[zoom]);
- const boardHeight=Math.max(1650,...graph.screens.map(screen=>screen.y+(nodeHeights[screen.id]??200)+120));const marker=useId().replaceAll(':','');
+ const boardHeight=Math.max(1650,...graph.screens.map(screen=>screen.y+(nodeHeights[screen.id]??200)+120),...(draftOverlay?.nodes.map(node=>node.y+280)??[]));const marker=useId().replaceAll(':','');
+ const graphRef=useRef(graph);graphRef.current=graph;
+ const placeRef=useRef(onDraftPlace);placeRef.current=onDraftPlace;
+ const viewportChangeRef=useRef(onViewportChange);viewportChangeRef.current=onViewportChange;
+ const placedFor=useRef('');
+ const [layoutEpoch,setLayoutEpoch]=useState(0);
+ const draftKey=draftOverlay?.nodes.map(node=>node.key).join('\0')??'';
+ useEffect(()=>{
+  const node=viewportRef.current;
+  if(!node||typeof ResizeObserver==='undefined')return;
+  const observer=new ResizeObserver(()=>setLayoutEpoch(value=>value+1));
+  observer.observe(node);
+  return()=>observer.disconnect();
+ },[]);
+ useLayoutEffect(()=>{
+  const node=viewportRef.current;
+  const read=readViewport(node);
+  if(!draftKey)placedFor.current='';
+  if(!read)return;
+  const viewportBox={left:read.left,top:read.top,right:read.left+read.width,bottom:read.top+read.height};
+  const insets=edgeInsets(viewportBox,chromeObstacles(viewportBox));
+  const rounded={top:Math.round(insets.top),right:Math.round(insets.right),bottom:Math.round(insets.bottom),left:Math.round(insets.left)};
+  let scrollLeft=read.scrollLeft;
+  let scrollTop=read.scrollTop;
+  if(draftOverlay&&draftKey&&!draftOverlay.settled&&placeRef.current&&placedFor.current!==draftKey){
+   const placed=placementForDraft({existing:graphRef.current.screens.map(screen=>({x:screen.x,y:screen.y})),count:draftOverlay.nodes.length,zoom,viewport:{width:read.width,height:read.height,scrollLeft,scrollTop},insets:rounded});
+   if(placed.positions.length===draftOverlay.nodes.length){
+    placedFor.current=draftKey;
+    placeRef.current(Object.fromEntries(draftOverlay.nodes.map((item,index)=>[item.key,placed.positions[index]!])));
+    if(node&&(Math.abs((node.scrollLeft||0)-placed.scrollLeft)>1||Math.abs((node.scrollTop||0)-placed.scrollTop)>1)){
+     node.scrollLeft=placed.scrollLeft;node.scrollTop=placed.scrollTop;
+     scrollLeft=node.scrollLeft||placed.scrollLeft;scrollTop=node.scrollTop||placed.scrollTop;
+     viewportChangeRef.current?.({zoom,scrollLeft,scrollTop});
+    }
+   }
+  }else if(draftOverlay?.settled)placedFor.current=draftKey;
+ },[draftKey,draftOverlay,draftOverlay?.settled,zoom,layoutEpoch]);
  const drag=useRef<{id:string;x:number;y:number;clientX:number;clientY:number}|undefined>(undefined);
  function startDrag(event:PointerEvent<HTMLElement>,id:string,x:number,y:number){if(!onMove||event.button!==0)return;if(typeof event.currentTarget.setPointerCapture==='function')event.currentTarget.setPointerCapture(event.pointerId);drag.current={id,x,y,clientX:event.clientX,clientY:event.clientY};}
  function dragMove(event:PointerEvent<HTMLElement>,id:string){const current=drag.current;if(!current||current.id!==id)return;onMove?.(id,Math.max(0,Math.min(2400,current.x+(event.clientX-current.clientX)/zoom)),Math.max(0,Math.min(1400,current.y+(event.clientY-current.clientY)/zoom)));}
@@ -195,7 +284,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  const highlighted=highlightedEdgeId===edge.id;
  return <g key={edge.id} role="img" aria-label={'Connection '+from.title+' to '+to.title} data-edge-id={edge.id} data-highlighted={highlighted?'true':undefined} className={(selectedEdges.has(edge.id)?'selected-transition':'unselected-transition')+(highlighted?' highlighted-transition':'')}><path d={`M${start[0]},${start[1]} C${middle},${start[1]} ${middle},${end[1]} ${end[0]},${end[1]}`} stroke={highlighted?'var(--inspector-highlight)':selectedEdges.has(edge.id)?color(status):'var(--border-strong)'} strokeWidth={highlighted?3:selectedEdges.has(edge.id)?1.25:1} fill="none" markerEnd={`url(#${marker})`} strokeDasharray={highlighted||selectedEdges.has(edge.id)?undefined:'6 5'}/><foreignObject x={middle-80} y={Math.max(4,(start[1]+end[1])/2-72)} width="160" height="48"><div className="transition-label">{edge.responseCondition}{selectedEdges.has(edge.id)&&<small>{status??'Visits '+route!.edgeIds.flatMap((id,index)=>id===edge.id?[index+1+' → '+(index+2)]:[]).join(', ')}</small>}{result&&!selectedEdges.has(edge.id)&&<small>Outside scenario</small>}</div></foreignObject></g>;
  })}</svg>
- {graph.screens.map(screen=>{const outcome=result?.screens.find(item=>item.id===screen.id)?.status;return <article key={screen.id} data-screen-id={screen.id} className={'screen-node '+(selectedScreens.has(screen.id)?'on-route ':'')+(selected===screen.id?'selected-screen':'')} style={{left:screen.x,top:screen.y,borderColor:selectedScreens.has(screen.id)?color(outcome):undefined}} aria-label={'Screen '+screen.title} tabIndex={onDelete||onInfo?0:undefined} onContextMenu={event=>openMenu(event,screen.id)} onKeyDown={event=>{
+ {graph.screens.map(screen=>{const outcome=result?.screens.find(item=>item.id===screen.id)?.status;const added=draftOverlay?.existing.find(item=>item.screenId===screen.id);return <article key={screen.id} data-screen-id={screen.id} className={'screen-node '+(added?'has-ai-draft-steps ':'')+(selectedScreens.has(screen.id)?'on-route ':'')+(selected===screen.id?'selected-screen':'')} style={{left:screen.x,top:screen.y,borderColor:selectedScreens.has(screen.id)?color(outcome):undefined}} aria-label={'Screen '+screen.title} tabIndex={onDelete||onInfo?0:undefined} onContextMenu={event=>openMenu(event,screen.id)} onKeyDown={event=>{
   if(event.target!==event.currentTarget||!renderInspector)return;
   if(event.key==='Enter'&&onSelect){event.preventDefault();focusInspector.current=screen.id;onSelect(screen.id);if(selected===screen.id)relayout(value=>value+1);}
   if(event.key==='Escape'&&inspected?.id===screen.id){event.preventDefault();closeInspector();}
@@ -203,9 +292,11 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  <button className="screen-node-heading" aria-label={'Select screen '+screen.title} onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>startDrag(event,screen.id,screen.x,screen.y)} onPointerMove={event=>dragMove(event,screen.id)} onPointerUp={endDrag} onPointerCancel={endDrag} onKeyDown={event=>{const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const direction=vectors[event.key];if(!direction||!onMove)return;event.preventDefault();const amount=event.shiftKey?40:10;onMove(screen.id,Math.max(0,Math.min(2400,screen.x+direction[0]*amount)),Math.max(0,Math.min(1400,screen.y+direction[1]*amount)));}}><span className="screen-icon">▣</span><span><span className={onRename?'screen-title-placeholder':undefined}>{screen.title}</span></span><span className="node-handle"/></button>
  {onRename&&<NodeTitle screenId={screen.id} title={screen.title} onRename={title=>onRename(screen.id,title)} onSelect={()=>onSelect?.(screen.id)}/>}
  {screen.referenceScreenshot?<div className="screen-reference-frame" onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>startDrag(event,screen.id,screen.x,screen.y)} onPointerMove={event=>dragMove(event,screen.id)} onPointerUp={endDrag} onPointerCancel={endDrag}><img className="screen-reference" draggable={false} src={screen.referenceScreenshot} alt={'Reference for '+screen.title}/>{onRemoveCapture&&<button type="button" className="screen-reference-delete" aria-label={'Delete capture for '+screen.title} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onRemoveCapture(screen.id);}}><DeleteIcon/></button>}</div>:<p className="screen-capture-label">No capture yet</p>}
+ {added&&<ol className="ai-draft-steps ai-draft-on-screen" data-testid="ai-draft-existing-steps">{added.steps.map((step,index)=><li key={index} data-testid="ai-draft-step" className={step.specified?'is-specified':undefined}>{step.text}</li>)}</ol>}
  {(outcome==='passed'||outcome==='failed')&&<p className={'node-outcome outcome '+outcome}>{outcome==='passed'?'✓':outcome==='failed'?'✕':'○'} {outcome}</p>}
  </article>;})}
- {!graph.screens.length&&<div className="canvas-empty"><h3>Build your screen map</h3><p>Add a screen and describe its checks. Screen titles are descriptive.</p></div>}
+ {draftOverlay&&<DraftOverlayLayer overlay={draftOverlay} zoom={zoom} onMove={onDraftMove}/>}
+ {!graph.screens.length&&!draftOverlay?.nodes.length&&<div className="canvas-empty"><h3>Build your screen map</h3><p>Add a screen and describe its checks. Screen titles are descriptive.</p></div>}
  </div></div></div>
  {contextMenu&&(contextMenu.screenId?onDelete||onInfo||onAppend:onAdd||onRun)&&<div ref={menu} className="canvas-context-menu" role="menu" aria-label={contextMenu.screenId?'Node menu':'Canvas menu'} style={{left:contextMenu.left,top:contextMenu.top}} onContextMenu={event=>event.preventDefault()} onKeyDown={event=>{
   if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
@@ -226,7 +317,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  </div>;
 }
 
-export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,onRun,onRepairSource,scenarioMode=false,scenarioId,scenarios=[],initialView,onViewChange,picker,cards,onCardPosition,yamlDeletionWarnings,onYamlDelete,run,draftInvalid=false,runScripts,reservedLines,scenarioPanel,onScenarioPanelChange}:{onRepairSource?:(ownerId:string)=>void;scenarioId?:string;scenarios?:{id:string;name:string;pathId?:string}[];scenarioMode?:boolean;onRun?:()=>void;yaml?:string;onYamlChange?:(yaml:string)=>void;graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string};onViewChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number;selectedScreenId:string;selectedVisitId:string})=>void;picker?:PickerSession;cards?:{picker?:CardPosition;yaml?:CardPosition};onCardPosition?:(card:'picker'|'yaml',position:CardPosition)=>void;yamlDeletionWarnings?:(index:number)=>string[];onYamlDelete?:(yaml:string,index:number)=>()=>void;run?:InspectorRunFeed;draftInvalid?:boolean;runScripts?:RunScriptModel;reservedLines?:number[];scenarioPanel?:ReactNode;onScenarioPanelChange?:(open:boolean)=>void}){
+export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathChange,disabled,yaml,onYamlChange,onRun,onRepairSource,scenarioMode=false,scenarioId,scenarios=[],initialView,onViewChange,picker,cards,onCardPosition,yamlDeletionWarnings,onYamlDelete,run,draftInvalid=false,runScripts,reservedLines,scenarioPanel,onScenarioPanelChange,draftOverlay,draftReview,onDraftPlace,onDraftMove}:{onRepairSource?:(ownerId:string)=>void;scenarioId?:string;scenarios?:{id:string;name:string;pathId?:string}[];scenarioMode?:boolean;onRun?:()=>void;yaml?:string;onYamlChange?:(yaml:string)=>void;graph:CanvasGraph|undefined;onChange:(graph:CanvasGraph|undefined)=>void;catalog:CatalogEntry[];diagnostics:CanvasDiagnostic[];pathId:string;onPathChange:(id:string)=>void;disabled:boolean;initialView?:{zoom?:number;scrollLeft?:number;scrollTop?:number;selectedScreenId?:string;selectedVisitId?:string};onViewChange?:(view:{zoom:number;scrollLeft:number;scrollTop:number;selectedScreenId:string;selectedVisitId:string})=>void;picker?:PickerSession;cards?:{picker?:CardPosition;yaml?:CardPosition};onCardPosition?:(card:'picker'|'yaml',position:CardPosition)=>void;yamlDeletionWarnings?:(index:number)=>string[];onYamlDelete?:(yaml:string,index:number)=>()=>void;run?:InspectorRunFeed;draftInvalid?:boolean;runScripts?:RunScriptModel;reservedLines?:number[];scenarioPanel?:ReactNode;onScenarioPanelChange?:(open:boolean)=>void;draftOverlay?:DraftOverlay;draftReview?:ReactNode;onDraftPlace?:(positions:Record<string,{x:number;y:number}>)=>void;onDraftMove?:(key:string,x:number,y:number)=>void}){
  const [pending,setPending]=useState<{graph:CanvasGraph;source?:string;warnings:string[]}>();
  const [clearPending,setClearPending]=useState<{graph:CanvasGraph;source?:string;title:string;visits:string[]}>();
  const [linkedEdgeId,setLinkedEdgeId]=useState<string>();
@@ -733,7 +824,7 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  {graph&&<>
  {!scenarioMode&&<div className="canvas-route-bar"><label htmlFor={apiId+'-path'}>Scenario path</label><select id={apiId+'-path'} value={pathId} disabled={disabled} onChange={event=>onPathChange(event.target.value)}><option value="">Explicitly select a route</option>{graph.paths.map(path=><option key={path.id} value={path.id}>{path.name}</option>)}</select><span>{path?.edgeIds.length??0} selected transitions</span></div>}
  
- <CanvasBoard inspectorYielded={inspectorYielded||panelOpen} initialView={initialView} onViewportChange={next=>{viewport.current=next;onViewChange?.({...next,selectedScreenId:selected,selectedVisitId:selectedVisit});}} highlightedEdgeId={highlightedEdge?.id} inspectorNote={highlightNote||undefined} onCloseInspector={()=>{setSelected('');setSelectedVisit('');}} onAppend={scenarioMode&&path?.screenId&&!path.finished&&!disabled&&!runLocked?id=>perform(()=>appendScreen(id)):undefined} graph={boardGraph!} pathId={pathId} result={scenarioMode?undefined:canvasResult} selected={selected} onRun={disabled||runLocked?undefined:onRun} onAdd={disabled||runLocked?undefined:(x,y)=>perform(()=>addScreen('New screen',x,y))} onRename={disabled||runLocked?undefined:(id,title)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,title}:screen)})} onInfo={disabled?undefined:id=>{setNodeInfoId(id);setSelected(id);setError('');}} onDelete={disabled||runLocked?undefined:deleteScreen} onSelect={id=>{setSelected(id);setSelectedVisit(path?routeVisits(graph,path).find((visit,index)=>visitScreenId(graph,path,index)===id)?.id??'':'');setRepairTest('');}} renderInspector={yaml!==undefined&&onYamlChange?renderVisitSections:undefined} onMove={disabled||runLocked?undefined:(id,x,y)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,x,y}:screen)})} onRemoveCapture={disabled||runLocked?undefined:id=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,referenceScreenshot:undefined}:screen)})}/>
+ <CanvasBoard draftOverlay={draftOverlay} draftReview={draftReview} onDraftPlace={onDraftPlace} onDraftMove={onDraftMove} inspectorYielded={inspectorYielded||panelOpen} initialView={initialView} onViewportChange={next=>{viewport.current=next;onViewChange?.({...next,selectedScreenId:selected,selectedVisitId:selectedVisit});}} highlightedEdgeId={highlightedEdge?.id} inspectorNote={highlightNote||undefined} onCloseInspector={()=>{setSelected('');setSelectedVisit('');}} onAppend={scenarioMode&&path?.screenId&&!path.finished&&!disabled&&!runLocked?id=>perform(()=>appendScreen(id)):undefined} graph={boardGraph!} pathId={pathId} result={scenarioMode?undefined:canvasResult} selected={selected} onRun={disabled||runLocked?undefined:onRun} onAdd={disabled||runLocked?undefined:(x,y)=>perform(()=>addScreen('New screen',x,y))} onRename={disabled||runLocked?undefined:(id,title)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,title}:screen)})} onInfo={disabled?undefined:id=>{setNodeInfoId(id);setSelected(id);setError('');}} onDelete={disabled||runLocked?undefined:deleteScreen} onSelect={id=>{setSelected(id);setSelectedVisit(path?routeVisits(graph,path).find((visit,index)=>visitScreenId(graph,path,index)===id)?.id??'':'');setRepairTest('');}} renderInspector={yaml!==undefined&&onYamlChange?renderVisitSections:undefined} onMove={disabled||runLocked?undefined:(id,x,y)=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,x,y}:screen)})} onRemoveCapture={disabled||runLocked?undefined:id=>onChange({...graph,screens:graph.screens.map(screen=>screen.id===id?{...screen,referenceScreenshot:undefined}:screen)})}/>
  {!scenarioMode&&<p className="field-hint">The selected route runs initial checks, ordered connection actions, then destination checks. Other branches are not selected automatically. Unassociated YAML commands remain in execution. Results map after the run; live per-step reporting remains unavailable. Declared setup and checkpoint-specific handler outcomes map after completion.</p>}
  {!scenarioMode&&<div className="canvas-inspectors">{Boolean(testLabel||from||to||action||assertion||condition||pathName||nextEdge)&&<button onClick={()=>{setTestLabel('');setFrom('');setTo('');setAction('');setAssertion('');setCondition('');setPathName('');setNextEdge('');}}>Cancel canvas drafts</button>}<fieldset disabled={disabled}><legend>Advanced YAML associations</legend>
  {!screen&&<p className="field-hint">Select a node on the canvas to edit its YAML associations.</p>}
