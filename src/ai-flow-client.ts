@@ -1,5 +1,6 @@
 import type {ApplyResult, Diagnostic, Preview} from '../server/authoring/types.js';
 import type {AiModelInfo, AiPublicConfig, AiTestResult, ProviderId, StorageKind} from '../server/ai/config.js';
+import type {ClarifyingAnswer} from '../server/ai/questions.js';
 import type {GenerationPhase, GenerationState, GenerationView, JobError} from '../server/ai/store.js';
 
 export type {AiModelInfo, AiPublicConfig, AiTestResult, ApplyResult, Diagnostic, GenerationPhase, GenerationState, GenerationView, JobError, Preview, ProviderId, StorageKind};
@@ -7,6 +8,8 @@ export type {AiModelInfo, AiPublicConfig, AiTestResult, ApplyResult, Diagnostic,
 export const AI_POLL_MS = 500;
 export const PROMPT_CHAR_LIMIT = 4000;
 export const PROMPT_COUNTER_AT = 3600;
+/** Matches the generation API: an answer is at most 200 characters. */
+export const ANSWER_CHAR_LIMIT = 200;
 
 export class AiFlowRequestError extends Error {
   constructor(message: string, readonly status: number, readonly code: string, readonly diagnostics?: Diagnostic[]) {
@@ -39,6 +42,8 @@ export type GenerationRequest = {
   expectedSettingsRevision: number;
   prompt: string;
   previousJobId?: string;
+  /** Refines the current draft. The server requires previousJobId when this is set. */
+  answers?: ClarifyingAnswer[];
 };
 export type ContextRequest = {workspaceId: string; expectedRevision: number; screenIds?: string[]};
 export type AuthoringContext = {contextId: string; workspaceId: string; revision: number; expiresAt: string};
