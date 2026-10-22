@@ -6,6 +6,7 @@ import { resolve, extname, sep } from 'node:path';
 import { createRunner, type Execute } from './runner.js';
 import { createApiHandler } from './http.js';
 import { createScenarios } from './scenarios.js';
+import { createAi } from './ai/index.js';
 import { createMaestro } from './maestro.js';
 import {clearToolStarted,killProcess,lookupProcess,markToolStarted,recordSettledProcess} from './owned-process.js';
 import { sweepUnfinishedRuns } from './run-recovery.js';
@@ -32,6 +33,8 @@ await sweepUnfinishedRuns(ownershipRoot, { lookup: lookupProcess, kill: killProc
 const maestro = createMaestro({ prepareProcess: prepareProcess('maestro'), cancelProcess: cancelProcess('maestro'), noteProcess: noteProcess('maestro') });
 const runner = createRunner({ artifactDirectory, execute, ownershipDirectory: ownershipRoot, inspector: maestro });
 const scenarios = createScenarios({ root: ownershipRoot, runner, maestro, prepareProcess: prepareProcess('mockoon'), cancelProcess: cancelProcess('mockoon'), noteProcess: noteProcess('mockoon') });
+const ai = createAi({ root: ownershipRoot, authoring: scenarios.authoring, readWorkspace: id => scenarios.workspace(id) });
+await ai.ready;
 const production = process.argv.includes('--production');
 const server = createServer();
 let serve: (request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse) => void;
@@ -53,6 +56,6 @@ if (production) {
   const vite = await createViteServer({ server: { middlewareMode: true, hmr: { server } }, appType: 'spa' });
   serve = (request, response) => vite.middlewares(request, response);
 }
-server.on('request', createApiHandler(runner, artifactDirectory, serve, scenarios));
+server.on('request', createApiHandler(runner, artifactDirectory, serve, scenarios, ai));
 server.on('error', error => { console.error('Unable to start workbench:', error.message); process.exitCode = 1; });
 server.listen(port, '127.0.0.1', () => console.log(`TnT workbench: http://127.0.0.1:${port} (${production ? 'production' : 'development'})`));

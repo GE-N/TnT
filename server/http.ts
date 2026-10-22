@@ -1,6 +1,8 @@
 import {AuthoringHttpError} from './authoring/errors.js';
 import {decodeAuthoringJson} from './authoring/schema.js';
 import {REQUEST_LIMIT} from './authoring/types.js';
+import {AiHttpError} from './ai/errors.js';
+import type {AiService} from './ai/index.js';
 import {ScriptBlocked} from './script-validation.js';
 import {ScriptTrustConflict} from './script-trust-store.js';
 import {DraftConflict,WorkspaceConflict,WorkspacePayloadTooLarge} from './workspace-store.js';
@@ -13,7 +15,8 @@ import type { createScenarios } from './scenarios.js';
 
 export function createApiHandler(runner: ReturnType<typeof createRunner>, artifactDirectory: string,
   fallback?: (request: IncomingMessage, response: ServerResponse) => void,
-  scenarios?: ReturnType<typeof createScenarios>) {
+  scenarios?: ReturnType<typeof createScenarios>,
+  ai?: AiService) {
   const token = randomBytes(32).toString('hex');
   let launching = false;
   return async (request: IncomingMessage, response: ServerResponse) => {
@@ -39,8 +42,8 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         catch (error) { return json(200, { ready: false, devices: [], token, tool: 'Xcode simctl', error: message(error) }); }
       }
       if (request.headers['x-tnt-token'] !== token) return json(403, { error: 'Refresh the workbench to establish a runner session.' });
-      if (request.method === 'POST' && request.headers.origin !== `http://${host}`) return json(403, { error: 'A same-origin workbench request is required.' });
-      if (request.method === 'POST' && !request.headers['content-type']?.startsWith('application/json')) return json(415, { error: 'Send JSON.' });
+      if ((request.method === 'POST' || request.method === 'PUT') && request.headers.origin !== `http://${host}`) return json(403, { error: 'A same-origin workbench request is required.' });
+      if ((request.method === 'POST' || request.method === 'PUT') && !request.headers['content-type']?.startsWith('application/json')) return json(415, { error: 'Send JSON.' });
       const apps = /^\/api\/devices\/([^/]+)\/apps$/.exec(url.pathname);
       if (request.method === 'GET' && apps) return json(200, await runner.apps(apps[1]));
       if (request.method === 'POST' && url.pathname === '/api/picker/captures') return json(200, await runner.picker.capture(await readJson(request)));
@@ -138,9 +141,22 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
           return response.end(screen);
         }
       }
+      if (ai) {
+        if (request.method === 'GET' && url.pathname === '/api/ai/config') return json(200, await ai.getConfig());
+        if (request.method === 'PUT' && url.pathname === '/api/ai/config') return json(200, await ai.putConfig(await readJson(request)));
+        if (request.method === 'POST' && url.pathname === '/api/ai/config/test') return json(200, await ai.testConnection(await readJson(request)));
+        if (request.method === 'GET' && url.pathname === '/api/ai/models') return json(200, await ai.listModels(url.searchParams.get('provider')));
+        if (request.method === 'POST' && url.pathname === '/api/ai/generations') return json(202, await ai.start(await readJson(request)));
+        const generation = /^\/api\/ai\/generations\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(cancel))?$/.exec(url.pathname);
+        if (generation) {
+          if (request.method === 'GET' && !generation[2]) return json(200, await ai.get(generation[1]));
+          if (request.method === 'POST' && generation[2] === 'cancel') return json(200, await ai.cancel(generation[1]));
+        }
+      }
       return json(404, { error: 'Unknown runner operation.' });
     } catch (error) {
       if (error instanceof AuthoringHttpError) return json(error.status, error.body);
+      if (error instanceof AiHttpError) return json(error.status, error.body);
       if(error instanceof ScriptBlocked)return json(url.pathname==='/api/runs'?422:400,{blocked:error.blocked,error:error.message});
       if(error instanceof ScriptTrustConflict)return json(409,{error:error.message});
       const code = (error as NodeJS.ErrnoException).code;
