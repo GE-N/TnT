@@ -560,6 +560,9 @@ test('AI flow authoring UI', async t => {
         field.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
       });
       await h.until(() => h.status() === 'generating', 'refining');
+      assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]')?.textContent, '✦ Draft');
+      assert.equal(h.document.querySelectorAll('[data-testid="ai-draft-zone"]').length, 1);
+      assert.equal(h.document.body.textContent?.includes('Previous draft'), false);
       assert.equal((h.ai.generationBodies.at(-1) as {previousJobId?: string}).previousJobId, previousJobId);
       await h.service.save({name: 'Other workspace', yaml: 'appId: com.example.HybridApp\n---\n- launchApp\n'});
       await h.click('[aria-label="Manage workspace"]');
@@ -685,10 +688,175 @@ test('AI flow authoring UI', async t => {
       await h.cleanup();
     }
   });
+
+  await t.test('a needsInfo question lives in the capsule and one answer replaces the same draft', async () => {
+    const h = await harness('asks');
+    try {
+      await h.render();
+      await h.generate('Pay a bill that needs a title');
+      await h.until(() => h.document.querySelectorAll('[data-testid="ai-question"]').length === 2 && h.status() === 'needsInfo', 'questions');
+      const questions = [...h.document.querySelectorAll<HTMLElement>('[data-testid="ai-question"]')];
+      assert.match(questions[0]?.textContent ?? '', /Which title should the first step use/);
+      assert.match(questions[1]?.textContent ?? '', /Which control is Pay/);
+      assert.deepEqual([...questions[0].querySelectorAll('[data-testid="ai-question-option"]')].map(button => button.textContent), ['Home', 'Start', 'Welcome']);
+      assert.deepEqual([...questions[1].querySelectorAll('[data-testid="ai-question-option"]')].map(button => button.textContent), ['Pay', 'Confirm']);
+      assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]')?.textContent, '✦ Draft');
+      assert.equal(h.confirmEnabled(), true);
+      const jobId = await h.untilJobId();
+      await h.click('[data-testid="ai-question-option"][data-question-key="payTarget"]');
+      await h.until(() => h.ai.generationBodies.length >= 2, 'answer sent');
+      const sent = h.ai.generationBodies[1] as {previousJobId?: string; prompt?: string; answers?: {key: string; answer: string}[]};
+      assert.equal(sent.previousJobId, jobId);
+      assert.equal(sent.prompt, 'Pay');
+      assert.deepEqual(sent.answers, [{key: 'payTarget', answer: 'Pay'}]);
+      await h.until(() => h.document.querySelector('[data-testid="ai-question"]') === null && h.document.querySelector('[data-testid="ai-draft-step"]')?.textContent === '1 · Tap Home', 'draft replaced');
+      assert.equal(h.document.querySelectorAll('[data-testid="ai-draft-zone"]').length, 1);
+      assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]')?.textContent, '✦ Draft');
+      assert.equal(h.document.body.textContent?.includes('Previous draft'), false);
+      assert.equal(h.status(), 'pending');
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('a typed reply answers the first question and updates the same draft', async () => {
+    const h = await harness('asks');
+    try {
+      await h.render();
+      await h.generate('Pay a bill that needs a title');
+      await h.until(() => h.status() === 'needsInfo' && !!h.document.querySelector('[aria-label="Ask for changes"]'), 'reply field');
+      const jobId = await h.untilJobId();
+      await h.fill('Ask for changes', 'Start screen');
+      await act(async () => {
+        const field = h.document.querySelector<HTMLInputElement>('[aria-label="Ask for changes"]');
+        assert.ok(field);
+        field.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+      });
+      await h.until(() => h.ai.generationBodies.length >= 2, 'reply sent');
+      const sent = h.ai.generationBodies[1] as {previousJobId?: string; prompt?: string; answers?: {key: string; answer: string}[]};
+      assert.equal(sent.previousJobId, jobId);
+      assert.equal(sent.prompt, 'Start screen');
+      assert.deepEqual(sent.answers, [{key: 'homeVisible', answer: 'Start screen'}]);
+      await h.until(() => h.status() === 'pending' && h.document.querySelector('[data-testid="ai-question"]') === null, 'questions cleared');
+      assert.equal(h.document.querySelectorAll('[data-testid="ai-draft-zone"]').length, 1);
+      assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]')?.textContent, '✦ Draft');
+      assert.equal(h.document.body.textContent?.includes('Previous draft'), false);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('Apply on a needsInfo draft calls apply and succeeds', async () => {
+    const h = await harness('asks');
+    try {
+      await h.render();
+      await h.generate('Pay a bill that needs a title');
+      await h.until(() => h.status() === 'needsInfo' && h.confirmEnabled(), 'apply ready');
+      assert.equal(h.document.querySelector('[data-testid="ai-confirm-reason"]'), null);
+      await h.click('[data-testid="ai-confirm"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-provenance"]'), 'applied');
+      assert.equal(h.ai.applies, 1);
+      assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]'), null);
+      assert.equal(h.document.querySelector('[data-testid="ai-question"]'), null);
+      assert.equal(h.status(), 'idle');
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('a refine replaces the same draft and a failure keeps it', async () => {
+    const held = await harness('ready');
+    try {
+      await held.render();
+      await held.generate('Pay the electric bill');
+      await held.until(() => held.document.querySelector('[data-draft-screen="home"]') !== null, 'original draft');
+      held.ai.holdNextJob();
+      await held.fill('Ask for changes', 'Rename the last screen');
+      await act(async () => {
+        held.document.querySelector<HTMLInputElement>('[aria-label="Ask for changes"]')!.dispatchEvent(new held.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+      });
+      await held.until(() => held.status() === 'generating', 'refining');
+      assert.equal(held.document.querySelector('[data-testid="ai-draft-chip"]')?.textContent, '✦ Draft');
+      assert.equal(held.document.querySelectorAll('[data-testid="ai-draft-zone"]').length, 1);
+      assert.ok(held.document.querySelector('[data-draft-screen="home"]'));
+      assert.equal(held.document.body.textContent?.includes('Previous draft'), false);
+      assert.equal(held.document.body.textContent?.includes('Late refine'), false);
+      held.ai.release();
+      await held.until(() => !!held.document.querySelector('[data-draft-screen="late"]'), 'replaced in place');
+      assert.equal(held.document.querySelector('[data-draft-screen="home"]'), null);
+      assert.equal(held.document.querySelectorAll('[data-testid="ai-draft-zone"]').length, 1);
+      assert.equal(held.document.querySelector('[data-testid="ai-draft-chip"]')?.textContent, '✦ Draft');
+      assert.equal(held.document.body.textContent?.includes('Previous draft'), false);
+      assert.equal(held.status(), 'pending');
+    } finally { await held.cleanup(); }
+
+    const failed = await harness('ready');
+    try {
+      await failed.render();
+      await failed.generate('Pay the electric bill');
+      await failed.until(() => !!failed.document.querySelector('[data-draft-screen="home"]'), 'draft before failed refine');
+      failed.ai.rejectNextGeneration();
+      await failed.fill('Ask for changes', 'Add a receipt');
+      await act(async () => {
+        failed.document.querySelector<HTMLInputElement>('[aria-label="Ask for changes"]')!.dispatchEvent(new failed.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+      });
+      await failed.until(() => !!failed.document.querySelector('[data-testid="ai-capsule-error"]'), 'capsule error');
+      assert.ok(failed.status() === 'pending' || failed.status() === 'stale', failed.status());
+      assert.ok(failed.document.querySelector('[data-draft-screen="home"]'));
+      assert.equal(failed.document.querySelectorAll('[data-testid="ai-draft-zone"]').length, 1);
+      assert.equal(failed.document.querySelector('[data-testid="ai-draft-chip"]')?.textContent, '✦ Draft');
+      assert.equal(failed.document.body.textContent?.includes('Previous draft'), false);
+      assert.match(failed.document.querySelector('[data-testid="ai-capsule-error"]')?.textContent ?? '', /Settings changed/);
+    } finally { await failed.cleanup(); }
+  });
+
+  await t.test('steps added to an existing screen use the draft style until dismiss or apply', async () => {
+    const dismissed = await harness('on-existing');
+    try {
+      await dismissed.render();
+      await dismissed.addNode();
+      await dismissed.until(async () => {
+        if (!dismissed.workspaceId) return false;
+        const saved = await dismissed.saved();
+        return (saved.canvas?.screens.length ?? 0) === 1;
+      }, 'existing screen saved');
+      const placed = dismissed.positions();
+      await dismissed.generate('Add a pay step on this screen');
+      await dismissed.until(() => !!dismissed.document.querySelector('[data-testid="ai-draft-existing-steps"]'), 'steps on the existing screen');
+      const host = dismissed.document.querySelector<HTMLElement>('[data-screen-id].has-ai-draft-steps');
+      assert.ok(host);
+      assert.equal(host.querySelector('[data-testid="ai-draft-existing-steps"]')?.textContent, '1 · Go to Done');
+      assert.equal(host.querySelector('[data-testid="ai-draft-screen"]'), null);
+      assert.equal(dismissed.document.querySelectorAll('[data-testid="ai-draft-screen"]').length, 1);
+      assert.equal(dismissed.document.querySelector('[data-draft-screen="done"] p')?.textContent, 'Done');
+      assert.equal(dismissed.document.querySelector('[data-draft-screen="home"]'), null);
+      assert.equal(dismissed.positions(), placed);
+      await dismissed.click('[data-testid="ai-discard"]');
+      await dismissed.until(() => dismissed.status() === 'idle', 'dismissed');
+      assert.equal(dismissed.document.querySelector('.has-ai-draft-steps'), null);
+      assert.equal(dismissed.document.querySelector('[data-testid="ai-draft-existing-steps"]'), null);
+      assert.equal(dismissed.document.querySelector('[data-testid="ai-draft-chip"]'), null);
+      assert.equal(dismissed.positions(), placed);
+    } finally { await dismissed.cleanup(); }
+
+    const applied = await harness('on-existing');
+    try {
+      await applied.render();
+      await applied.addNode();
+      await applied.until(async () => {
+        if (!applied.workspaceId) return false;
+        return ((await applied.saved()).canvas?.screens.length ?? 0) === 1;
+      }, 'existing screen saved');
+      await applied.generate('Add a pay step on this screen');
+      await applied.until(() => !!applied.document.querySelector('.has-ai-draft-steps') && applied.confirmEnabled(), 'draft steps ready');
+      await applied.click('[data-testid="ai-confirm"]');
+      await applied.until(() => !!applied.document.querySelector('[data-testid="ai-provenance"]'), 'applied');
+      assert.equal(applied.ai.applies, 1);
+      assert.equal(applied.document.querySelector('.has-ai-draft-steps'), null);
+      assert.equal(applied.document.querySelector('[data-testid="ai-draft-existing-steps"]'), null);
+      assert.equal(applied.document.querySelector('[data-testid="ai-draft-chip"]'), null);
+      assert.ok(applied.document.querySelector('[data-screen-id]'));
+    } finally { await applied.cleanup(); }
+  });
 });
 
-type Mode = 'ready' | 'hold' | 'expired' | 'needs' | 'invalid' | 'authoring-failed';
-type Job = {id: string; workspaceId: string; baseRevision: number; state: 'running' | 'pending' | 'needsInfo' | 'failed' | 'cancelled'; phase: GenerationView['phase']; draft?: FlowDraft | Record<string, unknown>; preview?: Preview; model?: string; upstreamProvider?: string; error?: {code: string; message: string; retryable: boolean}};
+type Mode = 'ready' | 'hold' | 'expired' | 'needs' | 'invalid' | 'authoring-failed' | 'asks' | 'on-existing';
+type AskedQuestion = {key: string; about?: string; text: string; options: string[]};
+type Job = {id: string; workspaceId: string; baseRevision: number; state: 'running' | 'pending' | 'needsInfo' | 'failed' | 'cancelled'; phase: GenerationView['phase']; draft?: FlowDraft | Record<string, unknown>; preview?: Preview; model?: string; upstreamProvider?: string; questions?: AskedQuestion[]; error?: {code: string; message: string; retryable: boolean}};
 type ScenarioService = ReturnType<typeof createScenarios>;
 
 type CatalogFixture = {id: string; name?: string};
@@ -963,7 +1131,17 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
           return {status: 409, body: {error: 'Settings changed in another session. Refresh and try again.', code: 'SETTINGS_CHANGED'}};
         }
         counts.generations++;
-        const job: Job = {id: crypto.randomUUID(), workspaceId: String(body?.workspaceId), baseRevision: Number(body?.expectedRevision), state: 'running', phase: 'model', draft: mode === 'needs' ? needsDraft() : happyDraft(), ...(typeof body?.model === 'string' ? {model: body.model} : {}), ...(body?.provider === 'openrouter' ? {upstreamProvider: 'openrouter-upstream'} : {})};
+        const previousJobId = typeof body?.previousJobId === 'string' ? body.previousJobId : '';
+        const answering = Array.isArray(body?.answers) && body.answers.length > 0;
+        let draft: FlowDraft = mode === 'needs' || mode === 'asks' ? needsDraft() : happyDraft();
+        if (mode === 'on-existing') {
+          const workspace = await service.workspace(String(body?.workspaceId));
+          const screen = workspace.canvas?.screens[0];
+          draft = screen ? existingScreenDraft(screen.id) : happyDraft();
+        }
+        if (mode === 'asks' && previousJobId) draft = answeredDraft();
+        const questions = mode === 'asks' && !previousJobId && !answering ? askedQuestions() : undefined;
+        const job: Job = {id: crypto.randomUUID(), workspaceId: String(body?.workspaceId), baseRevision: Number(body?.expectedRevision), state: 'running', phase: 'model', draft, ...(questions ? {questions} : {}), ...(typeof body?.model === 'string' ? {model: body.model} : {}), ...(body?.provider === 'openrouter' ? {upstreamProvider: 'openrouter-upstream'} : {})};
         if (holdNext) { heldJobs.add(job.id); holdNext = false; }
         jobs.set(job.id, job);
         return {status: 202, body: viewOf(job, mode)};
@@ -1094,8 +1272,16 @@ function finish(job: Job, mode: Mode) {
     job.preview = blockedPreview(job.workspaceId, job.baseRevision, [{code: 'INVALID_DRAFT', path: '/visits/2/operations/0', severity: 'error', blocks: ['apply', 'run'], message: 'Step 3 uses "swipe", which TnT can\'t author yet.', remedy: 'Describe the step with a supported action.'}]);
     return;
   }
-  const draft = (job.draft ?? (mode === 'needs' ? needsDraft() : happyDraft())) as FlowDraft;
+  const draft = (job.draft ?? (mode === 'needs' || mode === 'asks' ? needsDraft() : happyDraft())) as FlowDraft;
   job.draft = draft;
+  if (job.questions?.length) {
+    job.state = 'needsInfo';
+    const preview = previewFor(job.workspaceId, job.baseRevision, draft);
+    preview.applicable = true;
+    preview.authoringComplete = false;
+    job.preview = preview;
+    return;
+  }
   const diagnosed = diagnose(draft);
   job.state = diagnosed.applicable ? 'pending' : 'needsInfo';
   job.preview = previewFor(job.workspaceId, job.baseRevision, draft);
@@ -1112,6 +1298,7 @@ function viewOf(job: Job, mode: Mode): GenerationView {
     ...(job.error ? {error: job.error} : {}),
     ...(previewFresh && job.preview ? {previewId: job.preview.previewId, preview: job.preview, previewExpiresAt: job.preview.expiresAt} : {}),
     ...(finished && job.draft ? {draft: job.draft} : {}),
+    ...(finished && job.state === 'needsInfo' && job.questions?.length ? {questions: job.questions.map(question => ({...question, options: [...question.options]}))} : {}),
   };
 }
 
@@ -1138,6 +1325,36 @@ function blockedPreview(workspaceId: string, revision: number, diagnostics: Prev
     contractVersion: 1, compilerVersion: 'test', draftHash: 'invalid', applicable: false, authoringComplete: false,
     runReadiness: 'blocked', requiredAssumptionKeys: [], diagnostics,
     changes: {created: [], reused: [], updated: []}, identityMap: {}, timeline: [],
+  };
+}
+
+function askedQuestions(): AskedQuestion[] {
+  return [
+    {key: 'homeVisible', about: 'open', text: 'Which title should the first step use?', options: ['Home', 'Start', 'Welcome']},
+    {key: 'payTarget', text: 'Which control is Pay?', options: ['Pay', 'Confirm']},
+  ];
+}
+
+function answeredDraft(): FlowDraft {
+  return {
+    schemaVersion: 1, mode: 'createScenario', name: 'Pay a bill', appId: 'com.example.HybridApp', parameters: [],
+    execution: {setup: {kind: 'launchApp'}, handlerRefs: [], mock: {kind: 'none'}},
+    screens: [{key: 'home', kind: 'create', title: 'Home'}],
+    visits: [{key: 'v1', screenKey: 'home', operations: [{key: 'open', kind: 'tap', target: {kind: 'selector', selector: {target: 'text', match: 'exact', value: 'Home'}}, destination: {kind: 'stay'}}]}],
+    scripts: [], assumptions: [],
+  };
+}
+
+function existingScreenDraft(screenId: string): FlowDraft {
+  return {
+    schemaVersion: 1, mode: 'createScenario', name: 'Pay a bill', appId: 'com.example.HybridApp', parameters: [],
+    execution: {setup: {kind: 'launchApp'}, handlerRefs: [], mock: {kind: 'none'}},
+    screens: [{key: 'home', kind: 'existing', screenId}, {key: 'done', kind: 'create', title: 'Done'}],
+    visits: [
+      {key: 'v1', screenKey: 'home', operations: [{key: 'open', kind: 'tap', target: {kind: 'selector', selector: {target: 'text', match: 'exact', value: 'Pay'}}, destination: {kind: 'visit', visitKey: 'v2'}}]},
+      {key: 'v2', screenKey: 'done', operations: [{key: 'see', kind: 'checkVisible', target: {kind: 'selector', selector: {target: 'text', match: 'exact', value: 'Done'}}}]},
+    ],
+    scripts: [], assumptions: [],
   };
 }
 

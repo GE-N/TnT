@@ -949,6 +949,9 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .ai-flow .ai-capsule-apply:hover:not(:disabled):not([aria-disabled="true"]){background:#c5dcff}
 .ai-flow .ai-capsule-apply[aria-disabled="true"],.ai-flow .ai-capsule-apply:disabled{background:#eef1f5;color:#5f6368}
 .ai-flow .ai-capsule-apply:focus,.ai-flow .ai-capsule-apply:focus-visible{background:#c5dcff;box-shadow:0 0 0 3px rgba(10,132,255,.4)}
+.ai-flow .ai-question-option,.ai-flow .ai-question-option:hover,.ai-flow .ai-question-option:focus,.ai-flow .ai-question-option:focus-visible{border:0;border-bottom:0;border-radius:999px;background:#f3f8ff;color:#0a4fa8;text-decoration:none;box-shadow:inset 0 0 0 1.5px #8db8ef}
+.ai-flow .ai-question-option:hover{background:#e7f1ff}
+.ai-flow .ai-question-option:focus,.ai-flow .ai-question-option:focus-visible{background:#e7f1ff;box-shadow:0 0 0 3px rgba(10,132,255,.4)}
 .ai-flow .ai-capsule-dismiss:focus,.ai-flow .ai-capsule-dismiss:focus-visible{border:0;border-bottom:0;text-decoration:none;background:rgba(10,132,255,.08);box-shadow:0 0 0 3px rgba(10,132,255,.4)}
 .ai-launch{position:relative;display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:50%;color:var(--ai-button);background:transparent;box-shadow:0 0 0 8px rgba(10,132,255,.08),0 0 22px rgba(124,92,255,.35)}
 .ai-launch.is-open{background:var(--ai-info)}
@@ -976,6 +979,12 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .ai-spinner{width:12px;height:12px;border:1.5px solid rgba(10,132,255,.25);border-top-color:var(--ai-button);border-radius:50%;animation:ai-spin .8s linear infinite}
 .ai-capsule-wrap{display:flex;flex-direction:column;align-items:stretch;gap:6px;width:min(520px,calc(100vw - 48px));pointer-events:auto}
 .ai-capsule{display:flex;align-items:center;gap:8px;min-height:56px;padding:6px 8px 6px 14px;border-radius:999px;background:#fff;box-shadow:0 8px 28px rgba(37,48,65,.12),0 0 0 1px rgba(37,48,65,.06)}
+.ai-capsule.has-questions{flex-direction:column;align-items:stretch;gap:10px;border-radius:28px;padding:12px 10px 8px 14px}
+.ai-capsule-row{display:flex;align-items:center;gap:8px;width:100%;min-height:44px}
+.ai-questions{display:flex;flex-direction:column;gap:12px;padding:4px 6px 2px}
+.ai-question-text{margin:0;color:#253041;font-size:14px;line-height:1.4}
+.ai-question-options{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.ai-question-option{min-height:36px;padding:0 12px;border:0;border-radius:999px;background:#f3f8ff;color:#0a4fa8;font-weight:600;box-shadow:inset 0 0 0 1.5px #8db8ef}
 .ai-capsule .ai-spark{flex:none;color:#0a63d1}
 .ai-capsule-input{flex:1;min-width:0;width:auto;min-height:40px;margin:0;padding:8px 4px;border:0;border-bottom:0;border-radius:10px;background:transparent;box-shadow:none;text-decoration:none}
 .ai-capsule-apply{flex:none;min-height:40px;padding:0 14px;border:0;border-bottom:0;border-radius:12px;background:#d7e8ff;color:#0a63d1;font-weight:600;box-shadow:none;text-decoration:none}
@@ -1013,7 +1022,9 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .ai-issues{margin:8px 0;padding:0;list-style:none}
 .ai-issues li{display:flex;gap:8px;margin:4px 0}
 .ai-issue-no{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#b3261e;color:#fff;font-size:11px}
-.ai-draft-node.is-dimmed,.ai-draft-zone.is-dimmed{opacity:.45}
+.screen-node.has-ai-draft-steps,.workbench .screen-node.has-ai-draft-steps{border:1.5px dashed #8db8ef;background:#f3f8ff}
+.screen-node.has-ai-draft-steps .screen-node-heading{background:#f3f8ff;border-bottom-color:#d7e6f8}
+.ai-draft-on-screen{margin:0;padding:4px 12px 12px;border-top:1.5px dashed #8db8ef}
 .ai-settings{margin:0 0 16px;padding:0 0 12px;border-bottom:1px solid var(--border);color:#253041;font-size:14px}
 .ai-settings-sheet{position:fixed;z-index:48;left:24px;bottom:88px;box-sizing:border-box;width:min(440px,calc(100vw - 48px));max-height:min(720px,calc(100dvh - 160px));overflow:auto;margin:0;padding:12px 16px 16px;background:#fff;border:1px solid var(--border);border-bottom:1px solid var(--border);border-radius:18px;box-shadow:0 12px 32px #25304129}
 .ai-settings-bar{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
