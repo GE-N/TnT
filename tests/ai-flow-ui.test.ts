@@ -689,6 +689,121 @@ test('AI flow authoring UI', async t => {
     }
   });
 
+  await t.test('apply puts new screens where the draft was drawn and re-previews only after a drag', async () => {
+    const kept = await harness('ready');
+    try {
+      await kept.render();
+      sizeViewport(kept.document);
+      await kept.addNode();
+      await kept.until(async () => {
+        if (!kept.workspaceId) return false;
+        return ((await kept.saved()).canvas?.screens.length ?? 0) === 1;
+      }, 'existing screen saved');
+      const existing = kept.document.querySelector<HTMLElement>('[data-screen-id]');
+      assert.ok(existing?.dataset.screenId);
+      const existingId = existing.dataset.screenId;
+      const existingAt = {x: parseFloat(existing.style.left), y: parseFloat(existing.style.top)};
+      await kept.generate('Pay the electric bill');
+      await kept.until(() => kept.document.querySelectorAll('[data-testid="ai-draft-screen"]').length === 3, 'three draft cards');
+      await untilPlacements(kept);
+      assert.equal(kept.ai.previews, 1);
+      const sent = (kept.ai.previewBodies[0] as {placements?: Record<string, {x: number; y: number}>}).placements;
+      assert.ok(sent);
+      assert.deepEqual(Object.keys(sent).sort(), ['bills', 'done', 'home']);
+      const drawn = drawnDraft(kept.document);
+      for (const key of Object.keys(drawn)) samePoint(sent[key], drawn[key]);
+      const previewId = kept.ai.lastPreviewId;
+      await kept.click('[data-testid="ai-confirm"]');
+      await kept.until(() => !!kept.document.querySelector('[data-testid="ai-provenance"]'), 'applied without another preview');
+      assert.equal(kept.ai.previews, 1);
+      assert.equal((kept.ai.applyBodies.at(-1) as {previewId?: string}).previewId, previewId);
+      const saved = await kept.saved();
+      for (const [key, title] of [['home', 'Home'], ['bills', 'Bills'], ['done', 'Done']] as const) {
+        const screen = saved.canvas?.screens.find(item => item.title === title);
+        assert.ok(screen, title);
+        samePoint(screen, drawn[key]);
+      }
+      const stayed = saved.canvas?.screens.find(item => item.id === existingId);
+      assert.ok(stayed);
+      samePoint(stayed, existingAt);
+    } finally { await kept.cleanup(); }
+
+    const dragged = await harness('ready');
+    try {
+      await dragged.render();
+      sizeViewport(dragged.document);
+      await dragged.generate('Pay the electric bill');
+      await dragged.until(() => dragged.document.querySelectorAll('[data-testid="ai-draft-screen"]').length === 3, 'draft before drag');
+      await untilPlacements(dragged);
+      const before = dragged.ai.previews;
+      const firstPreview = dragged.ai.lastPreviewId;
+      const home = dragged.document.querySelector<HTMLElement>('[data-draft-screen="home"]');
+      assert.ok(home);
+      const startX = parseFloat(home.style.left);
+      const startY = parseFloat(home.style.top);
+      const zoomLabel = [...dragged.document.querySelectorAll('.canvas-toolbar span')].map(node => node.textContent?.trim() ?? '').find(text => /^\d+%$/.test(text));
+      const zoom = Number.parseInt(zoomLabel ?? '85', 10) / 100;
+      const pointer = (type: string, x: number, y: number) => home.dispatchEvent(new dragged.dom.window.PointerEvent(type, {bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, pointerId: 1}));
+      await act(async () => { pointer('pointerdown', 0, 0); pointer('pointermove', 80 * zoom, 40 * zoom); pointer('pointerup', 80 * zoom, 40 * zoom); });
+      assert.ok(Math.abs(parseFloat(home.style.left) - (startX + 80)) < 1, 'draft card moved');
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+      assert.equal(dragged.ai.previews, before, 'dragging does not preview');
+      const moved = drawnDraft(dragged.document);
+      await dragged.click('[data-testid="ai-confirm"]');
+      await dragged.until(() => dragged.ai.previews === before + 1 && !!dragged.document.querySelector('[data-testid="ai-provenance"]'), 're-previewed then applied');
+      const again = (dragged.ai.previewBodies.at(-1) as {placements?: Record<string, {x: number; y: number}>}).placements;
+      assert.ok(again);
+      for (const key of Object.keys(moved)) samePoint(again[key], moved[key]);
+      assert.notEqual(dragged.ai.lastPreviewId, firstPreview);
+      assert.equal((dragged.ai.applyBodies.at(-1) as {previewId?: string}).previewId, dragged.ai.lastPreviewId);
+      const saved = await dragged.saved();
+      for (const [key, title] of [['home', 'Home'], ['bills', 'Bills'], ['done', 'Done']] as const) {
+        samePoint(saved.canvas?.screens.find(item => item.title === title), moved[key]);
+      }
+    } finally { await dragged.cleanup(); }
+
+    const existing = await harness('on-existing');
+    try {
+      await existing.render();
+      sizeViewport(existing.document);
+      await existing.addNode();
+      await existing.until(async () => {
+        if (!existing.workspaceId) return false;
+        return ((await existing.saved()).canvas?.screens.length ?? 0) === 1;
+      }, 'host screen saved');
+      await existing.generate('Add a pay step on this screen');
+      await existing.until(() => !!existing.document.querySelector('[data-draft-screen="done"]'), 'create screen drawn');
+      await untilPlacements(existing);
+      const sent = (existing.ai.previewBodies.at(-1) as {placements?: Record<string, {x: number; y: number}>}).placements;
+      assert.ok(sent);
+      assert.deepEqual(Object.keys(sent), ['done']);
+      assert.equal('home' in sent, false);
+      samePoint(sent.done, drawnDraft(existing.document).done);
+    } finally { await existing.cleanup(); }
+
+    const failed = await harness('ready');
+    try {
+      await failed.render();
+      sizeViewport(failed.document);
+      await failed.generate('Pay the electric bill');
+      await failed.until(() => failed.document.querySelectorAll('[data-testid="ai-draft-screen"]').length === 3, 'draft before a failed re-preview');
+      await untilPlacements(failed);
+      const home = failed.document.querySelector<HTMLElement>('[data-draft-screen="home"]');
+      assert.ok(home);
+      const zoomLabel = [...failed.document.querySelectorAll('.canvas-toolbar span')].map(node => node.textContent?.trim() ?? '').find(text => /^\d+%$/.test(text));
+      const zoom = Number.parseInt(zoomLabel ?? '85', 10) / 100;
+      const pointer = (type: string, x: number, y: number) => home.dispatchEvent(new failed.dom.window.PointerEvent(type, {bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, pointerId: 1}));
+      await act(async () => { pointer('pointerdown', 0, 0); pointer('pointermove', 60 * zoom, 0); pointer('pointerup', 60 * zoom, 0); });
+      failed.ai.failNextPreview();
+      await failed.click('[data-testid="ai-confirm"]');
+      await failed.until(() => /could not be previewed/i.test(failed.document.querySelector('[data-testid="ai-capsule-error"]')?.textContent ?? ''), 'preview error in the capsule');
+      assert.equal(failed.ai.applies, 0);
+      assert.equal(failed.document.querySelector('[data-testid="ai-provenance"]'), null);
+      assert.ok(failed.document.querySelector('[data-draft-screen="home"]'));
+      assert.equal(failed.status(), 'pending');
+    } finally { await failed.cleanup(); }
+  });
+
   await t.test('a needsInfo question lives in the capsule and one answer replaces the same draft', async () => {
     const h = await harness('asks');
     try {
@@ -977,6 +1092,70 @@ test('AI flow authoring UI', async t => {
 });
 
 type Mode = 'ready' | 'hold' | 'expired' | 'needs' | 'invalid' | 'authoring-failed' | 'asks' | 'on-existing';
+type StoredPreview = {preview: Preview; placements?: Record<string, {x: number; y: number}>; draft?: FlowDraft};
+
+function placementRecord(value: unknown): Record<string, {x: number; y: number}> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  const placements: Record<string, {x: number; y: number}> = {};
+  for (const [key, point] of Object.entries(value)) {
+    if (!point || typeof point !== 'object' || Array.isArray(point)) return;
+    const x = (point as {x?: unknown}).x;
+    const y = (point as {y?: unknown}).y;
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    placements[key] = {x, y};
+  }
+  return Object.keys(placements).length ? placements : undefined;
+}
+
+function placedScreens(stored: StoredPreview | undefined, stamp: string) {
+  const placements = stored?.placements;
+  const draft = stored?.draft;
+  if (!placements || !draft?.screens) return [];
+  return draft.screens.flatMap(screen => {
+    if (screen.kind !== 'create') return [];
+    const point = placements[screen.key];
+    if (!point) return [];
+    return [{id: 'screen' + stamp + screen.key, title: screen.title, x: point.x, y: point.y, tests: []}];
+  });
+}
+
+function sizeViewport(document: Document) {
+  const viewport = document.querySelector<HTMLElement>('.canvas-viewport');
+  assert.ok(viewport, 'canvas viewport');
+  Object.defineProperty(viewport, 'clientWidth', {configurable: true, value: 1280});
+  Object.defineProperty(viewport, 'clientHeight', {configurable: true, value: 800});
+}
+
+function drawnDraft(document: Document) {
+  const points: Record<string, {x: number; y: number}> = {};
+  for (const node of document.querySelectorAll<HTMLElement>('[data-draft-screen]')) {
+    const key = node.dataset.draftScreen ?? '';
+    points[key] = {x: parseFloat(node.style.left), y: parseFloat(node.style.top)};
+  }
+  return points;
+}
+
+async function untilPlacements(h: Awaited<ReturnType<typeof harness>>) {
+  await h.until(() => {
+    const body = h.ai.previewBodies.at(-1) as {placements?: Record<string, {x: number; y: number}>} | undefined;
+    const drawn = drawnDraft(h.document);
+    const placements = body?.placements;
+    const drawnKeys = Object.keys(drawn);
+    if (!placements || !drawnKeys.length) return false;
+    const keys = Object.keys(placements);
+    return keys.length === drawnKeys.length && keys.every(key => {
+      const point = drawn[key];
+      const sent = placements[key];
+      return !!point && !!sent && Math.abs(point.x - sent.x) < 0.001 && Math.abs(point.y - sent.y) < 0.001;
+    });
+  }, 'preview placements match the drawn cards');
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+}
+
+function samePoint(left: {x: number; y: number} | undefined, right: {x: number; y: number} | undefined) {
+  assert.ok(left && right);
+  assert.ok(Math.abs(left.x - right.x) < 0.001 && Math.abs(left.y - right.y) < 0.001, JSON.stringify(left) + ' vs ' + JSON.stringify(right));
+}
 type AskedQuestion = {key: string; about?: string; text: string; options: string[]};
 type Job = {id: string; workspaceId: string; baseRevision: number; state: 'running' | 'pending' | 'needsInfo' | 'failed' | 'cancelled'; phase: GenerationView['phase']; draft?: FlowDraft | Record<string, unknown>; preview?: Preview; model?: string; upstreamProvider?: string; questions?: AskedQuestion[]; error?: {code: string; message: string; retryable: boolean}};
 type ScenarioService = ReturnType<typeof createScenarios>;
@@ -1204,7 +1383,7 @@ async function applyKeptDraft(h: Awaited<ReturnType<typeof harness>>) {
 
 function createFake(mode: Mode, service: ScenarioService, options: HarnessOptions = {}) {
   const jobs = new Map<string, Job>();
-  const previews = new Map<string, Preview>();
+  const previews = new Map<string, StoredPreview>();
   const applied = new Map<string, unknown>();
   const snapshots = new Map<string, Awaited<ReturnType<ScenarioService['workspace']>>>();
   const waiters: Array<() => void> = [];
@@ -1212,6 +1391,10 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
   const puts: unknown[] = [];
   const tests: unknown[] = [];
   const generationBodies: unknown[] = [];
+  const previewBodies: unknown[] = [];
+  const applyBodies: unknown[] = [];
+  let lastPreviewId = '';
+  let failPreview = false;
   const modelQueries: string[] = [];
   const heldJobs = new Set<string>();
   let config: FakeConfig = options.unconfigured ? unconfiguredConfig() : savedConfig(options.savedModel);
@@ -1235,6 +1418,10 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
     get puts() { return puts; },
     get tests() { return tests; },
     get generationBodies() { return generationBodies; },
+    get previewBodies() { return previewBodies; },
+    get applyBodies() { return applyBodies; },
+    get lastPreviewId() { return lastPreviewId; },
+    failNextPreview() { failPreview = true; },
     get modelQueries() { return modelQueries; },
     holdNextTest() { holdTest = true; },
     holdNextJob() { holdNext = true; },
@@ -1246,7 +1433,7 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
       for (const job of jobs.values()) {
         if (heldJobs.has(job.id) && job.state === 'running') job.draft = lateDraft();
         finish(job, mode);
-        if (job.preview) previews.set(job.preview.previewId, job.preview);
+        if (job.preview) previews.set(job.preview.previewId, {preview: job.preview});
       }
       for (const resolve of waiters.splice(0)) resolve();
     },
@@ -1303,7 +1490,7 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
           if (parked && job.state === 'running' && !released) await new Promise<void>(resolve => waiters.push(resolve));
           const view = viewOf(job, mode);
           if (!parked && job.state === 'running') finish(job, mode);
-          if (job.preview) previews.set(job.preview.previewId, job.preview);
+          if (job.preview) previews.set(job.preview.previewId, {preview: job.preview});
           return {status: 200, body: view};
         } finally { counts.inflight--; }
       }
@@ -1316,8 +1503,15 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
       if (method === 'POST' && path === '/api/authoring/context') return {status: 200, body: {contextId: crypto.randomUUID(), workspaceId: body?.workspaceId, revision: body?.expectedRevision, expiresAt: new Date(Date.now() + 60_000).toISOString()}};
       if (method === 'POST' && path === '/api/authoring/preview') {
         counts.previews++;
+        previewBodies.push(structuredClone(body));
+        if (failPreview) {
+          failPreview = false;
+          return {status: 500, body: {error: 'The draft could not be previewed.', code: 'REQUEST_FAILED'}};
+        }
         const preview = previewFor(String(body?.workspaceId), Number(body?.expectedRevision), body?.draft as FlowDraft);
-        previews.set(preview.previewId, preview);
+        const placements = placementRecord(body?.placements);
+        previews.set(preview.previewId, {preview, placements, draft: body?.draft as FlowDraft | undefined});
+        lastPreviewId = preview.previewId;
         return {status: 200, body: preview};
       }
       if (method === 'POST' && path === '/api/authoring/apply') {
@@ -1325,9 +1519,10 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
         const currentRevision = workspace.metadata?.revision ?? 0;
         const expected = Number(body?.expectedRevision);
         if (expected !== currentRevision) return {status: 409, body: {error: 'The workspace revision does not match expectedRevision.', code: 'REVISION_CONFLICT'}};
-        const preview = previews.get(String(body?.previewId));
-        if (!preview || preview.baseRevision !== expected) return {status: 409, body: {error: 'The preview was created for a different revision or compiler version.', code: 'PREVIEW_STALE'}};
-        return {status: 200, body: await applyDraft(service, counts, applied, snapshots, body ?? {})};
+        const stored = previews.get(String(body?.previewId));
+        if (!stored || stored.preview.baseRevision !== expected) return {status: 409, body: {error: 'The preview was created for a different revision or compiler version.', code: 'PREVIEW_STALE'}};
+        applyBodies.push(structuredClone(body));
+        return {status: 200, body: await applyDraft(service, counts, applied, snapshots, body ?? {}, stored)};
       }
       if (method === 'POST' && path === '/api/authoring/undo') {
         calls.push('undo');
@@ -1342,7 +1537,7 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
   };
 }
 
-async function applyDraft(service: ScenarioService, counts: {applies: number}, applied: Map<string, unknown>, snapshots: Map<string, Awaited<ReturnType<ScenarioService['workspace']>>>, body: Record<string, unknown>) {
+async function applyDraft(service: ScenarioService, counts: {applies: number}, applied: Map<string, unknown>, snapshots: Map<string, Awaited<ReturnType<ScenarioService['workspace']>>>, body: Record<string, unknown>, stored?: StoredPreview) {
   counts.applies++;
   const key = String(body.idempotencyKey);
   const existing = applied.get(key);
@@ -1351,11 +1546,13 @@ async function applyDraft(service: ScenarioService, counts: {applies: number}, a
   const stamp = crypto.randomUUID().replaceAll('-', '').slice(0, 8);
   const scenarioId = 'scenario' + stamp;
   const pathId = 'path' + stamp;
-  const screenId = 'screen' + stamp;
+  const placed = placedScreens(stored, stamp);
+  const screenId = placed[0]?.id ?? ('screen' + stamp);
+  const screens = [...(current.canvas?.screens ?? []), ...(placed.length ? placed : [{id: screenId, title: 'Home', x: 40, y: 40, tests: []}])];
   snapshots.set('pending:' + key, structuredClone(current));
   const saved = await service.save({
     id: current.id, name: current.name, yaml: current.yaml, flows: current.flows, mock: current.mock, automation: current.automation,
-    canvas: {screens: [...(current.canvas?.screens ?? []), {id: screenId, title: 'Home', x: 40, y: 40, tests: []}], edges: [...(current.canvas?.edges ?? [])], paths: [...(current.canvas?.paths ?? []), {id: pathId, name: 'Pay a bill', screenId, scenarioId, edgeIds: []}]},
+    canvas: {screens, edges: [...(current.canvas?.edges ?? [])], paths: [...(current.canvas?.paths ?? []), {id: pathId, name: 'Pay a bill', screenId, scenarioId, edgeIds: []}]},
     scenarios: [...(current.scenarios ?? []), {id: scenarioId, name: 'Pay a bill', authoring: 'canvas' as const, pathId, steps: [], inputs: {}, parameters: {}, enabledHandlerIds: []}],
     expectedRevision: Number(body.expectedRevision),
   });

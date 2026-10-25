@@ -38,8 +38,13 @@ export type AiDraft = {
   previousJobId?: string;
   /** Review status to put back when a refine fails or is cancelled. */
   restoreStatus?: AiDraftStatus;
-  /** Canvas coordinates for pending create-screens. Survives reload with the draft; Apply does not read them. */
+  /** Canvas coordinates for pending create-screens. Survives reload with the draft. Apply sends them as placements. */
   positions?: DraftPositions;
+  /**
+   * Placements sent with the current client preview.
+   * `null` means that preview omitted the field. Absent means the preview was not recorded here.
+   */
+  previewedPlacements?: DraftPositions | null;
 };
 
 export type PersistedAiDraft = {jobId: string; prompt: string; previewId?: string; baseRevision?: number; positions?: DraftPositions};
@@ -224,6 +229,33 @@ export function draftOverlayFor(draft: FlowDraft, canvas: CanvasGraph | undefine
   return {nodes, edges, anchors, existing: onExisting, ...(settled ? {settled: true} : {})};
 }
 
+/** Create-screen points only, in draft order. Existing-screen keys are never included. */
+function placementsFor(draft: FlowDraft | undefined, positions?: DraftPositions): DraftPositions | undefined {
+  if (!draft || !positions) return;
+  const placements: DraftPositions = {};
+  for (const screen of draft.screens) {
+    if (screen.kind !== 'create') continue;
+    const point = positions[screen.key];
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+    placements[screen.key] = {x: point.x, y: point.y};
+  }
+  return Object.keys(placements).length ? placements : undefined;
+}
+
+/**
+ * `previewed` is null when the client preview omitted placements, and absent when this preview
+ * was not recorded by the client (the generation preview, which has no drawn positions).
+ */
+function placementsMatch(current: DraftPositions | undefined, previewed: DraftPositions | null | undefined) {
+  if (previewed === undefined) return current === undefined;
+  const sent = previewed ?? undefined;
+  if (!current && !sent) return true;
+  if (!current || !sent) return false;
+  const keys = Object.keys(current);
+  if (keys.length !== Object.keys(sent).length) return false;
+  return keys.every(key => sent[key]?.x === current[key].x && sent[key]?.y === current[key].y);
+}
+
 function needsRegeneration(code: string | undefined, diagnostics?: {code: string}[]) {
   if (code === 'REVISION_CONFLICT' || !!code?.startsWith('INVALID_')) return true;
   return !!diagnostics?.some(item => item.code === 'REVISION_CONFLICT' || item.code.startsWith('INVALID_'));
@@ -240,6 +272,8 @@ function fromView(current: AiDraft, view: GenerationView, revision: number): AiD
   const baseRevision = preview?.baseRevision ?? current.baseRevision;
   const revisionStale = baseRevision !== undefined && revision !== baseRevision;
   const terminal = view.state !== 'running';
+  const incomingPreviewId = view.previewId ?? preview?.previewId;
+  const previewReplaced = !!incomingPreviewId && incomingPreviewId !== current.previewId;
   let status: AiDraftStatus = current.status;
   if (view.state === 'running') status = revisionStale ? 'stale' : 'generating';
   else if (view.state === 'failed') status = 'failed';
@@ -253,7 +287,8 @@ function fromView(current: AiDraft, view: GenerationView, revision: number): AiD
     jobId: view.state === 'cancelled' ? undefined : view.id,
     phase: view.state === 'running' ? view.phase : undefined,
     ...(baseRevision !== undefined ? {baseRevision} : {}),
-    ...(view.previewId || preview?.previewId ? {previewId: view.previewId ?? preview?.previewId} : {}),
+    ...(incomingPreviewId ? {previewId: incomingPreviewId} : {}),
+    ...(previewReplaced ? {previewedPlacements: undefined} : {}),
     ...(preview ? {
       applicable: preview.applicable,
       diagnostics: preview.diagnostics,
@@ -377,6 +412,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const pendingAnswers = useRef<{key: string; answer: string}[] | undefined>(undefined);
   /** Revision written by the current refine's own save. That bump must not mark the kept draft stale. */
   const ownSaveRevision = useRef<number | undefined>(undefined);
+  /** Server preview id we already tried to re-preview with drawn positions. Stops a failed sync from looping. */
+  const placementPreviewFor = useRef<string | undefined>(undefined);
   const persistTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const acked = useRef(new Set<string>());
   const openSettingsRef = useRef(input.onOpenSettings);
@@ -407,6 +444,19 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   useEffect(() => {
     if (reviewing && showOverlay) setOpen(false);
   }, [reviewing, showOverlay]);
+
+  useEffect(() => {
+    if ((draft.status !== 'pending' && draft.status !== 'needsInfo') || draft.refining) return;
+    if (!draft.draft || !draft.previewId || draft.baseRevision === undefined) return;
+    if (draft.previewedPlacements !== undefined) return;
+    const workspaceId = draft.workspaceId || input.workspaceId;
+    if (!workspaceId) return;
+    const placements = placementsFor(draft.draft, draft.positions);
+    if (!placements) return;
+    if (placementPreviewFor.current === draft.previewId) return;
+    placementPreviewFor.current = draft.previewId;
+    void repreview(draft.draft, draft.baseRevision, workspaceId, false, undefined, draft.positions);
+  }, [draft.status, draft.refining, draft.previewId, draft.baseRevision, draft.previewedPlacements, positionKey, draft.workspaceId, draft.jobId, input.workspaceId]);
 
   useEffect(() => {
     setDraft(current => {
@@ -551,8 +601,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   /** Re-previews a kept draft for a workspace the user has already left, so switch-back can Apply it. */
   async function retargetKeptDraft(base: AiDraft, workspaceId: string, revision: number, draft: FlowDraft, jobId: string, restoreStatus: AiDraftStatus) {
     try {
-      const context = await client.createContext({workspaceId, expectedRevision: revision});
-      const preview = await client.preview({workspaceId, expectedRevision: revision, contextId: context.contextId, draft});
+      const opened = await requestPreview(draft, revision, workspaceId, base.positions);
+      const preview = opened.preview;
       const ready: AiDraft = {
         ...base,
         status: preview.baseRevision === revision ? restoreStatus : 'stale',
@@ -563,6 +613,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         applicable: preview.applicable,
         diagnostics: preview.diagnostics,
         requiredAssumptionKeys: preview.requiredAssumptionKeys,
+        previewedPlacements: opened.placements,
         refining: false,
         restoreStatus: undefined,
         previousJobId: undefined,
@@ -774,11 +825,25 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     setDisclosure(null);
   }
 
-  async function repreview(nextDraft: FlowDraft, revision: number, workspaceId: string, regenerate: boolean, restore?: {status: AiDraftStatus; error?: AiDraft['error']; notice?: string; jobId?: string}) {
+  async function requestPreview(nextDraft: FlowDraft, revision: number, workspaceId: string, positions?: DraftPositions) {
+    const context = await client.createContext({workspaceId, expectedRevision: revision});
+    const placements = placementsFor(nextDraft, positions);
+    const preview = await client.preview({
+      workspaceId,
+      expectedRevision: revision,
+      contextId: context.contextId,
+      draft: nextDraft,
+      ...(placements ? {placements} : {}),
+    });
+    return {preview, placements: placements ?? null};
+  }
+
+  async function repreview(nextDraft: FlowDraft, revision: number, workspaceId: string, regenerate: boolean, restore?: {status: AiDraftStatus; error?: AiDraft['error']; notice?: string; jobId?: string}, positions?: DraftPositions) {
     const watched = jobGuard.current;
+    const drawn = positions ?? draftRef.current.positions;
     try {
-      const context = await client.createContext({workspaceId, expectedRevision: revision});
-      const preview = await client.preview({workspaceId, expectedRevision: revision, contextId: context.contextId, draft: nextDraft});
+      const opened = await requestPreview(nextDraft, revision, workspaceId, drawn);
+      const preview = opened.preview;
       if (jobGuard.current !== watched) return;
       if (!restore && regenerate && needsRegeneration(undefined, preview.diagnostics)) {
         await generate(draftRef.current.prompt);
@@ -787,8 +852,9 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       const matched = preview.baseRevision === revision;
       if (matched && ownSaveRevision.current === revision) ownSaveRevision.current = undefined;
       setDraft(current => {
+        if (current.status === 'applying') return current;
         if (watched && current.jobId !== watched && current.jobId !== restore?.jobId) return current;
-        const status: AiDraftStatus = !matched ? 'stale' : restore?.status ?? (preview.applicable ? 'pending' : 'needsInfo');
+        const status: AiDraftStatus = !matched ? 'stale' : restore?.status ?? (current.status === 'needsInfo' ? 'needsInfo' : (preview.applicable ? 'pending' : 'needsInfo'));
         return {
           ...current,
           draft: nextDraft,
@@ -800,6 +866,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
           applicable: preview.applicable,
           diagnostics: preview.diagnostics,
           requiredAssumptionKeys: preview.requiredAssumptionKeys,
+          previewedPlacements: opened.placements,
           phase: undefined,
           refining: false,
           restoreStatus: undefined,
@@ -882,15 +949,54 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   async function confirm() {
     const current = draftRef.current;
     if (confirmReason(current, input.running) || !current.previewId || current.baseRevision === undefined || !input.workspaceId) return;
-    const previewId = current.previewId;
+    const workspaceId = input.workspaceId;
+    let previewId = current.previewId;
+    let expectedRevision = current.baseRevision;
+    const positions = current.positions;
+    const drawn = placementsFor(current.draft, positions);
+    setDraft(existing => ({...existing, status: 'applying', error: undefined}));
+    if (current.draft && !placementsMatch(drawn, current.previewedPlacements)) {
+      try {
+        const opened = await requestPreview(current.draft, expectedRevision, workspaceId, positions);
+        if (draftRef.current.jobId !== current.jobId) return;
+        if (opened.preview.baseRevision !== expectedRevision) {
+          setDraft(existing => ({
+            ...existing,
+            status: 'stale',
+            previewId: opened.preview.previewId,
+            baseRevision: opened.preview.baseRevision,
+            expiresAt: opened.preview.expiresAt,
+            applicable: opened.preview.applicable,
+            diagnostics: opened.preview.diagnostics,
+            requiredAssumptionKeys: opened.preview.requiredAssumptionKeys,
+            previewedPlacements: opened.placements,
+          }));
+          return;
+        }
+        previewId = opened.preview.previewId;
+        expectedRevision = opened.preview.baseRevision;
+        setDraft(existing => existing.status === 'applying' ? {
+          ...existing,
+          previewId,
+          baseRevision: expectedRevision,
+          expiresAt: opened.preview.expiresAt,
+          applicable: opened.preview.applicable,
+          diagnostics: opened.preview.diagnostics,
+          requiredAssumptionKeys: opened.preview.requiredAssumptionKeys,
+          previewedPlacements: opened.placements,
+        } : existing);
+      } catch (error) {
+        setDraft(existing => ({...existing, status: current.status === 'needsInfo' || current.applicable === false ? 'needsInfo' : 'pending', error: errorOf(error, 'The draft could not be previewed.')}));
+        return;
+      }
+    }
     let key = idempotency.current.get(previewId);
     if (!key) { key = crypto.randomUUID(); idempotency.current.set(previewId, key); }
-    setDraft(existing => ({...existing, status: 'applying', error: undefined}));
     let applied: ApplyResponse;
     try {
       applied = await client.apply({
-        workspaceId: input.workspaceId,
-        expectedRevision: current.baseRevision,
+        workspaceId,
+        expectedRevision,
         previewId,
         idempotencyKey: key,
         acknowledgedAssumptionKeys: current.requiredAssumptionKeys ?? [],

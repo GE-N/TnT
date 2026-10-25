@@ -47,7 +47,14 @@ export type GenerationRequest = {
 };
 export type ContextRequest = {workspaceId: string; expectedRevision: number; screenIds?: string[]};
 export type AuthoringContext = {contextId: string; workspaceId: string; revision: number; expiresAt: string};
-export type PreviewRequest = {workspaceId: string; expectedRevision: number; contextId: string; draft: unknown};
+export type PreviewRequest = {
+  workspaceId: string;
+  expectedRevision: number;
+  contextId: string;
+  draft: unknown;
+  /** Canvas points for this draft's create screens. Omitted when none are drawn. */
+  placements?: Record<string, {x: number; y: number}>;
+};
 export type ApplyRequest = {workspaceId: string; expectedRevision: number; previewId: string; idempotencyKey: string; acknowledgedAssumptionKeys: string[]};
 export type ApplyResponse = ApplyResult & {receiptId?: string};
 export type UndoRequest = {workspaceId: string; expectedRevision: number; receiptId: string};
