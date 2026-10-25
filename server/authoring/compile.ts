@@ -83,17 +83,17 @@ function placeScreens(existing: {x: number; y: number}[], count: number) {
   return placed;
 }
 
-export function compileDraft(workspace: Workspace, draft: FlowDraft, context: ContextSnapshot): Translation {
+export function compileDraft(workspace: Workspace, draft: FlowDraft, context: ContextSnapshot, placements?: Readonly<Record<string, {x: number; y: number}>>): Translation {
   const diagnostics = validateDraft(draft, workspace, context);
   if (blocksApply(diagnostics)) return finish(draft, diagnostics);
-  try { return materialize(workspace, draft, context, diagnostics); }
+  try { return materialize(workspace, draft, context, diagnostics, placements); }
   catch (error) {
     diagnostics.push(issue('PROJECTION_FAILED', '', 'error', ['apply', 'run'], error instanceof Error ? error.message : 'The draft could not be projected.', 'Repair the draft and preview again.'));
     return finish(draft, diagnostics);
   }
 }
 
-function materialize(workspace: Workspace, draft: FlowDraft, context: ContextSnapshot, diagnostics: Diagnostic[]): Translation {
+function materialize(workspace: Workspace, draft: FlowDraft, context: ContextSnapshot, diagnostics: Diagnostic[], placements?: Readonly<Record<string, {x: number; y: number}>>): Translation {
   const scenarioId = 'scenario-' + randomUUID();
   const pathId = 'path-' + randomUUID();
   const screenIds = new Map(draft.screens.map(screen => [screen.key, screen.kind === 'existing' ? screen.screenId : 'screen-' + randomUUID()]));
@@ -108,14 +108,24 @@ function materialize(workspace: Workspace, draft: FlowDraft, context: ContextSna
     const screen = draft.screens.find(item => item.key === visit.screenKey);
     if (screen?.kind === 'create' && !createOrder.includes(screen.key)) createOrder.push(screen.key);
   }
-  const spots = placeScreens(canvas.screens.map(screen => ({x: screen.x, y: screen.y})), createOrder.length);
-  if (spots.length < createOrder.length) {
+  const given = new Map<string, {x: number; y: number}>();
+  if (placements) for (const key of createOrder) {
+    const point = placements[key];
+    if (point) given.set(key, point);
+  }
+  const occupied = canvas.screens.map(screen => ({x: screen.x, y: screen.y}));
+  for (const point of given.values()) occupied.push({x: point.x, y: point.y});
+  const unplaced = createOrder.length - given.size;
+  const spots = placeScreens(occupied, unplaced);
+  if (spots.length < unplaced) {
     diagnostics.push(issue('CAPACITY_EXCEEDED', '/screens', 'error', ['apply', 'run'], 'There is no free canvas space for the new screens.', 'Move existing screens or remove one. Authoring does not move existing nodes.'));
     return finish(draft, diagnostics);
   }
-  createOrder.forEach((key, index) => {
+  let spot = 0;
+  createOrder.forEach(key => {
     const declared = draft.screens.find(screen => screen.key === key);
-    canvas.screens.push({id: screenIds.get(key)!, title: declared && declared.kind === 'create' ? declared.title.trim() : key, x: spots[index].x, y: spots[index].y, tests: []});
+    const point = given.get(key) ?? spots[spot++];
+    canvas.screens.push({id: screenIds.get(key)!, title: declared && declared.kind === 'create' ? declared.title.trim() : key, x: point.x, y: point.y, tests: []});
   });
 
   const tests: CanvasTest[] = [];
