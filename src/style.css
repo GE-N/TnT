@@ -953,9 +953,14 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .ai-flow .ai-question-option:hover{background:#e7f1ff}
 .ai-flow .ai-question-option:focus,.ai-flow .ai-question-option:focus-visible{background:#e7f1ff;box-shadow:0 0 0 3px rgba(10,132,255,.4)}
 .ai-flow .ai-capsule-dismiss:focus,.ai-flow .ai-capsule-dismiss:focus-visible{border:0;border-bottom:0;text-decoration:none;background:rgba(10,132,255,.08);box-shadow:0 0 0 3px rgba(10,132,255,.4)}
-.ai-launch{position:relative;display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:50%;color:var(--ai-button);background:transparent;box-shadow:0 0 0 8px rgba(10,132,255,.08),0 0 22px rgba(124,92,255,.35)}
-.ai-launch.is-open{background:var(--ai-info)}
+.ai-flow button.ai-launch,.ai-flow button.ai-launch:hover,.ai-flow button.ai-launch:focus,.ai-flow button.ai-launch.is-open{position:relative;display:inline-flex;align-items:center;justify-content:center;width:auto;min-width:44px;height:44px;min-height:44px;padding:0 16px;border:0;border-radius:999px;background:#e7f3ff;color:#0a63d1;font-weight:600;white-space:nowrap;box-shadow:none;outline:none}
+.ai-flow button.ai-launch:focus-visible{outline:none;background:#e7f3ff;color:#0a63d1;box-shadow:0 0 0 3px rgba(10,132,255,.4)}
 .ai-launch-dot{position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:var(--ai-violet)}
+.ai-flow-choice{display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px;margin:0 0 8px;padding:0;border:0;min-height:44px}
+.ai-flow-choice-option{display:flex;align-items:center;gap:8px;min-height:44px;margin:0;font-size:14px;font-weight:600;color:#253041}
+.ai-flow-choice-option:has(input:checked){color:#0a63d1}
+.ai-flow .ai-flow-choice input[type="radio"]{appearance:auto;-webkit-appearance:radio;width:16px;height:16px;min-width:16px;min-height:16px;margin:0;padding:0;flex:none;border:0;border-bottom:0;border-radius:50%;background:transparent;box-shadow:none;accent-color:#0a84ff;opacity:1}
+.ai-flow .ai-flow-choice input[type="radio"]:hover,.ai-flow .ai-flow-choice input[type="radio"]:focus,.ai-flow .ai-flow-choice input[type="radio"]:focus-visible{outline:2px solid #0a84ff;outline-offset:2px;background:transparent;box-shadow:none;border:0;border-bottom:0}
 .ai-spark{display:block}
 .ai-panel{width:100%;padding:12px 16px 8px;border:1.5px solid transparent;border-radius:18px;background:linear-gradient(#fff,#fff) padding-box,linear-gradient(120deg,#0a84ff,var(--ai-violet),#0a84ff) border-box;background-size:100% 100%,220% 100%;box-shadow:0 0 0 6px rgba(10,132,255,.08),0 12px 32px rgba(124,92,255,.16);animation:ai-shimmer 8s linear infinite}
 .ai-panel.is-error{border-color:var(--ai-error);background:#fff;animation:none;box-shadow:0 12px 32px #25304114}

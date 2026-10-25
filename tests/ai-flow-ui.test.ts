@@ -864,6 +864,116 @@ test('AI flow authoring UI', async t => {
       assert.ok(applied.document.querySelector('[data-screen-id]'));
     } finally { await applied.cleanup(); }
   });
+
+  await t.test('the describe-a-flow button stays labeled and quiet at rest', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      const button = h.document.querySelector<HTMLButtonElement>('[data-testid="ai-flow-button"]');
+      assert.ok(button);
+      assert.equal(button.classList.contains('ai-launch'), true);
+      assert.match(button.textContent ?? '', /✦\s*Describe a flow/);
+      assert.equal(button.getAttribute('aria-label'), 'Describe a flow');
+      assert.equal(h.document.querySelector('[data-testid="ai-flow-choice"]'), null);
+      const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+      const blocks = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+      const launch = blocks.filter(([, selector]) => selector.includes('.ai-launch') && !selector.includes('ai-launch-dot'));
+      const rest = launch.filter(([, selector]) => !selector.includes('focus-visible'));
+      assert.ok(rest.length >= 1, 'at-rest launch rule');
+      for (const [, , body] of rest) {
+        assert.match(body, /#e7f3ff/);
+        assert.match(body, /#0a63d1/);
+        assert.match(body, /border:\s*0/);
+        assert.match(body, /box-shadow:\s*none/);
+        assert.match(body, /outline:\s*none/);
+        assert.doesNotMatch(body, /box-shadow:\s*(?!none)/);
+      }
+      const focus = launch.filter(([, selector]) => selector.includes('focus-visible'));
+      assert.ok(focus.some(([, , body]) => /box-shadow:\s*0 0 0 3px/.test(body)), 'keyboard ring');
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('after apply, New flow generates without undo and Replace undoes first', async () => {
+    const created = await harness('ready');
+    try {
+      await created.render();
+      await created.generate('Pay the electric bill');
+      await created.until(() => created.confirmEnabled(), 'confirm');
+      await created.click('[data-testid="ai-confirm"]');
+      await created.until(() => !!created.document.querySelector('[data-testid="ai-undo"]'), 'undo offer');
+      assert.equal(created.document.querySelector('[data-testid="ai-flow-choice"]'), null);
+      await created.click('[data-testid="ai-flow-button"]');
+      await created.until(() => !!created.document.querySelector('[data-testid="ai-flow-choice"]'), 'choice');
+      const fresh = created.document.querySelector<HTMLInputElement>('[data-testid="ai-flow-choice-new"]');
+      const replace = created.document.querySelector<HTMLInputElement>('[data-testid="ai-flow-choice-replace"]');
+      assert.equal(fresh?.checked, true);
+      assert.equal(replace?.checked, false);
+      assert.match(fresh?.closest('label')?.textContent ?? '', /New flow/);
+      assert.match(replace?.closest('label')?.textContent ?? '', /Replace this flow/);
+      await created.click('[data-testid="ai-flow-choice-replace"]');
+      assert.equal(created.document.querySelector<HTMLInputElement>('[data-testid="ai-flow-choice-replace"]')?.checked, true);
+      await created.click('[data-testid="ai-flow-choice-new"]');
+      assert.equal(created.document.querySelector<HTMLInputElement>('[data-testid="ai-flow-choice-new"]')?.checked, true);
+      await created.fill('Flow description', 'Send a receipt');
+      await created.click('[data-testid="ai-generate"]');
+      await created.until(() => created.ai.generations === 2, 'new flow generated');
+      assert.equal(created.ai.undos, 0);
+      assert.deepEqual(created.ai.calls.filter(call => call === 'undo' || call === 'generate'), ['generate', 'generate']);
+      assert.equal((created.ai.generationBodies.at(-1) as {previousJobId?: string; prompt?: string}).previousJobId, undefined);
+      assert.equal((created.ai.generationBodies.at(-1) as {prompt?: string}).prompt, 'Send a receipt');
+      assert.equal((await created.saved()).scenarios?.length ?? 0, 1);
+    } finally { await created.cleanup(); }
+
+    const replaced = await harness('ready');
+    try {
+      await replaced.render();
+      await replaced.generate('Pay the electric bill');
+      await replaced.until(() => replaced.confirmEnabled(), 'confirm');
+      await replaced.click('[data-testid="ai-confirm"]');
+      await replaced.until(() => !!replaced.document.querySelector('[data-testid="ai-undo"]'), 'undo offer');
+      await replaced.click('[data-testid="ai-flow-button"]');
+      await replaced.until(() => !!replaced.document.querySelector('[data-testid="ai-flow-choice-replace"]'), 'choice');
+      await replaced.click('[data-testid="ai-flow-choice-replace"]');
+      await replaced.fill('Flow description', 'Send a receipt');
+      await replaced.click('[data-testid="ai-generate"]');
+      await replaced.until(() => replaced.ai.generations === 2, 'replaced flow generated');
+      const sequence = replaced.ai.calls.filter(call => call === 'undo' || call === 'generate');
+      const undoAt = sequence.indexOf('undo');
+      const secondGenerate = sequence.lastIndexOf('generate');
+      assert.ok(undoAt > sequence.indexOf('generate') && undoAt < secondGenerate, sequence.join(','));
+      assert.equal(replaced.ai.undos, 1);
+      assert.equal((replaced.ai.generationBodies.at(-1) as {previousJobId?: string; answers?: unknown; prompt?: string}).previousJobId, undefined);
+      assert.equal((replaced.ai.generationBodies.at(-1) as {answers?: unknown}).answers, undefined);
+      assert.equal((replaced.ai.generationBodies.at(-1) as {prompt?: string}).prompt, 'Send a receipt');
+      assert.equal((await replaced.saved()).scenarios?.length ?? 0, 0);
+    } finally { await replaced.cleanup(); }
+  });
+
+  await t.test('a failed replace undo stays in the composer and does not generate', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.generate('Pay the electric bill');
+      await h.until(() => h.confirmEnabled(), 'confirm');
+      await h.click('[data-testid="ai-confirm"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-undo"]'), 'undo offer');
+      await h.click('[data-testid="ai-flow-button"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-flow-choice-replace"]'), 'choice');
+      await h.click('[data-testid="ai-flow-choice-replace"]');
+      await h.fill('Flow description', 'Send a receipt');
+      h.ai.failNextUndo();
+      await h.click('[data-testid="ai-generate"]');
+      await h.until(() => /can’t be replaced/.test(h.document.querySelector('[data-testid="ai-error"]')?.textContent ?? ''), 'inline undo error');
+      assert.equal(h.ai.generations, 1);
+      assert.equal(h.ai.undos, 0);
+      assert.equal(h.ai.calls.filter(call => call === 'generate').length, 1);
+      assert.equal((h.document.querySelector('[aria-label="Flow description"]') as HTMLTextAreaElement).value, 'Send a receipt');
+      assert.equal(h.document.querySelector<HTMLInputElement>('[data-testid="ai-flow-choice-replace"]')?.checked, true);
+      assert.equal((await h.saved()).scenarios?.length ?? 0, 1);
+      await h.click('[data-testid="ai-undo"]');
+      await h.until(() => h.document.querySelector('[data-testid="ai-flow-choice"]') === null, 'choice removed');
+    } finally { await h.cleanup(); }
+  });
 });
 
 type Mode = 'ready' | 'hold' | 'expired' | 'needs' | 'invalid' | 'authoring-failed' | 'asks' | 'on-existing';
@@ -1111,12 +1221,16 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
   let failPut = false;
   let rejectGeneration = false;
   const counts = {generations: 0, previews: 0, applies: 0, cancels: 0, undos: 0, inflight: 0};
+  const calls: string[] = [];
+  let failUndo = false;
   return {
     get generations() { return counts.generations; },
     get previews() { return counts.previews; },
     get applies() { return counts.applies; },
     get cancels() { return counts.cancels; },
     get undos() { return counts.undos; },
+    get calls() { return calls; },
+    failNextUndo() { failUndo = true; },
     get inflight() { return counts.inflight; },
     get puts() { return puts; },
     get tests() { return tests; },
@@ -1156,6 +1270,7 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
         return {status: 200, body: {testId: body?.testId, ok: true, message: "Connected to OpenRouter. The model hasn't been tested yet."}};
       }
       if (method === 'POST' && path === '/api/ai/generations') {
+        calls.push('generate');
         generationBodies.push(structuredClone(body));
         if (rejectGeneration) {
           rejectGeneration = false;
@@ -1214,7 +1329,14 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
         if (!preview || preview.baseRevision !== expected) return {status: 409, body: {error: 'The preview was created for a different revision or compiler version.', code: 'PREVIEW_STALE'}};
         return {status: 200, body: await applyDraft(service, counts, applied, snapshots, body ?? {})};
       }
-      if (method === 'POST' && path === '/api/authoring/undo') return {status: 200, body: await undoDraft(service, counts, snapshots, body ?? {})};
+      if (method === 'POST' && path === '/api/authoring/undo') {
+        calls.push('undo');
+        if (failUndo) {
+          failUndo = false;
+          return {status: 409, body: {error: 'The workspace changed, so this flow can’t be replaced.', code: 'UNDO_CONFLICT'}};
+        }
+        return {status: 200, body: await undoDraft(service, counts, snapshots, body ?? {})};
+      }
       return {status: 404, body: {error: 'Unknown authoring route.', code: 'NOT_FOUND'}};
     },
   };

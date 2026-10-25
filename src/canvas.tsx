@@ -13,16 +13,16 @@ import type {ScenarioDetailsProps} from './scenario-details.js';
 import {Fragment,cloneElement,isValidElement,useContext,useEffect,useId,useLayoutEffect,useRef,useState,type ReactNode,type MouseEvent,type PointerEvent,type CSSProperties} from 'react';
 import type {YAMLReference,CanvasGraph,CanvasTest,CanvasDiagnostic,CanvasResult,CatalogEntry,ScreenNode} from '../server/canvas.js';
 import {inspectorWidth,placeInspector,visibleBounds,type InspectorPlacement,type Rect} from './inspector-placement.js';
-import {DRAFT_REVIEW_BAR,edgeInsets,placementForDraft,type Box,type Insets} from './draft-placement.js';
+import {DRAFT_REVIEW_BAR,edgeInsets,placementForDraft,reservedAiChrome,type Box,type Insets} from './draft-placement.js';
 const runLockReason='Unavailable while the scenario is running.';
 
 export const emptyCanvas=():CanvasGraph=>({screens:[],edges:[],paths:[]});
 export type DraftOverlay={nodes:{key:string;title:string;x:number;y:number;steps:{text:string;specified:boolean}[]}[];edges:{from:string;to:string;label:string}[];anchors:{key:string;x:number;y:number}[];existing:{screenId:string;key:string;steps:{text:string;specified:boolean}[]}[];settled?:boolean};
 const DRAFT_CHROME='.workspace-manager,.scenario-sequence-bar,.device-toolbar,.canvas-toolbar,.ai-launch,.ai-capsule,.floating-inspector,.scenario-details-panel,.workspace-advanced,.report-tools,.launch-tools,.screenshot-tools,.script-editor,.ai-settings-sheet,.canvas-route-bar,.run-error-toast';
-function chromeObstacles(viewport:Box):Box[]{
+function elementBoxes(viewport:Box,selector:string):Box[]{
  if(typeof document==='undefined')return [];
  const boxes:Box[]=[];
- for(const element of document.querySelectorAll<HTMLElement>(DRAFT_CHROME)){
+ for(const element of document.querySelectorAll<HTMLElement>(selector)){
   if(element.closest('.canvas-surface'))continue;
   if(element.hidden||element.getAttribute('aria-hidden')==='true'||element.getAttribute('data-inspector-yielded')==='true'||element.style.visibility==='hidden')continue;
   const rect=element.getBoundingClientRect();
@@ -31,6 +31,10 @@ function chromeObstacles(viewport:Box):Box[]{
   boxes.push({left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom});
  }
  return boxes;
+}
+function draftObstacles(viewport:Box){
+ const reserved=reservedAiChrome(viewport,elementBoxes(viewport,'.ai-launch,.ai-capsule'));
+ return {obstacles:[...elementBoxes(viewport,DRAFT_CHROME),reserved],reserved};
 }
 function readViewport(node:HTMLElement|null){
  if(!node)return;
@@ -206,12 +210,13 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   if(!draftKey)placedFor.current='';
   if(!read)return;
   const viewportBox={left:read.left,top:read.top,right:read.left+read.width,bottom:read.top+read.height};
-  const insets=edgeInsets(viewportBox,chromeObstacles(viewportBox));
+  const chrome=draftObstacles(viewportBox);
+  const insets=edgeInsets(viewportBox,chrome.obstacles);
   const rounded={top:Math.round(insets.top),right:Math.round(insets.right),bottom:Math.round(insets.bottom),left:Math.round(insets.left)};
   let scrollLeft=read.scrollLeft;
   let scrollTop=read.scrollTop;
   if(draftOverlay&&draftKey&&!draftOverlay.settled&&placeRef.current&&placedFor.current!==draftKey){
-   const placed=placementForDraft({existing:graphRef.current.screens.map(screen=>({x:screen.x,y:screen.y})),count:draftOverlay.nodes.length,zoom,viewport:{width:read.width,height:read.height,scrollLeft,scrollTop},insets:rounded});
+   const placed=placementForDraft({existing:graphRef.current.screens.map(screen=>({x:screen.x,y:screen.y})),count:draftOverlay.nodes.length,zoom,viewport:{width:read.width,height:read.height,scrollLeft,scrollTop},insets:rounded,reserved:[chrome.reserved],origin:{left:read.left,top:read.top}});
    if(placed.positions.length===draftOverlay.nodes.length){
     placedFor.current=draftKey;
     placeRef.current(Object.fromEntries(draftOverlay.nodes.map((item,index)=>[item.key,placed.positions[index]!])));

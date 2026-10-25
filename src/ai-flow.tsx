@@ -1,3 +1,4 @@
+import {flushSync} from 'react-dom';
 import {useEffect, useId, useMemo, useRef, useState, type KeyboardEvent} from 'react';
 import type {CanvasGraph} from '../server/canvas.js';
 import type {Diagnostic, DraftOperation, DraftTarget, FlowDraft} from '../server/authoring/types.js';
@@ -350,6 +351,13 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const [provenanceId, setProvenanceId] = useState('');
   const [provenanceName, setProvenanceName] = useState('');
   const [undoOffer, setUndoOffer] = useState<{receiptId: string; revision: number; workspaceId: string}>();
+  const undoOfferRef = useRef(undoOffer);
+  undoOfferRef.current = undoOffer;
+  const [flowChoice, setFlowChoice] = useState<'new' | 'replace'>('new');
+  const flowChoiceRef = useRef(flowChoice);
+  flowChoiceRef.current = flowChoice;
+  const opLock = useRef(false);
+  const hadUndoOffer = useRef(false);
   const [config, setConfig] = useState<AiPublicConfig>();
   const [disclosure, setDisclosure] = useState<string | null>(null);
   const jobGuard = useRef<string | undefined>(undefined);
@@ -484,6 +492,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       }
     }
     workspaceRef.current = currentId;
+    if (opLock.current) return;
     const stored = persistedAiDraft(callbacks.current.readView());
     const token = ++hydrateToken.current;
     if (!stored || !currentId) {
@@ -527,6 +536,13 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   useEffect(() => {
     setUndoOffer(current => current && input.revision !== current.revision ? undefined : current);
   }, [input.revision]);
+
+  useEffect(() => {
+    if (undoOffer) { hadUndoOffer.current = true; return; }
+    if (!hadUndoOffer.current) return;
+    hadUndoOffer.current = false;
+    setFlowChoice('new');
+  }, [undoOffer]);
 
   function clearPersisted() {
     callbacks.current.rememberView({aiDraft: null});
@@ -623,91 +639,127 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     return true;
   }
 
+  /**
+   * Same undo as the provenance Undo action.
+   * Replace reloads inside generate, while opLock is held, so that reload does not wipe the prompt.
+   */
+  async function restoreUndo(keepComposer: boolean) {
+    const offer = undoOfferRef.current;
+    if (!offer) return false;
+    try {
+      await client.undo({workspaceId: offer.workspaceId, expectedRevision: offer.revision, receiptId: offer.receiptId});
+      const detail = await callbacks.current.fetchWorkspace(offer.workspaceId);
+      if (keepComposer) flushSync(() => { callbacks.current.loadWorkspace(detail); });
+      else callbacks.current.loadWorkspace(detail);
+      setUndoOffer(undefined);
+      setProvenanceId('');
+      setFlowChoice('new');
+      return true;
+    } catch (error) {
+      setDraft(current => ({...current, error: errorOf(error, 'Undo failed.')}));
+      setOpen(true);
+      return false;
+    }
+  }
+
   async function generate(prompt = draftRef.current.prompt) {
     const text = prompt.trim();
-    if (!text || text.length > PROMPT_CHAR_LIMIT || submitting) return;
+    if (!text || text.length > PROMPT_CHAR_LIMIT || submitting || opLock.current) return;
+    opLock.current = true;
     const refining = !!draftRef.current.refining;
     const previousJobId = refining ? (draftRef.current.previousJobId ?? draftRef.current.jobId) : undefined;
     const restoreStatus = refining ? draftRef.current.restoreStatus : undefined;
     const answers = refining ? pendingAnswers.current : undefined;
+    const replacing = !refining && flowChoiceRef.current === 'replace' && !!undoOfferRef.current;
     setSubmitting(true);
     setOpen(true);
     setDisclosure(null);
     setDraft(current => ({...current, status: refining ? current.status : 'prompting', prompt: text, error: undefined, notice: undefined}));
-    let settings: AiPublicConfig;
     try {
-      settings = await client.getConfig();
-      if (!settings?.providers?.openrouter || !settings.providers['openai-compatible']) throw new AiFlowRequestError('AI settings could not be loaded.', 502, 'AI_NOT_CONFIGURED');
-      configRef.current = settings;
-      setConfig(settings);
-    } catch (error) {
-      if (!failRefine(text, errorOf(error, 'AI settings could not be loaded.'))) setDraft(current => ({...current, status: 'failed', prompt: text, error: errorOf(error, 'AI settings could not be loaded.')}));
+      if (replacing) {
+        const undone = await restoreUndo(true);
+        if (!undone) {
+          setFlowChoice('replace');
+          setDraft(current => ({...current, status: 'prompting', prompt: text, error: current.error ?? {code: 'UNDO_CONFLICT', message: 'Undo failed.', retryable: true}}));
+          setOpen(true);
+          return;
+        }
+      } else if (!refining) {
+        setFlowChoice('new');
+      }
+      let settings: AiPublicConfig;
+      try {
+        settings = await client.getConfig();
+        if (!settings?.providers?.openrouter || !settings.providers['openai-compatible']) throw new AiFlowRequestError('AI settings could not be loaded.', 502, 'AI_NOT_CONFIGURED');
+        configRef.current = settings;
+        setConfig(settings);
+      } catch (error) {
+        if (!failRefine(text, errorOf(error, 'AI settings could not be loaded.'))) setDraft(current => ({...current, status: 'failed', prompt: text, error: errorOf(error, 'AI settings could not be loaded.')}));
+        return;
+      }
+      const provider = settings.selected;
+      const entry = settings.providers[provider];
+      const model = entry?.model?.trim() || '';
+      if (!entry?.configured || !model) {
+        const failure = {code: 'AI_NOT_CONFIGURED' as const, message: 'Add an API key and model in AI settings. Your text is kept here.', retryable: false};
+        if (!failRefine(text, failure)) setDraft(current => ({...current, status: 'prompting', prompt: text, refining, error: failure}));
+        return;
+      }
+      const share = disclosureToken(provider, entry.baseUrl);
+      if (!readDisclosure().has(share) && !acked.current.has(share)) {
+        setDisclosure(share);
+        return;
+      }
+      let saved: Workspace | undefined;
+      try { saved = await callbacks.current.save(); }
+      catch (error) {
+        const failure = {...errorOf(error, 'Save failed. The draft was not generated.'), retryable: true, code: 'SAVE_FAILED'};
+        if (!failRefine(text, failure)) setDraft(current => ({...current, status: 'failed', prompt: text, error: failure}));
+        return;
+      }
+      if (!saved?.id) {
+        const failure = {code: 'SAVE_FAILED', message: 'Save the workspace before generating.', retryable: true};
+        if (!failRefine(text, failure)) setDraft(current => ({...current, status: 'failed', prompt: text, error: failure}));
+        return;
+      }
+      const baseRevision = saved.metadata?.revision ?? 0;
+      if (refining) ownSaveRevision.current = baseRevision;
+      try {
+        const started = await client.startGeneration({
+          workspaceId: saved.id,
+          expectedRevision: baseRevision,
+          expectedSettingsRevision: settings.settingsRevision,
+          prompt: text,
+          ...(previousJobId ? {previousJobId} : {}),
+          ...(answers?.length ? {answers} : {}),
+        });
+        pendingAnswers.current = undefined;
+        jobGuard.current = started.id;
+        setDraft(current => ({
+          ...current,
+          status: 'generating',
+          prompt: text,
+          jobId: started.id,
+          workspaceId: saved?.id,
+          ...(refining ? {} : {baseRevision}),
+          phase: started.phase,
+          refining,
+          ...(refining && previousJobId ? {previousJobId} : {previousJobId: undefined}),
+          ...(refining && restoreStatus ? {restoreStatus} : {restoreStatus: undefined}),
+          draft: refining ? current.draft : undefined,
+          questions: refining ? current.questions : undefined,
+          error: started.error,
+          notice: undefined,
+        }));
+      } catch (error) {
+        jobGuard.current = undefined;
+        const failure = errorOf(error, 'Couldn’t generate.');
+        if (!failRefine(text, failure)) setDraft(current => ({...current, status: 'failed', prompt: text, draft: current.draft, error: failure}));
+      }
+    } finally {
+      opLock.current = false;
       setSubmitting(false);
-      return;
     }
-    const provider = settings.selected;
-    const entry = settings.providers[provider];
-    const model = entry?.model?.trim() || '';
-    if (!entry?.configured || !model) {
-      const failure = {code: 'AI_NOT_CONFIGURED' as const, message: 'Add an API key and model in AI settings. Your text is kept here.', retryable: false};
-      if (!failRefine(text, failure)) setDraft(current => ({...current, status: 'prompting', prompt: text, refining, error: failure}));
-      setSubmitting(false);
-      return;
-    }
-    const share = disclosureToken(provider, entry.baseUrl);
-    if (!readDisclosure().has(share) && !acked.current.has(share)) {
-      setDisclosure(share);
-      setSubmitting(false);
-      return;
-    }
-    let saved: Workspace | undefined;
-    try { saved = await callbacks.current.save(); }
-    catch (error) {
-      const failure = {...errorOf(error, 'Save failed. The draft was not generated.'), retryable: true, code: 'SAVE_FAILED'};
-      if (!failRefine(text, failure)) setDraft(current => ({...current, status: 'failed', prompt: text, error: failure}));
-      setSubmitting(false);
-      return;
-    }
-    if (!saved?.id) {
-      const failure = {code: 'SAVE_FAILED', message: 'Save the workspace before generating.', retryable: true};
-      if (!failRefine(text, failure)) setDraft(current => ({...current, status: 'failed', prompt: text, error: failure}));
-      setSubmitting(false);
-      return;
-    }
-    const baseRevision = saved.metadata?.revision ?? 0;
-    if (refining) ownSaveRevision.current = baseRevision;
-    try {
-      const started = await client.startGeneration({
-        workspaceId: saved.id,
-        expectedRevision: baseRevision,
-        expectedSettingsRevision: settings.settingsRevision,
-        prompt: text,
-        ...(previousJobId ? {previousJobId} : {}),
-        ...(answers?.length ? {answers} : {}),
-      });
-      pendingAnswers.current = undefined;
-      jobGuard.current = started.id;
-      setDraft(current => ({
-        ...current,
-        status: 'generating',
-        prompt: text,
-        jobId: started.id,
-        workspaceId: saved?.id,
-        ...(refining ? {} : {baseRevision}),
-        phase: started.phase,
-        refining,
-        ...(refining && previousJobId ? {previousJobId} : {previousJobId: undefined}),
-        ...(refining && restoreStatus ? {restoreStatus} : {restoreStatus: undefined}),
-        draft: refining ? current.draft : undefined,
-        questions: refining ? current.questions : undefined,
-        error: started.error,
-        notice: undefined,
-      }));
-    } catch (error) {
-      jobGuard.current = undefined;
-      const failure = errorOf(error, 'Couldn’t generate.');
-      if (!failRefine(text, failure)) setDraft(current => ({...current, status: 'failed', prompt: text, draft: current.draft, error: failure}));
-    } finally { setSubmitting(false); }
   }
 
   function continueDisclosure() {
@@ -866,18 +918,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   }
 
   async function undoApply() {
-    const offer = undoOffer;
-    if (!offer) return;
-    try {
-      await client.undo({workspaceId: offer.workspaceId, expectedRevision: offer.revision, receiptId: offer.receiptId});
-      const detail = await callbacks.current.fetchWorkspace(offer.workspaceId);
-      callbacks.current.loadWorkspace(detail);
-      setUndoOffer(undefined);
-      setProvenanceId('');
-    } catch (error) {
-      setDraft(current => ({...current, error: errorOf(error, 'Undo failed.')}));
-      setOpen(true);
-    }
+    if (!undoOfferRef.current) return;
+    await restoreUndo(false);
   }
 
   async function cancel() {
@@ -963,7 +1005,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const reason = confirmReason(draft, input.running);
   const provider = config?.selected ?? 'openrouter';
   return {
-    draft, open, submitting, overlay, provenanceId, provenanceName, undoOffer, reason, token: input.token,
+    draft, open, submitting, overlay, provenanceId, provenanceName, undoOffer, flowChoice, setFlowChoice, reason, token: input.token,
     config, provider,
     disclosure, continueDisclosure, dismissDisclosure,
     setPrompt: (prompt: string) => setDraft(current => ({...current, prompt})),
@@ -1044,6 +1086,7 @@ export function AiFlow({control}: {control: AiDraftControl}) {
         <h3 className="ai-draft-heading">{refining ? 'Refine draft' : 'Describe a flow'}</h3>
         <button type="button" className="ai-text" aria-label="Close" onClick={() => { if (!generating) { control.closePanel(); buttonRef.current?.focus(); } }}>✕</button>
       </div>
+      {undoOffer && !refining && <FlowChoice control={control} disabled={busy} />}
       {control.disclosure ? <><p className="ai-prompt-preview">{draft.prompt}</p><Disclosure control={control} /></> : <>
         <textarea ref={fieldRef} className="ai-prompt-field" aria-label="Flow description" placeholder="Describe the flow" value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={copy ? errorId : undefined} onChange={event => control.setPrompt(event.target.value)} onKeyDown={onFieldKeyDown} />
         <p className="ai-hint">Enter generates · Shift+Enter new line · Esc closes</p>
@@ -1067,9 +1110,24 @@ export function AiFlow({control}: {control: AiDraftControl}) {
       </>}
     </section>}
     {REVIEW.includes(draft.status) && !refining && draft.draft ? <AiCapsule control={control} /> : <button type="button" ref={buttonRef} className={'ai-launch' + (open ? ' is-open' : '')} data-testid="ai-flow-button" aria-label="Describe a flow" title="Describe a flow" aria-expanded={open} aria-busy={busy || undefined} onClick={() => open ? (generating ? undefined : control.closePanel()) : control.openPanel()}>
-      <Sparkles />
+      ✦ Describe a flow
     </button>}
   </div>;
+}
+
+function FlowChoice({control, disabled}: {control: AiDraftControl; disabled: boolean}) {
+  const choice = control.flowChoice;
+  return <fieldset className="ai-flow-choice" data-testid="ai-flow-choice" disabled={disabled}>
+    <legend className="sr-only">What should this prompt do?</legend>
+    <label className="ai-flow-choice-option">
+      <input type="radio" name="ai-flow-choice" value="new" data-testid="ai-flow-choice-new" checked={choice === 'new'} onChange={() => control.setFlowChoice('new')} />
+      New flow
+    </label>
+    <label className="ai-flow-choice-option">
+      <input type="radio" name="ai-flow-choice" value="replace" data-testid="ai-flow-choice-replace" checked={choice === 'replace'} onChange={() => control.setFlowChoice('replace')} />
+      Replace this flow
+    </label>
+  </fieldset>;
 }
 
 function AiCapsule({control}: {control: AiDraftControl}) {
