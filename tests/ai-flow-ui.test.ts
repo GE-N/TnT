@@ -1,4 +1,4 @@
-import {openScenarioPanel} from './workspace-ui-helpers.js';
+import {openScenarioPanel, showLegacyCanvasControls} from './workspace-ui-helpers.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
@@ -1737,3 +1737,112 @@ function runningRun(id: string, workspaceId: string, deviceId: string) {
     steps: [], log: '', cleanup: {verified: false, detail: 'pending'}, artifacts: [], mappingNote: '',
   };
 }
+
+test('empty and YAML-only workspaces open on the contextual canvas', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'tnt-contextual-canvas-'));
+  const yaml = 'appId: com.example.HybridApp\n---\n- launchApp\n';
+  const emptyCanvas = {screens: [], edges: [], paths: []};
+  const service = createScenarios({
+    root: directory,
+    runner: createRunner({artifactDirectory: directory, execute: async () => ({stdout: '', stderr: ''})}),
+    maestro: {version: async () => '0', run: async () => ({code: 0, log: '', cleanup: {verified: true, detail: 'unused'}})},
+  });
+  const empty = await service.save({name: 'Untitled workspace', yaml, scenarios: [], canvas: emptyCanvas});
+  await service.saveView(empty.id, {format: 1, panels: {advanced: true}, scenarioId: 'gone'});
+  const yamlOnly = await service.save({
+    name: 'YAML only', yaml, canvas: emptyCanvas,
+    scenarios: [{id: 'yaml-1', name: 'Imported flow', steps: [], inputs: {}, parameters: {}, enabledHandlerIds: []}],
+  });
+  const omitted = await service.save({name: 'No canvas field', yaml, scenarios: []});
+  await service.setSession(empty.id);
+  const dom = new JSDOM('<div id="root"></div>');
+  const keys = ['window', 'document', 'HTMLElement', 'Event', 'ResizeObserver', 'IS_REACT_ACT_ENVIRONMENT', 'fetch'] as const;
+  const previous = keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+  class ResizeObserver { observe() {} disconnect() {} }
+  const pending: Promise<Response>[] = [];
+  const request = async (path: string, init?: {body?: string}) => {
+    try {
+      const body = init?.body ? JSON.parse(init.body) : undefined;
+      const id = path.split('/')[3];
+      if (path === '/api/session') return Response.json(await service.session());
+      if (path === '/api/canvas/references') return Response.json({references: [], diagnostics: []});
+      if (path.startsWith('/api/scripts/trust')) return Response.json({scripts: []});
+      if (path.endsWith('/view')) return Response.json(await service.saveView(id, body));
+      if (/^\/api\/workspaces\/[0-9a-f-]{36}$/.test(path)) return Response.json(await service.workspaceDetail(id));
+      return Response.json({error: 'unused'}, {status: 404});
+    } catch (error) {
+      return Response.json({error: error instanceof Error ? error.message : 'Request failed'}, {status: 400});
+    }
+  };
+  const fetchImpl = (path: string, init?: {body?: string}) => { const response = request(path, init); pending.push(response); return response; };
+  for (const key of keys) Object.defineProperty(globalThis, key, {value: key === 'fetch' ? fetchImpl : key === 'IS_REACT_ACT_ENVIRONMENT' ? true : key === 'ResizeObserver' ? ResizeObserver : Reflect.get(dom.window, key), configurable: true});
+  const {createRoot} = await import('react-dom/client');
+  const document = dom.window.document;
+  let root = createRoot(document.getElementById('root')!);
+  const settle = async () => { do { await Promise.all(pending.splice(0)); await new Promise(resolve => setImmediate(resolve)); } while (pending.length); };
+  const render = async () => { await act(async () => { root.render(createElement(Scenarios, {token: 'local', deviceId: '', bundleId: 'com.example.HybridApp', launchBusy: false, onRunning: () => {}, recoverSession: true})); }); };
+  const reload = async (id: string) => {
+    await service.setSession(id);
+    await act(async () => { root.unmount(); });
+    root = createRoot(document.getElementById('root')!);
+    await render();
+    for (let attempt = 0; attempt < 40; attempt++) {
+      if (document.querySelector('.artifact-id')?.textContent?.includes(id)) return;
+      await act(async () => { await settle(); });
+    }
+    assert.fail('workspace ' + id + ' did not load');
+  };
+  const legend = (text: string) => [...document.querySelectorAll('legend')].some(node => node.textContent === text);
+  const contextual = (hint?: RegExp) => {
+    assert.ok(document.querySelector('.scenario-sequence-bar'), 'sequence bar');
+    if (hint) assert.match(document.querySelector('.scenario-sequence-bar')?.textContent ?? '', hint);
+    assert.equal([...document.querySelectorAll('button')].some(node => node.textContent === 'Disable canvas'), false);
+    assert.equal(legend('Connect expected screens'), false);
+    assert.equal(legend('Advanced YAML associations'), false);
+    assert.equal(document.querySelector('.canvas-route-bar'), null);
+    assert.match(document.querySelector('.workspace-advanced > summary')?.textContent ?? '', /Advanced mode · legacy authoring and settings/);
+  };
+  try {
+    await reload(empty.id);
+    contextual(/No scenarios/);
+    assert.match(document.querySelector('.sequence-empty-hint')?.textContent ?? '', /Create one to start a sequence/);
+    const launch = document.querySelector<HTMLButtonElement>('[data-testid="ai-flow-button"]');
+    assert.ok(launch);
+    await act(async () => { launch.click(); });
+    assert.equal(document.querySelector('.ai-draft-heading')?.textContent, 'Describe a flow');
+    assert.ok(document.querySelector('[aria-label="Flow description"]'));
+    await reload(empty.id);
+    contextual(/No scenarios/);
+    await reload(yamlOnly.id);
+    contextual(/Imported flow/);
+    assert.doesNotMatch(document.querySelector('.scenario-sequence-bar')?.textContent ?? '', /No scenarios/);
+    await reload(omitted.id);
+    contextual(/No scenarios/);
+    await reload(empty.id);
+    contextual(/No scenarios/);
+    await showLegacyCanvasControls(document, act);
+    assert.equal(document.querySelector('.scenario-sequence-bar'), null);
+    assert.ok([...document.querySelectorAll('button')].some(node => node.textContent === 'Disable canvas'));
+    assert.equal(legend('Connect expected screens'), true);
+    assert.equal(legend('Advanced YAML associations'), true);
+    assert.ok(document.querySelector('.canvas-route-bar'));
+    const details = document.querySelector<HTMLDetailsElement>('.workspace-advanced')!;
+    if (!details.open) await act(async () => { details.querySelector('summary')!.click(); });
+    const back = [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Return to contextual canvas');
+    assert.ok(back);
+    await act(async () => { back.click(); });
+    contextual(/No scenarios/);
+    await showLegacyCanvasControls(document, act);
+    assert.ok([...document.querySelectorAll('button')].some(node => node.textContent === 'Disable canvas'));
+    const view = await service.workspaceDetail(empty.id);
+    assert.equal(JSON.stringify(view.view ?? {}).includes('legacyCanvas'), false);
+    await reload(empty.id);
+    contextual(/No scenarios/);
+    assert.equal([...document.querySelectorAll('button')].some(node => node.textContent === 'Disable canvas'), false);
+  } finally {
+    await act(async () => { root.unmount(); });
+    dom.window.close();
+    for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
+    await rm(directory, {recursive: true, force: true});
+  }
+});

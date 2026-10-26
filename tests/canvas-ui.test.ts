@@ -1,4 +1,4 @@
-import {inspectorCard,inspectorOwner,inspectScreen,workspaceCommand,singleWorkspaceLibrary} from './workspace-ui-helpers.js';
+import {inspectorCard,inspectorOwner,inspectScreen,showLegacyCanvasControls,workspaceCommand,singleWorkspaceLibrary} from './workspace-ui-helpers.js';
 import {test} from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';import {act,createElement,useState,type ChangeEvent} from 'react';import {CanvasEditor,CanvasBoard} from '../src/canvas.js';import {selectedCanvasPath} from '../server/canvas.js';import type {CanvasGraph,CatalogEntry} from '../server/canvas.js';
 async function addNode(dom:JSDOM,title:string){
  const document=dom.window.document;
@@ -227,7 +227,7 @@ test('canvas Run scenario uses the selected path and shows blocked runs in a dis
  const context=async()=>act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));
  const runFromMenu=async()=>{await context();await act(async()=>{const menu=document.querySelector('[role=menu]')!;menu.querySelectorAll<HTMLButtonElement>('button')[1].click();});};
  try{
-  await render();await click('Open saved workspace');
+  await render();await click('Open saved workspace');await showLegacyCanvasControls(document,act);
   await context();assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(node=>node.textContent),['Add node','Run scenario']);
   await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'Run scenario');
   await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'Add node');

@@ -2,7 +2,7 @@ import {commitVisitEdits} from './workspace-ui-helpers.js';
 import {act,createElement} from 'react';
 import {JSDOM} from 'jsdom';
 import type {CanvasGraph} from '../server/canvas.js';
-import {inspectScreen,workspaceCommand} from './workspace-ui-helpers.js';
+import {inspectScreen,showLegacyCanvasControls,workspaceCommand} from './workspace-ui-helpers.js';
 import {captureState,withSeededIdsAsync,type GoldenFixture,type GoldenScript,type GoldenSnapshot} from './golden-canvas-runner.js';
 
 const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
@@ -176,6 +176,7 @@ export async function runUi(fixture:GoldenFixture,hooks:{beforeRequest?:(path:st
     try{
       await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));
       await workspaceCommand(document,'open',settle);
+      if(!fixture.scenarioMode)await showLegacyCanvasControls(document,act);
       let current=await published();
       const baseline=captureState({graph:current.canvas,yaml:current.yaml},fixture);
       const operations:GoldenSnapshot['operations']=[];

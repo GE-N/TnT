@@ -385,7 +385,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     else{setScenarioId(scenarios[0]?.id??'');setScenarioNotice('');}
     const savedPath=typeof view.pathId==='string'&&workspace.canvas?.paths.some(path=>path.id===view.pathId)?view.pathId:'';
     setPathId(savedPath);
-    setLegacyCanvas(!scenarios.some(item=>item.authoring==='canvas'));setDefinitions(scenarios);setDefinitionError('');setResetApp(false);
+    setLegacyCanvas(false);setDefinitions(scenarios);setDefinitionError('');setResetApp(false);
     setDeletedScenario(undefined);setBatch(undefined);setWorkspaceId(workspace.id);setName(workspace.name);setYaml(workspace.yaml);setFlows(JSON.stringify(workspace.flows??{},null,2));
     setAutomation(workspace.automation);setAutomationError('');setPreview(undefined);setCanvas(workspace.canvas);setLoadedMock(workspace.mock);setMock(workspace.mock);setMockError('');setLoadRevision(value=>value+1);
     artifactSequence.current++;setReports([]);setRun(undefined);setArtifact(undefined);setInputs('');setExpectedPage('');setDrafts([]);fieldsRef.current.clear();

@@ -76,3 +76,12 @@ export async function openScenarioPanel(document:Document,act:(callback:()=>void
  if(!trigger)return;
  await act(async()=>{trigger.click();});
 }
+/** Legacy canvas is session-only. Loads stay on the contextual canvas until this opt-in. */
+export async function showLegacyCanvasControls(document:Document,act:(callback:()=>void|Promise<void>)=>Promise<unknown>){
+ if([...document.querySelectorAll('button')].some(node=>node.textContent==='Disable canvas'||node.textContent==='Create screen canvas'||node.textContent==='Return to contextual canvas'))return;
+ const details=document.querySelector<HTMLDetailsElement>('.workspace-advanced');
+ if(details&&!details.open)await act(async()=>{details.querySelector('summary')!.click();});
+ const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>node.textContent==='Show legacy canvas controls');
+ assert.ok(button,'Show legacy canvas controls');
+ await act(async()=>{button.click();});
+}
