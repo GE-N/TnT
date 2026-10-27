@@ -54,6 +54,8 @@ export type PreviewRequest = {
   draft: unknown;
   /** Canvas points for this draft's create screens. Omitted when none are drawn. */
   placements?: Record<string, {x: number; y: number}>;
+  /** Overwrite this canvas scenario in place. Omitted on the first Apply, which still creates. */
+  replaceScenarioId?: string;
 };
 export type ApplyRequest = {workspaceId: string; expectedRevision: number; previewId: string; idempotencyKey: string; acknowledgedAssumptionKeys: string[]};
 export type ApplyResponse = ApplyResult & {receiptId?: string};

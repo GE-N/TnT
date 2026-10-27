@@ -1,13 +1,17 @@
 import {useEffect, useId, type KeyboardEvent} from 'react';
 import {relativeVersionTime, type FlowVersion} from './ai-versions.js';
 
-export function VersionsSheet({versions, nowId, selectedId, onSelect, onClose, onKeepCurrent}: {
+export function VersionsSheet({versions, nowId, selectedId, onSelect, onClose, onKeepCurrent, onRestore, restoreDisabled, restoreNote, restoreError}: {
   versions: FlowVersion[];
   nowId?: string;
   selectedId?: string;
   onSelect: (id: string) => void;
   onClose: () => void;
   onKeepCurrent: () => void;
+  onRestore: () => void;
+  restoreDisabled?: boolean;
+  restoreNote?: string;
+  restoreError?: string;
 }) {
   const labelId = useId();
   const selected = versions.find(item => item.id === selectedId) ?? versions[0];
@@ -50,10 +54,11 @@ export function VersionsSheet({versions, nowId, selectedId, onSelect, onClose, o
     <footer className="ai-versions-foot">
       {past ? <>
         <div className="ai-versions-actions">
-          <button type="button" className="ai-version-restore" data-testid="ai-version-restore" aria-disabled="true">✓ Restore</button>
+          <button type="button" className="ai-version-restore" data-testid="ai-version-restore" aria-disabled={restoreDisabled ? true : undefined} onClick={() => { if (!restoreDisabled) onRestore(); }}>✓ Restore</button>
           <button type="button" className="ai-version-keep" data-testid="ai-version-keep" onClick={onKeepCurrent}>Keep current</button>
         </div>
-        <p className="ai-versions-hint">Restore checkpoints Now first, then writes this as current.</p>
+        <p className="ai-versions-hint">{restoreNote ?? 'Restore checkpoints Now first, then writes this as current.'}</p>
+        {restoreError && <p className="ai-versions-error" role="alert" data-testid="ai-version-restore-error">{restoreError}</p>}
       </> : <p className="ai-versions-hint">Local on this Mac · kept with the workspace</p>}
     </footer>
   </aside>;

@@ -166,7 +166,7 @@ export function withPoppedVersion(state: AiVersionsState, flowId: string): AiVer
 
 /**
  * Stack half of Figma Restore: checkpoint Now, then mark the chosen past entry as the new Now.
- * TODO(R8-U2): write — the workspace write with replaceScenarioId is not done here.
+ * The sheet writes the workspace; this only describes the stack shape.
  */
 export function withRestoredVersion(state: AiVersionsState, versionId: string, createdAt: string, nextId: () => string): AiVersionsState {
   const flowId = state.current;

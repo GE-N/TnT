@@ -8,7 +8,7 @@ import type {DraftPositions} from './draft-placement.js';
 import {AI_POLL_MS, ANSWER_CHAR_LIMIT, AiFlowRequestError, createAiFlowClient, PROMPT_CHAR_LIMIT, PROMPT_COUNTER_AT, type AiPublicConfig, type ApplyResponse, type GenerationPhase, type GenerationView, type ProviderId} from './ai-flow-client.js';
 import {subscribeAiConfig} from './ai-settings.js';
 import {VersionsSheet} from './ai-versions-sheet.js';
-import {makeVersion, readAiVersions, relativeVersionTime, sharedScreenIds, UNDO_WINDOW_MS, withPoppedVersion, withPushedVersion, withRestoredVersion, type AiVersionsState, type FlowVersion, type VersionCanvasPreview} from './ai-versions.js';
+import {makeVersion, readAiVersions, relativeVersionTime, sharedScreenIds, UNDO_WINDOW_MS, withPoppedVersion, withPushedVersion, type AiVersionsState, type FlowVersion, type VersionCanvasPreview} from './ai-versions.js';
 
 export type AiDraftStatus = 'idle' | 'prompting' | 'generating' | 'pending' | 'needsInfo' | 'stale' | 'applying' | 'failed';
 
@@ -47,6 +47,11 @@ export type AiDraft = {
    * `null` means that preview omitted the field. Absent means the preview was not recorded here.
    */
   previewedPlacements?: DraftPositions | null;
+  /**
+   * `replaceScenarioId` sent with the current client preview.
+   * `null` means that preview omitted the field. Absent means the preview was not recorded here.
+   */
+  previewedReplaceId?: string | null;
 };
 
 export type PersistedAiDraft = {jobId: string; prompt: string; previewId?: string; baseRevision?: number; positions?: DraftPositions};
@@ -263,6 +268,20 @@ function placementsMatch(current: DraftPositions | undefined, previewed: DraftPo
   return keys.every(key => sent[key]?.x === current[key].x && sent[key]?.y === current[key].y);
 }
 
+/** `previewed` is absent for a generation preview, which cannot name a scenario to overwrite. */
+function replaceMatches(wanted: string | undefined, previewed: string | null | undefined) {
+  if (previewed === undefined) return wanted === undefined;
+  return (previewed ?? undefined) === wanted;
+}
+
+/** Why ✓ Restore stays quiet. Inline, and only while the write would be wrong. */
+export function restoreBlockReason(running: boolean, draft: AiDraft, busy: boolean) {
+  if (running) return 'Restore is unavailable while a run is active.';
+  if (busy || draft.status === 'applying') return 'Restore is unavailable while a draft is being applied.';
+  if (draft.status === 'generating' || (draft.draft && draft.status !== 'idle')) return 'Restore is unavailable while a draft is pending.';
+  return undefined;
+}
+
 function needsRegeneration(code: string | undefined, diagnostics?: {code: string}[]) {
   if (code === 'REVISION_CONFLICT' || !!code?.startsWith('INVALID_')) return true;
   return !!diagnostics?.some(item => item.code === 'REVISION_CONFLICT' || item.code.startsWith('INVALID_'));
@@ -295,7 +314,7 @@ function fromView(current: AiDraft, view: GenerationView, revision: number): AiD
     phase: view.state === 'running' ? view.phase : undefined,
     ...(baseRevision !== undefined ? {baseRevision} : {}),
     ...(incomingPreviewId ? {previewId: incomingPreviewId} : {}),
-    ...(previewReplaced ? {previewedPlacements: undefined} : {}),
+    ...(previewReplaced ? {previewedPlacements: undefined, previewedReplaceId: undefined} : {}),
     ...(preview ? {
       applicable: preview.applicable,
       diagnostics: preview.diagnostics,
@@ -383,7 +402,7 @@ function writeDisclosure(id: string) {
   try { sessionStorage.setItem(DISCLOSURE_KEY, JSON.stringify([...next])); } catch { /* The in-memory set still skips it for this page. */ }
 }
 
-export function useAiDraft(input: Callbacks & {token: string; workspaceId: string; revision: number; running: boolean; canvas: CanvasGraph | undefined; contentKey: string; loadRevision: number; onOpenSettings?: (returnTo?: HTMLElement) => void}) {
+export function useAiDraft(input: Callbacks & {token: string; workspaceId: string; revision: number; running: boolean; canvas: CanvasGraph | undefined; scenarios: {id: string; authoring?: string; pathId?: string}[]; contentKey: string; loadRevision: number; onOpenSettings?: (returnTo?: HTMLElement) => void}) {
   const client = useMemo(() => createAiFlowClient(input.token), [input.token]);
   const callbacks = useRef<Callbacks>(input);
   callbacks.current = input;
@@ -392,7 +411,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const [submitting, setSubmitting] = useState(false);
   const [provenanceId, setProvenanceId] = useState('');
   const [provenanceName, setProvenanceName] = useState('');
-  const [undoOffer, setUndoOffer] = useState<{receiptId: string; revision: number; workspaceId: string}>();
+  const [undoOffer, setUndoOffer] = useState<{receiptId: string; revision: number; workspaceId: string; pops?: number}>();
   const undoOfferRef = useRef(undoOffer);
   undoOfferRef.current = undoOffer;
   const [undoVisible, setUndoVisible] = useState(false);
@@ -401,6 +420,16 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   versionStateRef.current = versionState;
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [selectedVersionId, setSelectedVersionId] = useState<string>();
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreError, setRestoreError] = useState('');
+  const keepVersionsOpen = useRef(false);
+  /** The next content-key change is our own Apply or Restore, so Undo stays up. */
+  const adoptContentKey = useRef(false);
+  const restoreLock = useRef(false);
+  const scenariosRef = useRef(input.scenarios);
+  scenariosRef.current = input.scenarios;
+  const provenanceRef = useRef(provenanceId);
+  provenanceRef.current = provenanceId;
   const opLock = useRef(false);
   const [config, setConfig] = useState<AiPublicConfig>();
   const [disclosure, setDisclosure] = useState<string | null>(null);
@@ -584,7 +613,11 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
 
   useEffect(() => {
     if (!provenanceId) { provenanceBaseline.current = undefined; return; }
-    if (provenanceBaseline.current === undefined) { provenanceBaseline.current = input.contentKey; return; }
+    if (adoptContentKey.current || provenanceBaseline.current === undefined) {
+      adoptContentKey.current = false;
+      provenanceBaseline.current = input.contentKey;
+      return;
+    }
     if (input.contentKey !== provenanceBaseline.current) {
       provenanceBaseline.current = undefined;
       setProvenanceId('');
@@ -607,6 +640,13 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     const next = readAiVersions(callbacks.current.readView());
     versionStateRef.current = next;
     setVersionState(next);
+    if (keepVersionsOpen.current) {
+      keepVersionsOpen.current = false;
+      const list = next.current ? next.flows[next.current] ?? [] : [];
+      setSelectedVersionId(list.at(-1)?.id);
+      setVersionsOpen(list.length > 0);
+      return;
+    }
     setVersionsOpen(false);
     setSelectedVersionId(undefined);
   }, [input.loadRevision, input.workspaceId]);
@@ -631,6 +671,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         diagnostics: preview.diagnostics,
         requiredAssumptionKeys: preview.requiredAssumptionKeys,
         previewedPlacements: opened.placements,
+        previewedReplaceId: opened.replaceScenarioId,
         refining: false,
         restoreStatus: undefined,
         previousJobId: undefined,
@@ -721,7 +762,9 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     try {
       await client.undo({workspaceId: offer.workspaceId, expectedRevision: offer.revision, receiptId: offer.receiptId});
       const detail = await callbacks.current.fetchWorkspace(offer.workspaceId);
-      const nextVersions = flowId ? withPoppedVersion(versionStateRef.current, flowId) : versionStateRef.current;
+      let nextVersions = versionStateRef.current;
+      const pops = offer.pops ?? 1;
+      if (flowId) for (let index = 0; index < pops; index++) nextVersions = withPoppedVersion(nextVersions, flowId);
       detail.view = viewWith(detail.view, {aiVersions: nextVersions});
       versionStateRef.current = nextVersions;
       if (keepComposer) flushSync(() => { callbacks.current.loadWorkspace(detail); });
@@ -840,17 +883,40 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     setDisclosure(null);
   }
 
-  async function requestPreview(nextDraft: FlowDraft, revision: number, workspaceId: string, positions?: DraftPositions) {
+  /** Scenario an Apply or Restore overwrites. A deleted or non-canvas flow falls back to create and clears `current`. */
+  function liveReplaceId() {
+    const state = versionStateRef.current;
+    const id = state.current || provenanceRef.current;
+    if (!id) return;
+    const scenario = scenariosRef.current.find(item => item.id === id);
+    if (scenario?.authoring === 'canvas' && scenario.pathId) return id;
+    if (state.current === id) commitVersions({format: 1, flows: state.flows});
+    if (provenanceRef.current === id) setProvenanceId('');
+    return undefined;
+  }
+
+  async function persistVersions(next: AiVersionsState) {
+    versionStateRef.current = next;
+    setVersionState(next);
+    callbacks.current.rememberView({aiVersions: next});
+    const workspaceId = input.workspaceId;
+    if (!workspaceId) return;
+    await callbacks.current.saveWorkspaceView(workspaceId, callbacks.current.readView());
+  }
+
+  async function requestPreview(nextDraft: FlowDraft, revision: number, workspaceId: string, positions?: DraftPositions, replaceScenarioId?: string) {
     const context = await client.createContext({workspaceId, expectedRevision: revision});
     const placements = placementsFor(nextDraft, positions);
+    const replaceId = replaceScenarioId ?? liveReplaceId();
     const preview = await client.preview({
       workspaceId,
       expectedRevision: revision,
       contextId: context.contextId,
       draft: nextDraft,
       ...(placements ? {placements} : {}),
+      ...(replaceId ? {replaceScenarioId: replaceId} : {}),
     });
-    return {preview, placements: placements ?? null};
+    return {preview, placements: placements ?? null, replaceScenarioId: replaceId ?? null};
   }
 
   async function repreview(nextDraft: FlowDraft, revision: number, workspaceId: string, regenerate: boolean, restore?: {status: AiDraftStatus; error?: AiDraft['error']; notice?: string; jobId?: string}, positions?: DraftPositions) {
@@ -882,6 +948,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
           diagnostics: preview.diagnostics,
           requiredAssumptionKeys: preview.requiredAssumptionKeys,
           previewedPlacements: opened.placements,
+          previewedReplaceId: opened.replaceScenarioId,
           phase: undefined,
           refining: false,
           restoreStatus: undefined,
@@ -963,16 +1030,18 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
 
   async function confirm() {
     const current = draftRef.current;
-    if (confirmReason(current, input.running) || !current.previewId || current.baseRevision === undefined || !input.workspaceId) return;
+    if (restoreLock.current || confirmReason(current, input.running) || !current.previewId || current.baseRevision === undefined || !input.workspaceId) return;
     const workspaceId = input.workspaceId;
     let previewId = current.previewId;
     let expectedRevision = current.baseRevision;
+    let assumptions = current.requiredAssumptionKeys ?? [];
     const positions = current.positions;
     const drawn = placementsFor(current.draft, positions);
+    const replaceId = liveReplaceId();
     setDraft(existing => ({...existing, status: 'applying', error: undefined}));
-    if (current.draft && !placementsMatch(drawn, current.previewedPlacements)) {
+    if (current.draft && (!placementsMatch(drawn, current.previewedPlacements) || !replaceMatches(replaceId, current.previewedReplaceId))) {
       try {
-        const opened = await requestPreview(current.draft, expectedRevision, workspaceId, positions);
+        const opened = await requestPreview(current.draft, expectedRevision, workspaceId, positions, replaceId);
         if (draftRef.current.jobId !== current.jobId) return;
         if (opened.preview.baseRevision !== expectedRevision) {
           setDraft(existing => ({
@@ -985,11 +1054,13 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
             diagnostics: opened.preview.diagnostics,
             requiredAssumptionKeys: opened.preview.requiredAssumptionKeys,
             previewedPlacements: opened.placements,
+            previewedReplaceId: opened.replaceScenarioId,
           }));
           return;
         }
         previewId = opened.preview.previewId;
         expectedRevision = opened.preview.baseRevision;
+        assumptions = opened.preview.requiredAssumptionKeys ?? [];
         setDraft(existing => existing.status === 'applying' ? {
           ...existing,
           previewId,
@@ -999,6 +1070,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
           diagnostics: opened.preview.diagnostics,
           requiredAssumptionKeys: opened.preview.requiredAssumptionKeys,
           previewedPlacements: opened.placements,
+          previewedReplaceId: opened.replaceScenarioId,
         } : existing);
       } catch (error) {
         setDraft(existing => ({...existing, status: current.status === 'needsInfo' || current.applicable === false ? 'needsInfo' : 'pending', error: errorOf(error, 'The draft could not be previewed.')}));
@@ -1014,7 +1086,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         expectedRevision,
         previewId,
         idempotencyKey: key,
-        acknowledgedAssumptionKeys: current.requiredAssumptionKeys ?? [],
+        acknowledgedAssumptionKeys: assumptions,
       });
     } catch (error) {
       setDraft(existing => ({...existing, status: current.status === 'needsInfo' || current.applicable === false ? 'needsInfo' : 'pending', error: errorOf(error, 'The draft could not be confirmed.')}));
@@ -1036,6 +1108,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       versionStateRef.current = nextVersions;
       jobGuard.current = undefined;
       memory.current.delete(applied.workspaceId);
+      adoptContentKey.current = true;
       callbacks.current.loadWorkspace(detail);
       callbacks.current.selectScenario(applied.scenarioId);
       callbacks.current.rememberView({aiDraft: null, aiVersions: nextVersions});
@@ -1151,12 +1224,91 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     commitVersions(withPoppedVersion(versionStateRef.current, id));
   }
 
-  /** Stack half of Figma Restore. TODO(R8-U2): write the chosen draft with replaceScenarioId. */
-  function restore(versionId: string) {
-    const next = withRestoredVersion(versionStateRef.current, versionId, new Date().toISOString(), () => crypto.randomUUID());
-    commitVersions(next);
-    const head = next.current ? next.flows[next.current]?.at(-1) : undefined;
-    setSelectedVersionId(head?.id);
+  /**
+   * Figma Restore. Checkpoint Now and persist it before previewing the past draft
+   * onto the same scenario. Success settles on one new Now entry. Failure removes
+   * the checkpoint and leaves the canvas alone.
+   */
+  async function restore(versionId: string) {
+    if (restoreLock.current || restoreBlockReason(input.running, draftRef.current, false)) return;
+    const workspaceId = input.workspaceId;
+    const previous = versionStateRef.current;
+    const flowId = previous.current;
+    const list = flowId ? previous.flows[flowId] ?? [] : [];
+    const chosen = list.find(item => item.id === versionId);
+    const now = list.at(-1);
+    if (!workspaceId || !flowId || !chosen || !now || chosen.id === now.id) return;
+    const scenario = scenariosRef.current.find(item => item.id === flowId);
+    if (!scenario || scenario.authoring !== 'canvas' || !scenario.pathId) {
+      setRestoreError('Restore is unavailable because the applied flow is no longer on the canvas.');
+      return;
+    }
+    restoreLock.current = true;
+    setRestoreBusy(true);
+    setRestoreError('');
+    const checkpoint: FlowVersion = {...structuredClone(now), id: crypto.randomUUID(), createdAt: new Date().toISOString()};
+    let appliedOk = false;
+    const failureText = (error: unknown) => error instanceof AiFlowRequestError ? error.message : error instanceof Error ? error.message : 'This version could not be restored.';
+    const rollback = async (message: string) => {
+      try { await persistVersions(previous); }
+      catch { commitVersions(previous); }
+      setRestoreError(message);
+    };
+    try {
+      try {
+        await persistVersions(withPushedVersion(previous, flowId, checkpoint));
+      } catch (error) {
+        commitVersions(previous);
+        setRestoreError(failureText(error));
+        return;
+      }
+      try {
+        const opened = await requestPreview(chosen.draft, revisionRef.current, workspaceId, chosen.placements, flowId);
+        const preview = opened.preview;
+        const blocking = preview.diagnostics.find(item => item.severity === 'error' || item.blocks.includes('apply'));
+        if (preview.baseRevision !== revisionRef.current) {
+          await rollback('The workspace changed, so this version was not restored.');
+          return;
+        }
+        if (!preview.applicable || blocking) {
+          await rollback(blocking?.message || 'This version could not be restored.');
+          return;
+        }
+        const applied = await client.apply({
+          workspaceId,
+          expectedRevision: preview.baseRevision,
+          previewId: preview.previewId,
+          idempotencyKey: crypto.randomUUID(),
+          acknowledgedAssumptionKeys: preview.requiredAssumptionKeys ?? [],
+        });
+        appliedOk = true;
+        const marked: FlowVersion = {...structuredClone(chosen), id: crypto.randomUUID(), createdAt: new Date().toISOString()};
+        let base = versionStateRef.current;
+        if (base.current === flowId && base.flows[flowId]?.at(-1)?.id === checkpoint.id) base = withPoppedVersion(base, flowId);
+        const settled = withPushedVersion(base, flowId, marked);
+        await persistVersions(settled);
+        const detail = await callbacks.current.fetchWorkspace(applied.workspaceId);
+        detail.view = viewWith(detail.view, {aiVersions: settled});
+        versionStateRef.current = settled;
+        adoptContentKey.current = true;
+        keepVersionsOpen.current = true;
+        callbacks.current.loadWorkspace(detail);
+        setVersionState(settled);
+        callbacks.current.rememberView({aiVersions: settled});
+        callbacks.current.selectScenario(applied.scenarioId);
+        setSelectedVersionId(marked.id);
+        setProvenanceId(applied.scenarioId);
+        setProvenanceName(marked.title || 'this flow');
+        setRestoreError('');
+        if (applied.receiptId) setUndoOffer({receiptId: applied.receiptId, revision: applied.revision, workspaceId: applied.workspaceId, pops: 1});
+      } catch (error) {
+        if (appliedOk) setRestoreError(failureText(error));
+        else await rollback(failureText(error));
+      }
+    } finally {
+      restoreLock.current = false;
+      setRestoreBusy(false);
+    }
   }
 
   function openVersions() {
@@ -1167,15 +1319,18 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
 
   function closeVersions() {
     const list = versions();
+    setRestoreError('');
     setSelectedVersionId(list.at(-1)?.id);
     setVersionsOpen(false);
   }
 
   function selectVersion(id: string) {
+    if (id !== selectedVersionId) setRestoreError('');
     setSelectedVersionId(id);
   }
 
   function keepCurrent() {
+    setRestoreError('');
     setSelectedVersionId(versions().at(-1)?.id);
   }
 
@@ -1202,6 +1357,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     sheetVersions: [...listed].reverse(), nowVersionId: nowVersion?.id, selectedVersionId: selectedVersion?.id,
     openVersions, closeVersions, selectVersion, keepCurrent,
     pushVersion, popVersion, versions, restore,
+    restoreError, restoreReason: restoreBlockReason(input.running, draft, restoreBusy),
   };
 }
 
@@ -1308,7 +1464,7 @@ export function AiFlow({control}: {control: AiDraftControl}) {
     {reviewing ? <AiCapsule control={control} versionsRef={versionsRef} /> : history ? <HistoryCapsule control={control} versionsRef={versionsRef} /> : <button type="button" ref={buttonRef} className={'ai-launch' + (open ? ' is-open' : '')} data-testid="ai-flow-button" aria-label="Describe a flow" title="Describe a flow" aria-expanded={open} aria-busy={busy || undefined} onClick={() => open ? (generating ? undefined : control.closePanel()) : control.openPanel()}>
       ✦ Describe a flow
     </button>}
-    {control.versionsOpen && !!control.sheetVersions.length && <VersionsSheet versions={control.sheetVersions} nowId={control.nowVersionId} selectedId={control.selectedVersionId} onSelect={control.selectVersion} onClose={closeVersions} onKeepCurrent={control.keepCurrent} />}
+    {control.versionsOpen && !!control.sheetVersions.length && <VersionsSheet versions={control.sheetVersions} nowId={control.nowVersionId} selectedId={control.selectedVersionId} onSelect={control.selectVersion} onClose={closeVersions} onKeepCurrent={control.keepCurrent} onRestore={() => { const id = control.selectedVersionId; if (id) void control.restore(id); }} restoreDisabled={!!control.restoreReason} restoreNote={control.restoreReason} restoreError={control.restoreError} />}
   </div>;
 }
 

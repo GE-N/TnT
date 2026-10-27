@@ -1165,16 +1165,13 @@ test('AI flow authoring UI', async t => {
       assert.equal(h.document.querySelector('[data-screen-id]'), null);
       assert.equal(h.document.querySelector('[data-testid="ai-draft-screen"]'), null);
       const restore = h.document.querySelector('[data-testid="ai-version-restore"]');
-      assert.equal(restore?.getAttribute('aria-disabled'), 'true');
+      assert.equal(restore?.getAttribute('aria-disabled'), null);
+      assert.equal(restore?.hasAttribute('disabled'), false);
       assert.match(restore?.textContent ?? '', /✓ Restore/);
       assert.ok(h.document.querySelector('[data-testid="ai-version-keep"]'));
       assert.match(h.document.querySelector('.ai-versions-hint')?.textContent ?? '', /Restore checkpoints Now first/);
       assert.equal(viewport.scrollLeft, scroll.left);
       assert.equal(viewport.scrollTop, scroll.top);
-      assert.equal((await h.saved()).metadata?.revision ?? 0, revision);
-      assert.equal(h.documentOf(await h.saved()), before);
-      await h.click('[data-testid="ai-version-restore"]');
-      assert.ok(h.document.querySelector('[data-testid="ai-version-preview"]'));
       assert.equal((await h.saved()).metadata?.revision ?? 0, revision);
       assert.equal(h.documentOf(await h.saved()), before);
       await h.click('[data-testid="ai-version-keep"]');
@@ -1221,6 +1218,249 @@ test('AI flow authoring UI', async t => {
       assert.equal(JSON.stringify(await readVersions(h)), stack);
     } finally { await h.cleanup(); }
   });
+
+  await t.test('a second apply overwrites the same scenario and pushes one version', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await describeAndApply(h, 'Pay the electric bill');
+      const first = await h.saved();
+      const id = first.scenarios?.[0]?.id ?? '';
+      const count = first.scenarios?.length ?? 0;
+      assert.equal(count, 1);
+      assert.equal(h.ai.undos, 0);
+      await describeAndApply(h, 'Send a receipt');
+      const saved = await h.saved();
+      assert.equal(saved.scenarios?.length, count);
+      assert.equal(saved.scenarios?.[0]?.id, id);
+      assert.equal(saved.scenarios?.[0]?.name, 'Send a receipt');
+      assert.equal(saved.canvas?.screens?.some(screen => screen.title === 'Receipt'), true);
+      const previews = h.ai.previewBodies as {replaceScenarioId?: string}[];
+      assert.equal(previews.some(body => body.replaceScenarioId === id), true);
+      assert.equal(previews[0]?.replaceScenarioId, undefined);
+      await h.until(async () => (await readVersions(h))?.flows?.[id]?.length === 2, 'both versions stored');
+      const stack = await readVersions(h);
+      assert.equal(stack?.current, id);
+      assert.deepEqual(stack?.flows?.[id]?.map(item => item.title), ['Pay a bill', 'Send a receipt']);
+      assert.equal(h.ai.undos, 0);
+      assert.equal(h.ai.calls.includes('undo'), false);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('restore checkpoints before preview and settles the past version as Now', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await describeAndApply(h, 'Pay the electric bill');
+      await describeAndApply(h, 'Send a receipt');
+      const id = (await h.saved()).scenarios?.[0]?.id ?? '';
+      await h.until(async () => (await readVersions(h))?.flows?.[id]?.length === 2, 'two versions');
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+      const beforeStack = await readVersions(h);
+      const mark = h.requests.length;
+      await h.click('[data-testid="ai-versions"]');
+      await h.until(() => h.document.querySelectorAll('[data-testid="ai-version-option"]').length === 2, 'rows');
+      const past = h.document.querySelectorAll<HTMLElement>('[data-testid="ai-version-option"]')[1];
+      assert.ok(past);
+      await act(async () => { past.click(); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-version-preview"]'), 'past preview');
+      await h.click('[data-testid="ai-version-restore"]');
+      await h.until(async () => {
+        const next = await readVersions(h);
+        const list = next?.flows?.[id] ?? [];
+        return list.length === 3 && list[0]?.title === 'Pay a bill' && list[1]?.title === 'Send a receipt' && list[2]?.title === 'Pay a bill';
+      }, 'stack is v1, v2, v1 now');
+      const slice = h.requests.slice(mark);
+      const previewAt = slice.findIndex(item => item.path === '/api/authoring/preview');
+      const applyAt = slice.findIndex(item => item.path === '/api/authoring/apply');
+      const viewAt = slice.findIndex(item => item.path.endsWith('/view') && ((item.body?.aiVersions as StoredVersions | undefined)?.flows?.[id]?.length ?? 0) === 3);
+      assert.ok(viewAt >= 0 && previewAt > viewAt && applyAt > previewAt, 'checkpoint view write before preview and apply');
+      const checkpoint = ((slice[viewAt]?.body?.aiVersions as StoredVersions).flows?.[id] ?? []);
+      assert.equal(checkpoint.at(-1)?.title, 'Send a receipt');
+      assert.notEqual(checkpoint.at(-1)?.id, beforeStack?.flows?.[id]?.[1]?.id);
+      const previewBody = slice[previewAt]?.body as {replaceScenarioId?: string; draft?: FlowDraft; placements?: Record<string, {x: number; y: number}>};
+      assert.equal(previewBody.replaceScenarioId, id);
+      assert.equal(previewBody.draft?.name, 'Pay a bill');
+      assert.ok(previewBody.placements && Object.keys(previewBody.placements).length > 0);
+      const final = await readVersions(h);
+      assert.equal(final?.flows?.[id]?.[0]?.id, beforeStack?.flows?.[id]?.[0]?.id);
+      assert.equal(final?.flows?.[id]?.[1]?.id, beforeStack?.flows?.[id]?.[1]?.id);
+      assert.notEqual(final?.flows?.[id]?.at(-1)?.id, checkpoint.at(-1)?.id);
+      const saved = await h.saved();
+      assert.equal(saved.scenarios?.length, 1);
+      assert.equal(saved.scenarios?.[0]?.id, id);
+      assert.equal(saved.scenarios?.[0]?.name, 'Pay a bill');
+      assert.equal(saved.canvas?.screens?.some(screen => screen.title === 'Receipt'), false);
+      assert.ok(h.document.querySelector('[data-testid="ai-versions-sheet"]'));
+      assert.equal(h.document.querySelector('[data-testid="ai-version-preview"]'), null);
+      assert.match(h.document.querySelector('[aria-selected="true"]')?.textContent ?? '', /Now/);
+      assert.match(h.document.querySelector('[aria-selected="true"]')?.textContent ?? '', /Pay a bill/);
+      await h.click('[data-testid="ai-undo"]');
+      await h.until(async () => (await readVersions(h))?.flows?.[id]?.length === 2, 'undo popped the restored entry');
+      const undone = await h.saved();
+      assert.equal(undone.scenarios?.[0]?.id, id);
+      assert.equal(undone.scenarios?.[0]?.name, 'Send a receipt');
+      assert.equal(undone.canvas?.screens?.some(screen => screen.title === 'Receipt'), true);
+      assert.equal(h.ai.calls.filter(call => call === 'undo').length, 1);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('restoring a later version still works after its screens were overwritten', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await describeAndApply(h, 'Pay the electric bill');
+      await describeAndApply(h, 'Send a receipt');
+      const id = (await h.saved()).scenarios?.[0]?.id ?? '';
+      await h.until(async () => (await readVersions(h))?.flows?.[id]?.length === 2, 'two versions');
+      const before = await readVersions(h);
+      const receipt = before?.flows?.[id]?.[1];
+      assert.ok(receipt);
+      assert.equal(receipt.draft.screens.every(screen => screen.kind === 'create'), true);
+      await h.click('[data-testid="ai-versions"]');
+      await h.until(() => h.document.querySelectorAll('[data-testid="ai-version-option"]').length === 2, 'rows');
+      await act(async () => { h.document.querySelectorAll<HTMLElement>('[data-testid="ai-version-option"]')[1]?.click(); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-version-restore"]'), 'restore v1');
+      await h.click('[data-testid="ai-version-restore"]');
+      await h.until(async () => (await readVersions(h))?.flows?.[id]?.at(-1)?.title === 'Pay a bill' && (await readVersions(h))?.flows?.[id]?.length === 3, 'v1 restored');
+      const option = [...h.document.querySelectorAll<HTMLElement>('[data-testid="ai-version-option"]')].find(item => item.dataset.versionId === receipt.id);
+      assert.ok(option);
+      const calls = h.requests.length;
+      await act(async () => { option.click(); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-version-preview"]'), 'v2 preview');
+      await h.click('[data-testid="ai-version-restore"]');
+      await h.until(async () => (await readVersions(h))?.flows?.[id]?.at(-1)?.title === 'Send a receipt', 'v2 restored');
+      const preview = h.requests.slice(calls).find(item => item.path === '/api/authoring/preview')?.body as {draft?: FlowDraft; replaceScenarioId?: string} | undefined;
+      assert.equal(preview?.replaceScenarioId, id);
+      assert.equal(preview?.draft?.screens.every(screen => screen.kind === 'create'), true);
+      const saved = await h.saved();
+      assert.equal(saved.scenarios?.length, 1);
+      assert.equal(saved.scenarios?.[0]?.id, id);
+      assert.equal(saved.scenarios?.[0]?.name, 'Send a receipt');
+      assert.equal(saved.canvas?.screens?.some(screen => screen.title === 'Receipt'), true);
+      assert.equal(h.ai.calls.includes('undo'), false);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('a failed restore leaves the stack and the workspace unchanged', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await describeAndApply(h, 'Pay the electric bill');
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+      const detail = await h.service.workspaceDetail(h.workspaceId);
+      const view = detail.view as {aiVersions: StoredVersions};
+      const flowId = view.aiVersions.current ?? '';
+      const now = view.aiVersions.flows?.[flowId]?.at(-1);
+      assert.ok(now);
+      const older = structuredClone(now);
+      older.id = 'older-version';
+      older.title = 'First AI draft';
+      older.createdAt = new Date(Date.now() - 120_000).toISOString();
+      await h.service.saveView(h.workspaceId, {aiVersions: {...view.aiVersions, flows: {...view.aiVersions.flows, [flowId]: [older, now]}}});
+      await h.remount();
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions"]'), 'versions');
+      const revision = (await h.saved()).metadata?.revision ?? 0;
+      const before = h.documentOf(await h.saved());
+      const stack = JSON.stringify(await readVersions(h));
+      await h.click('[data-testid="ai-versions"]');
+      await h.until(() => h.document.querySelectorAll('[data-testid="ai-version-option"]').length === 2, 'rows');
+      await act(async () => { h.document.querySelector('[data-testid="ai-versions-sheet"]')?.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true})); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-version-restore"]'), 'restore');
+      h.ai.failNextApply();
+      await h.click('[data-testid="ai-version-restore"]');
+      await h.until(() => /revision does not match/.test(h.document.querySelector('[data-testid="ai-version-restore-error"]')?.textContent ?? ''), 'inline error');
+      const error = h.document.querySelector('[data-testid="ai-version-restore-error"]');
+      assert.equal(error?.closest('[data-testid="ai-versions-sheet"]'), h.document.querySelector('[data-testid="ai-versions-sheet"]'));
+      assert.equal((await h.saved()).metadata?.revision ?? 0, revision);
+      assert.equal(h.documentOf(await h.saved()), before);
+      assert.equal(JSON.stringify(await readVersions(h)), stack);
+      assert.equal((await h.saved()).scenarios?.length ?? 0, 1);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('restore stays disabled while a draft is pending or a run is active', async () => {
+    const h = await harness('ready', {deviceId: 'E5C92F6E-40DC-493C-93B4-469E67193736'});
+    try {
+      await h.render();
+      await describeAndApply(h, 'Pay the electric bill');
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+      const detail = await h.service.workspaceDetail(h.workspaceId);
+      const view = detail.view as {aiVersions: StoredVersions};
+      const flowId = view.aiVersions.current ?? '';
+      const now = view.aiVersions.flows?.[flowId]?.at(-1);
+      assert.ok(now);
+      const older = structuredClone(now);
+      older.id = 'older-version';
+      older.title = 'First AI draft';
+      await h.service.saveView(h.workspaceId, {aiVersions: {...view.aiVersions, flows: {...view.aiVersions.flows, [flowId]: [older, now]}}});
+      await h.remount();
+      await h.until(() => !!h.document.querySelector('[aria-label="Ask for changes"]'), 'ask');
+      await h.fill('Ask for changes', 'Send a receipt');
+      const ask = h.document.querySelector('[aria-label="Ask for changes"]');
+      assert.ok(ask);
+      await act(async () => { ask.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); });
+      for (let attempt = 0; attempt < 20; attempt++) {
+        if (h.document.querySelector('[data-testid="ai-disclosure-continue"]')) { await h.click('[data-testid="ai-disclosure-continue"]'); break; }
+        if (h.status() === 'generating' || h.status() === 'pending' || h.status() === 'needsInfo') break;
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
+      }
+      await h.until(() => h.confirmEnabled(), 'pending draft');
+      await h.click('[data-testid="ai-versions"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions-sheet"]'), 'sheet');
+      await act(async () => { h.document.querySelector('[data-testid="ai-versions-sheet"]')?.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true})); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-version-restore"]'), 'restore');
+      const pending = h.document.querySelector('[data-testid="ai-version-restore"]');
+      assert.equal(pending?.getAttribute('aria-disabled'), 'true');
+      assert.match(h.document.querySelector('.ai-versions-hint')?.textContent ?? '', /draft is pending/);
+      const revision = (await h.saved()).metadata?.revision ?? 0;
+      const applies = h.ai.applies;
+      await h.click('[data-testid="ai-version-restore"]');
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 200)); });
+      assert.equal(h.ai.applies, applies);
+      assert.equal((await h.saved()).metadata?.revision ?? 0, revision);
+      await h.click('[data-testid="ai-discard"]');
+      await h.until(() => h.status() === 'idle', 'dismissed');
+      await openScenarioPanel(h.document, act);
+      await h.click('[aria-label="Run scenario"]');
+      await h.until(() => h.document.querySelector('.result-tag')?.textContent === 'running', 'running');
+      if (!h.document.querySelector('[data-testid="ai-versions-sheet"]')) await h.click('[data-testid="ai-versions"]');
+      if (!h.document.querySelector('[data-testid="ai-version-restore"]')) {
+        await act(async () => { h.document.querySelector('[data-testid="ai-versions-sheet"]')?.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true})); });
+      }
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-version-restore"]'), 'restore during run');
+      assert.equal(h.document.querySelector('[data-testid="ai-version-restore"]')?.getAttribute('aria-disabled'), 'true');
+      assert.match(h.document.querySelector('.ai-versions-hint')?.textContent ?? '', /run is active/);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('a deleted AI flow is created again instead of replaced', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await describeAndApply(h, 'Pay the electric bill');
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+      const saved = await h.saved();
+      const gone = saved.scenarios?.[0]?.id ?? '';
+      await h.service.save({
+        id: saved.id, name: saved.name, yaml: saved.yaml, flows: saved.flows, mock: saved.mock, automation: saved.automation,
+        canvas: {screens: [], edges: [], paths: []}, scenarios: [], expectedRevision: saved.metadata?.revision ?? 0,
+      });
+      await h.remount();
+      await h.until(() => h.status() === 'idle' || !!h.document.querySelector('[data-testid="ai-flow-button"]') || !!h.document.querySelector('[aria-label="Ask for changes"]'), 'reloaded');
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 500)); });
+      const mark = h.ai.previewBodies.length;
+      await describeAndApply(h, 'Send a receipt');
+      const next = await h.saved();
+      assert.equal(next.scenarios?.length, 1);
+      assert.notEqual(next.scenarios?.[0]?.id, gone);
+      const later = (h.ai.previewBodies as {replaceScenarioId?: string}[]).slice(mark);
+      assert.ok(later.length >= 1);
+      assert.equal(later.every(body => body.replaceScenarioId === undefined), true);
+      const created = next.scenarios?.[0]?.id;
+      await h.until(async () => (await readVersions(h))?.current === created, 'current follows the new scenario');
+    } finally { await h.cleanup(); }
+  });
 });
 
 type StoredVersions = {
@@ -1229,6 +1469,31 @@ type StoredVersions = {
   flows?: Record<string, {id: string; title: string; createdAt: string; draft: FlowDraft; placements: Record<string, {x: number; y: number}>; projection: {screens: {key: string; title: string; x: number; y: number; steps: string[]}[]; edges: {from: string; to: string; label: string}[]}}[]>;
 };
 
+async function describeAndApply(h: Awaited<ReturnType<typeof harness>>, prompt: string) {
+  sizeViewport(h.document);
+  const asking = h.document.querySelector('[aria-label="Ask for changes"]');
+  if (asking) {
+    await h.fill('Ask for changes', prompt);
+    await act(async () => { asking.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); });
+  } else await h.generate(prompt);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const disclosure = h.document.querySelector('[data-testid="ai-disclosure-continue"]');
+    if (disclosure) { await h.click('[data-testid="ai-disclosure-continue"]'); break; }
+    const status = h.status();
+    if (status === 'generating' || status === 'pending' || status === 'needsInfo' || status === 'stale' || status === 'failed') break;
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
+  }
+  if (h.status() === 'stale' && h.document.querySelector('[data-testid="ai-refresh"]')) await h.click('[data-testid="ai-refresh"]');
+  await h.until(() => h.confirmEnabled(), 'confirm ' + prompt);
+  await h.until(() => {
+    const nodes = [...h.document.querySelectorAll<HTMLElement>('[data-draft-screen]')];
+    return nodes.length > 0 && nodes.every(node => Number.isFinite(parseFloat(node.style.left)) && Number.isFinite(parseFloat(node.style.top)));
+  }, 'draft cards ' + prompt);
+  await untilPlacements(h);
+  await h.click('[data-testid="ai-confirm"]');
+  await h.until(() => !!h.document.querySelector('[data-testid="ai-undo"]'), 'undo after ' + prompt);
+}
+
 async function readVersions(h: {workspaceId: string; service: {workspaceDetail: (id: string) => Promise<{view?: unknown}>}}): Promise<StoredVersions | undefined> {
   const detail = await h.service.workspaceDetail(h.workspaceId);
   const view = detail.view && typeof detail.view === 'object' ? detail.view as {aiVersions?: StoredVersions} : {};
@@ -1236,7 +1501,7 @@ async function readVersions(h: {workspaceId: string; service: {workspaceDetail: 
 }
 
 type Mode = 'ready' | 'hold' | 'expired' | 'needs' | 'invalid' | 'authoring-failed' | 'asks' | 'on-existing';
-type StoredPreview = {preview: Preview; placements?: Record<string, {x: number; y: number}>; draft?: FlowDraft};
+type StoredPreview = {preview: Preview; placements?: Record<string, {x: number; y: number}>; draft?: FlowDraft; replaceScenarioId?: string};
 
 function placementRecord(value: unknown): Record<string, {x: number; y: number}> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return;
@@ -1341,10 +1606,12 @@ async function harness(mode: Mode, options: HarnessOptions = {}) {
   const ai = createFake(mode, service, options);
   let workspaceId = '';
   const runs = new Map<string, unknown>();
+  const requests: {method: string; path: string; body?: Record<string, unknown>}[] = [];
   const fetchImpl = async (path: string, init?: {method?: string; body?: string}) => {
     const url = new URL(path, 'http://tnt.local');
     const method = init?.method ?? 'GET';
     const body = init?.body ? JSON.parse(init.body) as Record<string, unknown> : undefined;
+    requests.push({method, path: url.pathname, ...(body ? {body: structuredClone(body)} : {})});
     try {
       if (method === 'GET' && url.pathname === '/api/workspaces') return Response.json(await service.listWorkspaces(url.searchParams.get('q') ?? ''));
       const opened = /^\/api\/workspaces\/([0-9a-f-]{36})\/open$/.exec(url.pathname);
@@ -1403,7 +1670,7 @@ async function harness(mode: Mode, options: HarnessOptions = {}) {
     assert.fail(label + ' — status ' + (document.querySelector('[data-testid="ai-flow"]')?.getAttribute('data-ai-status') ?? 'missing') + ' — ' + (document.body.textContent ?? '').slice(0, 400));
   };
   return {
-    dom, document, service, ai,
+    dom, document, service, ai, requests,
     get workspaceId() { return workspaceId; },
     status: () => document.querySelector('[data-testid="ai-flow"]')?.getAttribute('data-ai-status') ?? '',
     reason: () => document.querySelector('[data-testid="ai-confirm-reason"]')?.textContent ?? '',
@@ -1542,6 +1809,7 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
   const applyBodies: unknown[] = [];
   let lastPreviewId = '';
   let failPreview = false;
+  let failApply = false;
   const modelQueries: string[] = [];
   const heldJobs = new Set<string>();
   let config: FakeConfig = options.unconfigured ? unconfiguredConfig() : savedConfig(options.savedModel);
@@ -1569,6 +1837,7 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
     get applyBodies() { return applyBodies; },
     get lastPreviewId() { return lastPreviewId; },
     failNextPreview() { failPreview = true; },
+    failNextApply() { failApply = true; },
     get modelQueries() { return modelQueries; },
     holdNextTest() { holdTest = true; },
     holdNextJob() { holdNext = true; },
@@ -1621,6 +1890,10 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
           draft = screen ? existingScreenDraft(screen.id) : happyDraft();
         }
         if (mode === 'asks' && previousJobId) draft = answeredDraft();
+        if (typeof body?.prompt === 'string' && body.prompt === 'Send a receipt') {
+          const workspace = await service.workspace(String(body.workspaceId));
+          draft = receiptDraft(workspace.canvas?.screens[0]?.id);
+        }
         const questions = mode === 'asks' && !previousJobId && !answering ? askedQuestions() : undefined;
         const job: Job = {id: crypto.randomUUID(), workspaceId: String(body?.workspaceId), baseRevision: Number(body?.expectedRevision), state: 'running', phase: 'model', draft, ...(questions ? {questions} : {}), ...(typeof body?.model === 'string' ? {model: body.model} : {}), ...(body?.provider === 'openrouter' ? {upstreamProvider: 'openrouter-upstream'} : {})};
         if (holdNext) { heldJobs.add(job.id); holdNext = false; }
@@ -1657,7 +1930,8 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
         }
         const preview = previewFor(String(body?.workspaceId), Number(body?.expectedRevision), body?.draft as FlowDraft);
         const placements = placementRecord(body?.placements);
-        previews.set(preview.previewId, {preview, placements, draft: body?.draft as FlowDraft | undefined});
+        const replaceScenarioId = typeof body?.replaceScenarioId === 'string' && body.replaceScenarioId ? body.replaceScenarioId : undefined;
+        previews.set(preview.previewId, {preview, placements, draft: body?.draft as FlowDraft | undefined, ...(replaceScenarioId ? {replaceScenarioId} : {})});
         lastPreviewId = preview.previewId;
         return {status: 200, body: preview};
       }
@@ -1665,6 +1939,10 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
         const workspace = await service.workspace(String(body?.workspaceId));
         const currentRevision = workspace.metadata?.revision ?? 0;
         const expected = Number(body?.expectedRevision);
+        if (failApply) {
+          failApply = false;
+          return {status: 409, body: {error: 'The workspace revision does not match expectedRevision.', code: 'REVISION_CONFLICT'}};
+        }
         if (expected !== currentRevision) return {status: 409, body: {error: 'The workspace revision does not match expectedRevision.', code: 'REVISION_CONFLICT'}};
         const stored = previews.get(String(body?.previewId));
         if (!stored || stored.preview.baseRevision !== expected) return {status: 409, body: {error: 'The preview was created for a different revision or compiler version.', code: 'PREVIEW_STALE'}};
@@ -1684,23 +1962,51 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
   };
 }
 
+function flowTitle(stored: StoredPreview | undefined) {
+  const name = stored?.draft?.name?.trim();
+  return name || 'Pay a bill';
+}
+
 async function applyDraft(service: ScenarioService, counts: {applies: number}, applied: Map<string, unknown>, snapshots: Map<string, Awaited<ReturnType<ScenarioService['workspace']>>>, body: Record<string, unknown>, stored?: StoredPreview) {
   counts.applies++;
   const key = String(body.idempotencyKey);
   const existing = applied.get(key);
   if (existing) return existing;
   const current = await service.workspace(String(body.workspaceId));
+  const replaceId = stored?.replaceScenarioId ?? '';
+  const replacing = replaceId ? current.scenarios?.find(item => item.id === replaceId) : undefined;
+  if (replaceId && (!replacing || replacing.authoring !== 'canvas' || !replacing.pathId)) {
+    throw new Error('replaceScenarioId must name a canvas scenario with a path.');
+  }
+  const known = new Set((current.canvas?.screens ?? []).map(screen => screen.id));
+  for (const screen of stored?.draft?.screens ?? []) {
+    if (screen.kind === 'existing' && !known.has(screen.screenId)) throw new Error('This version refers to a screen that is no longer on the canvas.');
+  }
   const stamp = crypto.randomUUID().replaceAll('-', '').slice(0, 8);
-  const scenarioId = 'scenario' + stamp;
-  const pathId = 'path' + stamp;
+  const name = flowTitle(stored);
   const placed = placedScreens(stored, stamp);
-  const screenId = placed[0]?.id ?? ('screen' + stamp);
-  const screens = [...(current.canvas?.screens ?? []), ...(placed.length ? placed : [{id: screenId, title: 'Home', x: 40, y: 40, tests: []}])];
+  const createdId = placed[0]?.id ?? ('screen' + stamp);
   snapshots.set('pending:' + key, structuredClone(current));
+  let scenarioId = 'scenario' + stamp;
+  let pathId = 'path' + stamp;
+  let screens = [...(current.canvas?.screens ?? []), ...(placed.length ? placed : [{id: createdId, title: 'Home', x: 40, y: 40, tests: [] as never[]}])];
+  let paths = [...(current.canvas?.paths ?? []), {id: pathId, name, screenId: createdId, scenarioId, edgeIds: [] as string[]}];
+  let scenarios = [...(current.scenarios ?? []), {id: scenarioId, name, authoring: 'canvas' as const, pathId, steps: [], inputs: {}, parameters: {}, enabledHandlerIds: []}];
+  if (replacing?.pathId) {
+    scenarioId = replacing.id;
+    pathId = replacing.pathId;
+    const referenced = new Set((stored?.draft?.screens ?? []).flatMap(screen => screen.kind === 'existing' ? [screen.screenId] : []));
+    const kept = (current.canvas?.screens ?? []).filter(screen => referenced.has(screen.id));
+    screens = [...kept, ...placed];
+    if (!screens.length) screens = [{id: createdId, title: 'Home', x: 40, y: 40, tests: []}];
+    const screenId = screens[0]?.id ?? createdId;
+    paths = (current.canvas?.paths ?? []).map(path => path.id === pathId ? {...path, name, screenId, scenarioId} : path);
+    scenarios = (current.scenarios ?? []).map(item => item.id === scenarioId ? {...item, name} : item);
+  }
   const saved = await service.save({
     id: current.id, name: current.name, yaml: current.yaml, flows: current.flows, mock: current.mock, automation: current.automation,
-    canvas: {screens, edges: [...(current.canvas?.edges ?? [])], paths: [...(current.canvas?.paths ?? []), {id: pathId, name: 'Pay a bill', screenId, scenarioId, edgeIds: []}]},
-    scenarios: [...(current.scenarios ?? []), {id: scenarioId, name: 'Pay a bill', authoring: 'canvas' as const, pathId, steps: [], inputs: {}, parameters: {}, enabledHandlerIds: []}],
+    canvas: {screens, edges: [...(current.canvas?.edges ?? [])], paths},
+    scenarios,
     expectedRevision: Number(body.expectedRevision),
   });
   const receiptId = crypto.randomUUID();
@@ -1719,6 +2025,21 @@ async function undoDraft(service: ScenarioService, counts: {undos: number}, snap
   });
   counts.undos++;
   return {workspaceId: saved.id, revision: saved.metadata?.revision ?? 0, receiptId: String(body.receiptId), scenarioId: snapshot.scenarios?.[0]?.id ?? '', undone: true as const};
+}
+
+function receiptDraft(existingId?: string): FlowDraft {
+  const tap = (key: string, value: string, visitKey: string): FlowDraft['visits'][number]['operations'][number] => ({key, kind: 'tap', target: {kind: 'selector', selector: {target: 'text', match: 'exact', value}}, destination: {kind: 'visit', visitKey}});
+  const home = existingId ? {key: 'home', kind: 'existing' as const, screenId: existingId} : {key: 'home', kind: 'create' as const, title: 'Home'};
+  return {
+    schemaVersion: 1, mode: 'createScenario', name: 'Send a receipt', appId: 'com.example.HybridApp', parameters: [],
+    execution: {setup: {kind: 'launchApp'}, handlerRefs: [], mock: {kind: 'none'}},
+    screens: [home, {key: 'receipt', kind: 'create', title: 'Receipt'}],
+    visits: [
+      {key: 'v1', screenKey: 'home', operations: [tap('open', 'Receipt', 'v2')]},
+      {key: 'v2', screenKey: 'receipt', operations: [{key: 'see', kind: 'checkVisible', target: {kind: 'selector', selector: {target: 'text', match: 'exact', value: 'Receipt'}}}]},
+    ],
+    scripts: [], assumptions: [],
+  };
 }
 
 function happyDraft(): FlowDraft {

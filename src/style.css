@@ -1010,6 +1010,7 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .ai-versions-foot{flex:none;display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid #eef0f4}
 .ai-versions-actions{display:flex;align-items:center;gap:8px;margin-left:-12px}
 .ai-versions-hint{margin:0;color:#5f6368;font-size:12px;line-height:1.45}
+.ai-versions-error{margin:0;color:var(--ai-error);font-size:12px;line-height:1.45;font-weight:600}
 .ai-flow .ai-version-restore,.ai-flow .ai-version-keep{min-height:44px;min-width:44px;padding:0 12px}
 .ai-flow .ai-version-restore{color:#0a63d1;font-weight:600}
 .ai-flow .ai-version-restore[aria-disabled="true"]{color:#8a9099}
