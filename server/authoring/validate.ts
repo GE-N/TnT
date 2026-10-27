@@ -100,7 +100,7 @@ export function validateDraft(draft: FlowDraft, workspace: Workspace, context: C
         const value = operation.value;
         if (value.kind === 'literal' && EXPRESSION.test(value.text)) diagnostics.push(issue('INVALID_LITERAL', `${base}/value`, 'error', ['apply', 'run'], 'Input literals cannot contain ${...} expressions.', 'Use a parameter reference for placeholders.', operation.key));
         if (value.kind === 'parameter' && !parameterNames.has(value.name)) diagnostics.push(issue('MISSING_PARAMETER_DECLARATION', `${base}/value`, 'error', ['apply', 'run'], `Input uses undeclared parameter ${value.name}.`, 'Declare the parameter on the draft.', operation.key));
-        if (value.kind === 'unresolved') diagnostics.push(issue('UNRESOLVED_VALUE', `${base}/value`, 'error', ['apply', 'run'], 'This input needs a value.', 'Provide a literal or a declared parameter.', operation.key));
+        if (value.kind === 'unresolved') diagnostics.push(issue('UNRESOLVED_VALUE', `${base}/value`, 'error', ['run'], 'This input needs a value.', 'Apply keeps the step. Enter a literal or a declared parameter before running.', operation.key));
       } else checkTarget(operation.target, screen, `${base}/target`, operation.key);
     });
     if (!final) {
@@ -157,7 +157,7 @@ export function validateDraft(draft: FlowDraft, workspace: Workspace, context: C
 
   function checkTarget(target: DraftTarget, screen: FlowDraft['screens'][number] | undefined, path: string, entityKey: string) {
     if (target.kind === 'unresolved') {
-      diagnostics.push(issue('UNRESOLVED_TARGET', path, 'error', ['apply', 'run'], 'This operation needs an element.', 'Choose a context target or an explicit text/id selector. Unresolved targets are not written into the workspace.', entityKey));
+      diagnostics.push(issue('UNRESOLVED_TARGET', path, 'error', ['run'], 'This operation needs an element.', 'Apply keeps the step without a target. Choose a context target or an explicit text/id selector before running.', entityKey));
       return;
     }
     if (target.kind === 'selector') {

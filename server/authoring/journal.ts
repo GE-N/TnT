@@ -36,6 +36,10 @@ export type JournalEntry = {
   receipt?: ApplyResult;
 };
 
+export function replacesExistingScenario(entry: JournalEntry) {
+  return Boolean(entry.reverse?.snapshot.scenarios?.some(scenario => scenario.id === entry.intended.scenarioId));
+}
+
 export function persistable(workspace: Workspace): PersistedWorkspace {
   const {metadata, canvasDiagnostics, ...content} = workspace;
   void metadata;
@@ -112,7 +116,10 @@ export async function reconcileJournal(journal: ReturnType<typeof createJournal>
     if (entry.status !== 'intent') continue;
     let workspace: Workspace | undefined;
     try { workspace = await deps.read(entry.workspaceId); } catch { continue; }
-    const published = Boolean(entry.publishedRevision || workspace.scenarios?.some(scenario => scenario.id === entry.intended.scenarioId));
+    // A replace reuses an id that is already on the workspace, so only a recorded revision or receipt counts as publication.
+    const published = replacesExistingScenario(entry)
+      ? entry.publishedRevision !== undefined || Boolean(entry.receipt)
+      : Boolean(entry.publishedRevision || workspace.scenarios?.some(scenario => scenario.id === entry.intended.scenarioId));
     if (!published) continue;
     const revision = entry.publishedRevision ?? workspace.metadata?.revision ?? 0;
     const stored: JournalEntry = {...entry, status: 'committed', publishedRevision: revision, receipt: entry.receipt ?? receiptFrom(entry, revision)};
