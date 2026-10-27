@@ -3,7 +3,7 @@ import {WorkspaceConflict} from '../workspace-store.js';
 import type {Workspace} from '../scenarios.js';
 import {readWorkspace} from './context.js';
 import {authoringError} from './errors.js';
-import {contentHash, createJournal, journalExpiry, journalNow, persistable, receiptFrom, type JournalEntry} from './journal.js';
+import {contentHash, createJournal, journalExpiry, journalNow, persistable, receiptFrom, replacesExistingScenario, type JournalEntry} from './journal.js';
 import {createPreviewStore, type StoredPreview} from './preview.js';
 import {assertEnvelope, requireRevision, requireString, requireWorkspaceId} from './schema.js';
 import {COMPILER_VERSION, issue, type ApplyResult, type AuthoringDeps, type AuthoringProvenance, type Diagnostic} from './types.js';
@@ -130,10 +130,6 @@ async function resume(deps: AuthoringDeps, journal: ReturnType<typeof createJour
     return receipt;
   }
   return publish(deps, journal, entry, {...entry.proposed, id: entry.workspaceId} as Workspace, new Set(entry.intended.scriptIds));
-}
-
-function replacesExistingScenario(entry: JournalEntry) {
-  return Boolean(entry.reverse?.snapshot.scenarios?.some(scenario => scenario.id === entry.intended.scenarioId));
 }
 
 function scriptIdsOf(scenarios: {scripts?: {id: string}[]}[] | undefined) {

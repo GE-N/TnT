@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
-import {readFile, readdir} from 'node:fs/promises';
+import {readFile, readdir, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {test} from 'node:test';
 import {referenceCatalog} from '../server/canvas.js';
 import {AuthoringHttpError} from '../server/authoring/errors.js';
 import {digest} from '../server/authoring/hash.js';
 import type {DraftOperation, FlowDraft} from '../server/authoring/types.js';
+import {createRunner} from '../server/runner.js';
+import {createScenarios} from '../server/scenarios.js';
 import {createWriteFaults} from '../server/workspace-store.js';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import {authoringFixture, contentOf, exampleDraft, proofYaml} from './authoring-helpers.js';
@@ -62,14 +64,39 @@ function at(workspace: Workspace, title: string) {
   return screen;
 }
 
+type JournalRecord = {
+  id: string;
+  status: string;
+  previewId: string;
+  publishedRevision?: number;
+  receipt?: {workspaceId: string; revision: number; scenarioId: string; pathId: string};
+  intended: {scenarioId: string; pathId: string};
+};
+
 async function journalEntry(root: string, previewId: string) {
   const directory = join(root, '.tnt', 'authoring-journal');
   const names = (await readdir(directory)).filter(name => name.endsWith('.json'));
   for (const name of names) {
-    const entry = JSON.parse(await readFile(join(directory, name), 'utf8')) as {id: string; previewId: string};
+    const entry = JSON.parse(await readFile(join(directory, name), 'utf8')) as JournalRecord;
     if (entry.previewId === previewId) return entry;
   }
   throw new Error(`Missing journal entry for ${previewId}.`);
+}
+
+async function reopenAsIntent(root: string, previewId: string) {
+  const entry = await journalEntry(root, previewId);
+  const {publishedRevision, receipt, ...intent} = entry;
+  void publishedRevision;
+  void receipt;
+  await writeFile(join(root, '.tnt', 'authoring-journal', `${entry.id}.json`), JSON.stringify({...intent, status: 'intent'}));
+}
+
+function restartAuthoring(root: string) {
+  const runner = createRunner({artifactDirectory: root, execute: async () => { throw new Error('no execution'); }});
+  return createScenarios({
+    root, trustDirectory: join(root, 'trust'), runner,
+    maestro: {version: async () => '2.11.0', run: async () => { throw new Error('no execution'); }},
+  });
 }
 
 function shorter(): FlowDraft {
@@ -309,5 +336,57 @@ test('resume of a replace does not treat the existing scenario id as already pub
     assert.equal(saved.scenarios?.[0].name, 'Shorter flow');
     assert.equal(recovered.scenarioId, applied.scenarioId);
     assert.equal(recovered.pathId, saved.scenarios?.[0].pathId);
+  } finally { await f.cleanup(); }
+});
+
+test('restart reconcile publishes a saved replace intent and still commits a create whose scenario exists', async () => {
+  const faults = createWriteFaults();
+  const f = await authoringFixture({faults: faults.faults});
+  try {
+    const created = await openPreview(f, f.workspace, draft());
+    const applied = await apply(f, f.workspace.id, created.revision, created.preview.previewId, 'create-a');
+    const scenarioId = applied.scenarioId;
+    await reopenAsIntent(f.root, created.preview.previewId);
+    const current = await f.service.workspace(f.workspace.id);
+    assert.equal(current.scenarios?.[0].id, scenarioId);
+    assert.equal(current.scenarios?.[0].name, draft().name);
+    const opened = await openPreview(f, current, shorter(), {replaceScenarioId: scenarioId});
+    assert.equal(opened.preview.applicable, true, opened.preview.diagnostics.map(item => item.message).join('\n'));
+    faults.failBeforeRename();
+    await assert.rejects(() => apply(f, f.workspace.id, opened.revision, opened.preview.previewId, 'replace-b'), /Injected failure before rename/);
+    const during = await f.service.workspace(f.workspace.id);
+    assert.equal(during.scenarios?.[0].id, scenarioId);
+    assert.equal(during.scenarios?.[0].name, draft().name);
+    assert.equal(during.metadata?.revision, current.metadata?.revision);
+    assert.equal((await journalEntry(f.root, opened.preview.previewId)).status, 'intent');
+    faults.pass();
+
+    const resumed = restartAuthoring(f.root);
+    await assert.rejects(() => resumed.authoring.undo(null));
+    const createEntry = await journalEntry(f.root, created.preview.previewId);
+    assert.equal(createEntry.status, 'committed');
+    assert.equal(createEntry.receipt?.scenarioId, scenarioId);
+    assert.equal(createEntry.receipt?.revision, during.metadata?.revision);
+    const kept = await resumed.workspace(f.workspace.id);
+    assert.equal(kept.scenarios?.[0].name, draft().name);
+    assert.equal(kept.metadata?.revision, during.metadata?.revision);
+    const createReceipt = await resumed.authoring.apply({workspaceId: f.workspace.id, expectedRevision: created.revision, previewId: created.preview.previewId, idempotencyKey: 'create-a', acknowledgedAssumptionKeys: []});
+    assert.equal(createReceipt.scenarioId, scenarioId);
+    assert.equal(createReceipt.revision, createEntry.receipt?.revision);
+    assert.equal(createReceipt.pathId, createEntry.receipt?.pathId);
+    assert.equal((await resumed.workspace(f.workspace.id)).metadata?.revision, during.metadata?.revision);
+
+    assert.equal((await journalEntry(f.root, opened.preview.previewId)).status, 'intent');
+    const recovered = await resumed.authoring.apply({workspaceId: f.workspace.id, expectedRevision: opened.revision, previewId: opened.preview.previewId, idempotencyKey: 'replace-b', acknowledgedAssumptionKeys: []});
+    const saved = await resumed.workspace(f.workspace.id);
+    assert.equal(saved.scenarios?.length, 1);
+    assert.equal(saved.scenarios?.[0].id, scenarioId);
+    assert.equal(saved.scenarios?.[0].name, 'Shorter flow');
+    assert.equal(recovered.scenarioId, scenarioId);
+    assert.equal(recovered.pathId, saved.scenarios?.[0].pathId);
+    assert.equal(recovered.revision, saved.metadata?.revision);
+    assert.equal(recovered.workspaceId, saved.id);
+    const replay = await resumed.authoring.apply({workspaceId: f.workspace.id, expectedRevision: opened.revision, previewId: opened.preview.previewId, idempotencyKey: 'replace-b', acknowledgedAssumptionKeys: []});
+    assert.deepEqual(replay, recovered);
   } finally { await f.cleanup(); }
 });
