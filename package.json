@@ -17,6 +17,7 @@
   "dependencies": {
     "@mockoon/cli": "9.9.0",
     "@mockoon/commons": "9.9.0",
+    "ajv": "8.20.0",
     "fast-xml-parser": "5.11.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
