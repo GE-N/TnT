@@ -11,6 +11,7 @@ import {Scenarios} from '../src/scenarios.js';
 import {createScenarios} from '../server/scenarios.js';
 import {createRunner} from '../server/runner.js';
 import type {FlowDraft, Preview} from '../server/authoring/types.js';
+import {UNDO_WINDOW_MS} from '../src/ai-versions.js';
 import type {GenerationView} from '../server/ai/store.js';
 
 const SECRET = 'sk-test-secret-value';
@@ -1008,63 +1009,7 @@ test('AI flow authoring UI', async t => {
     } finally { await h.cleanup(); }
   });
 
-  await t.test('after apply, New flow generates without undo and Replace undoes first', async () => {
-    const created = await harness('ready');
-    try {
-      await created.render();
-      await created.generate('Pay the electric bill');
-      await created.until(() => created.confirmEnabled(), 'confirm');
-      await created.click('[data-testid="ai-confirm"]');
-      await created.until(() => !!created.document.querySelector('[data-testid="ai-undo"]'), 'undo offer');
-      assert.equal(created.document.querySelector('[data-testid="ai-flow-choice"]'), null);
-      await created.click('[data-testid="ai-flow-button"]');
-      await created.until(() => !!created.document.querySelector('[data-testid="ai-flow-choice"]'), 'choice');
-      const fresh = created.document.querySelector<HTMLInputElement>('[data-testid="ai-flow-choice-new"]');
-      const replace = created.document.querySelector<HTMLInputElement>('[data-testid="ai-flow-choice-replace"]');
-      assert.equal(fresh?.checked, true);
-      assert.equal(replace?.checked, false);
-      assert.match(fresh?.closest('label')?.textContent ?? '', /New flow/);
-      assert.match(replace?.closest('label')?.textContent ?? '', /Replace this flow/);
-      await created.click('[data-testid="ai-flow-choice-replace"]');
-      assert.equal(created.document.querySelector<HTMLInputElement>('[data-testid="ai-flow-choice-replace"]')?.checked, true);
-      await created.click('[data-testid="ai-flow-choice-new"]');
-      assert.equal(created.document.querySelector<HTMLInputElement>('[data-testid="ai-flow-choice-new"]')?.checked, true);
-      await created.fill('Flow description', 'Send a receipt');
-      await created.click('[data-testid="ai-generate"]');
-      await created.until(() => created.ai.generations === 2, 'new flow generated');
-      assert.equal(created.ai.undos, 0);
-      assert.deepEqual(created.ai.calls.filter(call => call === 'undo' || call === 'generate'), ['generate', 'generate']);
-      assert.equal((created.ai.generationBodies.at(-1) as {previousJobId?: string; prompt?: string}).previousJobId, undefined);
-      assert.equal((created.ai.generationBodies.at(-1) as {prompt?: string}).prompt, 'Send a receipt');
-      assert.equal((await created.saved()).scenarios?.length ?? 0, 1);
-    } finally { await created.cleanup(); }
-
-    const replaced = await harness('ready');
-    try {
-      await replaced.render();
-      await replaced.generate('Pay the electric bill');
-      await replaced.until(() => replaced.confirmEnabled(), 'confirm');
-      await replaced.click('[data-testid="ai-confirm"]');
-      await replaced.until(() => !!replaced.document.querySelector('[data-testid="ai-undo"]'), 'undo offer');
-      await replaced.click('[data-testid="ai-flow-button"]');
-      await replaced.until(() => !!replaced.document.querySelector('[data-testid="ai-flow-choice-replace"]'), 'choice');
-      await replaced.click('[data-testid="ai-flow-choice-replace"]');
-      await replaced.fill('Flow description', 'Send a receipt');
-      await replaced.click('[data-testid="ai-generate"]');
-      await replaced.until(() => replaced.ai.generations === 2, 'replaced flow generated');
-      const sequence = replaced.ai.calls.filter(call => call === 'undo' || call === 'generate');
-      const undoAt = sequence.indexOf('undo');
-      const secondGenerate = sequence.lastIndexOf('generate');
-      assert.ok(undoAt > sequence.indexOf('generate') && undoAt < secondGenerate, sequence.join(','));
-      assert.equal(replaced.ai.undos, 1);
-      assert.equal((replaced.ai.generationBodies.at(-1) as {previousJobId?: string; answers?: unknown; prompt?: string}).previousJobId, undefined);
-      assert.equal((replaced.ai.generationBodies.at(-1) as {answers?: unknown}).answers, undefined);
-      assert.equal((replaced.ai.generationBodies.at(-1) as {prompt?: string}).prompt, 'Send a receipt');
-      assert.equal((await replaced.saved()).scenarios?.length ?? 0, 0);
-    } finally { await replaced.cleanup(); }
-  });
-
-  await t.test('a failed replace undo stays in the composer and does not generate', async () => {
+  await t.test('generating while a flow is applied never undoes and never offers New or Replace', async () => {
     const h = await harness('ready');
     try {
       await h.render();
@@ -1072,24 +1017,223 @@ test('AI flow authoring UI', async t => {
       await h.until(() => h.confirmEnabled(), 'confirm');
       await h.click('[data-testid="ai-confirm"]');
       await h.until(() => !!h.document.querySelector('[data-testid="ai-undo"]'), 'undo offer');
-      await h.click('[data-testid="ai-flow-button"]');
-      await h.until(() => !!h.document.querySelector('[data-testid="ai-flow-choice-replace"]'), 'choice');
-      await h.click('[data-testid="ai-flow-choice-replace"]');
-      await h.fill('Flow description', 'Send a receipt');
-      h.ai.failNextUndo();
-      await h.click('[data-testid="ai-generate"]');
-      await h.until(() => /can’t be replaced/.test(h.document.querySelector('[data-testid="ai-error"]')?.textContent ?? ''), 'inline undo error');
-      assert.equal(h.ai.generations, 1);
+      assert.equal(h.document.querySelector('[data-testid="ai-flow-choice"]'), null);
+      assert.equal(h.document.querySelector('[data-testid="ai-flow-choice-new"]'), null);
+      assert.equal(h.document.querySelector('[data-testid="ai-flow-choice-replace"]'), null);
+      assert.doesNotMatch(h.document.body.textContent ?? '', /Replace this flow/);
+      assert.equal((h.ai.applyBodies.at(-1) as {replaceScenarioId?: string}).replaceScenarioId, undefined);
+      await h.fill('Ask for changes', 'Send a receipt');
+      const ask = h.document.querySelector('[aria-label="Ask for changes"]');
+      assert.ok(ask);
+      await act(async () => { ask.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); });
+      await h.until(() => h.ai.generations === 2, 'second flow generated');
       assert.equal(h.ai.undos, 0);
-      assert.equal(h.ai.calls.filter(call => call === 'generate').length, 1);
-      assert.equal((h.document.querySelector('[aria-label="Flow description"]') as HTMLTextAreaElement).value, 'Send a receipt');
-      assert.equal(h.document.querySelector<HTMLInputElement>('[data-testid="ai-flow-choice-replace"]')?.checked, true);
+      assert.equal(h.ai.calls.includes('undo'), false);
+      assert.deepEqual(h.ai.calls.filter(call => call === 'undo' || call === 'generate'), ['generate', 'generate']);
+      assert.equal((h.ai.generationBodies.at(-1) as {previousJobId?: string; prompt?: string}).previousJobId, undefined);
+      assert.equal((h.ai.generationBodies.at(-1) as {prompt?: string}).prompt, 'Send a receipt');
       assert.equal((await h.saved()).scenarios?.length ?? 0, 1);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('undo is visible for 10 seconds after apply, then Versions remains', async () => {
+    const h = await harness('ready');
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    let undoTimer: (() => void) | undefined;
+    let parked: ReturnType<typeof setTimeout> | undefined;
+    globalThis.setTimeout = ((fn: TimerHandler, ms?: number, ...args: unknown[]) => {
+      if (typeof fn === 'function' && ms === UNDO_WINDOW_MS) {
+        undoTimer = () => fn(...args);
+        parked = realSetTimeout(() => undefined, 60_000);
+        return parked;
+      }
+      return realSetTimeout(fn, ms, ...args);
+    }) as typeof setTimeout;
+    try {
+      await h.render();
+      await h.generate('Pay the electric bill');
+      await h.until(() => h.confirmEnabled(), 'confirm');
+      await h.click('[data-testid="ai-confirm"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-undo"]'), 'undo during the window');
+      const capsule = h.document.querySelector('[data-testid="ai-capsule"]');
+      assert.equal(h.document.querySelector<HTMLInputElement>('[aria-label="Ask for changes"]')?.placeholder, 'Ask for changes');
+      assert.match(capsule?.textContent ?? '', /↶ Undo/);
+      assert.match(capsule?.textContent ?? '', /Versions/);
+      assert.equal(typeof undoTimer, 'function');
+      await act(async () => { undoTimer?.(); });
+      assert.equal(h.document.querySelector('[data-testid="ai-undo"]'), null);
+      assert.ok(h.document.querySelector('[data-testid="ai-versions"]'));
+      assert.equal(h.ai.undos, 0);
+      assert.equal(h.ai.calls.includes('undo'), false);
+    } finally {
+      if (parked) realClearTimeout(parked);
+      globalThis.setTimeout = realSetTimeout;
+      await h.cleanup();
+    }
+  });
+
+  await t.test('apply pushes one version and undo pops it', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.generate('Pay the electric bill');
+      await h.until(() => h.confirmEnabled(), 'confirm');
+      await h.click('[data-testid="ai-confirm"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-undo"]'), 'undo offer');
+      let stored: StoredVersions | undefined;
+      await h.until(async () => { stored = await readVersions(h); return stored?.format === 1 && !!stored.current && (stored.flows?.[stored.current]?.length ?? 0) === 1; }, 'version stored');
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+      stored = await readVersions(h);
+      const flowId = stored?.current ?? '';
+      const version = stored?.flows?.[flowId]?.[0];
+      const saved = await h.saved();
+      assert.equal(flowId, saved.scenarios?.[0]?.id);
+      assert.equal(version?.title, 'Pay a bill');
+      assert.equal(version?.draft.screens.every(screen => screen.kind === 'create'), true);
+      assert.ok((version?.projection.screens.length ?? 0) >= 1);
+      assert.equal((h.ai.applyBodies.at(-1) as {replaceScenarioId?: string}).replaceScenarioId, undefined);
       await h.click('[data-testid="ai-undo"]');
-      await h.until(() => h.document.querySelector('[data-testid="ai-flow-choice"]') === null, 'choice removed');
+      await h.until(async () => { const next = await readVersions(h); return !next?.current && Object.keys(next?.flows ?? {}).length === 0; }, 'version popped');
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+      const popped = await readVersions(h);
+      assert.equal(popped?.current, undefined);
+      assert.equal(Object.keys(popped?.flows ?? {}).length, 0);
+      assert.equal((await h.saved()).scenarios?.length ?? 0, 0);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('the versions sheet previews a past row without writing and keeps Restore disabled', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.generate('Pay the electric bill');
+      await h.until(() => h.confirmEnabled(), 'confirm');
+      await h.click('[data-testid="ai-confirm"]');
+      await h.until(async () => (await readVersions(h))?.current !== undefined, 'version stored');
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+      await h.unmount();
+      const detail = await h.service.workspaceDetail(h.workspaceId);
+      const view = detail.view as {aiVersions: StoredVersions};
+      const flowId = view.aiVersions.current ?? '';
+      const now = view.aiVersions.flows?.[flowId]?.at(-1);
+      assert.ok(now);
+      const older = structuredClone(now);
+      older.id = 'older-version';
+      older.title = 'First AI draft';
+      older.createdAt = new Date(Date.now() - (2 * 60_000 + 1000)).toISOString();
+      older.projection = {screens: [{key: 'home', title: 'Coordinator', x: 104, y: 200, steps: ['1 · Tap Coordinator']}], edges: []};
+      await h.service.saveView(h.workspaceId, {aiVersions: {...view.aiVersions, flows: {...view.aiVersions.flows, [flowId]: [older, now]}}});
+      await h.remount();
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions"]'), 'versions survive reload');
+      await h.until(() => !!h.document.querySelector('[aria-label="Select screen Home"]'), 'home screen');
+      await h.click('[aria-label="Select screen Home"]');
+      await h.until(() => !!h.document.querySelector('.floating-inspector'), 'inspector');
+      const before = h.documentOf(await h.saved());
+      const revision = (await h.saved()).metadata?.revision ?? 0;
+      await h.click('[data-testid="ai-versions"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions-sheet"]'), 'sheet');
+      assert.equal(h.document.querySelector('.floating-inspector'), null);
+      const sheet = h.document.querySelector('[data-testid="ai-versions-sheet"]');
+      assert.equal(sheet?.getAttribute('role'), 'dialog');
+      assert.equal(sheet?.getAttribute('aria-modal'), 'true');
+      assert.ok(sheet?.getAttribute('aria-labelledby'));
+      const list = h.document.querySelector('[role="listbox"]');
+      assert.equal(list?.getAttribute('aria-label'), 'Flow versions');
+      const options = [...h.document.querySelectorAll<HTMLElement>('[data-testid="ai-version-option"]')];
+      assert.equal(options.length, 2);
+      assert.match(options[0]?.textContent ?? '', /Pay a bill/);
+      assert.match(options[0]?.textContent ?? '', /Now/);
+      assert.match(options[0]?.textContent ?? '', /Just now/);
+      assert.match(options[1]?.textContent ?? '', /First AI draft/);
+      assert.match(options[1]?.textContent ?? '', /2 min ago/);
+      assert.equal(h.document.activeElement, options[0]);
+      assert.equal(list?.getAttribute('aria-activedescendant'), options[0]?.id);
+      const viewport = h.document.querySelector<HTMLElement>('.canvas-viewport');
+      assert.ok(viewport);
+      const scroll = {left: viewport.scrollLeft, top: viewport.scrollTop};
+      await act(async () => { sheet?.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true})); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-version-preview"]'), 'past preview');
+      const previewScreen = h.document.querySelector<HTMLElement>('[data-testid="ai-version-screen"]');
+      assert.match(previewScreen?.textContent ?? '', /Coordinator/);
+      assert.equal(previewScreen?.style.left, '104px');
+      assert.equal(previewScreen?.style.top, '200px');
+      const pill = h.document.querySelector('[data-testid="ai-version-viewing"]');
+      assert.match(pill?.textContent ?? '', /Viewing · 2 min ago/);
+      assert.equal(pill?.closest('[data-testid="ai-version-preview"]'), null);
+      assert.match(h.document.querySelector('[data-testid="sequence-scenario-name"]')?.textContent ?? '', /First AI draft · viewing earlier/);
+      assert.equal(h.document.querySelector('[data-screen-id]'), null);
+      assert.equal(h.document.querySelector('[data-testid="ai-draft-screen"]'), null);
+      const restore = h.document.querySelector('[data-testid="ai-version-restore"]');
+      assert.equal(restore?.getAttribute('aria-disabled'), 'true');
+      assert.match(restore?.textContent ?? '', /✓ Restore/);
+      assert.ok(h.document.querySelector('[data-testid="ai-version-keep"]'));
+      assert.match(h.document.querySelector('.ai-versions-hint')?.textContent ?? '', /Restore checkpoints Now first/);
+      assert.equal(viewport.scrollLeft, scroll.left);
+      assert.equal(viewport.scrollTop, scroll.top);
+      assert.equal((await h.saved()).metadata?.revision ?? 0, revision);
+      assert.equal(h.documentOf(await h.saved()), before);
+      await h.click('[data-testid="ai-version-restore"]');
+      assert.ok(h.document.querySelector('[data-testid="ai-version-preview"]'));
+      assert.equal((await h.saved()).metadata?.revision ?? 0, revision);
+      assert.equal(h.documentOf(await h.saved()), before);
+      await h.click('[data-testid="ai-version-keep"]');
+      await h.until(() => !h.document.querySelector('[data-testid="ai-version-preview"]') && !!h.document.querySelector('[data-screen-id]'), 'back to now');
+      assert.doesNotMatch(h.document.querySelector('[data-testid="sequence-scenario-name"]')?.textContent ?? '', /viewing earlier/);
+      assert.match(h.document.querySelector('[aria-selected="true"]')?.textContent ?? '', /Now/);
+      assert.match(h.document.querySelector('.ai-versions-hint')?.textContent ?? '', /Local on this Mac/);
+      assert.equal((await h.saved()).metadata?.revision ?? 0, revision);
+      await act(async () => { h.document.querySelector('[data-testid="ai-versions-sheet"]')?.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true})); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-version-preview"]'), 'preview again');
+      const openSheet = h.document.querySelector('[data-testid="ai-versions-sheet"]');
+      await act(async () => { openSheet?.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); });
+      await h.until(() => !h.document.querySelector('[data-testid="ai-versions-sheet"]') && !h.document.querySelector('[data-testid="ai-version-preview"]'), 'sheet closed');
+      assert.equal(h.document.activeElement, h.document.querySelector('[data-testid="ai-versions"]'));
+      assert.equal((await h.saved()).metadata?.revision ?? 0, revision);
+      assert.equal(h.documentOf(await h.saved()), before);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('dismissing a pending draft keeps the applied flow, the stack, and the revision', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.generate('Pay the electric bill');
+      await h.until(() => h.confirmEnabled(), 'confirm');
+      await h.click('[data-testid="ai-confirm"]');
+      await h.until(async () => (await readVersions(h))?.current !== undefined, 'version stored');
+      await h.fill('Ask for changes', 'Send a receipt');
+      const ask = h.document.querySelector('[aria-label="Ask for changes"]');
+      assert.ok(ask);
+      await act(async () => { ask.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-discard"]'), 'pending draft');
+      const revision = (await h.saved()).metadata?.revision ?? 0;
+      const before = h.documentOf(await h.saved());
+      const stack = JSON.stringify(await readVersions(h));
+      assert.equal(h.ai.undos, 0);
+      await h.click('[data-testid="ai-discard"]');
+      await h.until(() => !h.document.querySelector('[data-testid="ai-discard"]') && h.status() === 'idle', 'draft dismissed');
+      assert.equal(h.ai.undos, 0);
+      assert.equal(h.ai.calls.includes('undo'), false);
+      assert.equal((await h.saved()).metadata?.revision ?? 0, revision);
+      assert.equal(h.documentOf(await h.saved()), before);
+      assert.equal((await h.saved()).scenarios?.length ?? 0, 1);
+      assert.equal(JSON.stringify(await readVersions(h)), stack);
     } finally { await h.cleanup(); }
   });
 });
+
+type StoredVersions = {
+  format?: number;
+  current?: string;
+  flows?: Record<string, {id: string; title: string; createdAt: string; draft: FlowDraft; placements: Record<string, {x: number; y: number}>; projection: {screens: {key: string; title: string; x: number; y: number; steps: string[]}[]; edges: {from: string; to: string; label: string}[]}}[]>;
+};
+
+async function readVersions(h: {workspaceId: string; service: {workspaceDetail: (id: string) => Promise<{view?: unknown}>}}): Promise<StoredVersions | undefined> {
+  const detail = await h.service.workspaceDetail(h.workspaceId);
+  const view = detail.view && typeof detail.view === 'object' ? detail.view as {aiVersions?: StoredVersions} : {};
+  return view.aiVersions;
+}
 
 type Mode = 'ready' | 'hold' | 'expired' | 'needs' | 'invalid' | 'authoring-failed' | 'asks' | 'on-existing';
 type StoredPreview = {preview: Preview; placements?: Record<string, {x: number; y: number}>; draft?: FlowDraft};
@@ -1240,6 +1384,7 @@ async function harness(mode: Mode, options: HarnessOptions = {}) {
   const {createRoot} = await import('react-dom/client');
   const document = dom.window.document;
   let root = createRoot(document.getElementById('root')!);
+  let mounted = true;
   const render = (recover = false) => act(async () => { root.render(createElement(Scenarios, {token: 'local', deviceId: options.deviceId ?? '', bundleId: 'com.example.HybridApp', launchBusy: false, onRunning: () => {}, recoverSession: recover})); });
   const click = async (selector: string) => act(async () => { const node = document.querySelector<HTMLElement>(selector); assert.ok(node, selector); node.click(); });
   const clickText = async (text: string) => act(async () => { const node = [...document.querySelectorAll('button')].find(button => button.textContent === text); assert.ok(node, text); node.click(); });
@@ -1302,13 +1447,15 @@ async function harness(mode: Mode, options: HarnessOptions = {}) {
       await act(async () => document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu', {bubbles: true, cancelable: true, clientX: 120, clientY: 120})));
       await clickText('Add node');
     },
+    unmount: async () => { if (!mounted) return; mounted = false; await act(async () => root.unmount()); },
     remount: async () => {
-      await act(async () => root.unmount());
+      if (mounted) { mounted = false; await act(async () => root.unmount()); }
       root = createRoot(document.getElementById('root')!);
+      mounted = true;
       await render(true);
     },
     cleanup: async () => {
-      await act(async () => root.unmount());
+      if (mounted) { mounted = false; await act(async () => root.unmount()); }
       dom.window.close();
       for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
       await rm(directory, {recursive: true, force: true, maxRetries: 5, retryDelay: 50});

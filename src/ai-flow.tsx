@@ -7,6 +7,8 @@ import type {DraftOverlay} from './canvas.js';
 import type {DraftPositions} from './draft-placement.js';
 import {AI_POLL_MS, ANSWER_CHAR_LIMIT, AiFlowRequestError, createAiFlowClient, PROMPT_CHAR_LIMIT, PROMPT_COUNTER_AT, type AiPublicConfig, type ApplyResponse, type GenerationPhase, type GenerationView, type ProviderId} from './ai-flow-client.js';
 import {subscribeAiConfig} from './ai-settings.js';
+import {VersionsSheet} from './ai-versions-sheet.js';
+import {makeVersion, readAiVersions, relativeVersionTime, sharedScreenIds, UNDO_WINDOW_MS, withPoppedVersion, withPushedVersion, withRestoredVersion, type AiVersionsState, type FlowVersion, type VersionCanvasPreview} from './ai-versions.js';
 
 export type AiDraftStatus = 'idle' | 'prompting' | 'generating' | 'pending' | 'needsInfo' | 'stale' | 'applying' | 'failed';
 
@@ -88,6 +90,11 @@ const REVIEW: AiDraftStatus[] = ['pending', 'needsInfo', 'stale', 'applying'];
 
 function emptyDraft(prompt = ''): AiDraft {
   return {status: 'idle', prompt};
+}
+
+function viewWith(view: unknown, patch: Record<string, unknown>) {
+  const base = view && typeof view === 'object' && !Array.isArray(view) ? {...view as Record<string, unknown>} : {format: 1};
+  return {...base, ...patch};
 }
 
 export function persistedAiDraft(view: Record<string, unknown> | null | undefined): PersistedAiDraft | undefined {
@@ -388,11 +395,13 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const [undoOffer, setUndoOffer] = useState<{receiptId: string; revision: number; workspaceId: string}>();
   const undoOfferRef = useRef(undoOffer);
   undoOfferRef.current = undoOffer;
-  const [flowChoice, setFlowChoice] = useState<'new' | 'replace'>('new');
-  const flowChoiceRef = useRef(flowChoice);
-  flowChoiceRef.current = flowChoice;
+  const [undoVisible, setUndoVisible] = useState(false);
+  const [versionState, setVersionState] = useState<AiVersionsState>({format: 1, flows: {}});
+  const versionStateRef = useRef(versionState);
+  versionStateRef.current = versionState;
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [selectedVersionId, setSelectedVersionId] = useState<string>();
   const opLock = useRef(false);
-  const hadUndoOffer = useRef(false);
   const [config, setConfig] = useState<AiPublicConfig>();
   const [disclosure, setDisclosure] = useState<string | null>(null);
   const jobGuard = useRef<string | undefined>(undefined);
@@ -588,11 +597,19 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   }, [input.revision]);
 
   useEffect(() => {
-    if (undoOffer) { hadUndoOffer.current = true; return; }
-    if (!hadUndoOffer.current) return;
-    hadUndoOffer.current = false;
-    setFlowChoice('new');
+    if (!undoOffer) { setUndoVisible(false); return; }
+    setUndoVisible(true);
+    const timer = setTimeout(() => setUndoVisible(false), UNDO_WINDOW_MS);
+    return () => clearTimeout(timer);
   }, [undoOffer]);
+
+  useEffect(() => {
+    const next = readAiVersions(callbacks.current.readView());
+    versionStateRef.current = next;
+    setVersionState(next);
+    setVersionsOpen(false);
+    setSelectedVersionId(undefined);
+  }, [input.loadRevision, input.workspaceId]);
 
   function clearPersisted() {
     callbacks.current.rememberView({aiDraft: null});
@@ -690,21 +707,31 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     return true;
   }
 
-  /**
-   * Same undo as the provenance Undo action.
-   * Replace reloads inside generate, while opLock is held, so that reload does not wipe the prompt.
-   */
+  function commitVersions(next: AiVersionsState) {
+    versionStateRef.current = next;
+    setVersionState(next);
+    callbacks.current.rememberView({aiVersions: next});
+  }
+
+  /** Undo of an Apply. Generating a later flow does not call this. */
   async function restoreUndo(keepComposer: boolean) {
     const offer = undoOfferRef.current;
     if (!offer) return false;
+    const flowId = versionStateRef.current.current;
     try {
       await client.undo({workspaceId: offer.workspaceId, expectedRevision: offer.revision, receiptId: offer.receiptId});
       const detail = await callbacks.current.fetchWorkspace(offer.workspaceId);
+      const nextVersions = flowId ? withPoppedVersion(versionStateRef.current, flowId) : versionStateRef.current;
+      detail.view = viewWith(detail.view, {aiVersions: nextVersions});
+      versionStateRef.current = nextVersions;
       if (keepComposer) flushSync(() => { callbacks.current.loadWorkspace(detail); });
       else callbacks.current.loadWorkspace(detail);
+      setVersionState(nextVersions);
+      callbacks.current.rememberView({aiVersions: nextVersions});
       setUndoOffer(undefined);
       setProvenanceId('');
-      setFlowChoice('new');
+      setVersionsOpen(false);
+      setSelectedVersionId(undefined);
       return true;
     } catch (error) {
       setDraft(current => ({...current, error: errorOf(error, 'Undo failed.')}));
@@ -721,23 +748,11 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     const previousJobId = refining ? (draftRef.current.previousJobId ?? draftRef.current.jobId) : undefined;
     const restoreStatus = refining ? draftRef.current.restoreStatus : undefined;
     const answers = refining ? pendingAnswers.current : undefined;
-    const replacing = !refining && flowChoiceRef.current === 'replace' && !!undoOfferRef.current;
     setSubmitting(true);
     setOpen(true);
     setDisclosure(null);
     setDraft(current => ({...current, status: refining ? current.status : 'prompting', prompt: text, error: undefined, notice: undefined}));
     try {
-      if (replacing) {
-        const undone = await restoreUndo(true);
-        if (!undone) {
-          setFlowChoice('replace');
-          setDraft(current => ({...current, status: 'prompting', prompt: text, error: current.error ?? {code: 'UNDO_CONFLICT', message: 'Undo failed.', retryable: true}}));
-          setOpen(true);
-          return;
-        }
-      } else if (!refining) {
-        setFlowChoice('new');
-      }
       let settings: AiPublicConfig;
       try {
         settings = await client.getConfig();
@@ -1007,12 +1022,24 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     }
     try {
       const detail = await callbacks.current.fetchWorkspace(applied.workspaceId);
-      if (detail.view && typeof detail.view === 'object') detail.view = {...detail.view, aiDraft: null};
+      const screens = (detail.canvas?.screens ?? []).map(screen => ({id: screen.id, title: screen.title, x: screen.x, y: screen.y}));
+      const snapshot = current.draft ? makeVersion({
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        draft: current.draft,
+        placements: drawn,
+        screens,
+        sharedScreenIds: sharedScreenIds(detail.canvas, applied.scenarioId, detail.scenarios),
+      }) : undefined;
+      const nextVersions = snapshot ? withPushedVersion(versionStateRef.current, applied.scenarioId, snapshot) : versionStateRef.current;
+      detail.view = viewWith(detail.view, {aiDraft: null, aiVersions: nextVersions});
+      versionStateRef.current = nextVersions;
       jobGuard.current = undefined;
       memory.current.delete(applied.workspaceId);
       callbacks.current.loadWorkspace(detail);
       callbacks.current.selectScenario(applied.scenarioId);
-      clearPersisted();
+      callbacks.current.rememberView({aiDraft: null, aiVersions: nextVersions});
+      setVersionState(nextVersions);
       setProvenanceName(current.draft?.name || 'this flow');
       setDraft(emptyDraft());
       setOpen(false);
@@ -1108,16 +1135,73 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     });
   }
 
+  function versions(flowId?: string): FlowVersion[] {
+    const id = flowId ?? versionStateRef.current.current;
+    if (!id) return [];
+    return [...(versionStateRef.current.flows[id] ?? [])];
+  }
+
+  function pushVersion(flowId: string, version: FlowVersion) {
+    commitVersions(withPushedVersion(versionStateRef.current, flowId, version));
+  }
+
+  function popVersion(flowId?: string) {
+    const id = flowId ?? versionStateRef.current.current;
+    if (!id) return;
+    commitVersions(withPoppedVersion(versionStateRef.current, id));
+  }
+
+  /** Stack half of Figma Restore. TODO(R8-U2): write the chosen draft with replaceScenarioId. */
+  function restore(versionId: string) {
+    const next = withRestoredVersion(versionStateRef.current, versionId, new Date().toISOString(), () => crypto.randomUUID());
+    commitVersions(next);
+    const head = next.current ? next.flows[next.current]?.at(-1) : undefined;
+    setSelectedVersionId(head?.id);
+  }
+
+  function openVersions() {
+    const list = versions();
+    setSelectedVersionId(list.at(-1)?.id);
+    setVersionsOpen(true);
+  }
+
+  function closeVersions() {
+    const list = versions();
+    setSelectedVersionId(list.at(-1)?.id);
+    setVersionsOpen(false);
+  }
+
+  function selectVersion(id: string) {
+    setSelectedVersionId(id);
+  }
+
+  function keepCurrent() {
+    setSelectedVersionId(versions().at(-1)?.id);
+  }
+
+  const listed = versionState.current ? (versionState.flows[versionState.current] ?? []) : [];
+  const nowVersion = listed.at(-1);
+  const selectedVersion = listed.find(item => item.id === selectedVersionId) ?? nowVersion;
+  const previewing = versionsOpen && selectedVersion && nowVersion && selectedVersion.id !== nowVersion.id ? selectedVersion : undefined;
+  const versionPreview: VersionCanvasPreview | undefined = previewing ? {
+    breadcrumb: previewing.title + ' · viewing earlier',
+    viewingLabel: 'Viewing · ' + relativeVersionTime(previewing.createdAt),
+    projection: previewing.projection,
+  } : undefined;
   const reason = confirmReason(draft, input.running);
   const provider = config?.selected ?? 'openrouter';
   return {
-    draft, open, submitting, overlay, provenanceId, provenanceName, undoOffer, flowChoice, setFlowChoice, reason, token: input.token,
+    draft, open, submitting, overlay, provenanceId, provenanceName, undoOffer, undoVisible, reason, token: input.token,
     config, provider,
     disclosure, continueDisclosure, dismissDisclosure,
     setPrompt: (prompt: string) => setDraft(current => ({...current, prompt})),
     openPanel, closePanel, generate, refresh, ask, answer, confirm, undoApply, cancel, discard, refine,
     placeDraft, moveDraft,
     openSettings: (returnTo?: HTMLElement) => openSettingsRef.current?.(returnTo),
+    versionsOpen, versionPreview, versionCount: listed.length,
+    sheetVersions: [...listed].reverse(), nowVersionId: nowVersion?.id, selectedVersionId: selectedVersion?.id,
+    openVersions, closeVersions, selectVersion, keepCurrent,
+    pushVersion, popVersion, versions, restore,
   };
 }
 
@@ -1133,7 +1217,7 @@ export function confirmReason(draft: AiDraft, running: boolean) {
 export type AiDraftControl = ReturnType<typeof useAiDraft>;
 
 export function AiFlow({control}: {control: AiDraftControl}) {
-  const {draft, open, submitting, provenanceId, provenanceName, undoOffer} = control;
+  const {draft, open, submitting, provenanceId, provenanceName} = control;
   const generating = draft.status === 'generating' || submitting;
   const failed = draft.status === 'failed';
   const refining = !!draft.refining;
@@ -1181,18 +1265,24 @@ export function AiFlow({control}: {control: AiDraftControl}) {
     if (draft.prompt.trim() && !busy && !over && configured) void control.generate();
   }
 
+  const versionsRef = useRef<HTMLButtonElement>(null);
   const copy = draft.error ? errorCopy(draft.error.code, draft.error.message, control.config?.providers?.[control.provider]?.model || draft.model) : draft.notice;
   const composerIssues = (draft.diagnostics ?? []).filter(item => item.blocks.includes('apply') || item.severity === 'error');
-  return <div className="ai-flow" data-testid="ai-flow" data-ai-status={draft.status}>
+  const reviewing = REVIEW.includes(draft.status) && !refining && !!draft.draft;
+  const history = !reviewing && !open && (control.undoVisible || control.versionCount > 0);
+  function closeVersions() {
+    control.closeVersions();
+    versionsRef.current?.focus();
+  }
+  return <div className={'ai-flow' + (control.versionsOpen ? ' is-sheet-clear' : '')} data-testid="ai-flow" data-ai-status={draft.status}>
     <p className="sr-only" aria-live="polite" data-testid="ai-live">{live}</p>
     {draft.status === 'stale' && <p className="ai-muted">The workspace changed since this draft was prepared. <button type="button" className="ai-text" data-testid="ai-refresh" onClick={() => void control.refresh()}>Refresh</button></p>}
-    {provenanceId && <p className="ai-provenance" data-testid="ai-provenance">Applied as “{provenanceName || 'this flow'}” · not run yet{undoOffer && <> · <button type="button" data-testid="ai-undo" onClick={() => void control.undoApply()}>↶ Undo</button></>}</p>}
+    {provenanceId && <p className="ai-provenance" data-testid="ai-provenance">Applied as “{provenanceName || 'this flow'}” · not run yet</p>}
     {open && <section className={'ai-panel' + (failed && !neutral ? ' is-error' : '') + (generating ? ' is-busy' : '') + (over ? ' is-over' : '')} aria-label={refining ? 'Refine draft' : 'Describe a flow'} aria-busy={busy || undefined} onKeyDown={onPanelKeyDown}>
       <div className="ai-panel-bar">
         <h3 className="ai-draft-heading">{refining ? 'Refine draft' : 'Describe a flow'}</h3>
         <button type="button" className="ai-text" aria-label="Close" onClick={() => { if (!generating) { control.closePanel(); buttonRef.current?.focus(); } }}>✕</button>
       </div>
-      {undoOffer && !refining && <FlowChoice control={control} disabled={busy} />}
       {control.disclosure ? <><p className="ai-prompt-preview">{draft.prompt}</p><Disclosure control={control} /></> : <>
         <textarea ref={fieldRef} className="ai-prompt-field" aria-label="Flow description" placeholder="Describe the flow" value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={copy ? errorId : undefined} onChange={event => control.setPrompt(event.target.value)} onKeyDown={onFieldKeyDown} />
         <p className="ai-hint">Enter generates · Shift+Enter new line · Esc closes</p>
@@ -1215,28 +1305,39 @@ export function AiFlow({control}: {control: AiDraftControl}) {
         </div>
       </>}
     </section>}
-    {REVIEW.includes(draft.status) && !refining && draft.draft ? <AiCapsule control={control} /> : <button type="button" ref={buttonRef} className={'ai-launch' + (open ? ' is-open' : '')} data-testid="ai-flow-button" aria-label="Describe a flow" title="Describe a flow" aria-expanded={open} aria-busy={busy || undefined} onClick={() => open ? (generating ? undefined : control.closePanel()) : control.openPanel()}>
+    {reviewing ? <AiCapsule control={control} versionsRef={versionsRef} /> : history ? <HistoryCapsule control={control} versionsRef={versionsRef} /> : <button type="button" ref={buttonRef} className={'ai-launch' + (open ? ' is-open' : '')} data-testid="ai-flow-button" aria-label="Describe a flow" title="Describe a flow" aria-expanded={open} aria-busy={busy || undefined} onClick={() => open ? (generating ? undefined : control.closePanel()) : control.openPanel()}>
       ✦ Describe a flow
     </button>}
+    {control.versionsOpen && !!control.sheetVersions.length && <VersionsSheet versions={control.sheetVersions} nowId={control.nowVersionId} selectedId={control.selectedVersionId} onSelect={control.selectVersion} onClose={closeVersions} onKeepCurrent={control.keepCurrent} />}
   </div>;
 }
 
-function FlowChoice({control, disabled}: {control: AiDraftControl; disabled: boolean}) {
-  const choice = control.flowChoice;
-  return <fieldset className="ai-flow-choice" data-testid="ai-flow-choice" disabled={disabled}>
-    <legend className="sr-only">What should this prompt do?</legend>
-    <label className="ai-flow-choice-option">
-      <input type="radio" name="ai-flow-choice" value="new" data-testid="ai-flow-choice-new" checked={choice === 'new'} onChange={() => control.setFlowChoice('new')} />
-      New flow
-    </label>
-    <label className="ai-flow-choice-option">
-      <input type="radio" name="ai-flow-choice" value="replace" data-testid="ai-flow-choice-replace" checked={choice === 'replace'} onChange={() => control.setFlowChoice('replace')} />
-      Replace this flow
-    </label>
-  </fieldset>;
+function VersionsControl({control, buttonRef}: {control: AiDraftControl; buttonRef: {current: HTMLButtonElement | null}}) {
+  if (control.versionCount < 1) return null;
+  return <button type="button" ref={buttonRef} className="ai-versions-toggle" data-testid="ai-versions" aria-expanded={control.versionsOpen} aria-controls="ai-versions-sheet" onClick={() => control.versionsOpen ? control.closeVersions() : control.openVersions()}>Versions</button>;
 }
 
-function AiCapsule({control}: {control: AiDraftControl}) {
+function HistoryCapsule({control, versionsRef}: {control: AiDraftControl; versionsRef: {current: HTMLButtonElement | null}}) {
+  const [text, setText] = useState('');
+  function submit() {
+    const next = text.trim();
+    if (!next || next.length > PROMPT_CHAR_LIMIT) return;
+    setText('');
+    void control.generate(next);
+  }
+  return <div className="ai-capsule-wrap">
+    <form className="ai-capsule" data-testid="ai-capsule" onSubmit={event => { event.preventDefault(); submit(); }}>
+      <div className="ai-capsule-row">
+        <Sparkles />
+        <input className="ai-capsule-input" aria-label="Ask for changes" placeholder="Ask for changes" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
+        {control.undoVisible && <button type="button" className="ai-capsule-undo" data-testid="ai-undo" onClick={() => void control.undoApply()}>↶ Undo</button>}
+        <VersionsControl control={control} buttonRef={versionsRef} />
+      </div>
+    </form>
+  </div>;
+}
+
+function AiCapsule({control, versionsRef}: {control: AiDraftControl; versionsRef: {current: HTMLButtonElement | null}}) {
   const {draft, reason} = control;
   const [text, setText] = useState('');
   const applyRef = useRef<HTMLButtonElement>(null);
@@ -1270,6 +1371,7 @@ function AiCapsule({control}: {control: AiDraftControl}) {
         <Sparkles />
         <input className="ai-capsule-input" aria-label="Ask for changes" placeholder="Ask for changes" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
         <button type="button" ref={applyRef} className="ai-capsule-apply" data-testid="ai-confirm" aria-disabled={reason ? true : undefined} aria-describedby={reason ? reasonId : undefined} onClick={() => { if (!reason) void control.confirm(); }}>✓ Apply</button>
+        <VersionsControl control={control} buttonRef={versionsRef} />
         <button type="button" className="ai-capsule-dismiss" data-testid="ai-discard" aria-label="Dismiss draft" onClick={() => void control.discard()}>✕</button>
       </div>
     </form>
