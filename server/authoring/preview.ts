@@ -22,6 +22,8 @@ export type StoredPreview = {
   scriptIds: string[];
   /** Normalized create-screen coordinates. Omitted when the request has none, so the stored record matches the previous shape. */
   placements?: Record<string, ScreenPlacement>;
+  /** Canvas scenario overwritten in place. Omitted on create, so the stored record matches the previous shape. */
+  replaceScenarioId?: string;
 };
 
 export function createPreviewStore(now: () => Date) {
@@ -46,7 +48,7 @@ function blank(workspaceId: string, revision: number, draftHash: string, diagnos
 }
 
 export async function createPreview(deps: AuthoringDeps, contexts: ReturnType<typeof createContextStore>, previews: ReturnType<typeof createPreviewStore>, input: unknown, topKeys?: string[]) {
-  const body = assertEnvelope(input, topKeys, ['workspaceId', 'expectedRevision', 'contextId', 'draft', 'placements']);
+  const body = assertEnvelope(input, topKeys, ['workspaceId', 'expectedRevision', 'contextId', 'draft', 'placements', 'replaceScenarioId']);
   const workspaceId = requireWorkspaceId(body.workspaceId);
   const expectedRevision = requireRevision(body.expectedRevision);
   const contextId = requireString(body.contextId, 'a contextId');
@@ -55,11 +57,12 @@ export async function createPreview(deps: AuthoringDeps, contexts: ReturnType<ty
   const placements = readPlacements(body.placements, body.draft);
   const context = await contexts.require(contextId, workspaceId, expectedRevision);
   const workspace = await readWorkspace(deps, workspaceId);
+  const replaceScenarioId = readReplaceScenarioId(body.replaceScenarioId, workspace);
   const now = clock(deps);
-  const draftHash = previewDigest(body.draft, placements);
+  const draftHash = previewDigest(body.draft, placements, replaceScenarioId);
   const schema = draftSchemaResult(body.draft);
   const diagnostics = schema.ok ? [] : schema.diagnostics;
-  const translation = schema.ok ? compileDraft(workspace, schema.draft, context, placements) : undefined;
+  const translation = schema.ok ? compileDraft(workspace, schema.draft, context, placements, replaceScenarioId) : undefined;
   const preview: Preview = translation ? {
     previewId: randomUUID(), workspaceId, baseRevision: expectedRevision, expiresAt: new Date(now.getTime() + SNAPSHOT_TTL_MS).toISOString(),
     contractVersion: CONTRACT_VERSION, compilerVersion: COMPILER_VERSION, draftHash, applicable: translation.applicable, authoringComplete: translation.authoringComplete,
@@ -71,6 +74,7 @@ export async function createPreview(deps: AuthoringDeps, contexts: ReturnType<ty
     expiresAt: now.getTime() + SNAPSHOT_TTL_MS, draftHash, preview, scriptIds: translation?.scriptIds ?? [],
     ...(translation?.proposed ? {proposed: translation.proposed} : {}),
     ...(placements ? {placements} : {}),
+    ...(replaceScenarioId ? {replaceScenarioId} : {}),
   });
   return preview;
 }
@@ -125,6 +129,16 @@ function readPlacements(value: unknown, draft: unknown): Record<string, ScreenPl
   return names.length ? placements : undefined;
 }
 
-function previewDigest(draft: unknown, placements: Record<string, ScreenPlacement> | undefined) {
-  return placements ? digest({draft, placements}) : digest(draft);
+function readReplaceScenarioId(value: unknown, workspace: Workspace) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || value.length < 1) throw authoringError(400, 'INVALID_ENVELOPE', 'Provide a replaceScenarioId.');
+  const scenario = workspace.scenarios?.find(item => item.id === value);
+  if (!scenario) throw authoringError(400, 'INVALID_ENVELOPE', 'replaceScenarioId does not name a scenario in this workspace.');
+  if (scenario.authoring !== 'canvas' || !scenario.pathId) throw authoringError(400, 'INVALID_ENVELOPE', 'replaceScenarioId must name a canvas scenario with a path.');
+  return value;
+}
+
+function previewDigest(draft: unknown, placements: Record<string, ScreenPlacement> | undefined, replaceScenarioId?: string) {
+  if (!placements && !replaceScenarioId) return digest(draft);
+  return digest({draft, ...(placements ? {placements} : {}), ...(replaceScenarioId ? {replaceScenarioId} : {})});
 }

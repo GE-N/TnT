@@ -83,18 +83,20 @@ function placeScreens(existing: {x: number; y: number}[], count: number) {
   return placed;
 }
 
-export function compileDraft(workspace: Workspace, draft: FlowDraft, context: ContextSnapshot, placements?: Readonly<Record<string, {x: number; y: number}>>): Translation {
+export function compileDraft(workspace: Workspace, draft: FlowDraft, context: ContextSnapshot, placements?: Readonly<Record<string, {x: number; y: number}>>, replaceScenarioId?: string): Translation {
   const diagnostics = validateDraft(draft, workspace, context);
   if (blocksApply(diagnostics)) return finish(draft, diagnostics);
-  try { return materialize(workspace, draft, context, diagnostics, placements); }
+  try { return materialize(workspace, draft, context, diagnostics, placements, replaceScenarioId); }
   catch (error) {
     diagnostics.push(issue('PROJECTION_FAILED', '', 'error', ['apply', 'run'], error instanceof Error ? error.message : 'The draft could not be projected.', 'Repair the draft and preview again.'));
     return finish(draft, diagnostics);
   }
 }
 
-function materialize(workspace: Workspace, draft: FlowDraft, context: ContextSnapshot, diagnostics: Diagnostic[], placements?: Readonly<Record<string, {x: number; y: number}>>): Translation {
-  const scenarioId = 'scenario-' + randomUUID();
+function materialize(workspace: Workspace, draft: FlowDraft, context: ContextSnapshot, diagnostics: Diagnostic[], placements?: Readonly<Record<string, {x: number; y: number}>>, replaceScenarioId?: string): Translation {
+  const replaced = replaceScenarioId ? workspace.scenarios?.find(item => item.id === replaceScenarioId) : undefined;
+  if (replaceScenarioId && (replaced?.authoring !== 'canvas' || !replaced.pathId)) throw new Error('replaceScenarioId must name a canvas scenario with a path.');
+  const scenarioId = replaced ? replaced.id : 'scenario-' + randomUUID();
   const pathId = 'path-' + randomUUID();
   const screenIds = new Map(draft.screens.map(screen => [screen.key, screen.kind === 'existing' ? screen.screenId : 'screen-' + randomUUID()]));
   const visitIds = new Map(draft.visits.map(visit => [visit.key, randomUUID()]));
@@ -103,6 +105,14 @@ function materialize(workspace: Workspace, draft: FlowDraft, context: ContextSna
   const scriptIds = new Map(draft.scripts.map(script => [script.key, 'script-' + randomUUID()]));
   const canvas: CanvasGraph = structuredClone(workspace.canvas ?? emptyGraph);
   delete canvas.execution;
+  let removedTests: CanvasTest[] = [];
+  if (replaced?.pathId) {
+    const stripped = stripReplacedFlow(canvas, {...replaced, pathId: replaced.pathId}, new Set(draft.screens.flatMap(screen => screen.kind === 'existing' ? [screen.screenId] : [])));
+    canvas.screens = stripped.screens;
+    canvas.edges = stripped.edges;
+    canvas.paths = stripped.paths;
+    removedTests = stripped.removedTests;
+  }
   const createOrder: string[] = [];
   for (const visit of draft.visits) {
     const screen = draft.screens.find(item => item.key === visit.screenKey);
@@ -163,7 +173,12 @@ function materialize(workspace: Workspace, draft: FlowDraft, context: ContextSna
   });
 
   let yaml = workspace.yaml;
-  if (tests.length) yaml = writeChecks(yaml, emptyGraph, {screens: [{id: 'authoring-new', title: 'Authoring', x: 0, y: 0, tests}], edges: [], paths: []});
+  if (tests.length || removedTests.length) {
+    const previous = removedTests.length
+      ? {screens: [{id: 'authoring-removed', title: 'Removed', x: 0, y: 0, tests: removedTests}], edges: [], paths: []}
+      : emptyGraph;
+    yaml = writeChecks(yaml, previous, {screens: [{id: 'authoring-new', title: 'Authoring', x: 0, y: 0, tests}], edges: [], paths: []});
+  }
   const catalog = referenceCatalog(yaml, workspace.flows ?? {}).references;
   const created = new Set(tests.map(test => test.id));
   for (const mark of authoredChecks(yaml)) {
@@ -179,7 +194,7 @@ function materialize(workspace: Workspace, draft: FlowDraft, context: ContextSna
   if (tests.some(test => test.reference.fingerprint === 'draft' && !deferred.has(test.id))) throw new Error('An operation was not written into the scenario YAML.');
   if (Buffer.byteLength(yaml) > 100_000) {
     diagnostics.push(issue('CAPACITY_EXCEEDED', '', 'error', ['apply', 'run'], 'The resulting scenario YAML exceeds 100 KB.', 'Shorten the draft. Source and steps are not truncated.'));
-    return finish(draft, diagnostics, identity(draft, scenarioId, pathId, screenIds, visitIds, operationIds, scriptIds));
+    return finish(draft, diagnostics, identity(draft, scenarioId, pathId, screenIds, visitIds, operationIds, scriptIds, Boolean(replaced)));
   }
 
   const setup = draft.execution.setup.kind === 'context' ? context.setups[draft.execution.setup.ref] : undefined;
@@ -191,9 +206,19 @@ function materialize(workspace: Workspace, draft: FlowDraft, context: ContextSna
     ...(setup ? {setup: {file: setup.file, parameters: {...setup.parameters}}} : {}),
     ...(mock ? {mockResponseId: mock.responseId} : {}),
   };
+  // The draft replaces name, path, steps, setup, handlers, mock, parameters, and scripts.
+  // skipInRunAll is a canvas preference. Inputs stay only for parameters this draft still declares.
+  if (replaced) {
+    const inputs = keptInputs(replaced, scenario.parameters);
+    if (Object.keys(inputs).length) scenario.inputs = inputs;
+    if (typeof replaced.skipInRunAll === 'boolean') scenario.skipInRunAll = replaced.skipInRunAll;
+  }
   const {metadata, canvasDiagnostics, ...rest} = workspace;
   void metadata; void canvasDiagnostics;
-  const proposed: Workspace = {...structuredClone(rest), id: workspace.id, yaml, canvas, scenarios: [...(rest.scenarios ?? []), scenario]};
+  const scenarios = replaced
+    ? (rest.scenarios ?? []).map(item => item.id === replaced.id ? scenario : item)
+    : [...(rest.scenarios ?? []), scenario];
+  const proposed: Workspace = {...structuredClone(rest), id: workspace.id, yaml, canvas, scenarios};
   const runtime = Object.fromEntries(Object.entries(scenario.parameters).map(([name, rule]) => [name, rule.type === 'number' ? '0' : rule.type === 'boolean' ? 'true' : 'preview']));
   const selection = selectScenario(structuredClone(proposed), scenarioId, runtime, []);
   if (!selection?.canvas || !selection.scenario.pathId) throw new Error('The draft scenario could not be selected.');
@@ -249,7 +274,7 @@ function materialize(workspace: Workspace, draft: FlowDraft, context: ContextSna
   });
   if (retained.length) diagnostics.push(issue('UNSUPPORTED_SHARED_YAML', '', 'error', ['apply', 'run'], `Selected projection would retain undeclared executable work: ${retained.join(', ')}.`, 'Authoring cannot isolate this scenario from existing YAML. Remove or link that YAML before applying.'));
   const timeline = timelineFrom(draft, operationOrder, setup?.file, retained);
-  const mapped = identity(draft, scenarioId, pathId, screenIds, visitIds, operationIds, scriptIds);
+  const mapped = identity(draft, scenarioId, pathId, screenIds, visitIds, operationIds, scriptIds, Boolean(replaced));
   if (Buffer.byteLength(JSON.stringify({flows: proposed.flows, mock: proposed.mock, canvas, automation: proposed.automation, scenarios: proposed.scenarios})) > 900_000) {
     diagnostics.push(issue('CAPACITY_EXCEEDED', '', 'error', ['apply', 'run'], 'The resulting workspace exceeds the 900 KB authoring limit.', 'Reduce screenshots or reusable flows before applying.'));
   }
@@ -329,9 +354,10 @@ function timelineFrom(draft: FlowDraft, operations: {visitKey: string; operation
   return timeline;
 }
 
-function identity(draft: FlowDraft, scenarioId: string, pathId: string, screenIds: Map<string, string>, visitIds: Map<string, string>, operationIds: Map<string, string>, scriptIds: Map<string, string>): Pick<Translation, 'changes' | 'identityMap'> {
+function identity(draft: FlowDraft, scenarioId: string, pathId: string, screenIds: Map<string, string>, visitIds: Map<string, string>, operationIds: Map<string, string>, scriptIds: Map<string, string>, replaced = false): Pick<Translation, 'changes' | 'identityMap'> {
   const identityMap: Record<string, EntityRef> = {};
-  const created: EntityRef[] = [{kind: 'scenario', id: scenarioId}, {kind: 'path', id: pathId}];
+  const created: EntityRef[] = replaced ? [{kind: 'path', id: pathId}] : [{kind: 'scenario', id: scenarioId}, {kind: 'path', id: pathId}];
+  const updated: EntityRef[] = replaced ? [{kind: 'scenario', id: scenarioId}] : [];
   const reused: EntityRef[] = [];
   for (const screen of draft.screens) {
     const id = screenIds.get(screen.key)!;
@@ -354,5 +380,100 @@ function identity(draft: FlowDraft, scenarioId: string, pathId: string, screenId
     identityMap[script.key] = {kind: 'script', id};
     created.push({kind: 'script', id});
   }
-  return {identityMap, changes: {created, reused, updated: []}};
+  return {identityMap, changes: {created, reused, updated}};
+}
+
+function keptInputs(previous: ScenarioDefinition, parameters: ScenarioDefinition['parameters']) {
+  const inputs: Record<string, string> = {};
+  for (const [name, value] of Object.entries(previous.inputs)) {
+    const rule = parameters[name];
+    if (!rule) continue;
+    if (rule.type === 'number' && (!value.trim() || !Number.isFinite(Number(value)))) continue;
+    if (rule.type === 'boolean' && value !== 'true' && value !== 'false') continue;
+    inputs[name] = value;
+  }
+  return inputs;
+}
+
+function addEdgeTests(canvas: CanvasGraph, edgeId: string, ids: Set<string>) {
+  const edge = canvas.edges.find(item => item.id === edgeId);
+  if (!edge) return;
+  ids.add(edge.actionTestId);
+  for (const id of edge.actionTestIds ?? []) ids.add(id);
+  if (!edge.assertionTestId.startsWith('pending:')) ids.add(edge.assertionTestId);
+}
+
+/** Drops the replaced path and the screens, tests, and edges only that flow used. */
+function stripReplacedFlow(canvas: CanvasGraph, scenario: ScenarioDefinition & {pathId: string}, keptScreenIds: ReadonlySet<string>) {
+  const path = canvas.paths.find(item => item.id === scenario.pathId);
+  if (!path) throw new Error('The scenario path is not on the canvas.');
+  const otherPaths = canvas.paths.filter(item => item.id !== path.id);
+  const otherEdgeIds = new Set(otherPaths.flatMap(item => item.edgeIds));
+  const otherOperationIds = new Set<string>();
+  for (const other of otherPaths) {
+    for (const visit of other.visits ?? []) {
+      for (const id of visit.operationIds ?? []) otherOperationIds.add(id);
+      for (const id of visit.checkIds ?? []) otherOperationIds.add(id);
+    }
+    for (const edgeId of other.edgeIds) addEdgeTests(canvas, edgeId, otherOperationIds);
+  }
+  const pathOperationIds = new Set<string>();
+  for (const visit of path.visits ?? []) {
+    for (const id of visit.operationIds ?? []) pathOperationIds.add(id);
+    for (const id of visit.checkIds ?? []) pathOperationIds.add(id);
+  }
+  for (const edgeId of path.edgeIds) if (!otherEdgeIds.has(edgeId)) addEdgeTests(canvas, edgeId, pathOperationIds);
+  const removedEdgeIds = new Set(path.edgeIds.filter(id => !otherEdgeIds.has(id)));
+  const ownedByOthers = (test: CanvasTest) => otherOperationIds.has(test.id) || Boolean(test.scenarioIds?.some(id => id !== scenario.id));
+  const removedTestIds = new Set<string>();
+  for (const screen of canvas.screens) {
+    for (const test of screen.tests) {
+      if (ownedByOthers(test)) continue;
+      if (pathOperationIds.has(test.id) || test.scenarioIds?.includes(scenario.id)) removedTestIds.add(test.id);
+    }
+  }
+  const replacedScreenIds = new Set<string>();
+  if (path.screenId) replacedScreenIds.add(path.screenId);
+  for (const edgeId of path.edgeIds) {
+    const edge = canvas.edges.find(item => item.id === edgeId);
+    if (!edge) continue;
+    replacedScreenIds.add(edge.from);
+    replacedScreenIds.add(edge.to);
+  }
+  for (const screen of canvas.screens) {
+    if (screen.tests.some(test => removedTestIds.has(test.id) || test.scenarioIds?.includes(scenario.id))) replacedScreenIds.add(screen.id);
+  }
+  const otherScreenIds = new Set<string>();
+  for (const other of otherPaths) {
+    if (other.screenId) otherScreenIds.add(other.screenId);
+    for (const edgeId of other.edgeIds) {
+      const edge = canvas.edges.find(item => item.id === edgeId);
+      if (!edge) continue;
+      otherScreenIds.add(edge.from);
+      otherScreenIds.add(edge.to);
+    }
+  }
+  for (const screen of canvas.screens) {
+    if (screen.tests.some(ownedByOthers)) otherScreenIds.add(screen.id);
+  }
+  const removedTests: CanvasTest[] = [];
+  const screens = canvas.screens.flatMap(screen => {
+    const drop = replacedScreenIds.has(screen.id) && !otherScreenIds.has(screen.id) && !keptScreenIds.has(screen.id);
+    if (drop) {
+      removedTests.push(...screen.tests.filter(test => !ownedByOthers(test)));
+      return [];
+    }
+    const tests = screen.tests.filter(test => {
+      if (!removedTestIds.has(test.id)) return true;
+      removedTests.push(test);
+      return false;
+    });
+    return [{...screen, tests}];
+  });
+  return {
+    screens,
+    edges: canvas.edges.filter(edge => !removedEdgeIds.has(edge.id)),
+    paths: canvas.paths.filter(item => item.id !== path.id),
+    removedTests,
+  };
 }

@@ -79,7 +79,9 @@ export async function applyFlow(deps: AuthoringDeps, previews: ReturnType<typeof
   if (diagnostics.length) throw authoringError(422, 'APPLY_REJECTED', 'The draft cannot be applied.', diagnostics);
   if (!stored.proposed) throw authoringError(422, 'APPLY_REJECTED', 'The draft cannot be applied.', stored.preview.diagnostics.filter(item => item.blocks.includes('apply')));
 
-  const createdScenario = stored.proposed.scenarios?.find(item => !(current.scenarios ?? []).some(existing => existing.id === item.id));
+  const createdScenario = stored.replaceScenarioId
+    ? stored.proposed.scenarios?.find(item => item.id === stored.replaceScenarioId)
+    : stored.proposed.scenarios?.find(item => !(current.scenarios ?? []).some(existing => existing.id === item.id));
   if (!createdScenario?.pathId) throw authoringError(422, 'APPLY_REJECTED', 'The preview is missing its scenario.', stored.preview.diagnostics);
   const now = journalNow(deps);
   const entry: JournalEntry = {
@@ -113,13 +115,29 @@ async function resume(deps: AuthoringDeps, journal: ReturnType<typeof createJour
   }
   if (!entry.proposed || !entry.intended.scenarioId) throw authoringError(409, 'IDEMPOTENCY_CONFLICT', 'This idempotency key has an unfinished application that cannot be resumed.');
   const workspace = await readWorkspace(deps, entry.workspaceId);
-  if (workspace.scenarios?.some(scenario => scenario.id === entry.intended.scenarioId)) {
+  // Create can treat a new id on the workspace as publication. Replace reuses an id that was already there, so only a recorded revision or receipt counts.
+  const replacing = replacesExistingScenario(entry);
+  if (!replacing && workspace.scenarios?.some(scenario => scenario.id === entry.intended.scenarioId)) {
     const revision = workspace.metadata?.revision ?? entry.publishedRevision ?? 0;
     const receipt = entry.receipt ?? receiptFrom(entry, revision);
     await journal.save({...entry, status: 'committed', publishedRevision: revision, receipt});
     return receipt;
   }
+  if (replacing && (entry.publishedRevision !== undefined || entry.receipt)) {
+    const revision = entry.publishedRevision ?? workspace.metadata?.revision ?? 0;
+    const receipt = entry.receipt ?? receiptFrom(entry, revision);
+    await journal.save({...entry, status: 'committed', publishedRevision: revision, receipt});
+    return receipt;
+  }
   return publish(deps, journal, entry, {...entry.proposed, id: entry.workspaceId} as Workspace, new Set(entry.intended.scriptIds));
+}
+
+function replacesExistingScenario(entry: JournalEntry) {
+  return Boolean(entry.reverse?.snapshot.scenarios?.some(scenario => scenario.id === entry.intended.scenarioId));
+}
+
+function scriptIdsOf(scenarios: {scripts?: {id: string}[]}[] | undefined) {
+  return new Set((scenarios ?? []).flatMap(scenario => (scenario.scripts ?? []).map(row => row.id)));
 }
 
 async function publish(deps: AuthoringDeps, journal: ReturnType<typeof createJournal>, entry: JournalEntry, proposed: Workspace, scriptIds: ReadonlySet<string>) {
@@ -150,10 +168,15 @@ export async function undoFlow(deps: AuthoringDeps, journal: ReturnType<typeof c
   if ((current.metadata?.revision ?? 0) !== expectedRevision) throw authoringError(409, 'REVISION_CONFLICT', 'The workspace revision does not match expectedRevision.');
   if ((current.metadata?.revision ?? 0) !== entry.publishedRevision) throw authoringError(409, 'UNDO_CONFLICT', 'Later edits sit on top of this apply. Undo is only available while the workspace is still at the apply revision.');
   const restored = await saveWorkspace(deps, {...entry.reverse.snapshot, id: workspaceId} as Workspace, expectedRevision, async (next, previous) => {
-    const present = new Set((next.scenarios ?? []).flatMap(scenario => (scenario.scripts ?? []).map(row => row.id)));
-    for (const id of entry.intended.scriptIds) if (present.has(id)) throw authoringError(409, 'TRUST_ORIGIN_REQUIRED', 'Undo tried to keep an authoring script.');
+    const present = scriptIdsOf(next.scenarios);
+    const prior = scriptIdsOf(entry.reverse?.snapshot.scenarios);
+    const replacing = replacesExistingScenario(entry);
+    for (const id of entry.intended.scriptIds) {
+      if (!present.has(id)) continue;
+      if (!replacing || !prior.has(id)) throw authoringError(409, 'TRUST_ORIGIN_REQUIRED', 'Undo tried to keep an authoring script.');
+    }
     await deps.register(next, previous, {});
-    await deps.forget(workspaceId, entry.intended.scriptIds);
+    await deps.forget(workspaceId, entry.intended.scriptIds.filter(id => !present.has(id)));
   });
   await journal.save({...entry, status: 'undone'});
   return {workspaceId, revision: restored.metadata?.revision ?? 0, receiptId, scenarioId: entry.intended.scenarioId, undone: true as const};
