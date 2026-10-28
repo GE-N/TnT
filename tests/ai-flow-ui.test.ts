@@ -8,6 +8,7 @@ import {mkdtemp, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {Scenarios} from '../src/scenarios.js';
+import {restoreBlockReason} from '../src/ai-flow.js';
 import {createScenarios} from '../server/scenarios.js';
 import {createRunner} from '../server/runner.js';
 import type {FlowDraft, Preview} from '../server/authoring/types.js';
@@ -1059,11 +1060,14 @@ test('AI flow authoring UI', async t => {
       const capsule = h.document.querySelector('[data-testid="ai-capsule"]');
       assert.equal(h.document.querySelector<HTMLInputElement>('[aria-label="Ask for changes"]')?.placeholder, 'Ask for changes');
       assert.match(capsule?.textContent ?? '', /↶ Undo/);
-      assert.match(capsule?.textContent ?? '', /Versions/);
+      assert.equal(h.document.querySelector('[data-testid="ai-versions"]'), null);
+      assert.doesNotMatch(capsule?.textContent ?? '', /Versions/);
       assert.equal(typeof undoTimer, 'function');
       await act(async () => { undoTimer?.(); });
       assert.equal(h.document.querySelector('[data-testid="ai-undo"]'), null);
       assert.ok(h.document.querySelector('[data-testid="ai-versions"]'));
+      await h.click('[data-testid="ai-versions"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions-sheet"]'), 'sheet after the window');
       assert.equal(h.ai.undos, 0);
       assert.equal(h.ai.calls.includes('undo'), false);
     } finally {
@@ -1095,6 +1099,7 @@ test('AI flow authoring UI', async t => {
       assert.equal((h.ai.applyBodies.at(-1) as {replaceScenarioId?: string}).replaceScenarioId, undefined);
       await h.click('[data-testid="ai-undo"]');
       await h.until(async () => { const next = await readVersions(h); return !next?.current && Object.keys(next?.flows ?? {}).length === 0; }, 'version popped');
+      await h.until(() => !h.document.querySelector('[data-testid="ai-undo"]') && !h.document.querySelector('[data-testid="ai-versions"]'), 'neither undo nor versions');
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
       const popped = await readVersions(h);
       assert.equal(popped?.current, undefined);
@@ -1249,6 +1254,7 @@ test('AI flow authoring UI', async t => {
 
   await t.test('restore checkpoints before preview and settles the past version as Now', async () => {
     const h = await harness('ready');
+    const undoWindow = captureUndoWindow();
     try {
       await h.render();
       await describeAndApply(h, 'Pay the electric bill');
@@ -1258,6 +1264,8 @@ test('AI flow authoring UI', async t => {
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
       const beforeStack = await readVersions(h);
       const mark = h.requests.length;
+      await act(async () => { undoWindow.flush(); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions"]') && !h.document.querySelector('[data-testid="ai-undo"]'), 'versions after the undo window');
       await h.click('[data-testid="ai-versions"]');
       await h.until(() => h.document.querySelectorAll('[data-testid="ai-version-option"]').length === 2, 'rows');
       const past = h.document.querySelectorAll<HTMLElement>('[data-testid="ai-version-option"]')[1];
@@ -1302,11 +1310,12 @@ test('AI flow authoring UI', async t => {
       assert.equal(undone.scenarios?.[0]?.name, 'Send a receipt');
       assert.equal(undone.canvas?.screens?.some(screen => screen.title === 'Receipt'), true);
       assert.equal(h.ai.calls.filter(call => call === 'undo').length, 1);
-    } finally { await h.cleanup(); }
+    } finally { undoWindow.restore(); await h.cleanup(); }
   });
 
   await t.test('restoring a later version still works after its screens were overwritten', async () => {
     const h = await harness('ready');
+    const undoWindow = captureUndoWindow();
     try {
       await h.render();
       await describeAndApply(h, 'Pay the electric bill');
@@ -1317,6 +1326,8 @@ test('AI flow authoring UI', async t => {
       const receipt = before?.flows?.[id]?.[1];
       assert.ok(receipt);
       assert.equal(receipt.draft.screens.every(screen => screen.kind === 'create'), true);
+      await act(async () => { undoWindow.flush(); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions"]') && !h.document.querySelector('[data-testid="ai-undo"]'), 'versions after the undo window');
       await h.click('[data-testid="ai-versions"]');
       await h.until(() => h.document.querySelectorAll('[data-testid="ai-version-option"]').length === 2, 'rows');
       await act(async () => { h.document.querySelectorAll<HTMLElement>('[data-testid="ai-version-option"]')[1]?.click(); });
@@ -1339,7 +1350,7 @@ test('AI flow authoring UI', async t => {
       assert.equal(saved.scenarios?.[0]?.name, 'Send a receipt');
       assert.equal(saved.canvas?.screens?.some(screen => screen.title === 'Receipt'), true);
       assert.equal(h.ai.calls.includes('undo'), false);
-    } finally { await h.cleanup(); }
+    } finally { undoWindow.restore(); await h.cleanup(); }
   });
 
   await t.test('a failed restore leaves the stack and the workspace unchanged', async () => {
@@ -1395,7 +1406,13 @@ test('AI flow authoring UI', async t => {
       older.title = 'First AI draft';
       await h.service.saveView(h.workspaceId, {aiVersions: {...view.aiVersions, flows: {...view.aiVersions.flows, [flowId]: [older, now]}}});
       await h.remount();
-      await h.until(() => !!h.document.querySelector('[aria-label="Ask for changes"]'), 'ask');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions"]'), 'versions after reload');
+      await h.click('[data-testid="ai-versions"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions-sheet"]'), 'sheet');
+      await act(async () => { h.document.querySelector('[data-testid="ai-versions-sheet"]')?.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true})); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-version-restore"]'), 'restore');
+      assert.equal(h.document.querySelector('[data-testid="ai-version-restore"]')?.getAttribute('aria-disabled'), null);
+      assert.match(h.document.querySelector('.ai-versions-hint')?.textContent ?? '', /Restore checkpoints Now first/);
       await h.fill('Ask for changes', 'Send a receipt');
       const ask = h.document.querySelector('[aria-label="Ask for changes"]');
       assert.ok(ask);
@@ -1406,16 +1423,13 @@ test('AI flow authoring UI', async t => {
         await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
       }
       await h.until(() => h.confirmEnabled(), 'pending draft');
-      await h.click('[data-testid="ai-versions"]');
-      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions-sheet"]'), 'sheet');
-      await act(async () => { h.document.querySelector('[data-testid="ai-versions-sheet"]')?.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true})); });
-      await h.until(() => !!h.document.querySelector('[data-testid="ai-version-restore"]'), 'restore');
-      const pending = h.document.querySelector('[data-testid="ai-version-restore"]');
-      assert.equal(pending?.getAttribute('aria-disabled'), 'true');
-      assert.match(h.document.querySelector('.ai-versions-hint')?.textContent ?? '', /draft is pending/);
+      assert.equal(h.document.querySelector('[data-testid="ai-versions-sheet"]'), null);
+      assert.equal(h.document.querySelector('[data-testid="ai-versions"]'), null);
+      assert.ok(h.document.querySelector('[data-testid="ai-confirm"]'));
+      assert.ok(h.document.querySelector('[data-testid="ai-discard"]'));
+      assert.match(restoreBlockReason(false, {status: 'pending', prompt: 'Send a receipt', draft: {schemaVersion: 1} as FlowDraft}, false) ?? '', /draft is pending/);
       const revision = (await h.saved()).metadata?.revision ?? 0;
       const applies = h.ai.applies;
-      await h.click('[data-testid="ai-version-restore"]');
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 200)); });
       assert.equal(h.ai.applies, applies);
       assert.equal((await h.saved()).metadata?.revision ?? 0, revision);
@@ -1432,6 +1446,78 @@ test('AI flow authoring UI', async t => {
       assert.equal(h.document.querySelector('[data-testid="ai-version-restore"]')?.getAttribute('aria-disabled'), 'true');
       assert.match(h.document.querySelector('.ai-versions-hint')?.textContent ?? '', /run is active/);
     } finally { await h.cleanup(); }
+  });
+
+  await t.test('undo click leaves Versions only while history remains', async () => {
+    const h = await harness('ready');
+    const undoWindow = captureUndoWindow();
+    try {
+      await h.render();
+      await describeAndApply(h, 'Pay the electric bill');
+      assert.equal(h.document.querySelector('[data-testid="ai-versions"]'), null);
+      await h.click('[data-testid="ai-undo"]');
+      await h.until(() => !h.document.querySelector('[data-testid="ai-undo"]') && !h.document.querySelector('[data-testid="ai-versions"]'), 'only version popped');
+      await describeAndApply(h, 'Pay the electric bill');
+      await describeAndApply(h, 'Send a receipt');
+      assert.ok(h.document.querySelector('[data-testid="ai-undo"]'));
+      assert.equal(h.document.querySelector('[data-testid="ai-versions"]'), null);
+      await h.click('[data-testid="ai-undo"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions"]') && !h.document.querySelector('[data-testid="ai-undo"]'), 'versions after a partial undo');
+    } finally { undoWindow.restore(); await h.cleanup(); }
+  });
+
+  await t.test('a draft capsule never shows Versions', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.generate('Pay the electric bill');
+      await h.until(() => h.confirmEnabled(), 'first draft');
+      assert.ok(h.document.querySelector('[data-testid="ai-confirm"]'));
+      assert.ok(h.document.querySelector('[data-testid="ai-discard"]'));
+      assert.equal(h.document.querySelector('[data-testid="ai-versions"]'), null);
+      await h.click('[data-testid="ai-confirm"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-undo"]'), 'applied');
+      await h.until(async () => (await readVersions(h))?.current !== undefined, 'history');
+      await h.fill('Ask for changes', 'Send a receipt');
+      const ask = h.document.querySelector('[aria-label="Ask for changes"]');
+      assert.ok(ask);
+      await act(async () => { ask.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); });
+      for (let attempt = 0; attempt < 20; attempt++) {
+        if (h.document.querySelector('[data-testid="ai-disclosure-continue"]')) { await h.click('[data-testid="ai-disclosure-continue"]'); break; }
+        if (h.status() === 'generating' || h.status() === 'pending' || h.status() === 'needsInfo' || h.status() === 'stale' || h.status() === 'failed') break;
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
+      }
+      await h.until(() => h.confirmEnabled(), 'refine draft');
+      assert.ok(h.document.querySelector('[data-testid="ai-confirm"]'));
+      assert.ok(h.document.querySelector('[data-testid="ai-discard"]'));
+      assert.equal(h.document.querySelector('[data-testid="ai-versions"]'), null);
+      assert.equal(h.document.querySelector('[data-testid="ai-undo"]'), null);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('restore shows Undo only beside the open sheet and Esc focuses that control', async () => {
+    const h = await harness('ready');
+    const undoWindow = captureUndoWindow();
+    try {
+      await h.render();
+      await describeAndApply(h, 'Pay the electric bill');
+      await describeAndApply(h, 'Send a receipt');
+      await act(async () => { undoWindow.flush(); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions"]') && !h.document.querySelector('[data-testid="ai-undo"]'), 'versions after the window');
+      await h.click('[data-testid="ai-versions"]');
+      await h.until(() => h.document.querySelectorAll('[data-testid="ai-version-option"]').length === 2, 'rows');
+      const past = h.document.querySelectorAll<HTMLElement>('[data-testid="ai-version-option"]')[1];
+      assert.ok(past);
+      await act(async () => { past.click(); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-version-restore"]'), 'restore');
+      await h.click('[data-testid="ai-version-restore"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions-sheet"]') && !!h.document.querySelector('[data-testid="ai-undo"]') && !h.document.querySelector('[data-testid="ai-versions"]'), 'undo only beside the open sheet');
+      const sheet = h.document.querySelector('[data-testid="ai-versions-sheet"]');
+      await act(async () => { sheet?.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); });
+      await h.until(() => !h.document.querySelector('[data-testid="ai-versions-sheet"]'), 'sheet closed');
+      assert.notEqual(h.document.activeElement, h.document.body);
+      assert.equal(h.document.activeElement, h.document.querySelector('[data-testid="ai-undo"]'));
+    } finally { undoWindow.restore(); await h.cleanup(); }
   });
 
   await t.test('a deleted AI flow is created again instead of replaced', async () => {
@@ -1468,6 +1554,33 @@ type StoredVersions = {
   current?: string;
   flows?: Record<string, {id: string; title: string; createdAt: string; draft: FlowDraft; placements: Record<string, {x: number; y: number}>; projection: {screens: {key: string; title: string; x: number; y: number; steps: string[]}[]; edges: {from: string; to: string; label: string}[]}}[]>;
 };
+
+function captureUndoWindow() {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  let undoTimer: (() => void) | undefined;
+  const parked: ReturnType<typeof setTimeout>[] = [];
+  globalThis.setTimeout = ((fn: TimerHandler, ms?: number, ...args: unknown[]) => {
+    if (typeof fn === 'function' && ms === UNDO_WINDOW_MS) {
+      undoTimer = () => fn(...args);
+      const id = realSetTimeout(() => undefined, 60_000);
+      parked.push(id);
+      return id;
+    }
+    return realSetTimeout(fn, ms, ...args);
+  }) as typeof setTimeout;
+  return {
+    flush() {
+      const run = undoTimer;
+      undoTimer = undefined;
+      run?.();
+    },
+    restore() {
+      for (const id of parked) realClearTimeout(id);
+      globalThis.setTimeout = realSetTimeout;
+    },
+  };
+}
 
 async function describeAndApply(h: Awaited<ReturnType<typeof harness>>, prompt: string) {
   sizeViewport(h.document);

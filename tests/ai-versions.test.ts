@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type {FlowDraft} from '../server/authoring/types.js';
-import {makeVersion, projectionFor, readAiVersions, relativeVersionTime, selfContainedSnapshot, sharedScreenIds, VERSION_BYTE_BUDGET, VERSION_CAP, withPoppedVersion, withPushedVersion, withRestoredVersion, type AiVersionsState, type FlowVersion} from '../src/ai-versions.js';
+import {capsuleMode, makeVersion, projectionFor, readAiVersions, relativeVersionTime, selfContainedSnapshot, sharedScreenIds, VERSION_BYTE_BUDGET, VERSION_CAP, withPoppedVersion, withPushedVersion, withRestoredVersion, type AiVersionsState, type FlowVersion} from '../src/ai-versions.js';
 
 function draft(screens: FlowDraft['screens'], name = 'Coupon check'): FlowDraft {
   return {
@@ -107,6 +107,19 @@ test('undo pops the entry its apply pushed and restore checkpoints Now', () => {
   const roundTrip = readAiVersions({aiVersions: restored});
   assert.equal(roundTrip.current, 'flow');
   assert.equal(roundTrip.flows.flow.length, head.length);
+});
+
+test('capsule mode prefers a draft, then undo, then versions, otherwise idle', () => {
+  assert.equal(capsuleMode({draftOpen: true, undoVisible: true, versionCount: 3}), 'draft');
+  assert.equal(capsuleMode({draftOpen: true, undoVisible: true, versionCount: 0}), 'draft');
+  assert.equal(capsuleMode({draftOpen: true, undoVisible: false, versionCount: 3}), 'draft');
+  assert.equal(capsuleMode({draftOpen: true, undoVisible: false, versionCount: 0}), 'draft');
+  assert.equal(capsuleMode({draftOpen: false, undoVisible: true, versionCount: 3}), 'undo');
+  assert.equal(capsuleMode({draftOpen: false, undoVisible: true, versionCount: 1}), 'undo');
+  assert.equal(capsuleMode({draftOpen: false, undoVisible: true, versionCount: 0}), 'undo');
+  assert.equal(capsuleMode({draftOpen: false, undoVisible: false, versionCount: 1}), 'versions');
+  assert.equal(capsuleMode({draftOpen: false, undoVisible: false, versionCount: 4}), 'versions');
+  assert.equal(capsuleMode({draftOpen: false, undoVisible: false, versionCount: 0}), 'idle');
 });
 
 test('relative time uses the versions microcopy', () => {

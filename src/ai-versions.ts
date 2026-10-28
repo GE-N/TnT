@@ -1,7 +1,20 @@
 import type {DraftOperation, DraftTarget, FlowDraft} from '../server/authoring/types.js';
 
-/** How long the capsule keeps ↶ Undo after Apply. Then a quiet Versions control remains. */
+/** How long the capsule shows ↶ Undo after Apply. Versions replaces it once the window ends, when history exists. */
 export const UNDO_WINDOW_MS = 10_000;
+
+export type CapsuleMode = 'draft' | 'undo' | 'versions' | 'idle';
+
+/**
+ * One capsule control at a time. A pre-Apply draft wins, then the live Undo window,
+ * then quiet Versions when this flow already has history.
+ */
+export function capsuleMode(input: {draftOpen: boolean; undoVisible: boolean; versionCount: number}): CapsuleMode {
+  if (input.draftOpen) return 'draft';
+  if (input.undoVisible) return 'undo';
+  if (input.versionCount >= 1) return 'versions';
+  return 'idle';
+}
 
 /** Newest entry of each flow is last and is Now. Oldest drop first. */
 export const VERSION_CAP = 20;
