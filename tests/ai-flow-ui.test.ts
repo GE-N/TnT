@@ -1520,6 +1520,32 @@ test('AI flow authoring UI', async t => {
     } finally { undoWindow.restore(); await h.cleanup(); }
   });
 
+  await t.test('undo while the versions sheet is open focuses a mounted capsule control', async () => {
+    const h = await harness('ready');
+    const undoWindow = captureUndoWindow();
+    try {
+      await h.render();
+      await describeAndApply(h, 'Pay the electric bill');
+      await describeAndApply(h, 'Send a receipt');
+      await act(async () => { undoWindow.flush(); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions"]') && !h.document.querySelector('[data-testid="ai-undo"]'), 'versions after the window');
+      await h.click('[data-testid="ai-versions"]');
+      await h.until(() => h.document.querySelectorAll('[data-testid="ai-version-option"]').length === 2, 'rows');
+      const past = h.document.querySelectorAll<HTMLElement>('[data-testid="ai-version-option"]')[1];
+      assert.ok(past);
+      await act(async () => { past.click(); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-version-restore"]'), 'restore');
+      await h.click('[data-testid="ai-version-restore"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions-sheet"]') && !!h.document.querySelector('[data-testid="ai-undo"]') && !h.document.querySelector('[data-testid="ai-versions"]'), 'undo only beside the open sheet');
+      await h.click('[data-testid="ai-undo"]');
+      await h.until(() => !h.document.querySelector('[data-testid="ai-versions-sheet"]') && !!h.document.querySelector('[data-testid="ai-versions"]') && !h.document.querySelector('[data-testid="ai-undo"]'), 'sheet closed onto Versions');
+      const versions = h.document.querySelector<HTMLElement>('[data-testid="ai-versions"]');
+      assert.ok(versions?.isConnected);
+      assert.notEqual(h.document.activeElement, h.document.body);
+      assert.equal(h.document.activeElement, versions);
+    } finally { undoWindow.restore(); await h.cleanup(); }
+  });
+
   await t.test('a deleted AI flow is created again instead of replaced', async () => {
     const h = await harness('ready');
     try {

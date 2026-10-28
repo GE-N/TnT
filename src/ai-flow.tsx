@@ -1,5 +1,5 @@
 import {flushSync} from 'react-dom';
-import {useEffect, useId, useMemo, useRef, useState, type KeyboardEvent} from 'react';
+import {useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent} from 'react';
 import type {CanvasGraph} from '../server/canvas.js';
 import type {Diagnostic, DraftOperation, DraftTarget, FlowDraft} from '../server/authoring/types.js';
 import type {Workspace} from '../server/scenarios.js';
@@ -773,6 +773,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       callbacks.current.rememberView(keepComposer ? {aiVersions: nextVersions} : {aiDraft: null, aiVersions: nextVersions});
       if (!keepComposer) { setDraft(emptyDraft()); setOpen(false); }
       setUndoOffer(undefined);
+      setUndoVisible(false);
       setProvenanceId('');
       setVersionsOpen(false);
       setSelectedVersionId(undefined);
@@ -1438,7 +1439,7 @@ export function AiFlow({control}: {control: AiDraftControl}) {
     control.closeVersions();
     focusCapsule();
   }
-  useEffect(() => {
+  useLayoutEffect(() => {
     const wasOpen = sheetWasOpen.current;
     sheetWasOpen.current = control.versionsOpen;
     if (wasOpen && !control.versionsOpen) focusCapsule();
