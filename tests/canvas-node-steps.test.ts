@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {createElement} from 'react';
+import {act,createElement,useState} from 'react';
+import {RecoveredFields,WorkspaceDrafts,type DraftReport} from '../src/workspace-drafts.js';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {JSDOM} from 'jsdom';
 import type {CanvasGraph,CanvasTest} from '../server/canvas.js';
@@ -79,6 +80,8 @@ test('a screen visited twice lists every visit in order with continuous numbers'
  const steps=screenNodeSteps(graph,route,'login');
  assert.equal(steps[0].text,'1 · Tap Help');
  assert.equal(steps.at(-1)!.text,'16 · Input again');
+ assert.deepEqual(steps.map(item=>item.visit),[...Array(15).fill(0),2]);
+ assert.deepEqual(screenNodeSteps(graph,route,'home').map(item=>item.visit),[1]);
  assert.deepEqual(screenNodeSteps(graph,route,'home').map(item=>item.text),['1 · Check "Home" visible']);
  assert.deepEqual(screenNodeSteps(graph,route,'about'),[]);
  assert.deepEqual(screenNodeSteps(graph,undefined,'login'),[]);
@@ -115,10 +118,14 @@ test('a selected scenario draws steps on the solid card, with the capture when t
  assert.deepEqual([...login.querySelectorAll('.screen-node-steps li')].map(item=>item.textContent),['1 · Tap Help','2 · Tap','3 · Input user@gmail.com','4 · Input','5 · Input ••••••','6 · Input ••••••','7 · Input ••••••','8 · Back','9 · Back Close','10 · Go to Home','11 · Go to Profile','12 · Go to Settings','13 · Check "Welcome" visible','14 · Check "Error" absent','15 · Check','16 · Input again']);
  assert.equal(login.querySelector('.screen-node-steps li:nth-child(3)')!.className,'is-specified');
  assert.equal(login.querySelector('.screen-node-steps li:nth-child(4)')!.className,'');
+ assert.equal(login.querySelectorAll('.starts-visit').length,1);
+ assert.equal(login.querySelector('.starts-visit')!.textContent,'16 · Input again');
+ assert.equal(login.querySelector('.starts-visit')!.className,'is-specified starts-visit');
  assert.doesNotMatch(login.textContent!,/PASSWORD|\[redacted\]|\*\*\*\*/);
  const home=document.querySelector('[data-screen-id="home"]')!;
  assert.equal(home.querySelector('img'),null);
  assert.deepEqual([...home.querySelectorAll('.screen-node-steps li')].map(item=>item.textContent),['1 · Check "Home" visible']);
+ assert.equal(home.querySelectorAll('.starts-visit').length,0);
  const about=document.querySelector('[data-screen-id="about"]')!;
  assert.equal(about.querySelector('.screen-node-steps'),null);
  assert.equal(about.querySelector('.screen-capture-label'),null);
@@ -160,9 +167,144 @@ test('edge labels are boxless 11px text and the version-preview pill stays boxed
  assert.match(draft,/background:transparent/);
  assert.doesNotMatch(draft,/background:#fff|border-radius:999px|box-shadow:0 0 0/);
  assert.match(css,/\.screen-node-steps li\{[^}]*font-size:13px/);
+ assert.match(css,/\.screen-node-steps li\.starts-visit\{[^}]*margin-top:8px;padding-top:6px;border-top:1px solid var\(--border\)/);
  assert.match(css,/\.screen-node-steps li\.is-specified\{color:#0a63d1\}/);
+ assert.doesNotMatch(css,/\.screen-node-title\{[^}]*(?:dashed|border-bottom)/);
+ assert.equal(css.includes('screen-title-placeholder'),false);
  assert.match(css,/\.screen-node\{[^}]*z-index:3/);
  assert.equal(css.includes('screen-capture-label'),false);
  const source=readFileSync(new URL('../src/canvas.tsx',import.meta.url),'utf8');
+ assert.equal(source.includes('NodeTitle'),false);
+ assert.equal(source.includes('screen-title-placeholder'),false);
  assert.match(source,/width="180" height="36"><div className="ai-version-edge">/);
+});
+
+test('a visit with no mapped steps adds no divider',()=>{
+ const mini:CanvasGraph={
+  screens:[{id:'a',title:'A',x:0,y:0,tests:[
+   step('t1',{check:{visibility:'visible',target:'text',match:'exact',value:'One'}}),
+   step('setup-only',{role:'setup'}),
+   step('t2',{check:{visibility:'visible',target:'text',match:'exact',value:'Two'}}),
+  ]}],
+  edges:[
+   {id:'e1',from:'a',to:'a',actionTestId:'t1',actionTestIds:['t1'],assertionTestId:'t1',responseCondition:'Again'},
+   {id:'e2',from:'a',to:'a',actionTestId:'t2',actionTestIds:['t2'],assertionTestId:'t2',responseCondition:'Return'},
+  ],
+  paths:[{id:'p',name:'Loop',screenId:'a',edgeIds:['e1','e2'],visits:[
+   {id:'v1',operationIds:['t1']},
+   {id:'v2',operationIds:['setup-only']},
+   {id:'v3',operationIds:['t2']},
+  ]}],
+ };
+ const steps=screenNodeSteps(mini,mini.paths[0],'a');
+ assert.deepEqual(steps.map(item=>item.text),['1 · Check "One" visible','2 · Check "Two" visible']);
+ assert.deepEqual(steps.map(item=>item.visit),[0,2]);
+ const document=new JSDOM(renderToStaticMarkup(createElement(CanvasBoard,{graph:mini,pathId:'p'}))).window.document;
+ const items=[...document.querySelectorAll('.screen-node-steps li')];
+ assert.equal(items.filter(item=>item.classList.contains('starts-visit')).length,1);
+ assert.equal(items[0].classList.contains('starts-visit'),false);
+ assert.equal(items[1].textContent,'2 · Check "Two" visible');
+ assert.equal(items[1].classList.contains('starts-visit'),true);
+});
+
+test('rename is a menu action and the header title drags or selects',async()=>{
+ const dom=new JSDOM('<div id="root"></div>');
+ const keys=['window','document','HTMLElement','Event','KeyboardEvent','PointerEvent','ResizeObserver','MutationObserver','IS_REACT_ACT_ENVIRONMENT'];
+ const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ class ResizeObserver{observe(){}disconnect(){}}
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
+ const {createRoot}=await import('react-dom/client');
+ const root=createRoot(dom.window.document.getElementById('root')!);
+ const initial:CanvasGraph={screens:[{id:'login',title:'Login',x:40,y:40,tests:[]}],edges:[],paths:[]};
+ const selected:string[]=[];const renamed:string[]=[];const moved:Array<[string,number,number]>=[];
+ function Host(){
+  const [graph,setGraph]=useState(initial);
+  const [current,setCurrent]=useState('');
+  return createElement(CanvasBoard,{graph,selected:current,initialView:{zoom:1},onSelect:(id:string)=>{selected.push(id);setCurrent(id);},onCloseInspector:()=>setCurrent(''),renderInspector:()=>createElement('p',null,'Inspector open'),onRename:(id:string,title:string)=>{renamed.push(title);setGraph(value=>({...value,screens:value.screens.map(screen=>screen.id===id?{...screen,title}:screen)}));},onMove:(id:string,x:number,y:number)=>{moved.push([id,x,y]);setGraph(value=>({...value,screens:value.screens.map(screen=>screen.id===id?{...screen,x,y}:screen)}));},onDelete:()=>{},onInfo:()=>{},onAppend:()=>{}});
+ }
+ const document=dom.window.document;
+ const pointer=(target:Element,type:string,x:number,y:number)=>target.dispatchEvent(new dom.window.PointerEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:y,button:0,pointerId:1}));
+ const typeTitle=async(label:string,value:string)=>act(async()=>{const input=document.querySelector(`[aria-label="${label}"]`) as HTMLInputElement;assert.ok(input,label);Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
+ try{
+  await act(async()=>root.render(createElement(Host)));
+  assert.equal(document.querySelector('[aria-label^="Screen title for "]'),null);
+  const titleText=()=>document.querySelector('.screen-node-heading > span:nth-child(2)')!;
+  await act(async()=>titleText().dispatchEvent(new dom.window.MouseEvent('click',{bubbles:true})));
+  assert.deepEqual(selected,['login']);
+  assert.ok(document.querySelector('.floating-inspector'));
+  await act(async()=>{pointer(titleText(),'pointerdown',0,0);pointer(titleText(),'pointermove',10,0);pointer(titleText(),'pointerup',10,0);});
+  assert.deepEqual(moved,[['login',50,40]]);
+  const node=document.querySelector('[data-screen-id="login"]')!;
+  await act(async()=>node.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:40})));
+  assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(item=>item.textContent),['Add to sequence','Rename','Node info','Delete node']);
+  await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  const heading=document.querySelector<HTMLButtonElement>('.screen-node-heading')!;
+  heading.focus();
+  await act(async()=>heading.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ContextMenu',bubbles:true})));
+  assert.equal(document.activeElement?.textContent,'Add to sequence');
+  await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));
+  assert.equal(document.activeElement?.textContent,'Rename');
+  await act(async()=>(document.activeElement as HTMLButtonElement).click());
+  const input=document.querySelector('[aria-label="Screen title for Login"]') as HTMLInputElement;
+  assert.equal(document.activeElement,input);
+  assert.equal(input.selectionStart,0);
+  assert.equal(input.selectionEnd,input.value.length);
+  await typeTitle('Screen title for Login','Lobby');
+  await act(async()=>document.querySelector('[aria-label="Screen title for Login"]')!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
+  assert.deepEqual(renamed,['Lobby']);
+  assert.equal(document.querySelector('[aria-label="Screen title for Lobby"]'),null);
+  assert.equal(document.activeElement,document.querySelector('.screen-node-heading'));
+  assert.notEqual(document.activeElement,document.body);
+  assert.ok(document.querySelector('.floating-inspector'));
+  await act(async()=>node.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:40})));
+  await act(async()=>{const rename=[...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find(button=>button.textContent==='Rename');assert.ok(rename);rename.click();});
+  await typeTitle('Screen title for Lobby','Nope');
+  await act(async()=>document.querySelector('[aria-label="Screen title for Lobby"]')!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  assert.deepEqual(renamed,['Lobby']);
+  assert.equal(document.querySelector('[aria-label^="Screen title for "]'),null);
+  assert.equal(document.activeElement,document.querySelector('.screen-node-heading'));
+  assert.ok(document.querySelector('.floating-inspector'));
+  await act(async()=>node.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:40})));
+  await act(async()=>{const rename=[...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find(button=>button.textContent==='Rename');assert.ok(rename);rename.click();});
+  await typeTitle('Screen title for Lobby','Desk');
+  await act(async()=>document.querySelector('[aria-label="Screen title for Lobby"]')!.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));
+  assert.deepEqual(renamed,['Lobby','Desk']);
+  assert.equal(document.activeElement,document.querySelector('.screen-node-heading'));
+  await act(async()=>document.querySelector('[data-screen-id="login"]')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:40})));
+  await act(async()=>{const rename=[...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find(button=>button.textContent==='Rename');assert.ok(rename);rename.click();});
+  await typeTitle('Screen title for Desk','   ');
+  await act(async()=>document.querySelector('[aria-label="Screen title for Desk"]')!.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));
+  assert.deepEqual(renamed,['Lobby','Desk']);
+  assert.equal(document.querySelector('[aria-label^="Screen title for "]'),null);
+  assert.equal(document.activeElement,document.querySelector('.screen-node-heading'));
+  await act(async()=>document.querySelector('[data-screen-id="login"]')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:40})));
+  await act(async()=>{const rename=[...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find(button=>button.textContent==='Rename');assert.ok(rename);rename.click();});
+  const editing=document.querySelector('.screen-node-title')!;
+  const moves=moved.length;
+  await act(async()=>{pointer(editing,'pointerdown',0,0);pointer(editing,'pointermove',30,12);pointer(editing,'pointerup',30,12);});
+  assert.equal(moved.length,moves);
+ }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
+});
+
+test('a recovered screen title reopens the rename field',async()=>{
+ const dom=new JSDOM('<div id="root"></div>');
+ const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];
+ const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ class ResizeObserver{observe(){}disconnect(){}}
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
+ const {createRoot}=await import('react-dom/client');
+ const root=createRoot(dom.window.document.getElementById('root')!);
+ const reports:DraftReport[]=[];
+ const fields={'screen-title:login':'Recovered login'};
+ function Host(){return createElement(WorkspaceDrafts.Provider,{value:(_id:string,report:DraftReport)=>{reports.push(report);}},createElement(RecoveredFields.Provider,{value:fields},createElement(CanvasBoard,{graph,onRename:()=>{},onDelete:()=>{}})));}
+ try{
+  await act(async()=>root.render(createElement(Host)));
+  const input=dom.window.document.querySelector('[aria-label="Screen title for Login"]') as HTMLInputElement;
+  assert.ok(input);
+  assert.equal(input.value,'Recovered login');
+  assert.equal(input.selectionStart,0);
+  assert.equal(input.selectionEnd,'Recovered login'.length);
+  assert.equal(dom.window.document.activeElement,input);
+  assert.ok(reports.some(report=>report.pending&&report.key==='screen-title:login'&&report.value==='Recovered login'));
+ }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });

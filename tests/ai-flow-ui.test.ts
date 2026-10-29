@@ -36,11 +36,13 @@ test('AI flow authoring UI', async t => {
       assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]'), null);
       const workspace = await h.saved();
       assert.equal(workspace.scenarios?.some(item => item.name === 'Pay a bill' && item.authoring === 'canvas'), true);
+      await act(async () => h.document.querySelector('[aria-label="Screen Home"]')!.dispatchEvent(new h.dom.window.MouseEvent('contextmenu', {bubbles: true, cancelable: true, clientX: 80, clientY: 80})));
+      await h.clickText('Rename');
       await h.fill('Screen title for Home', 'Home desk');
       await act(async () => h.document.querySelector('[aria-label="Screen title for Home"]')!.dispatchEvent(new h.dom.window.FocusEvent('focusout', {bubbles: true})));
       await h.until(async () => (await h.saved()).canvas?.screens.some(screen => screen.title === 'Home desk') === true, 'saved title');
       await h.remount();
-      await h.until(() => !!h.document.querySelector('[aria-label="Screen title for Home desk"]'), 'reopened title');
+      await h.until(() => !!h.document.querySelector('[aria-label="Screen Home desk"]'), 'reopened title');
       await openScenarioPanel(h.document, act);
       assert.ok([...h.document.querySelectorAll('button')].some(button => button.textContent === 'Pay a bill'));
       assert.equal(h.ai.generations, 1);

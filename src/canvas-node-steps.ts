@@ -46,14 +46,14 @@ export function screenNodeSteps(graph:CanvasGraph,route:CanvasGraph['paths'][num
  if(!route)return [];
  const screen=graph.screens.find(item=>item.id===screenId);
  if(!screen)return [];
- const steps:{text:string;specified:boolean}[]=[];
+ const steps:{text:string;specified:boolean;visit:number}[]=[];
  routeVisits(graph,route).forEach((_visit,index)=>{
   if(visitScreenId(graph,route,index)!==screenId)return;
   for(const id of visitOperations(graph,route,index)){
    const test=screen.tests.find(item=>item.id===id);
    const mapped=test&&stepOf(graph,screenId,test);
    if(!mapped)continue;
-   steps.push({text:draftStepText(mapped.operation,steps.length,mapped.destinationTitle),specified:mapped.specified});
+   steps.push({text:draftStepText(mapped.operation,steps.length,mapped.destinationTitle),specified:mapped.specified,visit:index});
   }
  });
  return steps;

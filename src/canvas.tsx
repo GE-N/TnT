@@ -128,15 +128,6 @@ function DestinationSelect({name,graph,value,onChange,onCreate,unresolved=false}
 }
 function draftNavigationAction():CanvasTest{return {id:identity(),label:'Tap action',role:'action',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},tap:{target:'text',match:'exact',value:''}};}
 function draftScreenCheck():CanvasTest{return {id:identity(),label:'Screen check',role:'assertion',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:''}};}
-function NodeTitle({title,screenId,onRename,onSelect}:{title:string;screenId:string;onRename:(title:string)=>void;onSelect?:()=>void}){
- const recovered=useContext(RecoveredFields);
- const fieldKey='screen-title:'+screenId;
- const recoveredTitle=recovered[fieldKey];
- const [draft,setDraft]=useState(recoveredTitle??title);
- useWorkspaceDraft(draft!==title,fieldKey,draft);
- useEffect(()=>{setDraft(current=>current!==title&&recoveredTitle!==undefined&&current===recoveredTitle?current:title);},[title,recoveredTitle]);
- return <input className="screen-node-title" aria-label={'Screen title for '+title} title="Edit screen title · Enter to save · Escape to cancel" value={draft} maxLength={120} onFocus={onSelect} onChange={event=>setDraft(event.target.value)} onBlur={()=>{const next=draft.trim();if(next&&next!==title)onRename(next);setDraft(next||title);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();event.currentTarget.blur();}if(event.key==='Escape'){event.preventDefault();setDraft(title);}}}/>;
-}
 function NodeInfo({screen,disabled,error,onImage,onRemove,onClose}:{screen:ScreenNode;disabled:boolean;error:string;onImage:(file?:File)=>void;onRemove:()=>void;onClose:()=>void}){
  const dialog=useRef<HTMLElement>(null);
  useEffect(()=>{
@@ -168,6 +159,44 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  const [contextMenu,setContextMenu]=useState<{left:number;top:number;x:number;y:number;screenId?:string}>();
  const menu=useRef<HTMLDivElement>(null);
  const contextTarget=useRef<HTMLElement|null>(null);
+ const recoveredFields=useContext(RecoveredFields);
+ const consumedRecovery=useRef(new Set<string>());
+ const renameToken=useRef(1);
+ const titleInput=useRef<HTMLInputElement>(null);
+ const returnFocusId=useRef<string|undefined>(undefined);
+ const closingRename=useRef(false);
+ const [rename,setRename]=useState<{id:string;draft:string;token:number}|undefined>(()=>{
+  if(!onRename)return;
+  for(const screen of graph.screens){
+   const key='screen-title:'+screen.id;const draft=recoveredFields[key];
+   if(draft===undefined)continue;
+   consumedRecovery.current.add(key);
+   return {id:screen.id,draft,token:1};
+  }
+ });
+ const renameTitle=graph.screens.find(screen=>screen.id===rename?.id)?.title;
+ const recoveredTitle=rename?recoveredFields['screen-title:'+rename.id]:undefined;
+ useWorkspaceDraft(!!onRename&&!!rename&&renameTitle!==undefined&&rename.draft!==renameTitle,rename?'screen-title:'+rename.id:undefined,rename?.draft);
+ useLayoutEffect(()=>{
+  if(!onRename||rename)return;
+  for(const screen of graph.screens){
+   const key='screen-title:'+screen.id;
+   if(consumedRecovery.current.has(key))continue;
+   const draft=recoveredFields[key];
+   if(draft===undefined)continue;
+   consumedRecovery.current.add(key);renameToken.current+=1;
+   setRename({id:screen.id,draft,token:renameToken.current});
+   return;
+  }
+ },[onRename,graph.screens,recoveredFields,rename]);
+ useLayoutEffect(()=>{
+  if(!rename||renameTitle===undefined)return;
+  setRename(current=>{
+   if(!current||current.id!==rename.id)return current;
+   if(current.draft!==renameTitle&&recoveredTitle!==undefined&&current.draft===recoveredTitle)return current;
+   return current.draft===renameTitle?current:{...current,draft:renameTitle};
+  });
+ },[renameTitle,recoveredTitle,rename?.id]);
  useEffect(()=>{
   if(!contextMenu)return;
   menu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
@@ -176,13 +205,13 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   document.addEventListener('pointerdown',dismiss);document.addEventListener('keydown',escape);window.addEventListener('resize',dismiss);window.addEventListener('scroll',dismiss,true);
   return()=>{document.removeEventListener('pointerdown',dismiss);document.removeEventListener('keydown',escape);window.removeEventListener('resize',dismiss);window.removeEventListener('scroll',dismiss,true);};
  },[contextMenu]);
- function openMenu(event:MouseEvent<HTMLElement>,screenId?:string){
-  if(screenId?!onDelete&&!onInfo&&!onAppend:!onAdd&&!onRun)return;
+ function openMenu(event:{preventDefault():void;stopPropagation():void;currentTarget:HTMLElement;clientX?:number;clientY?:number},screenId?:string){
+  if(screenId?!onDelete&&!onInfo&&!onAppend&&!onRename:!onAdd&&!onRun)return;
   event.preventDefault();event.stopPropagation();
   const bounds=surface.current!.getBoundingClientRect();
   const target=event.currentTarget.getBoundingClientRect();
   const left=event.clientX||target.left+20;const top=event.clientY||target.top+20;
-  const menuHeight=20+40*(screenId?[onAppend,onInfo,onDelete]:[onAdd,onRun]).filter(Boolean).length;
+  const menuHeight=20+40*(screenId?[onAppend,onRename,onInfo,onDelete]:[onAdd,onRun]).filter(Boolean).length;
   contextTarget.current=event.currentTarget;
   setContextMenu({screenId,left:Math.max(8,Math.min(window.innerWidth-188,left)),top:Math.max(8,Math.min(window.innerHeight-menuHeight,top)),x:Math.max(0,Math.min(2400,(left-bounds.left)/zoom)),y:Math.max(0,Math.min(1400,(top-bounds.top)/zoom))});
  }
@@ -297,6 +326,37 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   focusInspector.current='';
   (card.current.querySelector<HTMLElement>('.visit-section-heading')??card.current.querySelector<HTMLElement>('.floating-inspector-body '+focusableSelector.split(',').join(',.floating-inspector-body '))??card.current.querySelector<HTMLElement>(focusableSelector))?.focus();
  });
+ useLayoutEffect(()=>{
+  if(rename){
+   closingRename.current=false;
+   const input=titleInput.current;
+   if(!input)return;
+   input.focus({preventScroll:true});
+   input.setSelectionRange(0,input.value.length);
+   return;
+  }
+  const id=returnFocusId.current;
+  if(!id)return;
+  returnFocusId.current=undefined;
+  closingRename.current=false;
+  screenElement(id)?.querySelector<HTMLButtonElement>('.screen-node-heading')?.focus({preventScroll:true});
+ },[rename?.token]);
+ function beginRename(id:string){
+  const screen=graph.screens.find(item=>item.id===id);
+  if(!screen||!onRename)return;
+  renameToken.current+=1;
+  closingRename.current=false;
+  setRename(current=>current?.id===id?{...current,token:renameToken.current}:{id,draft:screen.title,token:renameToken.current});
+ }
+ function finishRename(save:boolean,raw?:string){
+  if(closingRename.current||!rename)return;
+  closingRename.current=true;
+  const next=(raw??rename.draft).trim();
+  const screen=graph.screens.find(item=>item.id===rename.id);
+  if(save&&screen&&next&&next!==screen.title)onRename?.(rename.id,next);
+  returnFocusId.current=rename.id;
+  setRename(undefined);
+ }
  function closeInspector(){
   const node=inspected&&screenElement(inspected.id);
   onCloseInspector?.();
@@ -313,15 +373,16 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  const highlighted=highlightedEdgeId===edge.id;const box=edgeLabelBox({x:start[0],y:start[1]},{x:end[0],y:end[1]});
  return <g key={edge.id} role="img" aria-label={'Connection '+from.title+' to '+to.title} data-edge-id={edge.id} data-highlighted={highlighted?'true':undefined} className={(selectedEdges.has(edge.id)?'selected-transition':'unselected-transition')+(highlighted?' highlighted-transition':'')}><path d={`M${start[0]},${start[1]} C${middle},${start[1]} ${middle},${end[1]} ${end[0]},${end[1]}`} stroke={highlighted?'var(--inspector-highlight)':selectedEdges.has(edge.id)?color(status):'var(--border-strong)'} strokeWidth={highlighted?3:selectedEdges.has(edge.id)?1.25:1} fill="none" markerEnd={`url(#${marker})`} strokeDasharray={highlighted||selectedEdges.has(edge.id)?undefined:'6 5'}/><foreignObject x={box.x} y={box.y} width={box.width} height={box.height}><div className="transition-label"><span>{edge.responseCondition}</span>{selectedEdges.has(edge.id)&&<small>{status??'Visits '+route!.edgeIds.flatMap((id,index)=>id===edge.id?[index+1+' → '+(index+2)]:[]).join(', ')}</small>}{result&&!selectedEdges.has(edge.id)&&<small>Outside scenario</small>}</div></foreignObject></g>;
  })}</svg>
- {graph.screens.map(screen=>{if(versionPreview)return null;const outcome=result?.screens.find(item=>item.id===screen.id)?.status;const added=draftOverlay?.existing.find(item=>item.screenId===screen.id);const steps=screenNodeSteps(graph,route,screen.id);return <article key={screen.id} data-screen-id={screen.id} className={'screen-node '+(added?'has-ai-draft-steps ':'')+(selectedScreens.has(screen.id)?'on-route ':'')+(selected===screen.id?'selected-screen':'')} style={{left:screen.x,top:screen.y,borderColor:selectedScreens.has(screen.id)?color(outcome):undefined}} aria-label={'Screen '+screen.title} tabIndex={onDelete||onInfo?0:undefined} onContextMenu={event=>openMenu(event,screen.id)} onKeyDown={event=>{
-  if(event.target!==event.currentTarget||!renderInspector)return;
+ {graph.screens.map(screen=>{if(versionPreview)return null;const outcome=result?.screens.find(item=>item.id===screen.id)?.status;const added=draftOverlay?.existing.find(item=>item.screenId===screen.id);const steps=screenNodeSteps(graph,route,screen.id);const editing=rename?.id===screen.id;return <article key={screen.id} data-screen-id={screen.id} className={'screen-node '+(added?'has-ai-draft-steps ':'')+(selectedScreens.has(screen.id)?'on-route ':'')+(selected===screen.id?'selected-screen':'')} style={{left:screen.x,top:screen.y,borderColor:selectedScreens.has(screen.id)?color(outcome):undefined}} aria-label={'Screen '+screen.title} tabIndex={onDelete||onInfo?0:undefined} onContextMenu={event=>openMenu(event,screen.id)} onKeyDown={event=>{
+  const tag=(event.target as HTMLElement).tagName;
+  if(tag!=='INPUT'&&tag!=='TEXTAREA'&&(event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey)&&(onDelete||onInfo||onAppend||onRename)){event.preventDefault();openMenu(event,screen.id);return;}
+  if(tag==='INPUT'||tag==='TEXTAREA'||event.target!==event.currentTarget||!renderInspector)return;
   if(event.key==='Enter'&&onSelect){event.preventDefault();focusInspector.current=screen.id;onSelect(screen.id);if(selected===screen.id)relayout(value=>value+1);}
   if(event.key==='Escape'&&inspected?.id===screen.id){event.preventDefault();closeInspector();}
  }}>
- <button className="screen-node-heading" aria-label={'Select screen '+screen.title} onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>startDrag(event,screen.id,screen.x,screen.y)} onPointerMove={event=>dragMove(event,screen.id)} onPointerUp={endDrag} onPointerCancel={endDrag} onKeyDown={event=>{const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const direction=vectors[event.key];if(!direction||!onMove)return;event.preventDefault();const amount=event.shiftKey?40:10;onMove(screen.id,Math.max(0,Math.min(2400,screen.x+direction[0]*amount)),Math.max(0,Math.min(1400,screen.y+direction[1]*amount)));}}><span className="screen-icon">▣</span><span><span className={onRename?'screen-title-placeholder':undefined}>{screen.title}</span></span><span className="node-handle"/></button>
- {onRename&&<NodeTitle screenId={screen.id} title={screen.title} onRename={title=>onRename(screen.id,title)} onSelect={()=>onSelect?.(screen.id)}/>}
+ {editing?<div className="screen-node-heading" onPointerDown={event=>startDrag(event,screen.id,screen.x,screen.y)} onPointerMove={event=>dragMove(event,screen.id)} onPointerUp={endDrag} onPointerCancel={endDrag}><span className="screen-icon">▣</span><input ref={titleInput} className="screen-node-title" aria-label={'Screen title for '+screen.title} maxLength={120} value={rename.draft} onPointerDown={event=>event.stopPropagation()} onChange={event=>setRename(current=>current&&current.id===screen.id?{...current,draft:event.target.value}:current)} onBlur={event=>{if(!closingRename.current)finishRename(true,event.currentTarget.value);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();event.stopPropagation();finishRename(true,event.currentTarget.value);}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();finishRename(false);}}}/><span className="node-handle"/></div>:<button className="screen-node-heading" aria-label={'Select screen '+screen.title} onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>startDrag(event,screen.id,screen.x,screen.y)} onPointerMove={event=>dragMove(event,screen.id)} onPointerUp={endDrag} onPointerCancel={endDrag} onKeyDown={event=>{const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const direction=vectors[event.key];if(!direction||!onMove)return;event.preventDefault();const amount=event.shiftKey?40:10;onMove(screen.id,Math.max(0,Math.min(2400,screen.x+direction[0]*amount)),Math.max(0,Math.min(1400,screen.y+direction[1]*amount)));}}><span className="screen-icon">▣</span><span>{screen.title}</span><span className="node-handle"/></button>}
  {screen.referenceScreenshot?<div className="screen-reference-frame" onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>startDrag(event,screen.id,screen.x,screen.y)} onPointerMove={event=>dragMove(event,screen.id)} onPointerUp={endDrag} onPointerCancel={endDrag}><img className="screen-reference" draggable={false} src={screen.referenceScreenshot} alt={'Reference for '+screen.title}/>{onRemoveCapture&&<button type="button" className="screen-reference-delete" aria-label={'Delete capture for '+screen.title} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onRemoveCapture(screen.id);}}><DeleteIcon/></button>}</div>:null}
- {!!steps.length&&<ol className="screen-node-steps">{steps.map((step,index)=><li key={index} className={step.specified?'is-specified':undefined}>{step.text}</li>)}</ol>}
+ {!!steps.length&&<ol className="screen-node-steps">{steps.map((step,index)=>{const boundary=index>0&&step.visit!==steps[index-1].visit;const className=[step.specified?'is-specified':'',boundary?'starts-visit':''].filter(Boolean).join(' ');return <li key={index} className={className||undefined}>{step.text}</li>;})}</ol>}
  {added&&<ol className="ai-draft-steps ai-draft-on-screen" data-testid="ai-draft-existing-steps">{added.steps.map((step,index)=><li key={index} data-testid="ai-draft-step" className={step.specified?'is-specified':undefined}>{step.text}</li>)}</ol>}
  {(outcome==='passed'||outcome==='failed')&&<p className={'node-outcome outcome '+outcome}>{outcome==='passed'?'✓':outcome==='failed'?'✕':'○'} {outcome}</p>}
  </article>;})}
@@ -329,12 +390,13 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  {versionPreview&&<VersionPreviewLayer preview={versionPreview}/>}
  {!graph.screens.length&&!draftOverlay?.nodes.length&&!versionPreview&&<div className="canvas-empty"><h3>Build your screen map</h3><p>Add a screen and describe its checks. Screen titles are descriptive.</p></div>}
  </div></div></div>
- {contextMenu&&(contextMenu.screenId?onDelete||onInfo||onAppend:onAdd||onRun)&&<div ref={menu} className="canvas-context-menu" role="menu" aria-label={contextMenu.screenId?'Node menu':'Canvas menu'} style={{left:contextMenu.left,top:contextMenu.top}} onContextMenu={event=>event.preventDefault()} onKeyDown={event=>{
+ {contextMenu&&(contextMenu.screenId?onDelete||onInfo||onAppend||onRename:onAdd||onRun)&&<div ref={menu} className="canvas-context-menu" role="menu" aria-label={contextMenu.screenId?'Node menu':'Canvas menu'} style={{left:contextMenu.left,top:contextMenu.top}} onContextMenu={event=>event.preventDefault()} onKeyDown={event=>{
   if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
   event.preventDefault();const items=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const index=items.indexOf(document.activeElement as HTMLButtonElement);
   const next=event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length;items[next]?.focus();
  }}>
  {contextMenu.screenId&&onAppend&&<button role="menuitem" aria-label={'Add '+graph.screens.find(screen=>screen.id===contextMenu.screenId)?.title+' to scenario sequence'} onClick={()=>{setContextMenu(undefined);onAppend(contextMenu.screenId!);}}>Add to sequence</button>}
+ {contextMenu.screenId&&onRename&&<button role="menuitem" onClick={()=>{const id=contextMenu.screenId!;setContextMenu(undefined);beginRename(id);}}>Rename</button>}
  {contextMenu.screenId&&onInfo&&<button role="menuitem" onClick={()=>{setContextMenu(undefined);onInfo(contextMenu.screenId!);}}>Node info</button>}
  {(contextMenu.screenId?onDelete:onAdd)&&<button role="menuitem" disabled={!contextMenu.screenId&&graph.screens.length>=40} onClick={()=>{setContextMenu(undefined);if(contextMenu.screenId)onDelete?.(contextMenu.screenId);else onAdd?.(contextMenu.x,contextMenu.y);}}>{contextMenu.screenId?'Delete node':'Add node'}</button>}
  {!contextMenu.screenId&&onRun&&<button role="menuitem" onClick={()=>{setContextMenu(undefined);onRun();}}>Run scenario</button>}

@@ -5,6 +5,9 @@ async function addNode(dom:JSDOM,title:string){
  const document=dom.window.document;
  await act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));
  await act(async()=>{const add=[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button=>button.textContent==='Add node');assert.ok(add);add.click();});
+ const node=document.querySelector('[aria-label="Screen New screen"]');assert.ok(node);
+ await act(async()=>node.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:140,clientY:140})));
+ await act(async()=>{const rename=[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button=>button.textContent==='Rename');assert.ok(rename);rename.click();});
  await act(async()=>{const input=document.querySelector('[aria-label="Screen title for New screen"]')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,title);input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  await act(async()=>document.querySelector(`[aria-label="Screen title for New screen"]`)!.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));
 }
@@ -126,11 +129,13 @@ test('action destinations clean deleted references and Undo restores the origina
   await connect('Home','Other');
   assert.equal(saved!.edges.length,2);assert.deepEqual(saved!.paths[0].edgeIds,before.paths[0].edgeIds,'Connecting a branch does not extend the active tail');assert.equal(saved!.paths.length,1);
   await click('Remove transition');await click('Delete anyway');assert.equal(saved!.edges.length,1);assert.deepEqual(saved!.paths[0].edgeIds,[]);await click('Undo canvas deletion');assert.equal(saved!.edges.length,2);assert.match(authored,/# untouched/);
-  const beforeRename=authored;const title=document.querySelector('[aria-label="Screen title for Done"]') as HTMLInputElement;assert.ok(title,'Title is editable on the canvas node');assert.ok(title.closest('[data-screen-id]'));
-  await fill('Screen title for Done','Details');await act(async()=>title.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));assert.equal(saved!.screens[2].title,'Details');assert.equal(authored,beforeRename);assert.ok(document.querySelector('[aria-label="Connection Home to Details"]'));
-  await fill('Screen title for Details','');await act(async()=>title.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));assert.equal(saved!.screens[2].title,'Details');assert.equal(title.value,'Details');
-  await fill('Screen title for Details','Cancelled');await act(async()=>title.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(saved!.screens[2].title,'Details');assert.equal(title.value,'Details');
-  await fill('Screen title for Details','Done');await act(async()=>title.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));
+  const beforeRename=authored;assert.equal(document.querySelector('[aria-label="Screen title for Done"]'),null);
+  const startRename=async(name:string)=>{await act(async()=>document.querySelector(`[aria-label="Screen ${name}"]`)!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:100,clientY:100})));await click('Rename');};
+  await startRename('Done');const title=document.querySelector('[aria-label="Screen title for Done"]') as HTMLInputElement;assert.ok(title,'Rename opens the title on the canvas node');assert.ok(title.closest('[data-screen-id]'));
+  await fill('Screen title for Done','Details');await act(async()=>title.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));assert.equal(saved!.screens[2].title,'Details');assert.equal(authored,beforeRename);assert.ok(document.querySelector('[aria-label="Connection Home to Details"]'));assert.equal(document.querySelector('[aria-label="Screen title for Details"]'),null);
+  await startRename('Details');await fill('Screen title for Details','');await act(async()=>document.querySelector('[aria-label="Screen title for Details"]')!.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));assert.equal(saved!.screens[2].title,'Details');assert.equal(document.querySelector('[aria-label="Screen title for Details"]'),null);
+  await startRename('Details');await fill('Screen title for Details','Cancelled');await act(async()=>document.querySelector('[aria-label="Screen title for Details"]')!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(saved!.screens[2].title,'Details');assert.equal(document.querySelector('[aria-label="Screen title for Details"]'),null);assert.ok(document.querySelector('.floating-inspector'));
+  await startRename('Details');await fill('Screen title for Details','Done');await act(async()=>document.querySelector('[aria-label="Screen title for Details"]')!.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));
   const beforeNode=authored;const references=structuredClone(saved!.paths);await act(async()=>{document.querySelector('[aria-label="Screen Done"]')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:100,clientY:100}));});await click('Delete node');assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Chosen route/);await click('Delete anyway');assert.ok(!saved!.screens.some(screen=>screen.title==='Done'));assert.deepEqual(saved!.paths[0].edgeIds,[]);assert.equal(saved!.paths[0].visits!.length,1);assert.ok(!document.querySelector('[aria-label="Screen Done"]'));await click('Undo canvas deletion');assert.ok(document.querySelector('[aria-label="Screen Done"]'));assert.equal(authored,beforeNode);
   const intact=authored;
   for(const command of ['inputText: changed','tapOn:\\n    text: \\^Back\\$']){
@@ -200,7 +205,7 @@ test('canvas context menus add at the clicked position and delete nodes with war
   await context(document.querySelector('.canvas-surface')!);await click('Add node');
   assert.equal(saved!.screens.length,1);assert.equal(saved!.screens[0].x,400);assert.equal(saved!.screens[0].y,200);assert.equal(saved!.paths[0].screenId,saved!.screens[0].id);assert.equal(path,saved!.paths[0].id);assert.ok(!document.querySelector('.screen-node-delete'));
   const node=document.querySelector('[data-screen-id]')!;const position={x:saved!.screens[0].x,y:saved!.screens[0].y};
-  await context(node);assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(item=>item.textContent),['Node info','Delete node']);
+  await context(node);assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(item=>item.textContent),['Rename','Node info','Delete node']);
   await act(async()=>document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown',{bubbles:true})));assert.ok(!document.querySelector('[role=menu]'));
   await context(node);await click('Delete node');assert.ok(document.querySelector('[role=alertdialog]'));await click('Delete anyway');assert.equal(saved!.screens.length,0);await click('Undo canvas deletion');assert.deepEqual({x:saved!.screens[0].x,y:saved!.screens[0].y},position);
   await act(async()=>root.render(createElement(Host,{disabled:true})));await context(document.querySelector('.canvas-surface')!);assert.ok(!document.querySelector('[role=menu]'));await context(document.querySelector('[data-screen-id]')!);assert.ok(!document.querySelector('[role=menu]'));
