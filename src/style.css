@@ -402,8 +402,7 @@ textarea:focus{outline:1px solid var(--accent)}
 .canvas-visit-section.selected-visit{border-color:var(--accent);background:var(--selected)}
 .visit-section-heading{display:block;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--border);color:var(--text);padding:3px 0 8px;margin-bottom:8px;font-size:12px;font-weight:600}
 .visit-section-heading small{display:block;margin-top:3px;color:var(--muted);font-weight:400;font-size:11px}
-.visit-start-button,.unused-operations>button{background:var(--subtle);color:var(--text);border:1px solid var(--border);border-radius:5px;padding:6px 9px;text-align:left;font-size:11px}
-.unused-operations>button{display:block;width:100%;margin:6px 0}
+.visit-start-button{background:var(--subtle);color:var(--text);border:1px solid var(--border);border-radius:5px;padding:6px 9px;text-align:left;font-size:11px}
 
 .highlighted-transition path{filter:drop-shadow(0 0 4px #0a84ff80)}
 .highlighted-transition .transition-label{border-color:var(--inspector-highlight);color:var(--inspector-selected-text)}
@@ -419,7 +418,7 @@ textarea:focus{outline:1px solid var(--accent)}
 .floating-inspector li,.floating-inspector details{font-size:12px}
 .floating-inspector summary{display:flex;align-items:center}
 .floating-inspector .checkbox-label{min-height:44px}
-.floating-inspector .canvas-checks>button,.floating-inspector .visit-start-button,.floating-inspector .unused-operations>button{width:100%}
+.floating-inspector .canvas-checks>button,.floating-inspector .visit-start-button{width:100%}
 .floating-inspector .canvas-check-row button{min-width:44px}
 .floating-inspector .canvas-visit-section{background:var(--surface);padding:0 8px}
 .floating-inspector .canvas-visit-section.selected-visit{border-color:var(--inspector-highlight);background:var(--surface)}

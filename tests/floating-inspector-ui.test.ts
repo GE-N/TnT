@@ -1082,6 +1082,74 @@ test('delete focus skips repair steps to the next editable step',async()=>{
  }finally{await page.close();}
 });
 
+test('Node details omits Copy existing steps and still lists unassigned actions before a start',async()=>{
+ const withVisit=structuredClone(canvas);withVisit.screens[0].tests.push(tap('spare','Spare'));
+ const started=await mount({graph:withVisit,initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  assert.equal([...started.card()!.querySelectorAll('summary')].some(node=>node.textContent==='Copy existing steps'),false);
+  assert.equal([...started.card()!.querySelectorAll('summary')].some(node=>node.textContent==='Use existing actions/checks'),false);
+  assert.ok(started.card()!.querySelector('[aria-label="Check 1 selector"]'));
+ }finally{await started.close();}
+ const beforeStart=structuredClone(canvas);beforeStart.paths=[{id:'route',name:'Main',scenarioId:'main',edgeIds:[]}];
+ const unstarted=await mount({graph:beforeStart,initialView:{selectedScreenId:'home'}});
+ try{
+  const summaries=[...unstarted.card()!.querySelectorAll('summary')].map(node=>node.textContent);
+  assert.equal(summaries.includes('Copy existing steps'),false);
+  assert.ok(summaries.includes('Use existing actions/checks'));
+ }finally{await unstarted.close();}
+});
+
+test('a primary click on empty canvas closes Node details and a longer drag does not',async()=>{
+ const page=await mount();
+ const gesture=async(target:Element,x:number,y:number,x2=x,y2=y,button=0)=>act(async()=>{
+  const event=(type:string,clientX:number,clientY:number)=>target.dispatchEvent(new page.window.PointerEvent(type,{bubbles:true,cancelable:true,clientX,clientY,button,pointerId:1}));
+  event('pointerdown',x,y);event('pointerup',x2,y2);
+ });
+ try{
+  const surface=page.document.querySelector<HTMLElement>('.canvas-surface')!;
+  await gesture(surface,40,40);
+  absent(page.card());
+  absent(page.document.querySelector('.selected-screen'));
+  await page.select('Profile');
+  assert.ok(page.card());
+  await gesture(surface,40,40);
+  absent(page.card(),'A click on empty canvas closes the inspector');
+  absent(page.document.querySelector('.selected-screen'));
+  same(page.document.activeElement,page.node('profile'),'Focus returns to the screen, not the document body');
+  await page.select('Profile');
+  await gesture(surface,40,40,45,40);
+  assert.ok(page.card(),'Moving more than 4px does not close');
+  assert.ok(page.node('profile').classList.contains('selected-screen'));
+  await gesture(surface,40,40,44,40);
+  absent(page.card(),'A release within 4px still closes');
+  await page.select('Settings');
+  const home=page.document.querySelector<HTMLElement>('[aria-label="Select screen Home"]')!;
+  await act(async()=>{home.dispatchEvent(new page.window.PointerEvent('pointerdown',{bubbles:true,cancelable:true,clientX:8,clientY:8,button:0,pointerId:1}));home.dispatchEvent(new page.window.PointerEvent('pointerup',{bubbles:true,cancelable:true,clientX:8,clientY:8,button:0,pointerId:1}));home.click();});
+  assert.equal(page.card()!.querySelector('h3')!.textContent,'Home','A screen click selects instead of closing');
+  assert.ok(page.node('home').classList.contains('selected-screen'));
+  const edge=page.document.querySelector('.canvas-lines path')!;
+  await gesture(edge,80,80);
+  absent(page.card(),'A click on the edge SVG closes the inspector');
+  same(page.document.activeElement,page.node('home'));
+  await page.select('Profile');
+  await gesture(surface,20,20,20,20,2);
+  assert.ok(page.card(),'A secondary button does not close');
+  await act(async()=>surface.dispatchEvent(new page.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));
+  assert.ok(page.document.querySelector('[role=menu]'));
+  await gesture(surface,30,30);
+  absent(page.document.querySelector('[role=menu]'));
+  assert.ok(page.card(),'Dismissing the canvas menu does not close the inspector');
+  assert.ok(page.node('profile').classList.contains('selected-screen'));
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Close Profile inspector"]')!);
+  absent(page.card());
+  absent(page.document.querySelector('.selected-screen'));
+  await page.select('Profile');
+  await page.press(page.card()!,'Escape');
+  absent(page.card(),'Esc still closes');
+  same(page.document.activeElement,page.node('profile'));
+ }finally{await page.close();}
+});
+
 test('a graph edit while temporarily disabled permanently invalidates deletion Undo',async()=>{
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
