@@ -734,7 +734,7 @@ test("inspector styles keep 300px width, 44px targets, 12px text and the #0a63d1
       `${selector} is raised to 12px`,
     );
   assert.match(minimum.body, /font-size:12px/);
-  assert.match(css, /\.transition-label\{font:12px\/1\.5 system-ui;/);
+  assert.match(css, /\.transition-label\{font:11px\/1\.35 system-ui;/);
 });
 
 test('visit menu filters groups, adds with arrows/Enter and restores focus on Escape',async()=>{

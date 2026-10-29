@@ -29,7 +29,9 @@ test('screen cards fit a stored capture, offer delete, and keep title plus nonid
  const completed=new JSDOM(renderToStaticMarkup(createElement(CanvasBoard,{graph,onRemoveCapture:()=>{},result}))).window.document;
  assert.equal(completed.querySelector('.node-outcome')?.textContent,'✓ passed');
  const empty=new JSDOM(renderToStaticMarkup(createElement(CanvasBoard,{graph:{...graph,screens:[{...graph.screens[0],referenceScreenshot:undefined}]}}))).window.document;
- assert.match(empty.querySelector('[data-screen-id]')!.textContent!,/No capture yet/);
+ assert.doesNotMatch(empty.querySelector('[data-screen-id]')!.textContent!,/No capture yet/);
+ assert.equal(empty.querySelector('.screen-capture-label'),null);
+ assert.equal(empty.querySelector('.screen-node-steps'),null);
  assert.equal(empty.querySelector('img'),null);
  assert.equal(empty.querySelector('.screen-reference-delete'),null);
 });
