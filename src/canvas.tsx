@@ -20,7 +20,7 @@ const runLockReason='Unavailable while the scenario is running.';
 
 export const emptyCanvas=():CanvasGraph=>({screens:[],edges:[],paths:[]});
 export type DraftOverlay={nodes:{key:string;title:string;x:number;y:number;steps:{text:string;specified:boolean}[]}[];edges:{from:string;to:string;label:string}[];anchors:{key:string;x:number;y:number}[];existing:{screenId:string;key:string;steps:{text:string;specified:boolean}[]}[];settled?:boolean};
-const DRAFT_CHROME='.workspace-manager,.scenario-sequence-bar,.device-toolbar,.canvas-toolbar,.ai-launch,.ai-capsule,.floating-inspector,.ai-versions-sheet,.scenario-details-panel,.workspace-advanced,.report-tools,.launch-tools,.screenshot-tools,.script-editor,.ai-settings-sheet,.canvas-route-bar,.run-error-toast';
+const DRAFT_CHROME='.workspace-manager,.scenario-sequence-bar,.device-toolbar,.canvas-toolbar,.ai-launch,.ai-flow-field,.ai-capsule,.floating-inspector,.ai-versions-sheet,.scenario-details-panel,.workspace-advanced,.report-tools,.launch-tools,.screenshot-tools,.script-editor,.ai-settings-sheet,.canvas-route-bar,.run-error-toast';
 function elementBoxes(viewport:Box,selector:string):Box[]{
  if(typeof document==='undefined')return [];
  const boxes:Box[]=[];
@@ -35,7 +35,7 @@ function elementBoxes(viewport:Box,selector:string):Box[]{
  return boxes;
 }
 function draftObstacles(viewport:Box){
- const reserved=reservedAiChrome(viewport,elementBoxes(viewport,'.ai-launch,.ai-capsule'));
+ const reserved=reservedAiChrome(viewport,elementBoxes(viewport,'.ai-launch,.ai-flow-field,.ai-capsule'));
  return {obstacles:[...elementBoxes(viewport,DRAFT_CHROME),reserved],reserved};
 }
 function readViewport(node:HTMLElement|null){
@@ -305,7 +305,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   const bounds=visibleBounds(rectOf(viewportRef.current),{width:window.innerWidth,height:window.innerHeight});
   if(viewportRef.current.closest('.workbench')){const bottom=Math.min(bounds.top+bounds.height,window.innerHeight-88);bounds.top=Math.max(bounds.top,156);bounds.height=Math.max(0,bottom-bounds.top);}
   const rects=(elements:Element[])=>elements.map(rectOf).filter(rect=>rect.width>0&&rect.height>0);
-  const controls=rects(Array.from(document.querySelectorAll('.workbench .device-toolbar[open],.workbench .scenario-details-panel,.workbench .workspace-advanced[open],.workbench .report-tools[open],.workbench .workspace-management-surface,.workbench .canvas-inspectors,.workbench .draft-banner,.workbench .canvas-editor>.notice,.workbench .go-to-issue,.workbench>main>.notice,.workbench .scenario-panel>.notice,.workbench .run-error-toast')));
+  const controls=rects(Array.from(document.querySelectorAll('.workbench .device-toolbar[open],.workbench .scenario-details-panel,.workbench .workspace-advanced[open]:not([hidden]),.workbench .ai-flow-field,.workbench .report-tools[open],.workbench .workspace-management-surface,.workbench .canvas-inspectors,.workbench .draft-banner,.workbench .canvas-editor>.notice,.workbench .go-to-issue,.workbench>main>.notice,.workbench .scenario-panel>.notice,.workbench .run-error-toast')));
   for(const control of controls){
    if(control.width<260||control.height<44||control.left+control.width<=bounds.left||control.left>=bounds.left+bounds.width)continue;
    const leftSpace=control.left-bounds.left-12;const rightSpace=bounds.left+bounds.width-control.left-control.width-12;

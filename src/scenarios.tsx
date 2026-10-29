@@ -14,7 +14,7 @@ import type {Automation} from '../server/default-actions.js';
 import {canvasAfterDeletion,restoreDeletionReferences} from './yaml-forms.js';
 import {YamlDraftProvider,YamlEditor} from './yaml-editor.js';
 import { runnerClient,RunnerRequestError } from './runner-client.js';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { Run, Workspace } from '../server/scenarios.js';
 import type {WorkspaceDraft} from '../server/workspace-store.js';
@@ -28,6 +28,7 @@ import { parseAllDocuments } from 'yaml';
 import {approveScriptTrust,pullScriptTrust,readSourceWorkspace} from './run-script-client.js';
 import {batchReasonLabel,batchSummary,batchWithScriptBlocks,blockDisplayMessage,blocksFor,evidenceScrubFailed,moveScript,newScriptId,orderedScenarioSteps,readScriptRun,recordsFor,reservedPlacements,runHitCap,scenariosForSave,scenarioShowsMockVariables,untrustedCount,type BatchLine} from './run-script.js';
 import type {RunScriptModel} from './run-script-ui.js';
+const SHOW_ADVANCED_MODE=false;
 import {RedactedText} from './run-script-ui.js';
 import type {ScriptRow,ScriptSourceWorkspace,ScriptTrust} from '../server/run-script-contract.js';
 
@@ -104,7 +105,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     const back=aiReturn.current;
     aiReturn.current=null;
     if(back?.isConnected)back.focus();
-    else document.querySelector<HTMLElement>('[aria-label="Flow description"]')?.focus();
+    else document.querySelector<HTMLElement>('[aria-label="Describe a flow"]')?.focus();
   },[aiSettingsOpen]);
   const [acknowledged,setAcknowledged]=useState('');
   const [saveFailed,setSaveFailed]=useState(false);
@@ -118,6 +119,12 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const failedDraftKey=useRef('');
   const lastValid=useRef<Workspace|undefined>(undefined);
   const viewRef=useRef<Record<string,unknown>>({format:1});
+  useLayoutEffect(()=>{
+    if(SHOW_ADVANCED_MODE||!advanced.current)return;
+    const panels=viewRef.current.panels;
+    const restored=!!panels&&typeof panels==='object'&&!Array.isArray(panels)&&(panels as {advanced?:unknown}).advanced===true;
+    if(restored&&advanced.current.open)advanced.current.open=false;
+  },[loadRevision,workspaceId]);
   const draftRecord=useRef<WorkspaceDraft|null>(null);
   const latestDraftKey=useRef('');
   const warnOnLeaveRef=useRef(false);
@@ -711,7 +718,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     {!noWorkspace&&<AiFlow control={ai}/>}
     {!noWorkspace&&<>
 
-    <details ref={advanced} className="workspace-advanced" onToggle={event=>{const el=event.currentTarget as HTMLDetailsElement;rememberView({panels:{advanced:el.open}});}}><summary>Advanced mode · legacy authoring and settings</summary><button className="confirm" onClick={()=>{setLegacyCanvas(value=>!value);if(advanced.current)advanced.current.open=false;}}>{legacyCanvas?'Return to contextual canvas':'Show legacy canvas controls'}</button>
+    <details ref={advanced} className="workspace-advanced" hidden={!SHOW_ADVANCED_MODE} onToggle={event=>{const el=event.currentTarget as HTMLDetailsElement;if(!SHOW_ADVANCED_MODE)return;rememberView({panels:{advanced:el.open}});}}><summary>Advanced mode · legacy authoring and settings</summary><button className="confirm" onClick={()=>{setLegacyCanvas(value=>!value);if(advanced.current)advanced.current.open=false;}}>{legacyCanvas?'Return to contextual canvas':'Show legacy canvas controls'}</button>
     <ScenarioLibrary key={'scenarios-'+loadRevision} items={definitions} onChange={setDefinitions} selected={scenarioId} onSelect={selectScenario} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} canvas={canvas} automation={automation} mock={mock} disabled={running||submitting||pickerBusy||launchBusy} onError={setDefinitionError} inputAlert={inputReserved?{message:inputReserved.reason.message,testId:inputReserved.reason.kind==='reserved-input'?'reserved-input-error':'reserved-variable-error'}:undefined}/>
     <MockSetup key={loadRevision} initialPlan={loadedMock} disabled={running||submitting||pickerBusy} onChange={setMockPlan}/>
     <div className="scenario-editor">
