@@ -52,17 +52,19 @@ export function StepActionsMenu({label,title,className,items}:{label:string;titl
       if(target&&(menu?.contains(target)||trigger?.contains(target)))return;
       close(false);
     }
-    function onScroll(event:Event){if(menu?.contains(event.target as Node))return;close(false);}
+    function focusedInside(){const active=document.activeElement;return !!(active&&menu?.contains(active));}
+    function onScroll(event:Event){if(menu?.contains(event.target as Node))return;close(focusedInside());}
+    function onResize(){close(focusedInside());}
     document.addEventListener('pointerdown',outside,true);
     document.addEventListener('scroll',onScroll,true);
-    window.addEventListener('resize',outside);
-    return()=>{document.removeEventListener('pointerdown',outside,true);document.removeEventListener('scroll',onScroll,true);window.removeEventListener('resize',outside);};
+    window.addEventListener('resize',onResize);
+    return()=>{document.removeEventListener('pointerdown',outside,true);document.removeEventListener('scroll',onScroll,true);window.removeEventListener('resize',onResize);};
   },[open]);
   function onMenuKey(event:ReactKeyboardEvent<HTMLDivElement>){
     const buttons=[...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
     const index=buttons.indexOf(document.activeElement as HTMLButtonElement);
     if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close(true);return;}
-    if(event.key==='Tab'){close(false);return;}
+    if(event.key==='Tab'){event.preventDefault();event.stopPropagation();close(true);return;}
     if(!buttons.length||!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
     event.preventDefault();event.stopPropagation();
     const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowDown'?1:buttons.length-1))%buttons.length;

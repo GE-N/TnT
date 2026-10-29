@@ -952,6 +952,58 @@ test('step menu portals above later rows, flips, and Esc returns to the trigger'
  }finally{await page.close();}
 });
 
+test('step menu Tab, scroll, and resize return focus to the trigger',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const trigger=()=>page.card()!.querySelector<HTMLButtonElement>('.visit-step .step-actions-trigger')!;
+  trigger().focus();
+  await page.press(trigger(),'Enter');
+  assert.equal(page.document.activeElement?.getAttribute('role'),'menuitem');
+  assert.equal(await page.press(page.document.activeElement!,'Tab'),true);
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,trigger(),'Tab returns focus to the trigger');
+  assert.notEqual(page.document.activeElement,page.document.body);
+  assert.ok(page.card(),'Tab from the step menu leaves the inspector open');
+  await page.press(trigger(),'Enter');
+  await act(async()=>{
+   const event=new page.window.KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true});
+   page.document.activeElement!.dispatchEvent(event);
+   assert.equal(event.defaultPrevented,true);
+  });
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,trigger(),'Shift+Tab returns focus to the trigger');
+  await page.press(trigger(),'Enter');
+  assert.equal(page.document.activeElement?.getAttribute('role'),'menuitem');
+  await act(async()=>page.card()!.dispatchEvent(new page.window.Event('scroll')));
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,trigger(),'Scroll returns focus to the trigger');
+  assert.ok(page.card(),'Scroll from the step menu leaves the inspector open');
+  await page.press(trigger(),'Enter');
+  const heading=page.heading(1,'Home');
+  heading.focus();
+  await act(async()=>page.card()!.dispatchEvent(new page.window.Event('scroll')));
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,heading,'Scroll leaves focus outside the menu where it is');
+  await page.press(trigger(),'Enter');
+  assert.equal(page.document.activeElement?.getAttribute('role'),'menuitem');
+  await act(async()=>page.window.dispatchEvent(new page.window.Event('resize')));
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,trigger(),'Resize returns focus to the trigger');
+  assert.ok(page.card());
+  await page.press(trigger(),'Enter');
+  heading.focus();
+  await act(async()=>page.window.dispatchEvent(new page.window.Event('resize')));
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,heading,'Resize leaves focus outside the menu where it is');
+  await page.press(trigger(),'Enter');
+  assert.equal(page.document.activeElement?.getAttribute('role'),'menuitem');
+  await act(async()=>page.document.body.dispatchEvent(new page.window.PointerEvent('pointerdown',{bubbles:true,cancelable:true})));
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,page.document.body,'Outside pointerdown does not pull focus back to the trigger');
+  assert.ok(page.card());
+ }finally{await page.close();}
+});
+
 test('step menu moves retain focus, announce position and undo in one change',async()=>{
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
