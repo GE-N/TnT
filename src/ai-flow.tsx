@@ -1,5 +1,5 @@
 import {flushSync} from 'react-dom';
-import {useEffect, useId, useMemo, useRef, useState, type KeyboardEvent} from 'react';
+import {useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent} from 'react';
 import type {CanvasGraph} from '../server/canvas.js';
 import type {Diagnostic, DraftOperation, DraftTarget, FlowDraft} from '../server/authoring/types.js';
 import type {Workspace} from '../server/scenarios.js';
@@ -8,7 +8,7 @@ import type {DraftPositions} from './draft-placement.js';
 import {AI_POLL_MS, ANSWER_CHAR_LIMIT, AiFlowRequestError, createAiFlowClient, PROMPT_CHAR_LIMIT, PROMPT_COUNTER_AT, type AiPublicConfig, type ApplyResponse, type GenerationPhase, type GenerationView, type ProviderId} from './ai-flow-client.js';
 import {subscribeAiConfig} from './ai-settings.js';
 import {VersionsSheet} from './ai-versions-sheet.js';
-import {makeVersion, readAiVersions, relativeVersionTime, sharedScreenIds, UNDO_WINDOW_MS, withPoppedVersion, withPushedVersion, type AiVersionsState, type FlowVersion, type VersionCanvasPreview} from './ai-versions.js';
+import {capsuleMode, makeVersion, readAiVersions, relativeVersionTime, sharedScreenIds, UNDO_WINDOW_MS, withPoppedVersion, withPushedVersion, type AiVersionsState, type FlowVersion, type VersionCanvasPreview} from './ai-versions.js';
 
 export type AiDraftStatus = 'idle' | 'prompting' | 'generating' | 'pending' | 'needsInfo' | 'stale' | 'applying' | 'failed';
 
@@ -765,13 +765,15 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       let nextVersions = versionStateRef.current;
       const pops = offer.pops ?? 1;
       if (flowId) for (let index = 0; index < pops; index++) nextVersions = withPoppedVersion(nextVersions, flowId);
-      detail.view = viewWith(detail.view, {aiVersions: nextVersions});
+      detail.view = viewWith(detail.view, keepComposer ? {aiVersions: nextVersions} : {aiDraft: null, aiVersions: nextVersions});
       versionStateRef.current = nextVersions;
       if (keepComposer) flushSync(() => { callbacks.current.loadWorkspace(detail); });
       else callbacks.current.loadWorkspace(detail);
       setVersionState(nextVersions);
-      callbacks.current.rememberView({aiVersions: nextVersions});
+      callbacks.current.rememberView(keepComposer ? {aiVersions: nextVersions} : {aiDraft: null, aiVersions: nextVersions});
+      if (!keepComposer) { setDraft(emptyDraft()); setOpen(false); }
       setUndoOffer(undefined);
+      setUndoVisible(false);
       setProvenanceId('');
       setVersionsOpen(false);
       setSelectedVersionId(undefined);
@@ -786,6 +788,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   async function generate(prompt = draftRef.current.prompt) {
     const text = prompt.trim();
     if (!text || text.length > PROMPT_CHAR_LIMIT || submitting || opLock.current) return;
+    closeVersions();
     opLock.current = true;
     const refining = !!draftRef.current.refining;
     const previousJobId = refining ? (draftRef.current.previousJobId ?? draftRef.current.jobId) : undefined;
@@ -1422,14 +1425,25 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   }
 
   const versionsRef = useRef<HTMLButtonElement>(null);
+  const undoRef = useRef<HTMLButtonElement>(null);
+  const askRef = useRef<HTMLInputElement>(null);
+  const sheetWasOpen = useRef(control.versionsOpen);
   const copy = draft.error ? errorCopy(draft.error.code, draft.error.message, control.config?.providers?.[control.provider]?.model || draft.model) : draft.notice;
   const composerIssues = (draft.diagnostics ?? []).filter(item => item.blocks.includes('apply') || item.severity === 'error');
-  const reviewing = REVIEW.includes(draft.status) && !refining && !!draft.draft;
-  const history = !reviewing && !open && (control.undoVisible || control.versionCount > 0);
+  const draftOpen = REVIEW.includes(draft.status) && !refining && !!draft.draft;
+  const mode = capsuleMode({draftOpen, undoVisible: control.undoVisible, versionCount: control.versionCount});
+  function focusCapsule() {
+    (versionsRef.current ?? undoRef.current ?? askRef.current ?? fieldRef.current ?? buttonRef.current)?.focus();
+  }
   function closeVersions() {
     control.closeVersions();
-    versionsRef.current?.focus();
+    focusCapsule();
   }
+  useLayoutEffect(() => {
+    const wasOpen = sheetWasOpen.current;
+    sheetWasOpen.current = control.versionsOpen;
+    if (wasOpen && !control.versionsOpen) focusCapsule();
+  }, [control.versionsOpen]);
   return <div className={'ai-flow' + (control.versionsOpen ? ' is-sheet-clear' : '')} data-testid="ai-flow" data-ai-status={draft.status}>
     <p className="sr-only" aria-live="polite" data-testid="ai-live">{live}</p>
     {draft.status === 'stale' && <p className="ai-muted">The workspace changed since this draft was prepared. <button type="button" className="ai-text" data-testid="ai-refresh" onClick={() => void control.refresh()}>Refresh</button></p>}
@@ -1461,7 +1475,7 @@ export function AiFlow({control}: {control: AiDraftControl}) {
         </div>
       </>}
     </section>}
-    {reviewing ? <AiCapsule control={control} versionsRef={versionsRef} /> : history ? <HistoryCapsule control={control} versionsRef={versionsRef} /> : <button type="button" ref={buttonRef} className={'ai-launch' + (open ? ' is-open' : '')} data-testid="ai-flow-button" aria-label="Describe a flow" title="Describe a flow" aria-expanded={open} aria-busy={busy || undefined} onClick={() => open ? (generating ? undefined : control.closePanel()) : control.openPanel()}>
+    {mode === 'draft' ? <AiCapsule control={control} askRef={askRef} /> : mode !== 'idle' && !open ? <HistoryCapsule control={control} mode={mode} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : <button type="button" ref={buttonRef} className={'ai-launch' + (open ? ' is-open' : '')} data-testid="ai-flow-button" aria-label="Describe a flow" title="Describe a flow" aria-expanded={open} aria-busy={busy || undefined} onClick={() => open ? (generating ? undefined : control.closePanel()) : control.openPanel()}>
       ✦ Describe a flow
     </button>}
     {control.versionsOpen && !!control.sheetVersions.length && <VersionsSheet versions={control.sheetVersions} nowId={control.nowVersionId} selectedId={control.selectedVersionId} onSelect={control.selectVersion} onClose={closeVersions} onKeepCurrent={control.keepCurrent} onRestore={() => { const id = control.selectedVersionId; if (id) void control.restore(id); }} restoreDisabled={!!control.restoreReason} restoreNote={control.restoreReason} restoreError={control.restoreError} />}
@@ -1473,7 +1487,7 @@ function VersionsControl({control, buttonRef}: {control: AiDraftControl; buttonR
   return <button type="button" ref={buttonRef} className="ai-versions-toggle" data-testid="ai-versions" aria-expanded={control.versionsOpen} aria-controls="ai-versions-sheet" onClick={() => control.versionsOpen ? control.closeVersions() : control.openVersions()}>Versions</button>;
 }
 
-function HistoryCapsule({control, versionsRef}: {control: AiDraftControl; versionsRef: {current: HTMLButtonElement | null}}) {
+function HistoryCapsule({control, mode, versionsRef, undoRef, askRef}: {control: AiDraftControl; mode: 'undo' | 'versions'; versionsRef: {current: HTMLButtonElement | null}; undoRef: {current: HTMLButtonElement | null}; askRef: {current: HTMLInputElement | null}}) {
   const [text, setText] = useState('');
   function submit() {
     const next = text.trim();
@@ -1485,15 +1499,15 @@ function HistoryCapsule({control, versionsRef}: {control: AiDraftControl; versio
     <form className="ai-capsule" data-testid="ai-capsule" onSubmit={event => { event.preventDefault(); submit(); }}>
       <div className="ai-capsule-row">
         <Sparkles />
-        <input className="ai-capsule-input" aria-label="Ask for changes" placeholder="Ask for changes" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
-        {control.undoVisible && <button type="button" className="ai-capsule-undo" data-testid="ai-undo" onClick={() => void control.undoApply()}>↶ Undo</button>}
-        <VersionsControl control={control} buttonRef={versionsRef} />
+        <input ref={askRef} className="ai-capsule-input" aria-label="Ask for changes" placeholder="Ask for changes" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
+        {mode === 'undo' && <button type="button" ref={undoRef} className="ai-capsule-undo" data-testid="ai-undo" onClick={() => void control.undoApply()}>↶ Undo</button>}
+        {mode === 'versions' && <VersionsControl control={control} buttonRef={versionsRef} />}
       </div>
     </form>
   </div>;
 }
 
-function AiCapsule({control, versionsRef}: {control: AiDraftControl; versionsRef: {current: HTMLButtonElement | null}}) {
+function AiCapsule({control, askRef}: {control: AiDraftControl; askRef: {current: HTMLInputElement | null}}) {
   const {draft, reason} = control;
   const [text, setText] = useState('');
   const applyRef = useRef<HTMLButtonElement>(null);
@@ -1525,9 +1539,8 @@ function AiCapsule({control, versionsRef}: {control: AiDraftControl; versionsRef
       </div>}
       <div className="ai-capsule-row">
         <Sparkles />
-        <input className="ai-capsule-input" aria-label="Ask for changes" placeholder="Ask for changes" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
+        <input ref={askRef} className="ai-capsule-input" aria-label="Ask for changes" placeholder="Ask for changes" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
         <button type="button" ref={applyRef} className="ai-capsule-apply" data-testid="ai-confirm" aria-disabled={reason ? true : undefined} aria-describedby={reason ? reasonId : undefined} onClick={() => { if (!reason) void control.confirm(); }}>✓ Apply</button>
-        <VersionsControl control={control} buttonRef={versionsRef} />
         <button type="button" className="ai-capsule-dismiss" data-testid="ai-discard" aria-label="Dismiss draft" onClick={() => void control.discard()}>✕</button>
       </div>
     </form>
