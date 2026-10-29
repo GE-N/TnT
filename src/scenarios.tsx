@@ -82,6 +82,9 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const [inputs, setInputs] = useState('');
   const [sourceRepair,setSourceRepair]=useState<{ownerId:string}>();
   const advanced=useRef<HTMLDetailsElement>(null);
+  const [advancedRevealed,setAdvancedRevealed]=useState(false);
+  const revealReturn=useRef<HTMLElement|null>(null);
+  const pendingReveal=useRef<(()=>void)|null>(null);
   const aiSettings=useRef<AiSettingsHandle>(null);
   const aiReturn=useRef<HTMLElement|null>(null);
   const aiReturnPending=useRef(false);
@@ -120,10 +123,17 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const lastValid=useRef<Workspace|undefined>(undefined);
   const viewRef=useRef<Record<string,unknown>>({format:1});
   useLayoutEffect(()=>{
+    if(!advancedRevealed||!pendingReveal.current||!advanced.current)return;
+    const apply=pendingReveal.current;
+    pendingReveal.current=null;
+    advanced.current.open=true;
+    apply();
+  },[advancedRevealed]);
+  useLayoutEffect(()=>{
     if(SHOW_ADVANCED_MODE||!advanced.current)return;
     const panels=viewRef.current.panels;
     const restored=!!panels&&typeof panels==='object'&&!Array.isArray(panels)&&(panels as {advanced?:unknown}).advanced===true;
-    if(restored&&advanced.current.open)advanced.current.open=false;
+    if((restored||!advancedRevealed)&&advanced.current.open)advanced.current.open=false;
   },[loadRevision,workspaceId]);
   const draftRecord=useRef<WorkspaceDraft|null>(null);
   const latestDraftKey=useRef('');
@@ -250,9 +260,11 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const api = runnerClient(token);
   useEffect(()=>{
     if(!sourceRepair)return;
-    if(advanced.current)advanced.current.open=true;
-    const target=sourceRepair.ownerId==='flows'||sourceRepair.ownerId.endsWith('.yaml')?document.getElementById('reusable-flows'):sourceRepair.ownerId==='automation'?advanced.current?.querySelector<HTMLElement>('.default-actions input,.default-actions select'):advanced.current?.querySelector<HTMLElement>('[aria-label="YAML form and code editor"] button');
-    target?.scrollIntoView?.({block:'nearest'});target?.focus();
+    const ownerId=sourceRepair.ownerId;
+    revealAdvanced(()=>{
+      const target=ownerId==='flows'||ownerId.endsWith('.yaml')?document.getElementById('reusable-flows'):ownerId==='automation'?advanced.current?.querySelector<HTMLElement>('.default-actions input,.default-actions select'):advanced.current?.querySelector<HTMLElement>('[aria-label="YAML form and code editor"] button');
+      target?.scrollIntoView?.({block:'nearest'});target?.focus();
+    });
   },[sourceRepair]);
   useEffect(()=>{
     if(run)setReports(current=>current.some(item=>item.id===run.id)?current.map(item=>item.id===run.id?run:item):[...current,run]);
@@ -396,7 +408,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     setDeletedScenario(undefined);setBatch(undefined);setWorkspaceId(workspace.id);setName(workspace.name);setYaml(workspace.yaml);setFlows(JSON.stringify(workspace.flows??{},null,2));
     setAutomation(workspace.automation);setAutomationError('');setPreview(undefined);setCanvas(workspace.canvas);setLoadedMock(workspace.mock);setMock(workspace.mock);setMockError('');setLoadRevision(value=>value+1);
     artifactSequence.current++;setReports([]);setRun(undefined);setArtifact(undefined);setInputs('');setExpectedPage('');setDrafts([]);fieldsRef.current.clear();
-    setAcknowledged(contentKey(workspace));setSourceRepair(undefined);
+    setAcknowledged(contentKey(workspace));setSourceRepair(undefined);setAdvancedRevealed(false);pendingReveal.current=null;revealReturn.current=null;
     setDraftError(workspace.draftError??'');setDraftSavedAt(workspace.draft?.savedAt??'');setDraftBase(workspace.draft?.baseRevision??0);setDraftRevisionShown(workspace.draft?.draftRevision??0);
     setDismissedDraft(typeof view.dismissedDraftRevision==='number'?view.dismissedDraftRevision:0);setSavedRevision(workspace.metadata?.revision??0);
     setRecoveredFields({});setAcknowledgedDraftKey('');setConfirmCorrupt(false);draftRecord.current=workspace.draft??null;
@@ -600,11 +612,27 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     await api('/api/workspaces/'+persistence.current.id+'/draft/discard',{expectedDraftRevision:0});
     setDraftError('');setConfirmCorrupt(false);setDraftRevisionShown(0);setDraftSavedAt('');draftRecord.current=null;persistence.current={...persistence.current,draftRevision:0};
   }
-  function goToFirstIssue(){
-    const details=advanced.current;if(details)details.open=true;
-    const yamlField=document.getElementById('scenario-yaml') as HTMLTextAreaElement|null;
-    const target=invalidSource?yamlField:document.querySelector<HTMLElement>('.yaml-value input, #reusable-flows, #scenario-public-inputs, .default-actions input, .default-actions select, #scenario-yaml');
-    target?.focus();
+  function focusOmitted(){
+    const workspace=lastValid.current;
+    const pending=workspace?missingValues({...workspace,scenarios:definitions,automation}):[];
+    const omitted=workspace?.omittedValues?.find(item=>pending.some(line=>line.includes(item.name)&&line.includes(item.owner)));
+    const field=omitted?.owner.startsWith('scenario-setup:')?document.getElementById('scenario-setup-inputs'):omitted?.owner.startsWith('scenario:')?document.getElementById('scenario-public-inputs'):advanced.current?.querySelector<HTMLElement>('.default-actions textarea')??document.getElementById('scenario-public-inputs');
+    let node=field?.parentElement??null;
+    while(node){if(node.tagName==='DETAILS'&&!(node as HTMLDetailsElement).open)(node as HTMLDetailsElement).open=true;node=node.parentElement;}
+    field?.focus();
+  }
+  function revealAdvanced(apply:()=>void,returnTo?:EventTarget|null){
+    const candidate=returnTo instanceof HTMLElement?returnTo:document.activeElement;
+    if(candidate instanceof HTMLElement&&candidate.isConnected&&candidate!==document.body&&!advanced.current?.contains(candidate))revealReturn.current=candidate;
+    if(advancedRevealed&&advanced.current){pendingReveal.current=null;advanced.current.open=true;apply();return;}
+    pendingReveal.current=apply;setAdvancedRevealed(true);
+  }
+  function goToFirstIssue(event:{currentTarget:EventTarget|null}){
+    revealAdvanced(()=>{
+      const yamlField=document.getElementById('scenario-yaml') as HTMLTextAreaElement|null;
+      const target=invalidSource?yamlField:document.querySelector<HTMLElement>('.yaml-value input, #reusable-flows, #scenario-public-inputs, .default-actions input, .default-actions select, #scenario-yaml');
+      target?.focus();
+    },event.currentTarget);
   }
 
   async function submit(execute: boolean,targetId=scenarioId) {
@@ -698,7 +726,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const recoveryNote=showRecovery&&recoveryOpen&&<div ref={recoveryNoteRef} className="recovery-note" role="dialog" aria-label="Recovered draft" data-recovery-for="workspace" style={recoveryBox?{top:Math.max(8,Math.min(recoveryBox.bottom+6,window.innerHeight-8)),left:Math.max(8,Math.min(recoveryBox.left,window.innerWidth-288))}:undefined}><p>Unsaved changes from <time dateTime={draftSavedAt}>{draftSavedAt?new Date(draftSavedAt).toLocaleString():'earlier'}</time> were recovered.{staleDraft?' Based on an older version.':''}</p><div className="recovery-note-actions">{staleDraft?<button type="button" className="primary" onClick={()=>void copyWithDraft()}>Restore as a copy</button>:<button type="button" className="primary" onClick={()=>draftRecord.current&&restoreDraft(draftRecord.current)}>Restore draft</button>}<button type="button" onClick={()=>void keepSaved()}>Keep saved version</button></div></div>;
   return <WorkspaceDrafts.Provider value={reportDraft}><RecoveredFields.Provider value={recoveredFields}><YamlDraftProvider resetToken={loadRevision} yaml={yaml}><section className="panel scenario-panel" aria-labelledby="scenario-heading">
     <div className="panel-heading"><span className="section-number">03</span><div><h2 id="scenario-heading">Scenario workspace</h2><p>Design scenarios on the shared canvas. Connect a simulator when ready to run.</p></div></div>
-    {!!lastValid.current?.omittedValues?.length&&missingValues({...lastValid.current,scenarios:definitions,automation}).length>0&&<aside className="draft-banner" role="status"><p>Imported values need repair before execution: {missingValues({...lastValid.current,scenarios:definitions,automation}).join(' ')}</p><button onClick={()=>{if(advanced.current)advanced.current.open=true;}}>Review required values</button></aside>}
+    {!!lastValid.current?.omittedValues?.length&&missingValues({...lastValid.current,scenarios:definitions,automation}).length>0&&<aside className="draft-banner" role="status"><p>Imported values need repair before execution: {missingValues({...lastValid.current,scenarios:definitions,automation}).join(' ')}</p><button onClick={event=>revealAdvanced(focusOmitted,event.currentTarget)}>Review required values</button></aside>}
     <div className="canvas-workspace"><div className="workspace-canvas"><WorkspaceManager imported={scriptSource?.kind==='import'||scriptTrust.some(item=>item.origin==='imported')} empty={noWorkspace} token={token} id={workspaceId} name={name} status={persistenceStatus} statusNote={pauseNote} dirty={dirty} busy={submitting||pickerBusy} blocked={running||launchBusy||pickerBusy} onAction={workspaceAction} onSave={manualSave} onPrepare={prepareSwitch} onExport={async({includeValues,savedOnly})=>{
       let source=lastValid.current;
       if(!savedOnly&&!running&&!launchBusy){source=await manualSave();}
@@ -718,7 +746,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     {!noWorkspace&&<AiFlow control={ai}/>}
     {!noWorkspace&&<>
 
-    <details ref={advanced} className="workspace-advanced" hidden={!SHOW_ADVANCED_MODE} onToggle={event=>{const el=event.currentTarget as HTMLDetailsElement;if(!SHOW_ADVANCED_MODE)return;rememberView({panels:{advanced:el.open}});}}><summary>Advanced mode · legacy authoring and settings</summary><button className="confirm" onClick={()=>{setLegacyCanvas(value=>!value);if(advanced.current)advanced.current.open=false;}}>{legacyCanvas?'Return to contextual canvas':'Show legacy canvas controls'}</button>
+    <details ref={advanced} className="workspace-advanced" hidden={!SHOW_ADVANCED_MODE&&!advancedRevealed} onToggle={event=>{const el=event.currentTarget as HTMLDetailsElement;if(SHOW_ADVANCED_MODE){rememberView({panels:{advanced:el.open}});return;}if(el.open||!advancedRevealed)return;const back=revealReturn.current;revealReturn.current=null;pendingReveal.current=null;if(back?.isConnected&&!el.contains(back))back.focus();else document.querySelector<HTMLElement>('[aria-label="Describe a flow"]')?.focus();setAdvancedRevealed(false);}}><summary>Advanced mode · legacy authoring and settings</summary><button className="confirm" onClick={()=>{setLegacyCanvas(value=>!value);if(advanced.current)advanced.current.open=false;}}>{legacyCanvas?'Return to contextual canvas':'Show legacy canvas controls'}</button>
     <ScenarioLibrary key={'scenarios-'+loadRevision} items={definitions} onChange={setDefinitions} selected={scenarioId} onSelect={selectScenario} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} canvas={canvas} automation={automation} mock={mock} disabled={running||submitting||pickerBusy||launchBusy} onError={setDefinitionError} inputAlert={inputReserved?{message:inputReserved.reason.message,testId:inputReserved.reason.kind==='reserved-input'?'reserved-input-error':'reserved-variable-error'}:undefined}/>
     <MockSetup key={loadRevision} initialPlan={loadedMock} disabled={running||submitting||pickerBusy} onChange={setMockPlan}/>
     <div className="scenario-editor">
