@@ -623,10 +623,12 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .step-command{color:var(--muted)}
 .visit-inline-fields{display:grid;gap:6px;padding:8px 0}
 .visit-inline-fields input,.visit-inline-fields select{width:100%;box-sizing:border-box}
-.visit-step-actions{position:absolute;right:0;top:2px;background:var(--surface);z-index:2}
-.visit-step-actions[open]{box-shadow:0 4px 12px #25304129;max-width:180px}
-.visit-step-actions summary{display:grid;place-items:center;min-width:44px;min-height:44px}
-.visit-step-actions button{display:block;width:100%;min-height:44px}
+.visit-step-actions{position:absolute;right:0;top:2px;background:transparent}
+.visit-step-actions .step-actions-trigger{display:grid;place-items:center;box-sizing:border-box;width:44px;min-width:44px;min-height:44px;margin:0;padding:0;border:0;background:transparent;color:var(--text)}
+.visit-step:hover .visit-step-summary,.script-row:hover .script-row-summary{background:var(--subtle)}
+.visit-step:hover .step-actions-trigger,.script-row:hover .step-actions-trigger,.visit-step-actions .step-actions-trigger:hover:not(:disabled),.visit-step-actions .step-actions-trigger[aria-expanded="true"]{background:var(--subtle)}
+.step-actions-menu{position:fixed;z-index:70;display:grid;gap:4px;width:max-content;min-width:160px;max-width:220px;padding:4px;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px #25304129}
+.step-actions-menu [role=menuitem]{display:flex;align-items:center;gap:6px;width:100%;min-height:44px;text-align:left}
 .floating-inspector .add-visit-step{width:100%;min-height:48px;border:1px dashed var(--inspector-highlight);color:var(--inspector-primary);background:transparent;margin-top:8px}
 .add-step-dialog{position:fixed;inset:20% auto auto 50%;transform:translateX(-50%);width:300px;max-height:70vh;overflow:auto;z-index:60;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 12px 32px #25304140;font-size:13px}
 .add-step-dialog input,.add-step-dialog [role=option]{width:100%;box-sizing:border-box}
@@ -683,8 +685,8 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .visit-step[data-drop-position="before"]::after{top:-2px}
 .visit-step[data-drop-position="after"]::after{bottom:-2px}
 
-.floating-inspector .visit-step-actions .visit-step-delete{color:#5f6670;background:transparent;border-color:transparent}
-.floating-inspector .visit-step-actions .visit-step-delete:hover,.floating-inspector .visit-step-actions .visit-step-delete:focus{color:#b3261e;background:#fdecea}
+.step-actions-menu .visit-step-delete{color:#5f6670;background:transparent;border-color:transparent}
+.step-actions-menu .visit-step-delete:hover,.step-actions-menu .visit-step-delete:focus{color:#b3261e;background:#fdecea}
 .step-undo-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:80;display:flex;align-items:center;gap:6px;padding:8px 16px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 20px #25304129}
 .step-undo-toast button{min-height:44px}
 /* #49 desktop canvas: controls float in reserved top/bottom bands. */

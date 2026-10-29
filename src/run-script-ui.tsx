@@ -1,6 +1,7 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import type {ScriptAnchor,ScriptBlockReason,ScriptRow,ScriptSourceWorkspace,ScriptStepResult,ScriptTrust} from '../server/run-script-contract.js';
 import {REDACTED} from '../server/run-script-contract.js';
+import {StepActionsMenu} from './step-actions-menu.js';
 import {RunStatusBadge} from './visit-steps.js';
 import {SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,TRUST_UNKNOWN_TEXT,scriptFirstLine,scriptSourcePieces,type ScriptRecord,type ScriptRowView} from './run-script.js';
 import {placeScriptEditor,scriptEditorBottomReserve,scriptEditorWidth,inspectorWidth,type ScriptEditorPlace} from './inspector-placement.js';
@@ -31,11 +32,7 @@ export function ScriptStepRow({row,view,reveal,open,runLocked,stepNumber,afterLa
     {!view.trustUnknown&&view.trust.origin==='imported'&&!view.trust.trusted&&<p className="script-untrusted" data-testid="script-not-trusted">⚠ Not trusted on this Mac</p>}
     {failed&&<p className="script-inline-error" data-testid="script-error-reason" role="alert">✕ Script failed: <RedactedText text={view.message||'Script failed'}/> · scenario stopped</p>}
     {showBlock&&view.block&&view.block.kind!=='untrusted'&&<p className="script-inline-error" role="alert">✕ {view.blockText??view.block.message}</p>}
-    {!runLocked&&<details className="visit-step-actions script-row-actions"><summary aria-label={'Script actions '+row.label}>⋯</summary>
-      <button type="button" disabled={!canMoveUp} aria-label={'Move '+row.label+' up'} onClick={event=>{event.currentTarget.closest('details')!.open=false;onMove(-1);}}>↑ Move up</button>
-      <button type="button" disabled={!canMoveDown} aria-label={'Move '+row.label+' down'} onClick={event=>{event.currentTarget.closest('details')!.open=false;onMove(1);}}>↓ Move down</button>
-      <button type="button" className="visit-step-delete" aria-label={'Delete '+row.label} onClick={onDelete}>Delete</button>
-    </details>}
+    {!runLocked&&<StepActionsMenu className="script-row-actions" label={'Script actions '+row.label} items={[{label:'↑ Move up',ariaLabel:'Move '+row.label+' up',disabled:!canMoveUp,onSelect:()=>onMove(-1)},{label:'↓ Move down',ariaLabel:'Move '+row.label+' down',disabled:!canMoveDown,onSelect:()=>onMove(1)},{label:'Delete',ariaLabel:'Delete '+row.label,className:'visit-step-delete',onSelect:onDelete}]}/>}
   </div>;
 }
 

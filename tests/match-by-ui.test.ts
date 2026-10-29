@@ -8,6 +8,7 @@ import {JSDOM} from 'jsdom';
 import type {CanvasGraph,CanvasTest} from '../server/canvas.js';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import {inspectScreen,workspaceCommand} from './workspace-ui-helpers.js';
+import {openStepMenuItem} from './step-menu.js';
 
 const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';
 const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
@@ -622,7 +623,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       await act(async()=>card.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
       await typeInto(page,card.querySelector<HTMLInputElement>('.yaml-value input')!,'Canvas pending');
       await waitForField(page,'yaml-form:1:text','Canvas pending');
-      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Delete action 1"]')!.click());
+      await act(async()=>{const item=openStepMenuItem(page.document,'Delete action 1');assert.ok(item);item.click();});
       const saved=await page.published();
       assert.doesNotMatch(saved.yaml,/Canvas pending/);
       assert.equal((await page.service.workspaceDetail(page.workspace.id)).draft?.fields['yaml-form:1:text'],undefined);

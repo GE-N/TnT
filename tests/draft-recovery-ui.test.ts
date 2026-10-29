@@ -657,7 +657,8 @@ test('new blank visit steps never reach autosave payloads, and the first valid c
   const input=page.document.activeElement as HTMLInputElement;const row=input.closest('.visit-step')!;const id=row.getAttribute('data-operation-id')!;assert.ok(id);
   await act(async()=>{input.dispatchEvent(new page.dom.window.FocusEvent('focusout',{bubbles:true,relatedTarget:page.document.querySelector('h3')}));page.document.querySelector<HTMLElement>('h3')!.focus();});
   assert.equal(input.getAttribute('aria-invalid'),'true');assert.equal(row.querySelector('.visit-step-summary')!.getAttribute('aria-expanded'),'true');
-  await act(async()=>{row.querySelector('summary')!.click();page.document.querySelector('.floating-inspector')!.dispatchEvent(new page.dom.window.Event('scroll'));});
+  await act(async()=>row.querySelector<HTMLButtonElement>('.step-actions-trigger')!.click());
+  await act(async()=>page.document.querySelector('.floating-inspector')!.dispatchEvent(new page.dom.window.Event('scroll')));
   // An unrelated pending field makes actual draft POSTs, so this is not a vacuous no-request assertion.
   await page.fill('Expected page text for reusable assertion','Pending unrelated assertion');
   await act(async()=>{context.mock.timers.tick(801);await page.settle();});

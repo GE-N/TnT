@@ -6,12 +6,20 @@ import { act, createElement, useState, type ChangeEvent } from "react";
 import { refreshChecks, writeChecks } from "../shared/canvas-authoring.js";
 import type { CanvasGraph, CanvasTest } from "../server/canvas.js";
 import type { Rect } from "../src/inspector-placement.js";
+import { openStepMenuItem } from "./step-menu.js";
 
 // Compare DOM nodes by identity: assert's diff of a jsdom node exhausts the heap.
 const same = (actual: unknown, expected: unknown, message = "same node") =>
   assert.ok(actual === expected, message);
 const absent = (actual: unknown, message = "expected no node") =>
   assert.ok(actual == null, message);
+async function clickStep(document: Document, scope: ParentNode, label: string) {
+  await act(async () => {
+    const button = openStepMenuItem(document, label, scope);
+    assert.ok(button, label);
+    button.click();
+  });
+}
 
 const reference = {
   kind: "step" as const,
@@ -846,7 +854,7 @@ test('an external Undo refreshes an open draft without moving focus or writing t
 test('summaries retain command quotes and destination, and last-step Move down is disabled',async()=>{
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
-  assert.equal(page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary')!.textContent,'2 tapOn "Avatar" → Profile');assert.equal(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Move action 1 down"]')!.disabled,true);
+  assert.equal(page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary')!.textContent,'2 tapOn "Avatar" → Profile');await act(async()=>{const item=openStepMenuItem(page.document,'Move action 1 down',page.card()!);assert.equal(item!.disabled,true);});
   const before=page.saved();const graph={...before.graph,edges:[{...before.graph.edges[0],id:'foreign',from:'settings',to:'home'},...before.graph.edges]};await page.restore({graph,yaml:before.yaml});assert.equal(page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary')!.textContent,'2 tapOn "Avatar" → Profile','Destination lookup must be scoped to this screen');
  }finally{await page.close();}
 });
@@ -886,25 +894,77 @@ test('first valid new step and destination commit once and Undo restores exact g
 test('visit review styles retain minimum hit targets and accessible validation colours',()=>{
  const css=readFileSync(new URL('../src/style.css',import.meta.url),'utf8');const rules=[...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([,selector,body])=>({selector:selector.trim(),body}));
  const rule=(selector:string)=>rules.find(item=>item.selector===selector)!.body;
- for(const selector of ['.floating-inspector .visit-step-summary','.visit-step-actions summary','.visit-step-actions button','.navigation-hint button,.visit-yaml-link'])assert.match(rule(selector),/min-height:44px/);
- assert.match(rule('.visit-step-actions summary'),/min-width:44px/);assert.match(rule('.navigation-hint button,.visit-yaml-link'),/font-size:12px/);
+ for(const selector of ['.floating-inspector .visit-step-summary','.visit-step-actions .step-actions-trigger','.step-actions-menu [role=menuitem]','.navigation-hint button,.visit-yaml-link'])assert.match(rule(selector),/min-height:44px/);
+ assert.match(rule('.visit-step-actions .step-actions-trigger'),/min-width:44px/);assert.match(rule('.visit-step-actions .step-actions-trigger'),/background:transparent/);
+ const triggerHover=rule('.visit-step:hover .step-actions-trigger,.script-row:hover .step-actions-trigger,.visit-step-actions .step-actions-trigger:hover:not(:disabled),.visit-step-actions .step-actions-trigger[aria-expanded="true"]');
+ assert.match(triggerHover,/background:var\(--subtle\)/);assert.doesNotMatch(triggerHover,/--surface/);
+ assert.match(rule('.step-actions-menu'),/position:fixed/);assert.match(rule('.step-actions-menu'),/z-index:70/);
+ assert.match(rule('.navigation-hint button,.visit-yaml-link'),/font-size:12px/);
  assert.match(rule('.visit-selector-error'),/color:#b3261e/);assert.match(rule('.visit-selector-error'),/font-size:12px/);assert.match(rule('.visit-inline-fields input[aria-invalid=true]'),/border:2px solid #b3261e/);
  assert.match(css,/--warning: #8a4b00/);assert.match(css,/--warning-surface: #fff4e5/);assert.match(rule('.navigation-hint'),/color:var\(--warning\)/);assert.match(rule('.navigation-hint'),/background:var\(--warning-surface\)/);
  assert.match(rule('.floating-inspector .selected-visit>.visit-section-heading'),/width:calc\(100% \+ 16px\)/);
+});
+
+test('step menu portals above later rows, flips, and Esc returns to the trigger',async()=>{
+ const graph=structuredClone(canvas);graph.screens[0].tests.push(check('home-extra','Extra'));graph.paths[0].visits![0]={...graph.paths[0].visits![0],operationIds:['home-ready','avatar','home-extra']};
+ const rects=new Map([['step-trigger',{left:400,top:700,width:44,height:44}]]);
+ const page=await mount({graph,rects,initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const rows=[...page.card()!.querySelectorAll<HTMLElement>('.visit-step')];
+  assert.equal(rows.length,3);
+  const trigger=rows[0].querySelector<HTMLButtonElement>('.step-actions-trigger')!;
+  trigger.dataset.layout='step-trigger';
+  Object.defineProperty(page.window.HTMLElement.prototype,'offsetHeight',{configurable:true,get(){return this.classList.contains('step-actions-menu')?200:0;}});
+  Object.defineProperty(page.window.HTMLElement.prototype,'offsetWidth',{configurable:true,get(){return this.classList.contains('step-actions-menu')?180:0;}});
+  trigger.focus();
+  await page.press(trigger,'Enter');
+  const menu=page.document.querySelector<HTMLElement>('.step-actions-menu')!;
+  assert.equal(menu.getAttribute('role'),'menu');
+  assert.equal(menu.parentElement,page.document.body);
+  assert.equal(page.card()!.contains(menu),false);
+  for(const row of rows)assert.equal(row.contains(menu),false);
+  assert.equal(menu.style.top,'500px');assert.equal(menu.style.left,'264px');
+  const items=[...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
+  same(page.document.activeElement,items[0]);
+  await page.press(page.document.activeElement!,'ArrowDown');
+  same(page.document.activeElement,items[1]);
+  await page.press(page.document.activeElement!,'Home');
+  same(page.document.activeElement,items[0]);
+  await page.press(page.document.activeElement!,'End');
+  same(page.document.activeElement,items.at(-1)!);
+  await page.click(rows[2].querySelector<HTMLButtonElement>('.step-actions-trigger')!);
+  assert.equal(page.document.querySelectorAll('.step-actions-menu').length,1);
+  assert.equal(trigger.getAttribute('aria-expanded'),'false');
+  await page.press(page.document.activeElement!,'Escape');
+  same(page.document.activeElement,rows[2].querySelector('.step-actions-trigger'));
+  assert.ok(page.card(),'Esc from the step menu leaves the inspector open');
+  await page.press(rows[2].querySelector('.step-actions-trigger')!,' ');
+  assert.ok(page.document.querySelector('.step-actions-menu'));
+  await page.press(page.document.activeElement!,'Tab');
+  absent(page.document.querySelector('.step-actions-menu'));
+  await page.press(rows[0].querySelector('.step-actions-trigger')!,'Enter');
+  await act(async()=>page.document.body.dispatchEvent(new page.window.PointerEvent('pointerdown',{bubbles:true,cancelable:true})));
+  absent(page.document.querySelector('.step-actions-menu'));
+  await page.press(rows[0].querySelector('.step-actions-trigger')!,'Enter');
+  await act(async()=>page.card()!.dispatchEvent(new page.window.Event('scroll')));
+  absent(page.document.querySelector('.step-actions-menu'),'Inspector scroll closes the menu');
+  assert.ok(page.card());
+ }finally{await page.close();}
 });
 
 test('step menu moves retain focus, announce position and undo in one change',async()=>{
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
   const before=page.saved();const row=()=>page.card()!.querySelector<HTMLElement>('[data-operation-id="home-ready"]')!;
-  const menu=row().querySelector<HTMLElement>('[aria-label="Step actions"]');assert.ok(menu);
-  assert.equal(row().querySelector<HTMLButtonElement>('[aria-label="Move check 1 up"]')!.disabled,true);
-  await page.click(row().querySelector<HTMLButtonElement>('[aria-label="Move check 1 down"]')!);
+  const trigger=()=>row().querySelector<HTMLButtonElement>('.step-actions-trigger')!;
+  assert.equal(trigger().getAttribute('aria-label'),'Step actions');assert.equal(trigger().getAttribute('aria-haspopup'),'menu');
+  await act(async()=>{const item=openStepMenuItem(page.document,'Move check 1 up',row());assert.equal(item!.disabled,true);});
+  await clickStep(page.document,row(),'Move check 1 down');
   assert.deepEqual(page.saved().graph.paths[0].visits![0].operationIds,['avatar','home-ready']);
   same(page.document.activeElement,row().querySelector('.visit-step-summary'));
   assert.match(page.card()!.querySelector('[role=status]')!.textContent!,/Step 1 moved to position 2/);
-  assert.equal(row().querySelector<HTMLButtonElement>('[aria-label="Move check 1 down"]')!.disabled,true);
-  assert.equal(row().querySelector('details')!.open,false);
+  assert.equal(page.document.querySelector('.step-actions-menu'),null);assert.equal(trigger().getAttribute('aria-expanded'),'false');
+  await act(async()=>{const item=openStepMenuItem(page.document,'Move check 1 down',row());assert.equal(item!.disabled,true);});
   await page.click([...page.document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Undo canvas deletion')!);
   assert.deepEqual(page.saved(),before);
  }finally{await page.close();}
@@ -930,13 +990,13 @@ test('delete step offers live Undo toast and restores focus without a dialog',as
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
   const before=page.saved();const row=page.card()!.querySelector<HTMLElement>('[data-operation-id="home-ready"]')!;
-  await page.click(row.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  await clickStep(page.document,row,'Delete check 1');
   absent(page.document.querySelector('[role=alertdialog]'));absent(page.card()!.querySelector('[data-operation-id="home-ready"]'));
   const toast=page.document.querySelector<HTMLElement>('.step-undo-toast[role=status]');assert.ok(toast);assert.match(toast.textContent!,/Step 1 deleted · Undo/);
   const undo=toast.querySelector<HTMLButtonElement>('button')!;assert.equal(undo.disabled,false);
   same(page.document.activeElement,page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary'));
   await page.click(undo);assert.deepEqual(page.saved(),before);same(page.document.activeElement,page.card()!.querySelector('[data-operation-id="home-ready"] .visit-step-summary'));absent(page.document.querySelector('.step-undo-toast'));
-  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete action 1"]')!);
+  await clickStep(page.document,page.card()!,'Delete action 1');
   assert.equal(page.saved().graph.paths[0].edgeIds.length,0,'only outgoing action cuts the route');
   same(page.document.activeElement,page.card()!.querySelector('.add-visit-step'));
   await page.click(page.card()!.querySelector<HTMLButtonElement>('.visit-step-summary')!);
@@ -950,7 +1010,7 @@ test('deletion toast expires and cannot revive when the deleted snapshot returns
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
   context.mock.timers.enable({apis:['setTimeout']});
-  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  await clickStep(page.document,page.card()!,'Delete check 1');
   const deleted=page.saved();assert.ok(page.document.querySelector('.step-undo-toast'));
   await act(async()=>context.mock.timers.tick(8001));absent(page.document.querySelector('.step-undo-toast'));
   await page.restore(deleted);absent(page.document.querySelector('.step-undo-toast'));
@@ -984,7 +1044,7 @@ test('switching to another path invalidates step Undo without moving focus or re
  const graph=structuredClone(canvas);graph.paths.push({id:'other',name:'Other',scenarioId:'other-scenario',screenId:'settings',edgeIds:[],visits:[{id:'other-visit',operationIds:['settings-ready']}]});
  const page=await mount({graph,initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
-  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  await clickStep(page.document,page.card()!,'Delete check 1');
   assert.ok(page.document.querySelector('.step-undo-toast'),'deletion offers Undo in its original path');
   const deleted=page.saved();const control=page.document.querySelector<HTMLSelectElement>('[aria-label="Selected scenario path"]')!;
   async function choose(id:string){await act(async()=>{control.focus();Object.getOwnPropertyDescriptor(page.window.HTMLSelectElement.prototype,'value')!.set!.call(control,id);control.dispatchEvent(new page.window.Event('change',{bubbles:true}));});}
@@ -1038,7 +1098,7 @@ test('temporary disablement hides step Undo without discarding it or restarting 
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
   context.mock.timers.enable({apis:['setTimeout']});const before=page.saved();
-  const remove=()=>page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  const remove=()=>clickStep(page.document,page.card()!,'Delete check 1');
   await remove();await page.disable(true);absent(page.document.querySelector('.step-undo-toast'));
   await act(async()=>context.mock.timers.tick(1000));await page.disable(false);
   const undo=page.document.querySelector<HTMLButtonElement>('.step-undo-toast button');assert.ok(undo,'temporary submit/run state must preserve matching Undo');assert.equal(undo.disabled,false);
@@ -1054,11 +1114,11 @@ test('menu moves stay adjacent in the full visit order including repair steps',a
  const page=await mount({graph:graphWithRepairStep(),initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
   const row=page.card()!.querySelector<HTMLElement>('[data-operation-id="avatar"]')!;
-  await page.click(row.querySelector<HTMLButtonElement>('[aria-label="Move action 1 up"]')!);
+  await clickStep(page.document,row,'Move action 1 up');
   assert.deepEqual(page.saved().graph.paths[0].visits![0].operationIds,['home-ready','avatar','profile-ready']);
   assert.match(row.querySelector('.visit-step-summary')!.textContent!,/^2 /);same(page.document.activeElement,row.querySelector('.visit-step-summary'));
-  assert.equal(row.querySelector<HTMLButtonElement>('[aria-label="Move action 1 down"]')!.disabled,false,'a repair step still occupies the next visit position');
-  await page.click(row.querySelector<HTMLButtonElement>('[aria-label="Move action 1 down"]')!);
+  await act(async()=>{const item=openStepMenuItem(page.document,'Move action 1 down',row);assert.equal(item!.disabled,false,'a repair step still occupies the next visit position');});
+  await clickStep(page.document,row,'Move action 1 down');
   assert.deepEqual(page.saved().graph.paths[0].visits![0].operationIds,['home-ready','profile-ready','avatar']);
  }finally{await page.close();}
 });
@@ -1077,7 +1137,7 @@ test('drag targets use full visit positions across repair steps and one Undo res
 test('delete focus skips repair steps to the next editable step',async()=>{
  const page=await mount({graph:graphWithRepairStep(),initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
-  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  await clickStep(page.document,page.card()!,'Delete check 1');
   same(page.document.activeElement,page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary'),'repair rows must not divert next-step focus to Add step');
  }finally{await page.close();}
 });
@@ -1153,7 +1213,7 @@ test('a primary click on empty canvas closes Node details and a longer drag does
 test('a graph edit while temporarily disabled permanently invalidates deletion Undo',async()=>{
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
-  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);const deleted=page.saved();
+  await clickStep(page.document,page.card()!,'Delete check 1');const deleted=page.saved();
   await page.disable(true);const edited=structuredClone(deleted);edited.graph.screens[0].title='Edited Home';await page.restore(edited);
   await page.restore(deleted);await page.disable(false);absent(page.document.querySelector('.step-undo-toast'),'reverting a later edit must not revive a discarded Undo');
  }finally{await page.close();}
