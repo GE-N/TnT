@@ -54,6 +54,13 @@ export class WorkspacePayloadTooLarge extends Error { constructor(message:string
 const recordLimit=16_000_000;
 const viewLimit=64_000;
 const queues=new Map<string,Promise<unknown>>();
+const knowledgeListeners=new Map<string,Set<(workspaceId:string)=>void>>();
+/** Notifications are synchronous scheduling only; indexing never holds the store queue. */
+export function subscribeWorkspaceChanges(root:string,listener:(workspaceId:string)=>void){
+ const key=resolve(root);const listeners=knowledgeListeners.get(key)??new Set();
+ listeners.add(listener);knowledgeListeners.set(key,listeners);
+ return ()=>{listeners.delete(listener);if(!listeners.size)knowledgeListeners.delete(key);};
+}
 const contentKeys=new Set(['yaml','flows','canvas','scenarios','automation','mock']);
 const fieldKeyPattern=/^(yaml-command|canvas-authoring|checkpoint-draft|setup-parameters|yaml-form:\d+(?::[A-Za-z0-9._:%!~*'()-]{1,80})?|(?:screen-title|scenario-rename|action-parameters|scenario-inputs|scenario-setup|scenario-requirements):[A-Za-z0-9._:%!~*'()-]{1,100})$/;
 const validId=(id:string)=>{if(typeof id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id))throw new Error('Invalid workspace identifier.');return id;};
@@ -147,7 +154,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   await faults?.beforeRead?.();
   return {...content,metadata};
  }
- async function write(value:Workspace){const path=await file(value.id,true);await writeJson(path,{...value,canvasDiagnostics:undefined},recordLimit,'Workspace record exceeds the supported size.');return value;}
+ async function write(value:Workspace){const path=await file(value.id,true);await writeJson(path,{...value,canvasDiagnostics:undefined},recordLimit,'Workspace record exceeds the supported size.');for(const listener of knowledgeListeners.get(queueKey)??[]){try{listener(value.id);}catch{/* A failed indexer cannot reject a committed workspace save. */}}return value;}
  function assertFields(fields:unknown):Record<string,string>{
   if(!fields||typeof fields!=='object'||Array.isArray(fields))throw new Error('Draft fields must be an object of strings.');
   const entries=Object.entries(fields);
@@ -276,6 +283,8 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   readView:(id:string)=>serialize(()=>readView(id)),
   bundle:(id:string)=>serialize(async()=>{const workspace=await read(id);const draftState=await readDraftOnce(id);const view=await readView(id);return {...workspace,draft:draftState.draft,draftError:draftState.draftError,view};}),
   withWorkspace:<T>(id:string,operation:(workspace:Workspace)=>Promise<T>)=>serialize(async()=>operation(await read(id))),
+  /** Sidecars and final publication checks share lifecycle serialization; never create a missing workspace. */
+  withKnowledge:<T>(id:string,operation:(workspace:Workspace,directory:string)=>Promise<T>)=>serialize(async()=>operation(await read(id),await workspaceDirectory(id))),
   importCopy:(content:Workspace,beforePublish?:(next:Workspace)=>Promise<void>,sourceWorkspace?:ScriptSourceWorkspace)=>serialize(async()=>{
    assertClaimTitle(content.name);
    const stamp=now();const id=randomUUID();
