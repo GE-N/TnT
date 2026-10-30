@@ -1,4 +1,4 @@
-import {flushSync} from 'react-dom';
+import {createPortal, flushSync} from 'react-dom';
 import {useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent} from 'react';
 import type {CanvasGraph} from '../server/canvas.js';
 import type {Diagnostic, DraftOperation, DraftTarget, FlowDraft} from '../server/authoring/types.js';
@@ -8,6 +8,7 @@ import type {DraftPositions} from './draft-placement.js';
 import {AI_POLL_MS, ANSWER_CHAR_LIMIT, AiFlowRequestError, createAiFlowClient, PROMPT_CHAR_LIMIT, PROMPT_COUNTER_AT, type AiPublicConfig, type ApplyResponse, type GenerationPhase, type GenerationView, type ProviderId} from './ai-flow-client.js';
 import {subscribeAiConfig} from './ai-settings.js';
 import {VersionsSheet} from './ai-versions-sheet.js';
+import {closePanel as closeSidePanel, openPanel as openSidePanel, useSidePanels} from './side-panels.js';
 import {capsuleMode, makeVersion, readAiVersions, relativeVersionTime, sharedScreenIds, UNDO_WINDOW_MS, withPoppedVersion, withPushedVersion, type AiVersionsState, type FlowVersion, type VersionCanvasPreview} from './ai-versions.js';
 
 export type AiDraftStatus = 'idle' | 'prompting' | 'generating' | 'pending' | 'needsInfo' | 'stale' | 'applying' | 'failed';
@@ -418,7 +419,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const [versionState, setVersionState] = useState<AiVersionsState>({format: 1, flows: {}});
   const versionStateRef = useRef(versionState);
   versionStateRef.current = versionState;
-  const [versionsOpen, setVersionsOpen] = useState(false);
+  const sidePanels = useSidePanels();
+  const versionsOpen = sidePanels.open === 'versions';
   const [selectedVersionId, setSelectedVersionId] = useState<string>();
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [restoreError, setRestoreError] = useState('');
@@ -470,7 +472,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
 
   useEffect(() => subscribeAiConfig(next => { configRef.current = next; setConfig(next); }), []);
 
-  useEffect(() => () => { for (const timer of persistTimers.current) clearTimeout(timer); }, []);
+  useEffect(() => () => { for (const timer of persistTimers.current) clearTimeout(timer); closeSidePanel('versions'); }, []);
 
   useEffect(() => {
     if (!draft.jobId || draft.status === 'idle') return;
@@ -644,10 +646,11 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       keepVersionsOpen.current = false;
       const list = next.current ? next.flows[next.current] ?? [] : [];
       setSelectedVersionId(list.at(-1)?.id);
-      setVersionsOpen(list.length > 0);
+      if (list.length > 0) openSidePanel('versions');
+      else closeSidePanel('versions');
       return;
     }
-    setVersionsOpen(false);
+    closeSidePanel('versions');
     setSelectedVersionId(undefined);
   }, [input.loadRevision, input.workspaceId]);
 
@@ -775,7 +778,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       setUndoOffer(undefined);
       setUndoVisible(false);
       setProvenanceId('');
-      setVersionsOpen(false);
+      closeSidePanel('versions');
       setSelectedVersionId(undefined);
       return true;
     } catch (error) {
@@ -1317,14 +1320,14 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   function openVersions() {
     const list = versions();
     setSelectedVersionId(list.at(-1)?.id);
-    setVersionsOpen(true);
+    openSidePanel('versions');
   }
 
   function closeVersions() {
     const list = versions();
     setRestoreError('');
     setSelectedVersionId(list.at(-1)?.id);
-    setVersionsOpen(false);
+    closeSidePanel('versions');
   }
 
   function selectVersion(id: string) {
@@ -1459,17 +1462,19 @@ export function AiFlow({control}: {control: AiDraftControl}) {
     control.closeVersions();
     focusCapsule();
   }
+  const sidePanels = useSidePanels();
   useLayoutEffect(() => {
     const wasOpen = sheetWasOpen.current;
     sheetWasOpen.current = control.versionsOpen;
-    if (wasOpen && !control.versionsOpen) focusCapsule();
-  }, [control.versionsOpen]);
+    if (wasOpen && !control.versionsOpen && sidePanels.open !== 'nodeDetails') focusCapsule();
+  }, [control.versionsOpen, sidePanels.open]);
   useEffect(() => {
     if (mode !== 'idle' && !open && !refining) setFocused(false);
   }, [mode, open, refining]);
   const composer = mode === 'idle' || open || refining || generating;
   const showPanel = composer && (generating || refining || !!control.disclosure || (!collapsed && (focused || count > 0 || open || !!draft.error || (failed && !neutral))));
-  return <div className={'ai-flow' + (control.versionsOpen ? ' is-sheet-clear' : '')} data-testid="ai-flow" data-ai-status={draft.status}>
+  return <>
+  <div className="ai-flow" data-testid="ai-flow" data-ai-status={draft.status}>
     <p className="sr-only" aria-live="polite" data-testid="ai-live">{live}</p>
     {draft.status === 'stale' && <p className="ai-muted">The workspace changed since this draft was prepared. <button type="button" className="ai-text" data-testid="ai-refresh" onClick={() => void control.refresh()}>Refresh</button></p>}
     {provenanceId && <p className="ai-provenance" data-testid="ai-provenance">Applied as “{provenanceName || 'this flow'}” · not run yet</p>}
@@ -1500,8 +1505,9 @@ export function AiFlow({control}: {control: AiDraftControl}) {
       </>}
     </section>}
     {mode === 'draft' ? <AiCapsule control={control} askRef={askRef} /> : mode !== 'idle' && !open ? <HistoryCapsule control={control} mode={mode} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : <div className="ai-flow-field"><textarea ref={fieldRef} className="ai-flow-input" data-testid="ai-flow-field" rows={1} aria-label="Describe a flow" placeholder="✦ Describe a flow" value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={showPanel && copy ? errorId : undefined} onChange={event => { setCollapsed(false); control.setPrompt(event.target.value); }} onFocus={() => { setFocused(true); if (escFocus.current) { escFocus.current = false; return; } setCollapsed(false); }} onBlur={() => setFocused(false)} onKeyDown={onFieldKeyDown} /></div>}
-    {control.versionsOpen && !!control.sheetVersions.length && <VersionsSheet versions={control.sheetVersions} nowId={control.nowVersionId} selectedId={control.selectedVersionId} onSelect={control.selectVersion} onClose={closeVersions} onKeepCurrent={control.keepCurrent} onRestore={() => { const id = control.selectedVersionId; if (id) void control.restore(id); }} restoreDisabled={!!control.restoreReason} restoreNote={control.restoreReason} restoreError={control.restoreError} />}
-  </div>;
+  </div>
+  {control.versionsOpen && !!control.sheetVersions.length && createPortal(<VersionsSheet versions={control.sheetVersions} nowId={control.nowVersionId} selectedId={control.selectedVersionId} onSelect={control.selectVersion} onClose={closeVersions} onKeepCurrent={control.keepCurrent} onRestore={() => { const id = control.selectedVersionId; if (id) void control.restore(id); }} restoreDisabled={!!control.restoreReason} restoreNote={control.restoreReason} restoreError={control.restoreError} />, document.body)}
+  </>;
 }
 
 function VersionsControl({control, buttonRef}: {control: AiDraftControl; buttonRef: {current: HTMLButtonElement | null}}) {

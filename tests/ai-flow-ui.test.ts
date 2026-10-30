@@ -1218,6 +1218,40 @@ test('AI flow authoring UI', async t => {
     } finally { await h.cleanup(); }
   });
 
+  await t.test('Versions stays docked outside the AI field, and a node swaps it for Node details', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.generate('Pay the electric bill');
+      await h.until(() => h.confirmEnabled(), 'confirm');
+      await h.click('[data-testid="ai-confirm"]');
+      await h.until(async () => (await readVersions(h))?.current !== undefined, 'version stored');
+      await h.unmount();
+      await h.remount();
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions"]'), 'versions');
+      await h.until(() => !!h.document.querySelector('[aria-label="Select screen Home"]'), 'home');
+      const flow = () => h.document.querySelector('[data-testid="ai-flow"]')!;
+      const beforeClass = flow().className;
+      await h.click('[aria-label="Select screen Home"]');
+      await h.until(() => !!h.document.querySelector('.floating-inspector'), 'inspector');
+      assert.equal(h.document.querySelector('[data-testid="ai-versions-sheet"]'), null);
+      await h.click('[data-testid="ai-versions"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions-sheet"]'), 'sheet');
+      assert.equal(flow().className, beforeClass, 'opening Versions must not restyle the AI field');
+      assert.equal(flow().classList.contains('is-sheet-clear'), false);
+      const sheet = h.document.querySelector('[data-testid="ai-versions-sheet"]')!;
+      assert.equal(sheet.closest('.ai-flow'), null, 'the sheet must not sit inside the transformed AI field');
+      assert.equal(sheet.parentElement, h.document.body);
+      assert.equal(h.document.querySelector('.floating-inspector'), null, 'Versions closes Node details');
+      assert.equal(h.document.querySelectorAll('[data-testid="ai-versions-sheet"], .floating-inspector').length, 1);
+      await h.click('[aria-label="Select screen Home"]');
+      await h.until(() => !h.document.querySelector('[data-testid="ai-versions-sheet"]') && !!h.document.querySelector('.floating-inspector'), 'node closes Versions');
+      assert.equal(h.document.querySelectorAll('[data-testid="ai-versions-sheet"], .floating-inspector').length, 1);
+      await h.click('[data-testid="ai-versions"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-versions-sheet"]') && !h.document.querySelector('.floating-inspector'), 'Versions closes Node details again');
+    } finally { await h.cleanup(); }
+  });
+
   await t.test('dismissing a pending draft keeps the applied flow, the stack, and the revision', async () => {
     const h = await harness('ready');
     try {
