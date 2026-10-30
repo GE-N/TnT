@@ -305,7 +305,10 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   const bounds=visibleBounds(rectOf(viewportRef.current),{width:window.innerWidth,height:window.innerHeight});
   if(viewportRef.current.closest('.workbench')){const bottom=Math.min(bounds.top+bounds.height,window.innerHeight-88);bounds.top=Math.max(bounds.top,156);bounds.height=Math.max(0,bottom-bounds.top);}
   const rects=(elements:Element[])=>elements.map(rectOf).filter(rect=>rect.width>0&&rect.height>0);
-  const controls=rects(Array.from(document.querySelectorAll('.workbench .device-toolbar[open],.workbench .scenario-details-panel,.workbench .workspace-advanced[open]:not([hidden]),.workbench .ai-flow-field,.workbench .report-tools[open],.workbench .workspace-management-surface,.workbench .canvas-inspectors,.workbench .draft-banner,.workbench .canvas-editor>.notice,.workbench .go-to-issue,.workbench>main>.notice,.workbench .scenario-panel>.notice,.workbench .run-error-toast')));
+  const controls=rects(Array.from(document.querySelectorAll('.workbench .device-toolbar[open],.workbench .scenario-details-panel,.workbench .workspace-advanced[open]:not([hidden]),.workbench .report-tools[open],.workbench .workspace-management-surface,.workbench .canvas-inspectors,.workbench .draft-banner,.workbench .canvas-editor>.notice,.workbench .go-to-issue,.workbench>main>.notice,.workbench .scenario-panel>.notice,.workbench .run-error-toast')));
+  // Bottom dock: raise the floor. Do not treat it as a full-height side panel.
+  const aiField=rects(Array.from(document.querySelectorAll('.workbench .ai-flow-field')));
+  for(const field of aiField){const limit=field.top-12;if(limit<bounds.top+bounds.height)bounds.height=Math.max(0,limit-bounds.top);}
   for(const control of controls){
    if(control.width<260||control.height<44||control.left+control.width<=bounds.left||control.left>=bounds.left+bounds.width)continue;
    const leftSpace=control.left-bounds.left-12;const rightSpace=bounds.left+bounds.width-control.left-control.width-12;
@@ -318,7 +321,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   const next=placeInspector({anchor:rectOf(node),size:{width:inspectorWidth,height:card.current.scrollHeight},bounds,
    screens:rects(Array.from(surface.current!.querySelectorAll('[data-screen-id]')).filter(item=>item!==node)),
    labels:rects(edges.filter(edge=>edge!==highlightedEdge).flatMap(edge=>Array.from(edge.querySelectorAll('.transition-label')))),
-   highlighted:[...controls,...rects(Array.from(highlightedEdge?.querySelectorAll('.transition-label')??[])),...segment]});
+   highlighted:[...controls,...aiField,...rects(Array.from(highlightedEdge?.querySelectorAll('.transition-label')??[])),...segment]});
   setPlacement(previous=>previous&&previous.left===next.left&&previous.top===next.top&&previous.maxHeight===next.maxHeight&&previous.side===next.side&&previous.clamped===next.clamped?previous:next);
  });
  useEffect(()=>{

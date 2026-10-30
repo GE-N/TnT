@@ -5,7 +5,7 @@ import { JSDOM } from "jsdom";
 import { act, createElement, useState, type ChangeEvent } from "react";
 import { refreshChecks, writeChecks } from "../shared/canvas-authoring.js";
 import type { CanvasGraph, CanvasTest } from "../server/canvas.js";
-import type { Rect } from "../src/inspector-placement.js";
+import { inspectorGap, inspectorWidth, type Rect } from "../src/inspector-placement.js";
 import { openStepMenuItem } from "./step-menu.js";
 
 // Compare DOM nodes by identity: assert's diff of a jsdom node exhausts the heap.
@@ -117,7 +117,7 @@ type View = {
 };
 
 async function mount(
-  options: { initialView?: View; rects?: Map<string, Rect>; graph?:CanvasGraph; workbench?:boolean } = {},
+  options: { initialView?: View; rects?: Map<string, Rect>; graph?:CanvasGraph; workbench?:boolean; windowSize?:{width:number;height:number} } = {},
 ) {
   const dom = new JSDOM('<div id="root"'+(options.workbench?' class="workbench"':'')+'></div>', { url: "http://localhost/" });
   const window = dom.window;
@@ -177,11 +177,11 @@ async function mount(
     },
   });
   Object.defineProperty(window, "innerWidth", {
-    value: 1200,
+    value: options.windowSize?.width ?? 1200,
     configurable: true,
   });
   Object.defineProperty(window, "innerHeight", {
-    value: 800,
+    value: options.windowSize?.height ?? 800,
     configurable: true,
   });
   const { createRoot } = await import("react-dom/client");
@@ -1269,4 +1269,93 @@ test('a graph edit while temporarily disabled permanently invalidates deletion U
   await page.disable(true);const edited=structuredClone(deleted);edited.graph.screens[0].title='Edited Home';await page.restore(edited);
   await page.restore(deleted);await page.disable(false);absent(page.document.querySelector('.step-undo-toast'),'reverting a later edit must not revive a discarded Undo');
  }finally{await page.close();}
+});
+
+const dockedAiField: Rect = { left: 440, top: 832, width: 560, height: 44 };
+const dockedScenarios: Rect = { left: 24, top: 168, width: 280, height: 560 };
+
+function overlaps(a: Rect, b: Rect) {
+  const width = Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left);
+  const height = Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
+  return width > 0 && height > 0;
+}
+
+async function mountDockedWorkbench(node: Rect) {
+  const page = await mount({
+    workbench: true,
+    windowSize: { width: 1440, height: 900 },
+    initialView: { selectedScreenId: "home" },
+    rects: new Map<string, Rect>([
+      ["viewport", { left: 0, top: 0, width: 1440, height: 900 }],
+      ["home", node],
+    ]),
+  });
+  const panel = page.document.createElement("aside");
+  panel.className = "scenario-details-panel";
+  panel.dataset.layout = "scenarios-panel";
+  page.rects.set("scenarios-panel", dockedScenarios);
+  const field = page.document.createElement("div");
+  field.className = "ai-flow-field";
+  field.dataset.layout = "ai-field";
+  page.rects.set("ai-field", dockedAiField);
+  page.document.getElementById("root")!.append(panel, field);
+  await page.relayout();
+  return page;
+}
+
+function popupBox(page: Awaited<ReturnType<typeof mountDockedWorkbench>>): Rect {
+  const place = page.placement();
+  const maxHeight = Number.parseFloat(page.card()!.style.maxHeight);
+  return { left: place.left, top: place.top, width: inspectorWidth, height: Math.min(400, maxHeight) };
+}
+
+function assertClearOfDocks(page: Awaited<ReturnType<typeof mountDockedWorkbench>>) {
+  const popup = popupBox(page);
+  assert.equal(overlaps(popup, dockedAiField), false, "popup covers the AI field");
+  assert.equal(overlaps(popup, dockedScenarios), false, "popup covers the Scenarios panel");
+}
+
+test("a mid-canvas node keeps the popup on its right when the AI field is docked", async () => {
+  const node: Rect = { left: 480, top: 250, width: 160, height: 86 };
+  const page = await mountDockedWorkbench(node);
+  try {
+    assert.equal(page.placement().side, "right");
+    assert.equal(page.placement().left, node.left + node.width + inspectorGap);
+    assert.equal(page.placement().top, node.top);
+    assertClearOfDocks(page);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a node near the right edge flips the popup to its left", async () => {
+  const node: Rect = { left: 1120, top: 250, width: 160, height: 86 };
+  const page = await mountDockedWorkbench(node);
+  try {
+    assert.equal(page.placement().side, "left");
+    assert.equal(page.placement().left + inspectorWidth, node.left - inspectorGap);
+    assert.equal(page.placement().top, node.top);
+    assertClearOfDocks(page);
+  } finally {
+    await page.close();
+  }
+});
+
+test("pan and zoom keep the popup beside the selected node", async () => {
+  const node: Rect = { left: 480, top: 250, width: 160, height: 86 };
+  const page = await mountDockedWorkbench(node);
+  try {
+    const moved: Rect = { left: 640, top: 320, width: 150, height: 90 };
+    page.rects.set("home", moved);
+    await act(async () => {
+      page.window.dispatchEvent(new page.window.Event("scroll"));
+      page.window.dispatchEvent(new page.window.Event("resize"));
+    });
+    assert.equal(page.placement().side, "right");
+    assert.equal(page.placement().left, moved.left + moved.width + inspectorGap);
+    assert.equal(page.placement().top, moved.top);
+    assertClearOfDocks(page);
+  } finally {
+    await page.close();
+  }
 });
