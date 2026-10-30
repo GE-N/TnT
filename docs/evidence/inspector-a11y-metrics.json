@@ -8,15 +8,15 @@
       "screen": "home",
       "edit": false,
       "file": "evidence/inspector-a11y-1440x900.png",
-      "side": "right",
+      "side": "below",
       "clamped": false,
       "inspectorWidth": 300,
       "viewport": {
         "width": 1440,
         "height": 900
       },
-      "left": 259,
-      "top": 164,
+      "left": 34,
+      "top": 193,
       "targets": {
         "close": {
           "w": 44,
@@ -38,10 +38,7 @@
         "destination": null,
         "done": null,
         "matchBy": null,
-        "delete": {
-          "w": 44,
-          "h": 57
-        }
+        "delete": null
       },
       "primary": "#0a63d1",
       "danger": "#b3261e",
@@ -68,15 +65,15 @@
       "screen": "home",
       "edit": false,
       "file": "evidence/inspector-a11y-1280x800.png",
-      "side": "right",
+      "side": "below",
       "clamped": false,
       "inspectorWidth": 300,
       "viewport": {
         "width": 1280,
         "height": 800
       },
-      "left": 259,
-      "top": 164,
+      "left": 34,
+      "top": 193,
       "targets": {
         "close": {
           "w": 44,
@@ -98,10 +95,7 @@
         "destination": null,
         "done": null,
         "matchBy": null,
-        "delete": {
-          "w": 44,
-          "h": 57
-        }
+        "delete": null
       },
       "primary": "#0a63d1",
       "danger": "#b3261e",
@@ -136,7 +130,7 @@
         "height": 800
       },
       "left": 920,
-      "top": 227,
+      "top": 233,
       "targets": {
         "close": {
           "w": 44,
@@ -158,10 +152,7 @@
         "destination": null,
         "done": null,
         "matchBy": null,
-        "delete": {
-          "w": 44,
-          "h": 57
-        }
+        "delete": null
       },
       "primary": "#0a63d1",
       "danger": "#b3261e",
@@ -218,10 +209,7 @@
         "destination": null,
         "done": null,
         "matchBy": null,
-        "delete": {
-          "w": 44,
-          "h": 57
-        }
+        "delete": null
       },
       "primary": "#0a63d1",
       "danger": "#b3261e",
@@ -251,15 +239,15 @@
       "draft": true,
       "keyboard": false,
       "file": "evidence/inspector-a11y-contrast-targets.png",
-      "side": "right",
+      "side": "below",
       "clamped": false,
       "inspectorWidth": 300,
       "viewport": {
         "width": 1440,
         "height": 900
       },
-      "left": 259,
-      "top": 164,
+      "left": 34,
+      "top": 193,
       "targets": {
         "close": {
           "w": 44,
@@ -294,7 +282,7 @@
           "h": 44
         },
         "delete": {
-          "w": 104,
+          "w": 150,
           "h": 44
         }
       },
@@ -313,8 +301,8 @@
         {
           "label": "danger on failed step",
           "foreground": "#b3261e",
-          "background": "#fdecea",
-          "ratio": 5.72
+          "background": "#edf1f5",
+          "ratio": 5.76
         },
         {
           "label": "warning draft notice",
@@ -324,7 +312,7 @@
         }
       ],
       "focusOutline": "",
-      "focused": "body",
+      "focused": "Move check 1 down",
       "tabStops": 1
     },
     {
@@ -366,10 +354,7 @@
         "destination": null,
         "done": null,
         "matchBy": null,
-        "delete": {
-          "w": 44,
-          "h": 57
-        }
+        "delete": null
       },
       "primary": "#0a63d1",
       "danger": "#b3261e",
@@ -396,15 +381,15 @@
       "screen": "home",
       "edit": false,
       "file": "evidence/inspector-a11y-keyboard-journey.png",
-      "side": "right",
+      "side": "below",
       "clamped": false,
       "inspectorWidth": 300,
       "viewport": {
         "width": 1440,
         "height": 900
       },
-      "left": 259,
-      "top": 164,
+      "left": 34,
+      "top": 193,
       "targets": {
         "close": {
           "w": 44,
@@ -426,10 +411,7 @@
         "destination": null,
         "done": null,
         "matchBy": null,
-        "delete": {
-          "w": 44,
-          "h": 57
-        }
+        "delete": null
       },
       "primary": "#0a63d1",
       "danger": "#b3261e",
@@ -490,9 +472,9 @@
           ],
           "destinationBeforePick": true,
           "visual": {
-            "pickTop": 294,
-            "destinationTop": 462,
-            "selectorTop": 244,
+            "pickTop": 309,
+            "destinationTop": 477,
+            "selectorTop": 259,
             "pickBesideSelector": true
           }
         },
@@ -509,12 +491,12 @@
         },
         {
           "step": "linked step",
-          "id": "cadfed88-be9f-4ba8-bb7a-224f6f6f6798",
+          "id": "3beb5482-9a11-4f91-a8ac-2427e58f3fa0",
           "text": "3 tapOn \"created-id\" → Profile",
           "orderedIds": [
             "home-ready",
             "avatar",
-            "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+            "3beb5482-9a11-4f91-a8ac-2427e58f3fa0"
           ]
         },
         {
@@ -522,18 +504,37 @@
           "beforeOrder": [
             "home-ready",
             "avatar",
-            "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+            "3beb5482-9a11-4f91-a8ac-2427e58f3fa0"
           ],
           "afterOrder": [
             "home-ready",
-            "cadfed88-be9f-4ba8-bb7a-224f6f6f6798",
+            "3beb5482-9a11-4f91-a8ac-2427e58f3fa0",
             "avatar"
           ],
-          "changed": true
+          "changed": true,
+          "menu": {
+            "opened": "Move action 2 up",
+            "landed": "Move action 2 up",
+            "keys": [
+              "End",
+              "ArrowDown",
+              "Enter"
+            ],
+            "countBefore": 3
+          }
         },
         {
           "step": "delete",
           "target": "Delete action 2",
+          "menu": {
+            "opened": "Move action 2 up",
+            "landed": "Delete action 2",
+            "keys": [
+              "End",
+              "Enter"
+            ],
+            "countBefore": 3
+          },
           "afterDelete": {
             "count": 2,
             "stops": 1,
@@ -544,7 +545,7 @@
           },
           "remaining": [
             "home-ready",
-            "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+            "3beb5482-9a11-4f91-a8ac-2427e58f3fa0"
           ],
           "focusImmediately": "+ Add step",
           "focusAfter": "Edit Check 1",
@@ -596,9 +597,9 @@
       ],
       "destinationBeforePick": true,
       "visual": {
-        "pickTop": 294,
-        "destinationTop": 462,
-        "selectorTop": 244,
+        "pickTop": 309,
+        "destinationTop": 477,
+        "selectorTop": 259,
         "pickBesideSelector": true
       }
     },
@@ -615,12 +616,12 @@
     },
     {
       "step": "linked step",
-      "id": "cadfed88-be9f-4ba8-bb7a-224f6f6f6798",
+      "id": "3beb5482-9a11-4f91-a8ac-2427e58f3fa0",
       "text": "3 tapOn \"created-id\" → Profile",
       "orderedIds": [
         "home-ready",
         "avatar",
-        "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+        "3beb5482-9a11-4f91-a8ac-2427e58f3fa0"
       ]
     },
     {
@@ -628,18 +629,37 @@
       "beforeOrder": [
         "home-ready",
         "avatar",
-        "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+        "3beb5482-9a11-4f91-a8ac-2427e58f3fa0"
       ],
       "afterOrder": [
         "home-ready",
-        "cadfed88-be9f-4ba8-bb7a-224f6f6f6798",
+        "3beb5482-9a11-4f91-a8ac-2427e58f3fa0",
         "avatar"
       ],
-      "changed": true
+      "changed": true,
+      "menu": {
+        "opened": "Move action 2 up",
+        "landed": "Move action 2 up",
+        "keys": [
+          "End",
+          "ArrowDown",
+          "Enter"
+        ],
+        "countBefore": 3
+      }
     },
     {
       "step": "delete",
       "target": "Delete action 2",
+      "menu": {
+        "opened": "Move action 2 up",
+        "landed": "Delete action 2",
+        "keys": [
+          "End",
+          "Enter"
+        ],
+        "countBefore": 3
+      },
       "afterDelete": {
         "count": 2,
         "stops": 1,
@@ -650,7 +670,7 @@
       },
       "remaining": [
         "home-ready",
-        "cadfed88-be9f-4ba8-bb7a-224f6f6f6798"
+        "3beb5482-9a11-4f91-a8ac-2427e58f3fa0"
       ],
       "focusImmediately": "+ Add step",
       "focusAfter": "Edit Check 1",

@@ -32,6 +32,24 @@ function legacyCanvas(linked:boolean):CanvasGraph{
  };
 }
 const hostScenario={id:'scenario-host',name:'Legacy host',authoring:'canvas' as const,steps:[],inputs:{},parameters:{},enabledHandlerIds:[]};
+const scriptAnchor={index:0,fingerprint:'draft' as const};
+function scriptCanvas():CanvasGraph{
+ return {
+  screens:[
+   {id:'home',title:'Home',x:0,y:0,tests:[check('home-a','Home','Home')]},
+   {id:'other',title:'Other',x:400,y:0,tests:[check('other-b','Other','Other')]},
+  ],
+  edges:[],
+  paths:[
+   {id:'path-a',name:'Alpha',scenarioId:'scenario-a',screenId:'home',edgeIds:[],visits:[{id:'visit-a',operationIds:['home-a']}]},
+   {id:'path-b',name:'Beta',scenarioId:'scenario-b',screenId:'other',edgeIds:[],visits:[{id:'visit-b',operationIds:['other-b']}]},
+  ],
+ };
+}
+const scriptScenarios=[
+ {id:'scenario-a',name:'Alpha',authoring:'canvas' as const,pathId:'path-a',steps:[],inputs:{},parameters:{},enabledHandlerIds:[],scripts:[{id:'script-a',label:'Run script',source:'alpha-script',beforeStep:scriptAnchor}]},
+ {id:'scenario-b',name:'Beta',authoring:'canvas' as const,pathId:'path-b',steps:[],inputs:{},parameters:{},enabledHandlerIds:[],scripts:[{id:'script-b',label:'Run script',source:'beta-script',beforeStep:scriptAnchor}]},
+];
 
 async function journey(work:(ui:{
  document:Document;
@@ -42,7 +60,7 @@ async function journey(work:(ui:{
  holdNext:()=>void;
  failNext:(index?:number)=>void;
  settle:()=>Promise<void>;
-})=>Promise<void>,legacy?:'stay'|'linked'){
+})=>Promise<void>,legacy?:'stay'|'linked'|'scripts'){
  const directory=await mkdtemp(join(tmpdir(),'tnt-a11y-'));
  let fail=false;let failIndex=3;let hold=false;let returnRunning=false;let releaseHold:(()=>void)|undefined;
  const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=>'2.11.0',run:async({directory:dir,flow,signal})=>{
@@ -55,7 +73,7 @@ async function journey(work:(ui:{
   await writeFile(join(dir,'commands.json'),JSON.stringify(commands.map((command:any,index:number)=>({command:{[command==='back'?'backPressCommand':command==='launchApp'||command.launchApp?'launchAppCommand':command.tapOn?'tapOnElement':command.inputText?'inputTextCommand':'assertConditionCommand']:{}},metadata:{depth:0,status:failing&&index===failedAt?'FAILED':failing&&index>failedAt?'SKIPPED':'COMPLETED',error:failing&&index===failedAt?{message:'Assertion failed at visit 3'}:undefined}}))));
   return {code:failing?1:0,log:'Simulator boundary fixture',cleanup:{verified:true,detail:'Fixture exited'}};
  }}});
- const canvas:CanvasGraph=legacy?legacyCanvas(legacy==='linked'):{
+ const canvas:CanvasGraph=legacy==='scripts'?scriptCanvas():legacy?legacyCanvas(legacy==='linked'):{
   screens:[
    {id:'1',title:'Home',x:0,y:0,tests:[{id:'home-ready',label:'Home',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Home'}},{id:'go-2',label:'Go 2',role:'action',reference,tap:{target:'text',match:'exact',value:'Go 2'}},{id:'stay',label:'Stay',role:'action',reference,tap:{target:'text',match:'exact',value:'Stay'}}]},
    {id:'2',title:'Mid',x:400,y:0,tests:[{id:'mid-ready',label:'Mid',role:'assertion',reference,check:{visibility:'visible',target:'text',match:'exact',value:'Mid'}},{id:'go-3',label:'Go 3',role:'action',reference,tap:{target:'text',match:'exact',value:'Go 3'}}]},
@@ -69,8 +87,9 @@ async function journey(work:(ui:{
  };
  const blank={screens:[],edges:[],paths:[]};
  const yaml=writeChecks('appId: com.example.App\n---\n- launchApp\n',blank,canvas);
- const saved=await service.save({name:'A11y keyboard',yaml,canvas:refreshChecks(canvas,yaml),scenarios:legacy?[hostScenario]:[]});
- if(legacy)await service.saveView(saved.id,{format:1,pathId:'route',scenarioId:hostScenario.id,scenarioName:hostScenario.name,canvas:{selectedScreenId:'home',selectedVisitId:'visit-1',zoom:.85,scrollLeft:0,scrollTop:0}});
+ const saved=await service.save({name:'A11y keyboard',yaml,canvas:refreshChecks(canvas,yaml),scenarios:legacy==='scripts'?scriptScenarios:legacy?[hostScenario]:[]});
+ if(legacy==='scripts')await service.saveView(saved.id,{format:1,pathId:'path-a',scenarioId:'scenario-a',scenarioName:'Alpha',canvas:{selectedScreenId:'home',selectedVisitId:'visit-a',zoom:.85,scrollLeft:0,scrollTop:0}});
+ else if(legacy)await service.saveView(saved.id,{format:1,pathId:'route',scenarioId:hostScenario.id,scenarioName:hostScenario.name,canvas:{selectedScreenId:'home',selectedVisitId:'visit-1',zoom:.85,scrollLeft:0,scrollTop:0}});
  const dom=new JSDOM('<div id="root"></div>');const document=dom.window.document;const window=dom.window as unknown as Window&typeof globalThis;
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT','fetch'];
  const previous=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
@@ -95,6 +114,7 @@ async function journey(work:(ui:{
    if(path.endsWith('/draft/discard'))return Response.json(await service.discardDraft(id,body.expectedDraftRevision));
    if(path.endsWith('/draft'))return Response.json(await service.saveDraft(id,body));
    if(path==='/api/canvas/references')return Response.json(await service.references(body));
+   if(path.startsWith('/api/scripts/trust'))return Response.json({scripts:[]});
    return Response.json(await service.workspace(path.slice('/api/workspaces/'.length)));
   }catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}
  };
@@ -319,5 +339,20 @@ test('a persisted focused visit step that becomes a legacy stay row keeps one re
  assert.equal(row(document,'profile').querySelector('.destination-warning p')?.textContent,warning('open Profile'));
  assertReachableStop(document,'home-ready');
 },'linked'));
+
+test('switching scenarios clears script Undo and leaves the other scenario scripts in place',()=>journey(async({document,click})=>{
+ await inspectScreen(document,{title:'Home'},{number:1});
+ assert.match(document.querySelector('[data-script-id="script-a"]')?.textContent??'',/alpha-script/);
+ await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Script actions Run script"]')!.click());
+ await click('Delete Run script');
+ assert.match(document.querySelector('.script-undo')?.textContent??'',/Run script deleted/);
+ assert.equal(document.querySelector('[data-script-id="script-a"]'),null);
+ await click('Beta');
+ await inspectScreen(document,{title:'Other'},{number:1});
+ assert.equal(document.querySelector('.script-undo'),null);
+ assert.match(document.querySelector('[data-script-id="script-b"]')?.textContent??'',/beta-script/);
+ assert.equal(document.querySelector('[data-script-id="script-a"]'),null);
+ assert.equal(document.body.textContent?.includes('alpha-script'),false);
+},'scripts'));
 
 });

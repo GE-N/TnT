@@ -74,7 +74,7 @@ const measureScript=()=>{
  const destination=visible('[aria-label$=" destination"]');
  const done=[...inspector.querySelectorAll('.visit-inline-fields:not([hidden]) button')].find(button=>button.textContent==='Done'&&button.getBoundingClientRect().height>=44);
  const matchBy=visible('.match-by label');
- const remove=visible('.visit-step-delete');
+ const remove=document.querySelector('.step-actions-menu .visit-step-delete')||visible('.visit-step-delete');
  const styles=getComputedStyle(document.documentElement);
  const active=document.activeElement;
  const contrasts=[
@@ -138,6 +138,20 @@ async function tabUntil(page,ready,max=40){
  }
  throw new Error('Tab did not reach a target: '+seen.join(' | '));
 }
+async function activateStepMenu(page,which){
+ await page.keyboard.press('ArrowRight');
+ await page.keyboard.press('Enter');
+ await page.waitForFunction(()=>document.querySelector('.step-actions-menu')&&document.activeElement?.getAttribute('role')==='menuitem');
+ const opened=await focused(page);
+ if(which==='delete')await page.keyboard.press('End');
+ else{await page.keyboard.press('End');await page.keyboard.press('ArrowDown');}
+ const landed=await focused(page);
+ if(which==='delete'&&!landed.label.startsWith('Delete '))throw new Error('End did not focus Delete: '+landed.label+' from '+opened.label);
+ if(which==='up'&&!(landed.label.startsWith('Move ')&&landed.label.endsWith(' up')))throw new Error('ArrowDown did not focus Move up: '+landed.label+' from '+opened.label);
+ const countBefore=await page.evaluate(()=>document.querySelectorAll('.floating-inspector .visit-step-summary').length);
+ await page.keyboard.press('Enter');
+ return {opened:opened.label,landed:landed.label,keys:which==='delete'?['End','Enter']:['End','ArrowDown','Enter'],countBefore};
+}
 async function openScreen(page,title){
  await tabUntil(page,info=>info.label==='Screen '+title);
  await page.keyboard.press('Enter');
@@ -157,7 +171,8 @@ try{
   await new Promise(r=>setTimeout(r,700));
   if(shot.edit){
    await page.waitForSelector('.visit-inline-fields:not([hidden]) .pick-from-screen, .visit-inline-fields:not([hidden]) [aria-label$=" destination"]',{timeout:5_000}).catch(()=>{});
-   await page.evaluate(()=>{const menu=document.querySelector('.visit-step-actions');if(menu)menu.open=true;});
+   const trigger=await page.$('.floating-inspector .step-actions-trigger');
+   if(trigger){await trigger.click();await page.waitForSelector('.step-actions-menu',{timeout:5_000});}
   }else{
    const title={home:'Home',profile:'Profile',settings:'Settings'}[shot.screen]??'Home';
    await openScreen(page,title);
@@ -289,28 +304,22 @@ try{
  if(!linkedText.includes('Profile'))throw new Error('Created step did not show destination Profile: '+linkedText);
  keyboardLog.push({step:'linked step',id:created[0],text:linkedText,orderedIds:committedIds});
  const beforeOrder=await ids();
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('Enter');
-  await tabUntil(page,info=>info.label.startsWith('Move ')&&info.label.endsWith(' up'),6);
-  await page.keyboard.press('Enter');
+  const reorderKeys=await activateStepMenu(page,'up');
   try{
    await page.waitForFunction(previous=>JSON.stringify([...document.querySelectorAll('.floating-inspector .visit-step')].map(item=>item.getAttribute('data-operation-id')))!==previous,{timeout:4000},JSON.stringify(beforeOrder));
   }catch(error){
    throw new Error('Reorder did not change step ids. before='+beforeOrder.join(' | ')+' after='+(await ids()).join(' | ')+' focus='+(await focused(page)).label+' '+(error instanceof Error?error.message:''));
   }
   const afterOrder=await ids();
-  keyboardLog.push({step:'reorder',beforeOrder,afterOrder,changed:true});
+  keyboardLog.push({step:'reorder',beforeOrder,afterOrder,changed:true,menu:reorderKeys});
   for(let step=0;step<8&&!(await focused(page)).className.includes('visit-step-summary');step++)await shiftTab();
   if(!(await focused(page)).className.includes('visit-step-summary')){
    for(let step=0;step<8&&!(await focused(page)).className.includes('visit-step-summary');step++)await page.keyboard.press('Tab');
   }
   await page.keyboard.press('End');
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('Enter');
-  await tabUntil(page,info=>info.label.startsWith('Delete '),6);
-  const deleted=(await focused(page)).label;
-  const countBeforeDelete=(await page.evaluate(()=>document.querySelectorAll('.floating-inspector .visit-step-summary').length));
-  await page.keyboard.press('Enter');
+  const deleteKeys=await activateStepMenu(page,'delete');
+  const deleted=deleteKeys.landed;
+  const countBeforeDelete=deleteKeys.countBefore;
   await page.waitForFunction(previous=>{
    const summaries=[...document.querySelectorAll('.floating-inspector .visit-step-summary')];
    return summaries.length===previous-1&&summaries.filter(item=>item.tabIndex===0).length===1;
@@ -334,7 +343,7 @@ try{
  if(!focusAfter.className.includes('visit-step-summary'))throw new Error('Focus could not return to the surviving list stop from '+focusAfter.label);
  const stopCount=await page.evaluate(()=>document.querySelectorAll('.floating-inspector .visit-step-summary[tabindex="0"]').length);
  if(stopCount!==1)throw new Error('Expected one list tab stop after returning focus, got '+stopCount);
- keyboardLog.push({step:'delete',target:deleted,afterDelete,remaining,focusImmediately:focusImmediately.label,focusAfter:focusAfter.label,stops:stopCount});
+ keyboardLog.push({step:'delete',target:deleted,menu:deleteKeys,afterDelete,remaining,focusImmediately:focusImmediately.label,focusAfter:focusAfter.label,stops:stopCount});
   const afterMetrics=await page.evaluate(measureScript);
   const file=resolve(evidence,'inspector-a11y-keyboard-journey.png');
   await page.screenshot({path:file,fullPage:false});

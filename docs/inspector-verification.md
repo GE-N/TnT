@@ -21,6 +21,7 @@ The #51 edits stay in the inspector UI, these tests, and this review. This branc
 - running keeps one list stop and arrow navigation without unlocking edits
 - edit tab order is observed by walking focus: matching, then Destination, then Pick from screen, then Open YAML, then Close. The test does not assert CSS ancestry.
 - a persisted legacy stay row before a visit step, and a focused visit step that becomes a stay row, each leave one reachable summary stop. Warning and destination controls stay on the legacy rows. The in-memory missing-destination UI cases remain as a supplement.
+- deleting a script shows Undo, and switching scenarios removes that Undo without replacing the other scenario's script.
 - shortcut suppression in a focused selector; failed run announces `role="status"` / `role="alert"`
 
 `tests/match-by-ui.test.ts` keeps the original assertion that Pick lives in `.element-field` beside the selector. A separate test checks that Tab from Destination focuses Pick, and the next Tab focuses Done. Existing floating-inspector and run-state UI journeys remain green.
@@ -29,15 +30,15 @@ The #51 edits stay in the inspector UI, these tests, and this review. This branc
 
 Reviewed with the real `CanvasEditor` fixture via Vite + Chrome headless (`scripts/inspector-browser-review.mjs`) on Linux, Node 22. Metrics: `docs/evidence/inspector-a11y-metrics.json`.
 
-Desktop shots open the named screen with Enter on its article, then Tab to the step summary. The keyboard journey uses `page.keyboard` for navigation and activation. It does not call `focus()`, set control values, or click controls. The contrast shot still opens the step menu in the page so Delete can be measured; that mutation is not part of the keyboard journey.
+Desktop shots open the named screen with Enter on its article, then Tab to the step summary. The keyboard journey uses `page.keyboard` for navigation and activation, including ArrowDown and End inside the step menu. It does not call `focus()`, set control values, or click controls. The contrast shot clicks the step-menu trigger so the rendered portal menu can be measured. That click is not part of the keyboard journey.
 
 | Shot | Viewport | Recorded |
 | --- | --- | --- |
-| 1440×900 Home | 1440×900, zoom 0.85 | Side **right**, left 259, top 164, inspector width **300**, not clamped. Focused `Edit Check 1`. Outline `rgb(10, 132, 255) solid 3px`. One list stop. |
+| 1440×900 Home | 1440×900, zoom 0.85 | Side **below**, left 34, top 193, inspector width **300**, not clamped. Focused `Edit Check 1`. Outline `rgb(10, 132, 255) solid 3px`. One list stop. |
 | 1280×800 Home | 1280×800, zoom 0.85 | Same placement and focus ring. One list stop. |
-| Settings flip | 1280×800, zoom 1.15 | Side **below**, left 920, top 227, width 300, **not clamped**. Same focus ring. |
-| Profile zoom | 1440×900, zoom 0.5 | Side right, left 347, width **300**. Same focus ring. |
-| Contrast and targets | 1440×900 Home, editing, failed check, draft notice | Rendered contrast below. Focus is not on a summary (`focused: body`), so this shot is not a focus-ring shot. |
+| Settings flip | 1280×800, zoom 1.15 | Side **below**, left 920, top 233, width 300, **not clamped**. Same focus ring. |
+| Profile zoom | 1440×900, zoom 0.5 | Side right, left 347, top 164, width **300**. Same focus ring. |
+| Contrast and targets | 1440×900 Home, editing, failed check, draft notice, step menu open | Rendered contrast below. Focus is the open menu item `Move check 1 down`, outside the inspector, so this shot is not a focus-ring shot. |
 | Clamp | 420×520, Home parked far right/bottom (`clamp=1`) | **`clamped: true`**, side right, left 112, top 164, width 300, viewport 420×520. Focus was not moved; outline is empty. |
 | Keyboard journey | 1440×900 Home | Trace below. The screenshot is the end state after delete. |
 
@@ -47,16 +48,16 @@ Samples are computed style of elements that are actually in the inspector. Shots
 
 | Role | Paint | Ratio |
 | --- | --- | --- |
-| Danger (failed step) | `#b3261e` on `#fdecea` | 5.72 |
+| Danger (failed step summary) | `#b3261e` on `#edf1f5` | 5.76 |
 | Warning (draft notice) | `#8a4b00` on `#fff4e5` | 6.26 |
 
 Token names are recorded separately and are not treated as the contrast result.
 
 ### Targets at least 44px
 
-Contrast shot, with the step menu open: close 44×44, summary 254×47, Add step 254×48, Destination 254×44, Pick from screen 254×44, Done 254×44, Open YAML 86×44, Match by 124×44, Delete 104×44.
+Contrast shot, with the portal step menu open: close 44×44, summary 254×47, Add step 254×48, Destination 254×44, Pick from screen 254×44, Done 254×44, Open YAML 86×44, Match by 124×44, Delete 150×44.
 
-On shots that are not editing, Destination, Pick, Done and Match by are absent (recorded as null). Delete inside a closed ⋯ menu still has a box in this Chrome (44×57). The open-menu size is the one that counts.
+On shots that are not editing, Destination, Pick, Done, Match by and Delete are absent (recorded as null). Delete is measured from the open portal menu, not from a closed trigger.
 
 ### Keyboard-only journey
 
@@ -64,11 +65,11 @@ Recorded under `keyboard` in the metrics:
 
 1. Enter on Screen Home, Tab to the list. One stop. ArrowDown, ArrowUp and End moved Check 1 ↔ Action 1.
 2. Tab to Add step, Enter, Enter to create a Tap. Shift+Tab, ArrowRight to Element, type `created-id`.
-3. Tab order from the selector: matching → type → **destination → Pick from screen**. Pick's box stays with the element field (top 294, directly under the selector at 244) and above Destination (top 462).
+3. Tab order from the selector: matching → type → **destination → Pick from screen**. Pick's box stays with the element field (top 309, directly under the selector at 259) and above Destination (top 477).
 4. Shift+Tab back to the focused Destination select. ArrowDown twice changed that select from empty to `profile`. Enter on Done committed the step.
 5. The created row's summary text is `3 tapOn "created-id" → Profile`. Ordered ids were `home-ready`, `avatar`, then the new id.
-6. On that focused row: ArrowRight, Enter, Tab to **Move up**, Enter. Order changed to `home-ready`, the new id, `avatar`.
-7. End, ArrowRight, Enter, Enter on `Delete action 2` (the last row, `avatar`). Remaining ids were `home-ready` and the created id. Focus landed on `+ Add step`, then Shift+Tab / Tab returned to `Edit Check 1`. Exactly one summary had `tabIndex=0`.
+6. On that focused row: ArrowRight, Enter to open the menu, End, ArrowDown back to **Move action 2 up**, Enter. Order changed to `home-ready`, the new id, `avatar`.
+7. End, ArrowRight, Enter, End onto `Delete action 2`, Enter. Remaining ids were `home-ready` and the created id. Focus landed on `+ Add step`, then Shift+Tab / Tab returned to `Edit Check 1`. Exactly one summary had `tabIndex=0`.
 
 ### Screenshots
 
@@ -88,7 +89,7 @@ Recorded under `keyboard` in the metrics:
 
 ## Keyboard-only walkthrough (recorded)
 
-The trace above is the walkthrough. It creates a step, links Destination to Profile from the keyboard (the new row shows Profile), reorders that row with its own Move up, and deletes the last row (`avatar`) while the created step remains. Focus can return to the one list tab stop from the keyboard. Pick stays visually with the element field and is reached after Destination.
+The trace above is the walkthrough. It creates a step, links Destination to Profile from the keyboard (the new row shows Profile), reorders that row from its own menu with End and ArrowDown, and deletes the last row (`avatar`) with End. Focus can return to the one list tab stop from the keyboard. Pick stays visually with the element field and is reached after Destination.
 
 ## Verification
 
