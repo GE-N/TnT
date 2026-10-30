@@ -10,6 +10,7 @@ import { createAi } from './ai/index.js';
 import { createMaestro } from './maestro.js';
 import {clearToolStarted,killProcess,lookupProcess,markToolStarted,recordSettledProcess} from './owned-process.js';
 import { sweepUnfinishedRuns } from './run-recovery.js';
+import { acquireRootOwnership } from './root-ownership.js';
 
 const exec = promisify(execFile);
 const execute: Execute = async (file, args) => {
@@ -29,6 +30,15 @@ const ownershipRoot = resolve('.tnt');
 const prepareProcess = (role: 'maestro' | 'mockoon') => () => markToolStarted(ownershipRoot, role);
 const cancelProcess = (role: 'maestro' | 'mockoon') => () => clearToolStarted(ownershipRoot, role);
 const noteProcess = (role: 'maestro' | 'mockoon') => (pid: number) => recordSettledProcess(ownershipRoot, role, pid);
+// Own the canonical root before recovery, the workspace store, queues, or the listener.
+let rootOwnership: Awaited<ReturnType<typeof acquireRootOwnership>>;
+try {
+  rootOwnership = await acquireRootOwnership(ownershipRoot, { bindProcessLifecycle: true });
+} catch (error) {
+  console.error(error instanceof Error ? error.message : 'Could not acquire the workspace root.');
+  process.exit(1);
+}
+rootOwnership.guard.assertOwned();
 await sweepUnfinishedRuns(ownershipRoot, { lookup: lookupProcess, kill: killProcess });
 const maestro = createMaestro({ prepareProcess: prepareProcess('maestro'), cancelProcess: cancelProcess('maestro'), noteProcess: noteProcess('maestro') });
 const runner = createRunner({ artifactDirectory, execute, ownershipDirectory: ownershipRoot, inspector: maestro });
