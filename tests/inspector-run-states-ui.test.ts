@@ -117,11 +117,13 @@ async function journey(work:(ui:{
   await click('Use Home as scenario start');
   await click('Append connection 1 → 2');
   await click('Append connection 2 → 3');
-  // Appended destination visits start empty; copy each screen's existing check into its visit.
+  // Appended destination visits start empty; add each screen's check into its visit.
   await inspectScreen(document,{title:'Mid'},{number:2});
-  await click('Copy Visible text · Mid to Visit 2');
+  await click('Add check to Mid');
+  await fill('Check 1 selector','Mid');
   await inspectScreen(document,{title:'End'},{number:3});
-  await click('Copy Visible text · End to Visit 3');
+  await click('Add check to End');
+  await fill('Check 1 selector','End');
   await click('Finish sequence');
   await click('Save workspace');
   await work({document,click,fill,holdNext:()=>{hold=true;returnRunning=true;},holdPicker:()=>{holdCapture=true;},failNext:(index=5)=>{fail=true;failIndex=index;},setToken,settle});

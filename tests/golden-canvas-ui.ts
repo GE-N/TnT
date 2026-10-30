@@ -74,12 +74,19 @@ async function perform(document:Document,script:GoldenScript,graph:()=>CanvasGra
     if(document.activeElement!==cancel)throw new Error('Clear-destination confirm must start focus on Cancel.');
     await click(document,'Remove link');
   }else if(script.op==='delete-step'){
-    await act(async()=>{
-      const scope=script.visitId?document.querySelector(`[data-visit-id="${script.visitId}"]`):document;
-      const button=scope?.querySelector<HTMLButtonElement>(`[data-operation-id="${script.actionId}"] button[aria-label^="Delete "]`);
-      if(!button)throw new Error('Missing delete control for '+script.actionId);
-      button.click();
-    });
+    const scope=script.visitId?document.querySelector(`[data-visit-id="${script.visitId}"]`):document;
+    const row=scope?.querySelector<HTMLElement>(`[data-operation-id="${script.actionId}"]`);
+    const inline=row?.querySelector<HTMLButtonElement>('button[aria-label^="Delete "]');
+    const trigger=row?.querySelector<HTMLButtonElement>('.step-actions-trigger');
+    if(inline)await act(async()=>inline.click());
+    else if(trigger){
+      await act(async()=>{if(trigger.getAttribute('aria-expanded')!=='true')trigger.click();});
+      await act(async()=>{
+        const button=document.querySelector<HTMLButtonElement>('.step-actions-menu [role="menuitem"][aria-label^="Delete "]');
+        if(!button)throw new Error('Missing delete control for '+script.actionId);
+        button.click();
+      });
+    }else throw new Error('Missing delete control for '+script.actionId);
     if(document.querySelector('[role=alertdialog]'))throw new Error('Deleting a step must be immediate with Undo.');
   }else if(script.op==='delete-connection'){
     const edge=graph().edges.find(item=>item.id===script.edgeId);

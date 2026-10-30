@@ -13,7 +13,7 @@ import {parseAllDocuments} from 'yaml';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import type {CanvasGraph} from '../server/canvas.js';
 
-for(const shareBeforeStart of [false,true])test('a second scenario shares operations '+(shareBeforeStart?'before':'after')+' setting its start and runs its saved flow',async()=>{
+for(const shareBeforeStart of [false,true])test('a second scenario '+(shareBeforeStart?'shares operations before setting its start and runs its saved flow':'has no Copy existing steps after its start is set'),async()=>{
  const directory=await mkdtemp(join(tmpdir(),'tnt-membership-ui-'));
  const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';let executed='';
  const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
@@ -41,11 +41,11 @@ for(const shareBeforeStart of [false,true])test('a second scenario shares operat
   await click('Open saved workspace');await click('Scenario 2');
   assert.ok(!(await inspectScreen(document,{title:'Home'})).querySelector('[aria-label="Action 1 selector"]'),'Another scenario action is not presented as active');
   if(!shareBeforeStart){await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.doesNotMatch(executed,/tapOn|assertVisible/);}
-  if(shareBeforeStart){await click('Use existing actions/checks');await click('Scenarios');await click('Use Tap text · Go in Scenario 2');await inspectScreen(document,{title:'Done'});await click('Use existing actions/checks');await click('Scenarios');await click('Use Visible text · Done in Scenario 2');await click('Use Home as scenario start');}
-  else{await click('Copy existing steps');await click('Copy Tap text · Go to Visit 1');await inspectScreen(document,{title:'Done'});await click('Copy existing steps');await click('Copy Visible text · Done to Visit 2');}
-  assert.equal((await inspectScreen(document,{title:'Home'})).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go');
-  await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.match(executed,/tapOn/);assert.match(executed,/\^Done\$/);
-  await click('Save workspace');await click('Open saved workspace');await click('Scenario 2');assert.equal((await inspectScreen(document,{title:'Home'})).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go');
+  if(shareBeforeStart){const joined=await inspectScreen(document,{title:'Home'});assert.ok([...joined.querySelectorAll('summary')].some(node=>node.textContent==='Use existing actions/checks'));assert.equal([...joined.querySelectorAll('summary')].some(node=>node.textContent==='Copy existing steps'),false);await click('Use existing actions/checks');await click('Scenarios');await click('Use Tap text · Go in Scenario 2');await inspectScreen(document,{title:'Done'});await click('Use existing actions/checks');await click('Scenarios');await click('Use Visible text · Done in Scenario 2');await click('Use Home as scenario start');
+   assert.equal((await inspectScreen(document,{title:'Home'})).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go');
+   await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.match(executed,/tapOn/);assert.match(executed,/\^Done\$/);
+   await click('Save workspace');await click('Open saved workspace');await click('Scenario 2');assert.equal((await inspectScreen(document,{title:'Home'})).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go');
+  }else{for(const title of ['Home','Done']){const card=await inspectScreen(document,{title});assert.equal([...card.querySelectorAll('summary')].some(node=>node.textContent==='Copy existing steps'),false,title);}}
   await click('Scenario 1');assert.equal((await inspectScreen(document,{title:'Home'})).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go');
   await click('Add check to Home');
   await inspectScreen(document,{title:'Home'});await act(async()=>{const input=inspectorCard(document)!.querySelector('[aria-label="Check 1 selector"]')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,'First only');input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});

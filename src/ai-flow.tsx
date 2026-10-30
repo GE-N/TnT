@@ -1380,10 +1380,12 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   const generating = draft.status === 'generating' || submitting;
   const failed = draft.status === 'failed';
   const refining = !!draft.refining;
-  const buttonRef = useRef<HTMLButtonElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const escFocus = useRef(false);
   const errorId = useId();
   const [live, setLive] = useState('');
+  const [collapsed, setCollapsed] = useState(false);
+  const [focused, setFocused] = useState(false);
   const count = draft.prompt.length;
   const over = count > PROMPT_CHAR_LIMIT;
   const entry = control.config?.providers?.[control.provider];
@@ -1392,11 +1394,6 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   const busy = generating || draft.status === 'applying';
   const kind = retryKind(draft.error?.code);
   const neutral = draft.error?.code === 'CANCELLED' || draft.error?.code === 'INTERRUPTED' || (!draft.error && !!draft.notice);
-
-  useEffect(() => {
-    if (!open || generating || control.disclosure) return;
-    fieldRef.current?.focus();
-  }, [open, generating, control.disclosure, draft.status]);
 
   useEffect(() => {
     if (!generating) return;
@@ -1408,20 +1405,42 @@ export function AiFlow({control}: {control: AiDraftControl}) {
     if (draft.error && !neutral) setLive(errorCopy(draft.error.code, draft.error.message, draft.model));
   }, [draft.error, draft.model, neutral]);
 
+  useEffect(() => {
+    if (generating || refining || control.disclosure || draft.error) setCollapsed(false);
+  }, [generating, refining, control.disclosure, draft.error]);
+
+  useLayoutEffect(() => {
+    const node = fieldRef.current;
+    if (!node) return;
+    node.style.height = 'auto';
+    node.style.height = Math.min(Math.max(node.scrollHeight, 36), 24 * 4 + 16) + 'px';
+  }, [draft.prompt, open]);
+
+  function collapsePanel() {
+    setCollapsed(true);
+    const field = fieldRef.current;
+    if (field && document.activeElement !== field) {
+      escFocus.current = true;
+      field.focus();
+    }
+  }
+
   function onPanelKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.key !== 'Escape') return;
-    if (generating) { event.preventDefault(); event.stopPropagation(); void control.cancel(); return; }
-    if (refining) { event.preventDefault(); event.stopPropagation(); void control.cancel(); return; }
     event.preventDefault();
     event.stopPropagation();
-    control.closePanel();
-    buttonRef.current?.focus();
+    if (generating || refining) { void control.cancel(); return; }
+    if (control.disclosure) control.closePanel();
+    collapsePanel();
   }
 
   function onFieldKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Escape') { onPanelKeyDown(event); return; }
     if (event.key !== 'Enter' || event.shiftKey || control.disclosure) return;
     event.preventDefault();
-    if (draft.prompt.trim() && !busy && !over && configured) void control.generate();
+    if (!draft.prompt.trim() || busy || over) return;
+    if (!configured) { setCollapsed(false); return; }
+    void control.generate();
   }
 
   const versionsRef = useRef<HTMLButtonElement>(null);
@@ -1433,7 +1452,8 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   const draftOpen = REVIEW.includes(draft.status) && !refining && !!draft.draft;
   const mode = capsuleMode({draftOpen, undoVisible: control.undoVisible, versionCount: control.versionCount});
   function focusCapsule() {
-    (versionsRef.current ?? undoRef.current ?? askRef.current ?? fieldRef.current ?? buttonRef.current)?.focus();
+    const target = versionsRef.current ?? undoRef.current ?? askRef.current ?? fieldRef.current;
+    target?.focus();
   }
   function closeVersions() {
     control.closeVersions();
@@ -1444,17 +1464,21 @@ export function AiFlow({control}: {control: AiDraftControl}) {
     sheetWasOpen.current = control.versionsOpen;
     if (wasOpen && !control.versionsOpen) focusCapsule();
   }, [control.versionsOpen]);
+  useEffect(() => {
+    if (mode !== 'idle' && !open && !refining) setFocused(false);
+  }, [mode, open, refining]);
+  const composer = mode === 'idle' || open || refining || generating;
+  const showPanel = composer && (generating || refining || !!control.disclosure || (!collapsed && (focused || count > 0 || open || !!draft.error || (failed && !neutral))));
   return <div className={'ai-flow' + (control.versionsOpen ? ' is-sheet-clear' : '')} data-testid="ai-flow" data-ai-status={draft.status}>
     <p className="sr-only" aria-live="polite" data-testid="ai-live">{live}</p>
     {draft.status === 'stale' && <p className="ai-muted">The workspace changed since this draft was prepared. <button type="button" className="ai-text" data-testid="ai-refresh" onClick={() => void control.refresh()}>Refresh</button></p>}
     {provenanceId && <p className="ai-provenance" data-testid="ai-provenance">Applied as “{provenanceName || 'this flow'}” · not run yet</p>}
-    {open && <section className={'ai-panel' + (failed && !neutral ? ' is-error' : '') + (generating ? ' is-busy' : '') + (over ? ' is-over' : '')} aria-label={refining ? 'Refine draft' : 'Describe a flow'} aria-busy={busy || undefined} onKeyDown={onPanelKeyDown}>
+    {showPanel && <section className={'ai-panel' + (failed && !neutral ? ' is-error' : '') + (generating ? ' is-busy' : '') + (over ? ' is-over' : '')} aria-label={refining ? 'Refine draft' : 'AI flow'} aria-busy={busy || undefined} onKeyDown={onPanelKeyDown} onMouseDown={event => { const target = event.target instanceof Element ? event.target : null; if (target?.closest('a')) return; event.preventDefault(); }}>
       <div className="ai-panel-bar">
         <h3 className="ai-draft-heading">{refining ? 'Refine draft' : 'Describe a flow'}</h3>
-        <button type="button" className="ai-text" aria-label="Close" onClick={() => { if (!generating) { control.closePanel(); buttonRef.current?.focus(); } }}>✕</button>
+        <button type="button" className="ai-text" aria-label="Close" onClick={() => { if (generating) return; control.closePanel(); collapsePanel(); }}>✕</button>
       </div>
       {control.disclosure ? <><p className="ai-prompt-preview">{draft.prompt}</p><Disclosure control={control} /></> : <>
-        <textarea ref={fieldRef} className="ai-prompt-field" aria-label="Flow description" placeholder="Describe the flow" value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={copy ? errorId : undefined} onChange={event => control.setPrompt(event.target.value)} onKeyDown={onFieldKeyDown} />
         <p className="ai-hint">Enter generates · Shift+Enter new line · Esc closes</p>
         {count >= PROMPT_COUNTER_AT && <p className={over ? 'ai-error' : 'ai-muted'} data-testid="ai-char-count">{over ? (count - PROMPT_CHAR_LIMIT) + ' characters over the limit. Shorten the text to generate. Nothing is trimmed for you.' : count.toLocaleString('en-US') + ' / ' + PROMPT_CHAR_LIMIT.toLocaleString('en-US')}</p>}
         {generating && <div className="ai-progress" role="progressbar" aria-valuetext={refining ? 'Refining…' : PHASE_LABEL[draft.phase ?? 'model']} aria-label={refining ? 'Refining draft' : 'Generating flow'} />}
@@ -1468,16 +1492,14 @@ export function AiFlow({control}: {control: AiDraftControl}) {
         <div className="ai-actions">
           {generating ? <button type="button" className="ai-text" data-testid="ai-cancel" onClick={() => void control.cancel()}>Cancel</button>
             : kind === 'retry' || kind === 'network' ? <button type="button" className="ai-text" data-testid="ai-retry" onClick={() => void control.generate()}>{kind === 'network' ? 'Retry · may send another request' : 'Retry'}</button>
-            : kind === 'settings' || !configured ? <button type="button" className="ai-text" data-testid="ai-open-settings" onClick={event => control.openSettings(event.currentTarget)}>Open AI settings</button>
+            : kind === 'settings' || !configured ? <button type="button" className="ai-text" data-testid="ai-open-settings" onClick={event => { control.openPanel(); control.openSettings(event.currentTarget); }}>Open AI settings</button>
             : kind === 'refine' ? <button type="button" className="ai-text" data-testid="ai-refine" onClick={() => control.refine()}>Refine</button>
             : kind === 'refresh' ? <button type="button" className="ai-text" data-testid="ai-retry" onClick={() => void control.generate()}>Refresh and generate again</button>
             : <button type="button" className="ai-text" data-testid="ai-generate" disabled={!draft.prompt.trim() || busy || over || !configured} onClick={() => void control.generate()}>✦ Generate</button>}
         </div>
       </>}
     </section>}
-    {mode === 'draft' ? <AiCapsule control={control} askRef={askRef} /> : mode !== 'idle' && !open ? <HistoryCapsule control={control} mode={mode} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : <button type="button" ref={buttonRef} className={'ai-launch' + (open ? ' is-open' : '')} data-testid="ai-flow-button" aria-label="Describe a flow" title="Describe a flow" aria-expanded={open} aria-busy={busy || undefined} onClick={() => open ? (generating ? undefined : control.closePanel()) : control.openPanel()}>
-      ✦ Describe a flow
-    </button>}
+    {mode === 'draft' ? <AiCapsule control={control} askRef={askRef} /> : mode !== 'idle' && !open ? <HistoryCapsule control={control} mode={mode} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : <div className="ai-flow-field"><textarea ref={fieldRef} className="ai-flow-input" data-testid="ai-flow-field" rows={1} aria-label="Describe a flow" placeholder="✦ Describe a flow" value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={showPanel && copy ? errorId : undefined} onChange={event => { setCollapsed(false); control.setPrompt(event.target.value); }} onFocus={() => { setFocused(true); if (escFocus.current) { escFocus.current = false; return; } setCollapsed(false); }} onBlur={() => setFocused(false)} onKeyDown={onFieldKeyDown} /></div>}
     {control.versionsOpen && !!control.sheetVersions.length && <VersionsSheet versions={control.sheetVersions} nowId={control.nowVersionId} selectedId={control.selectedVersionId} onSelect={control.selectVersion} onClose={closeVersions} onKeepCurrent={control.keepCurrent} onRestore={() => { const id = control.selectedVersionId; if (id) void control.restore(id); }} restoreDisabled={!!control.restoreReason} restoreNote={control.restoreReason} restoreError={control.restoreError} />}
   </div>;
 }
@@ -1495,7 +1517,7 @@ function HistoryCapsule({control, mode, versionsRef, undoRef, askRef}: {control:
     setText('');
     void control.generate(next);
   }
-  return <div className="ai-capsule-wrap">
+  return <div className="ai-capsule-wrap ai-flow-field">
     <form className="ai-capsule" data-testid="ai-capsule" onSubmit={event => { event.preventDefault(); submit(); }}>
       <div className="ai-capsule-row">
         <Sparkles />
@@ -1527,7 +1549,7 @@ function AiCapsule({control, askRef}: {control: AiDraftControl; askRef: {current
     if (question && next.length <= ANSWER_CHAR_LIMIT) control.answer(question.key, next);
     else control.ask(next);
   }
-  return <div className="ai-capsule-wrap">
+  return <div className="ai-capsule-wrap ai-flow-field">
     <form className={'ai-capsule' + (questions.length ? ' has-questions' : '')} data-testid="ai-capsule" onSubmit={event => { event.preventDefault(); submit(); }}>
       {!!questions.length && <div className="ai-questions" data-testid="ai-questions">
         {questions.map(question => <div key={question.key} className="ai-question" data-testid="ai-question" data-question-key={question.key}>
@@ -1567,7 +1589,7 @@ function Disclosure({control}: {control: AiDraftControl}) {
 function SavedModelLine({control}: {control: AiDraftControl}) {
   const model = control.config?.providers?.[control.provider]?.model;
   return <div className="ai-chip-wrap">
-    <button type="button" className="ai-text" data-testid="ai-provider-chip" onClick={event => control.openSettings(event.currentTarget)}>{providerLabel(control.provider, model)}</button>
+    <button type="button" className="ai-text" data-testid="ai-provider-chip" onClick={event => { control.openPanel(); control.openSettings(event.currentTarget); }}>{providerLabel(control.provider, model)}</button>
   </div>;
 }
 

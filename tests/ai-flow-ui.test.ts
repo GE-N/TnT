@@ -36,11 +36,13 @@ test('AI flow authoring UI', async t => {
       assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]'), null);
       const workspace = await h.saved();
       assert.equal(workspace.scenarios?.some(item => item.name === 'Pay a bill' && item.authoring === 'canvas'), true);
+      await act(async () => h.document.querySelector('[aria-label="Screen Home"]')!.dispatchEvent(new h.dom.window.MouseEvent('contextmenu', {bubbles: true, cancelable: true, clientX: 80, clientY: 80})));
+      await h.clickText('Rename');
       await h.fill('Screen title for Home', 'Home desk');
       await act(async () => h.document.querySelector('[aria-label="Screen title for Home"]')!.dispatchEvent(new h.dom.window.FocusEvent('focusout', {bubbles: true})));
       await h.until(async () => (await h.saved()).canvas?.screens.some(screen => screen.title === 'Home desk') === true, 'saved title');
       await h.remount();
-      await h.until(() => !!h.document.querySelector('[aria-label="Screen title for Home desk"]'), 'reopened title');
+      await h.until(() => !!h.document.querySelector('[aria-label="Screen Home desk"]'), 'reopened title');
       await openScenarioPanel(h.document, act);
       assert.ok([...h.document.querySelectorAll('button')].some(button => button.textContent === 'Pay a bill'));
       assert.equal(h.ai.generations, 1);
@@ -181,7 +183,7 @@ test('AI flow authoring UI', async t => {
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)); });
       assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]'), null);
       assert.equal(h.status(), 'prompting');
-      assert.equal((h.document.querySelector('[aria-label="Flow description"]') as HTMLTextAreaElement).value, 'Pay the electric bill');
+      assert.equal((h.document.querySelector('[aria-label="Describe a flow"]') as HTMLTextAreaElement).value, 'Pay the electric bill');
       assert.equal(h.ai.generations, 1);
       assert.equal(h.ai.cancels, 1);
     } finally { await h.cleanup(); }
@@ -308,7 +310,9 @@ test('AI flow authoring UI', async t => {
     const h = await harness('ready');
     try {
       await h.render();
-      await h.click('[data-testid="ai-flow-button"]');
+      const field = h.document.querySelector<HTMLTextAreaElement>('[data-testid="ai-flow-field"]');
+      assert.ok(field);
+      await act(async () => { field.focus(); });
       assert.equal(h.document.querySelector('[data-testid="ai-request-model"]'), null);
       assert.equal(h.document.querySelector('[aria-label="Model for the next request"]'), null);
       assert.doesNotMatch(h.document.body.textContent ?? '', /Model for the next request|Applies to the next request/);
@@ -318,7 +322,7 @@ test('AI flow authoring UI', async t => {
       assert.equal(h.document.querySelector('.workspace-advanced [data-testid="ai-settings"]'), null);
       await h.click('[data-testid="ai-settings-close"]');
       await h.until(() => !h.document.querySelector('[data-testid="ai-settings"]'), 'settings closed');
-      await h.fill('Flow description', 'Pay the electric bill');
+      await h.fill('Describe a flow', 'Pay the electric bill');
       await h.click('[data-testid="ai-generate"]');
       await h.until(() => !!h.document.querySelector('[data-testid="ai-disclosure-continue"]') || h.status() === 'generating', 'disclosure or start');
       if (h.document.querySelector('[data-testid="ai-disclosure-continue"]')) await h.click('[data-testid="ai-disclosure-continue"]');
@@ -334,11 +338,17 @@ test('AI flow authoring UI', async t => {
     const h = await harness('ready');
     try {
       await h.render();
-      await h.click('.workspace-advanced > summary');
+      const advanced = h.document.querySelector<HTMLDetailsElement>('.workspace-advanced');
+      assert.ok(advanced);
+      assert.equal(advanced.hidden, true);
+      assert.equal(advanced.open, false);
       assert.equal(h.document.querySelector('[data-testid="ai-settings"]'), null);
-      assert.match(h.document.querySelector('.workspace-advanced')?.textContent ?? '', /Show legacy canvas controls/);
-      assert.doesNotMatch(h.document.querySelector('.workspace-advanced')?.textContent ?? '', /Replace key|Model ID/);
-      await h.click('[data-testid="ai-flow-button"]');
+      assert.match(advanced.textContent ?? '', /Advanced mode · legacy authoring and settings/);
+      assert.match(advanced.textContent ?? '', /Show legacy canvas controls/);
+      assert.doesNotMatch(advanced.textContent ?? '', /Replace key|Model ID/);
+      const opener = h.document.querySelector<HTMLTextAreaElement>('[data-testid="ai-flow-field"]');
+      assert.ok(opener);
+      await act(async () => { opener.focus(); });
       const chip = h.document.querySelector<HTMLButtonElement>('[data-testid="ai-provider-chip"]');
       assert.ok(chip);
       await h.click('[data-testid="ai-provider-chip"]');
@@ -463,7 +473,7 @@ test('AI flow authoring UI', async t => {
       assert.equal(h.document.querySelector('[data-testid="ai-confirm"]')?.textContent, '✓ Apply');
       assert.ok(h.document.querySelector('[aria-label="Ask for changes"]'));
       assert.equal(h.document.querySelector('[data-testid="ai-discard"]')?.getAttribute('aria-label'), 'Dismiss draft');
-      assert.equal(h.document.querySelector('[aria-label="Flow description"]'), null);
+      assert.equal(h.document.querySelector('[aria-label="Describe a flow"]'), null);
     } finally { await h.cleanup(); }
   });
 
@@ -476,7 +486,7 @@ test('AI flow authoring UI', async t => {
       await h.until(() => !!h.document.querySelector('[data-testid="ai-composer-issues"]'), 'issues stay visible');
       assert.equal(h.status(), 'failed');
       assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]'), null);
-      assert.equal((h.document.querySelector('[aria-label="Flow description"]') as HTMLTextAreaElement).value, prompt);
+      assert.equal((h.document.querySelector('[aria-label="Describe a flow"]') as HTMLTextAreaElement).value, prompt);
       const issues = h.document.querySelector('[data-testid="ai-composer-issues"]')?.textContent ?? '';
       assert.match(issues, /must have required property 'setup'/);
       assert.match(issues, /must have required property 'key'/);
@@ -493,13 +503,13 @@ test('AI flow authoring UI', async t => {
       await h.until(() => !!h.document.querySelector('[data-testid="ai-composer-issues"]'), 'authoring issues');
       assert.equal(h.status(), 'failed');
       assert.equal(h.document.querySelector('[data-testid="ai-draft-chip"]'), null);
-      assert.equal((h.document.querySelector('[aria-label="Flow description"]') as HTMLTextAreaElement).value, prompt);
+      assert.equal((h.document.querySelector('[aria-label="Describe a flow"]') as HTMLTextAreaElement).value, prompt);
       assert.match(h.document.querySelector('[data-testid="ai-composer-issues"]')?.textContent ?? '', /swipe/);
       assert.match(h.document.body.textContent ?? '', /Couldn.t build a flow/);
       assert.ok(h.document.querySelector('[data-testid="ai-refine"]'));
       const failedJobId = await h.untilJobId();
       await h.click('[data-testid="ai-refine"]');
-      await h.fill('Flow description', 'Use a tap instead of swipe');
+      await h.fill('Describe a flow', 'Use a tap instead of swipe');
       await h.click('[data-testid="ai-generate"]');
       await h.until(() => h.ai.generationBodies.length >= 2, 'refine sent');
       const sent = h.ai.generationBodies[1] as {previousJobId?: string};
@@ -521,7 +531,7 @@ test('AI flow authoring UI', async t => {
       await h.until(() => /API key saved/.test(h.document.querySelector('[data-testid="ai-has-key"]')?.textContent ?? ''), 'key saved');
       await h.click('[data-testid="ai-settings-close"]');
       await h.until(() => !!h.document.querySelector('[data-testid="ai-generate"]'), 'generate enabled');
-      await h.fill('Flow description', 'Pay the electric bill');
+      await h.fill('Describe a flow', 'Pay the electric bill');
       await h.click('[data-testid="ai-generate"]');
       await h.until(() => !!h.document.querySelector('[data-testid="ai-disclosure-continue"]') || h.ai.generations === 1, 'disclosure or start');
       if (h.document.querySelector('[data-testid="ai-disclosure-continue"]')) await h.click('[data-testid="ai-disclosure-continue"]');
@@ -598,7 +608,7 @@ test('AI flow authoring UI', async t => {
       ['scenario-sequence-bar', box(390, 24, 610, 72)],
       ['canvas-toolbar', box(24, 724, 220, 52)],
       ['ai-launch', box(1212, 676, 44, 44)],
-      ['workspace-advanced', box(340, 732, 280, 44)],
+      ['ai-flow-field', box(360, 720, 560, 56)],
       ['canvas-viewport', box(0, 0, 1280, 800)],
       ['canvas-surface', box(0, 0, 2295, 1402.5)],
     ] as const;
@@ -982,31 +992,43 @@ test('AI flow authoring UI', async t => {
     } finally { await applied.cleanup(); }
   });
 
-  await t.test('the describe-a-flow button stays labeled and quiet at rest', async () => {
+  await t.test('the describe-a-flow field is visible at rest and Esc collapses the panel', async () => {
     const h = await harness('ready');
     try {
       await h.render();
-      const button = h.document.querySelector<HTMLButtonElement>('[data-testid="ai-flow-button"]');
-      assert.ok(button);
-      assert.equal(button.classList.contains('ai-launch'), true);
-      assert.match(button.textContent ?? '', /✦\s*Describe a flow/);
-      assert.equal(button.getAttribute('aria-label'), 'Describe a flow');
+      const field = h.document.querySelector<HTMLTextAreaElement>('[data-testid="ai-flow-field"]');
+      assert.ok(field);
+      assert.equal(field.getAttribute('aria-label'), 'Describe a flow');
+      assert.equal(field.placeholder, '✦ Describe a flow');
+      assert.equal(h.document.querySelector('.ai-panel'), null);
+      assert.equal(h.document.querySelector('[data-testid="ai-flow-button"]'), null);
       assert.equal(h.document.querySelector('[data-testid="ai-flow-choice"]'), null);
       const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+      assert.match(css, /\.ai-flow\{[^}]*left:50%/);
+      assert.match(css, /\.ai-flow\{[^}]*bottom:24px/);
+      assert.match(css, /\.ai-flow\{[^}]*translateX\(-50%\)/);
       const blocks = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
-      const launch = blocks.filter(([, selector]) => selector.includes('.ai-launch') && !selector.includes('ai-launch-dot'));
-      const rest = launch.filter(([, selector]) => !selector.includes('focus-visible'));
-      assert.ok(rest.length >= 1, 'at-rest launch rule');
-      for (const [, , body] of rest) {
-        assert.match(body, /#e7f3ff/);
-        assert.match(body, /#0a63d1/);
+      const fieldRules = blocks.filter(([, selector]) => selector.includes('.ai-flow-field') || selector.includes('.ai-flow-input'));
+      assert.ok(fieldRules.some(([, , body]) => body.includes('#e7f3ff') && /border:\s*0/.test(body) && /box-shadow:\s*none/.test(body)), 'light-blue field without a border');
+      const inputRules = fieldRules.filter(([, selector]) => selector.split(',').some(part => /^\.ai-flow-input\b/.test(part.trim()) || /^\.ai-flow \.ai-flow-input\b/.test(part.trim())));
+      for (const [, , body] of inputRules) {
         assert.match(body, /border:\s*0/);
-        assert.match(body, /box-shadow:\s*none/);
-        assert.match(body, /outline:\s*none/);
-        assert.doesNotMatch(body, /box-shadow:\s*(?!none)/);
+        assert.match(body, /border-bottom:\s*0/);
+        assert.match(body, /text-decoration:\s*none/);
       }
-      const focus = launch.filter(([, selector]) => selector.includes('focus-visible'));
-      assert.ok(focus.some(([, , body]) => /box-shadow:\s*0 0 0 3px/.test(body)), 'keyboard ring');
+      assert.ok(inputRules.some(([, selector, body]) => selector.includes(':focus') && body.includes('box-shadow:0 0 0 2px')), 'capsule focus ring');
+      await act(async () => { field.focus(); });
+      const panel = h.document.querySelector('.ai-panel');
+      assert.ok(panel);
+      assert.equal((field.compareDocumentPosition(panel) & h.dom.window.Node.DOCUMENT_POSITION_PRECEDING) !== 0, true);
+      await h.fill('Describe a flow', 'Pay the electric bill');
+      await act(async () => { field.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Enter', shiftKey: true, bubbles: true, cancelable: true})); });
+      assert.equal(h.ai.generations, 0);
+      assert.equal(field.value, 'Pay the electric bill');
+      await act(async () => { field.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); });
+      assert.equal(h.document.querySelector('.ai-panel'), null);
+      assert.equal(field.value, 'Pay the electric bill');
+      assert.equal(h.document.activeElement, field);
     } finally { await h.cleanup(); }
   });
 
@@ -1559,7 +1581,7 @@ test('AI flow authoring UI', async t => {
         canvas: {screens: [], edges: [], paths: []}, scenarios: [], expectedRevision: saved.metadata?.revision ?? 0,
       });
       await h.remount();
-      await h.until(() => h.status() === 'idle' || !!h.document.querySelector('[data-testid="ai-flow-button"]') || !!h.document.querySelector('[aria-label="Ask for changes"]'), 'reloaded');
+      await h.until(() => h.status() === 'idle' || !!h.document.querySelector('[data-testid="ai-flow-field"]') || !!h.document.querySelector('[aria-label="Ask for changes"]'), 'reloaded');
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 500)); });
       const mark = h.ai.previewBodies.length;
       await describeAndApply(h, 'Send a receipt');
@@ -1830,15 +1852,17 @@ async function harness(mode: Mode, options: HarnessOptions = {}) {
     },
     openSettings: async () => {
       if (!document.querySelector('[data-testid="ai-settings"]')) {
-        if (!document.querySelector('[aria-label="Flow description"]')) await click('[data-testid="ai-flow-button"]');
+        const field = document.querySelector<HTMLTextAreaElement>('[data-testid="ai-flow-field"]');
+        if (field && !document.querySelector('[data-testid="ai-provider-chip"]')) await act(async () => { field.focus(); });
         await click('[data-testid="ai-provider-chip"]');
       }
       await until(() => !!document.querySelector('[data-testid="ai-api-key"]'), 'ai settings');
     },
     generate: async (prompt: string) => {
-      await click('[data-testid="ai-flow-button"]');
-      await fill('Flow description', prompt);
-      await click('[data-testid="ai-generate"]');
+      await fill('Describe a flow', prompt);
+      const field = document.querySelector<HTMLTextAreaElement>('[data-testid="ai-flow-field"]');
+      assert.ok(field, 'ai flow field');
+      await act(async () => { field.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); });
       for (let attempt = 0; attempt < 20; attempt++) {
         if (document.querySelector('[data-testid="ai-disclosure-continue"]')) {
           await click('[data-testid="ai-disclosure-continue"]');
@@ -2407,17 +2431,26 @@ test('empty and YAML-only workspaces open on the contextual canvas', async () =>
     assert.equal(legend('Connect expected screens'), false);
     assert.equal(legend('Advanced YAML associations'), false);
     assert.equal(document.querySelector('.canvas-route-bar'), null);
-    assert.match(document.querySelector('.workspace-advanced > summary')?.textContent ?? '', /Advanced mode · legacy authoring and settings/);
+    const advanced = document.querySelector<HTMLDetailsElement>('.workspace-advanced');
+    assert.ok(advanced);
+    assert.equal(advanced.hidden, true);
+    assert.equal(advanced.open, false);
+    assert.match(advanced.querySelector('summary')?.textContent ?? '', /Advanced mode · legacy authoring and settings/);
+    const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+    assert.match(css, /\.workspace-advanced\[hidden\]\{display:none!important\}/);
+    assert.match(css, /\.workspace-advanced\[open\]:not\(\[hidden\]\)/);
+    assert.doesNotMatch(css, /:has\([^)]*\.workspace-advanced\[open\](?!:not\(\[hidden\]\))/);
   };
   try {
     await reload(empty.id);
     contextual(/No scenarios/);
     assert.match(document.querySelector('.sequence-empty-hint')?.textContent ?? '', /Create one to start a sequence/);
-    const launch = document.querySelector<HTMLButtonElement>('[data-testid="ai-flow-button"]');
-    assert.ok(launch);
-    await act(async () => { launch.click(); });
+    const field = document.querySelector<HTMLTextAreaElement>('[data-testid="ai-flow-field"]');
+    assert.ok(field);
+    assert.equal(field.getAttribute('aria-label'), 'Describe a flow');
+    assert.equal(document.querySelector('.ai-panel'), null);
+    await act(async () => { field.focus(); });
     assert.equal(document.querySelector('.ai-draft-heading')?.textContent, 'Describe a flow');
-    assert.ok(document.querySelector('[aria-label="Flow description"]'));
     await reload(empty.id);
     contextual(/No scenarios/);
     await reload(yamlOnly.id);

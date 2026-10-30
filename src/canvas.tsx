@@ -15,11 +15,12 @@ import type {YAMLReference,CanvasGraph,CanvasTest,CanvasDiagnostic,CanvasResult,
 import {inspectorWidth,placeInspector,visibleBounds,type InspectorPlacement,type Rect} from './inspector-placement.js';
 import type {VersionCanvasPreview} from './ai-versions.js';
 import {DRAFT_REVIEW_BAR,edgeInsets,placementForDraft,reservedAiChrome,type Box,type Insets} from './draft-placement.js';
+import {edgeLabelBox,screenNodeSteps} from './canvas-node-steps.js';
 const runLockReason='Unavailable while the scenario is running.';
 
 export const emptyCanvas=():CanvasGraph=>({screens:[],edges:[],paths:[]});
 export type DraftOverlay={nodes:{key:string;title:string;x:number;y:number;steps:{text:string;specified:boolean}[]}[];edges:{from:string;to:string;label:string}[];anchors:{key:string;x:number;y:number}[];existing:{screenId:string;key:string;steps:{text:string;specified:boolean}[]}[];settled?:boolean};
-const DRAFT_CHROME='.workspace-manager,.scenario-sequence-bar,.device-toolbar,.canvas-toolbar,.ai-launch,.ai-capsule,.floating-inspector,.ai-versions-sheet,.scenario-details-panel,.workspace-advanced,.report-tools,.launch-tools,.screenshot-tools,.script-editor,.ai-settings-sheet,.canvas-route-bar,.run-error-toast';
+const DRAFT_CHROME='.workspace-manager,.scenario-sequence-bar,.device-toolbar,.canvas-toolbar,.ai-launch,.ai-flow-field,.ai-capsule,.floating-inspector,.ai-versions-sheet,.scenario-details-panel,.workspace-advanced,.report-tools,.launch-tools,.screenshot-tools,.script-editor,.ai-settings-sheet,.canvas-route-bar,.run-error-toast';
 function elementBoxes(viewport:Box,selector:string):Box[]{
  if(typeof document==='undefined')return [];
  const boxes:Box[]=[];
@@ -34,7 +35,7 @@ function elementBoxes(viewport:Box,selector:string):Box[]{
  return boxes;
 }
 function draftObstacles(viewport:Box){
- const reserved=reservedAiChrome(viewport,elementBoxes(viewport,'.ai-launch,.ai-capsule'));
+ const reserved=reservedAiChrome(viewport,elementBoxes(viewport,'.ai-launch,.ai-flow-field,.ai-capsule'));
  return {obstacles:[...elementBoxes(viewport,DRAFT_CHROME),reserved],reserved};
 }
 function readViewport(node:HTMLElement|null){
@@ -68,8 +69,8 @@ function DraftOverlayLayer({overlay,zoom,onMove}:{overlay:DraftOverlay;zoom:numb
   {zone&&<div className="ai-draft-zone" data-testid="ai-draft-zone" style={{left:zone.left,top:zone.top,width:zone.width,height:zone.height}} aria-hidden="true"><span className="ai-draft-chip" data-testid="ai-draft-chip">✦ Draft</span></div>}
   <svg className="ai-draft-lines" width="2700" height={height} aria-hidden="true">{overlay.edges.map(edge=>{
    const from=points.get(edge.from);const to=points.get(edge.to);if(!from||!to)return null;
-   const start=[from.x+258,from.y+58];const end=[to.x-8,to.y+58];const middle=(start[0]+end[0])/2;
-   return <g key={edge.from+'>'+edge.to}><path d={`M${start[0]},${start[1]} C${middle},${start[1]} ${middle},${end[1]} ${end[0]},${end[1]}`} fill="none"/><foreignObject x={middle-78} y={Math.max(4,(start[1]+end[1])/2-16)} width="156" height="28"><div className="ai-draft-edge">{edge.label}</div></foreignObject></g>;
+   const start=[from.x+258,from.y+58];const end=[to.x-8,to.y+58];const middle=(start[0]+end[0])/2;const box=edgeLabelBox({x:start[0],y:start[1]},{x:end[0],y:end[1]});
+   return <g key={edge.from+'>'+edge.to}><path d={`M${start[0]},${start[1]} C${middle},${start[1]} ${middle},${end[1]} ${end[0]},${end[1]}`} fill="none"/><foreignObject x={box.x} y={box.y} width={box.width} height={box.height}><div className="ai-draft-edge">{edge.label}</div></foreignObject></g>;
   })}</svg>
   {overlay.nodes.map(node=><article key={node.key} className={'ai-draft-node'+(onMove?' is-draggable':'')} data-testid="ai-draft-screen" data-draft-screen={node.key} style={{left:node.x,top:node.y}} tabIndex={onMove?0:-1} aria-label={'Draft screen '+node.title} onPointerDown={event=>startDrag(event,node.key,node.x,node.y)} onPointerMove={event=>dragMove(event,node.key)} onPointerUp={endDrag} onPointerCancel={endDrag} onKeyDown={event=>{const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const direction=vectors[event.key];if(!direction||!onMove)return;event.preventDefault();const amount=event.shiftKey?40:10;onMove(node.key,clampX(node.x+direction[0]*amount),clampY(node.y+direction[1]*amount));}}><p>{node.title}</p><ol className="ai-draft-steps">{node.steps.map((step,index)=><li key={index} data-testid="ai-draft-step" className={step.specified?'is-specified':undefined}>{step.text}</li>)}</ol></article>)}
  </>;
@@ -127,15 +128,6 @@ function DestinationSelect({name,graph,value,onChange,onCreate,unresolved=false}
 }
 function draftNavigationAction():CanvasTest{return {id:identity(),label:'Tap action',role:'action',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},tap:{target:'text',match:'exact',value:''}};}
 function draftScreenCheck():CanvasTest{return {id:identity(),label:'Screen check',role:'assertion',reference:{kind:'step',file:'flow.yaml',index:0,fingerprint:'draft'},check:{visibility:'visible',target:'text',match:'exact',value:''}};}
-function NodeTitle({title,screenId,onRename,onSelect}:{title:string;screenId:string;onRename:(title:string)=>void;onSelect?:()=>void}){
- const recovered=useContext(RecoveredFields);
- const fieldKey='screen-title:'+screenId;
- const recoveredTitle=recovered[fieldKey];
- const [draft,setDraft]=useState(recoveredTitle??title);
- useWorkspaceDraft(draft!==title,fieldKey,draft);
- useEffect(()=>{setDraft(current=>current!==title&&recoveredTitle!==undefined&&current===recoveredTitle?current:title);},[title,recoveredTitle]);
- return <input className="screen-node-title" aria-label={'Screen title for '+title} title="Edit screen title · Enter to save · Escape to cancel" value={draft} maxLength={120} onFocus={onSelect} onChange={event=>setDraft(event.target.value)} onBlur={()=>{const next=draft.trim();if(next&&next!==title)onRename(next);setDraft(next||title);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();event.currentTarget.blur();}if(event.key==='Escape'){event.preventDefault();setDraft(title);}}}/>;
-}
 function NodeInfo({screen,disabled,error,onImage,onRemove,onClose}:{screen:ScreenNode;disabled:boolean;error:string;onImage:(file?:File)=>void;onRemove:()=>void;onClose:()=>void}){
  const dialog=useRef<HTMLElement>(null);
  useEffect(()=>{
@@ -167,6 +159,44 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  const [contextMenu,setContextMenu]=useState<{left:number;top:number;x:number;y:number;screenId?:string}>();
  const menu=useRef<HTMLDivElement>(null);
  const contextTarget=useRef<HTMLElement|null>(null);
+ const recoveredFields=useContext(RecoveredFields);
+ const consumedRecovery=useRef(new Set<string>());
+ const renameToken=useRef(1);
+ const titleInput=useRef<HTMLInputElement>(null);
+ const returnFocusId=useRef<string|undefined>(undefined);
+ const closingRename=useRef(false);
+ const [rename,setRename]=useState<{id:string;draft:string;token:number}|undefined>(()=>{
+  if(!onRename)return;
+  for(const screen of graph.screens){
+   const key='screen-title:'+screen.id;const draft=recoveredFields[key];
+   if(draft===undefined)continue;
+   consumedRecovery.current.add(key);
+   return {id:screen.id,draft,token:1};
+  }
+ });
+ const renameTitle=graph.screens.find(screen=>screen.id===rename?.id)?.title;
+ const recoveredTitle=rename?recoveredFields['screen-title:'+rename.id]:undefined;
+ useWorkspaceDraft(!!onRename&&!!rename&&renameTitle!==undefined&&rename.draft!==renameTitle,rename?'screen-title:'+rename.id:undefined,rename?.draft);
+ useLayoutEffect(()=>{
+  if(!onRename||rename)return;
+  for(const screen of graph.screens){
+   const key='screen-title:'+screen.id;
+   if(consumedRecovery.current.has(key))continue;
+   const draft=recoveredFields[key];
+   if(draft===undefined)continue;
+   consumedRecovery.current.add(key);renameToken.current+=1;
+   setRename({id:screen.id,draft,token:renameToken.current});
+   return;
+  }
+ },[onRename,graph.screens,recoveredFields,rename]);
+ useLayoutEffect(()=>{
+  if(!rename||renameTitle===undefined)return;
+  setRename(current=>{
+   if(!current||current.id!==rename.id)return current;
+   if(current.draft!==renameTitle&&recoveredTitle!==undefined&&current.draft===recoveredTitle)return current;
+   return current.draft===renameTitle?current:{...current,draft:renameTitle};
+  });
+ },[renameTitle,recoveredTitle,rename?.id]);
  useEffect(()=>{
   if(!contextMenu)return;
   menu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
@@ -175,13 +205,13 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   document.addEventListener('pointerdown',dismiss);document.addEventListener('keydown',escape);window.addEventListener('resize',dismiss);window.addEventListener('scroll',dismiss,true);
   return()=>{document.removeEventListener('pointerdown',dismiss);document.removeEventListener('keydown',escape);window.removeEventListener('resize',dismiss);window.removeEventListener('scroll',dismiss,true);};
  },[contextMenu]);
- function openMenu(event:MouseEvent<HTMLElement>,screenId?:string){
-  if(screenId?!onDelete&&!onInfo&&!onAppend:!onAdd&&!onRun)return;
+ function openMenu(event:{preventDefault():void;stopPropagation():void;currentTarget:HTMLElement;clientX?:number;clientY?:number},screenId?:string){
+  if(screenId?!onDelete&&!onInfo&&!onAppend&&!onRename:!onAdd&&!onRun)return;
   event.preventDefault();event.stopPropagation();
   const bounds=surface.current!.getBoundingClientRect();
   const target=event.currentTarget.getBoundingClientRect();
   const left=event.clientX||target.left+20;const top=event.clientY||target.top+20;
-  const menuHeight=20+40*(screenId?[onAppend,onInfo,onDelete]:[onAdd,onRun]).filter(Boolean).length;
+  const menuHeight=20+40*(screenId?[onAppend,onRename,onInfo,onDelete]:[onAdd,onRun]).filter(Boolean).length;
   contextTarget.current=event.currentTarget;
   setContextMenu({screenId,left:Math.max(8,Math.min(window.innerWidth-188,left)),top:Math.max(8,Math.min(window.innerHeight-menuHeight,top)),x:Math.max(0,Math.min(2400,(left-bounds.left)/zoom)),y:Math.max(0,Math.min(1400,(top-bounds.top)/zoom))});
  }
@@ -248,6 +278,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   }else if(draftOverlay?.settled)placedFor.current=draftKey;
  },[draftKey,draftOverlay,draftOverlay?.settled,zoom,layoutEpoch]);
  const drag=useRef<{id:string;x:number;y:number;clientX:number;clientY:number}|undefined>(undefined);
+ const emptyClick=useRef<{x:number;y:number}|undefined>(undefined);
  function startDrag(event:PointerEvent<HTMLElement>,id:string,x:number,y:number){if(!onMove||event.button!==0)return;if(typeof event.currentTarget.setPointerCapture==='function')event.currentTarget.setPointerCapture(event.pointerId);drag.current={id,x,y,clientX:event.clientX,clientY:event.clientY};}
  function dragMove(event:PointerEvent<HTMLElement>,id:string){const current=drag.current;if(!current||current.id!==id)return;onMove?.(id,Math.max(0,Math.min(2400,current.x+(event.clientX-current.clientX)/zoom)),Math.max(0,Math.min(1400,current.y+(event.clientY-current.clientY)/zoom)));}
  function endDrag(){drag.current=undefined;}
@@ -274,7 +305,10 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   const bounds=visibleBounds(rectOf(viewportRef.current),{width:window.innerWidth,height:window.innerHeight});
   if(viewportRef.current.closest('.workbench')){const bottom=Math.min(bounds.top+bounds.height,window.innerHeight-88);bounds.top=Math.max(bounds.top,156);bounds.height=Math.max(0,bottom-bounds.top);}
   const rects=(elements:Element[])=>elements.map(rectOf).filter(rect=>rect.width>0&&rect.height>0);
-  const controls=rects(Array.from(document.querySelectorAll('.workbench .device-toolbar[open],.workbench .scenario-details-panel,.workbench .workspace-advanced[open],.workbench .report-tools[open],.workbench .workspace-management-surface,.workbench .canvas-inspectors,.workbench .draft-banner,.workbench .canvas-editor>.notice,.workbench .go-to-issue,.workbench>main>.notice,.workbench .scenario-panel>.notice,.workbench .run-error-toast')));
+  const controls=rects(Array.from(document.querySelectorAll('.workbench .device-toolbar[open],.workbench .scenario-details-panel,.workbench .workspace-advanced[open]:not([hidden]),.workbench .report-tools[open],.workbench .workspace-management-surface,.workbench .canvas-inspectors,.workbench .draft-banner,.workbench .canvas-editor>.notice,.workbench .go-to-issue,.workbench>main>.notice,.workbench .scenario-panel>.notice,.workbench .run-error-toast')));
+  // Bottom dock: raise the floor. Do not treat it as a full-height side panel.
+  const aiField=rects(Array.from(document.querySelectorAll('.workbench .ai-flow-field')));
+  for(const field of aiField){const limit=field.top-12;if(limit<bounds.top+bounds.height)bounds.height=Math.max(0,limit-bounds.top);}
   for(const control of controls){
    if(control.width<260||control.height<44||control.left+control.width<=bounds.left||control.left>=bounds.left+bounds.width)continue;
    const leftSpace=control.left-bounds.left-12;const rightSpace=bounds.left+bounds.width-control.left-control.width-12;
@@ -287,7 +321,7 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   const next=placeInspector({anchor:rectOf(node),size:{width:inspectorWidth,height:card.current.scrollHeight},bounds,
    screens:rects(Array.from(surface.current!.querySelectorAll('[data-screen-id]')).filter(item=>item!==node)),
    labels:rects(edges.filter(edge=>edge!==highlightedEdge).flatMap(edge=>Array.from(edge.querySelectorAll('.transition-label')))),
-   highlighted:[...controls,...rects(Array.from(highlightedEdge?.querySelectorAll('.transition-label')??[])),...segment]});
+   highlighted:[...controls,...aiField,...rects(Array.from(highlightedEdge?.querySelectorAll('.transition-label')??[])),...segment]});
   setPlacement(previous=>previous&&previous.left===next.left&&previous.top===next.top&&previous.maxHeight===next.maxHeight&&previous.side===next.side&&previous.clamped===next.clamped?previous:next);
  });
  useEffect(()=>{
@@ -295,27 +329,63 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
   focusInspector.current='';
   (card.current.querySelector<HTMLElement>('.visit-section-heading')??card.current.querySelector<HTMLElement>('.floating-inspector-body '+focusableSelector.split(',').join(',.floating-inspector-body '))??card.current.querySelector<HTMLElement>(focusableSelector))?.focus();
  });
+ useLayoutEffect(()=>{
+  if(rename){
+   closingRename.current=false;
+   const input=titleInput.current;
+   if(!input)return;
+   input.focus({preventScroll:true});
+   input.setSelectionRange(0,input.value.length);
+   return;
+  }
+  const id=returnFocusId.current;
+  if(!id)return;
+  returnFocusId.current=undefined;
+  closingRename.current=false;
+  screenElement(id)?.querySelector<HTMLButtonElement>('.screen-node-heading')?.focus({preventScroll:true});
+ },[rename?.token]);
+ function beginRename(id:string){
+  const screen=graph.screens.find(item=>item.id===id);
+  if(!screen||!onRename)return;
+  renameToken.current+=1;
+  closingRename.current=false;
+  setRename(current=>current?.id===id?{...current,token:renameToken.current}:{id,draft:screen.title,token:renameToken.current});
+ }
+ function finishRename(save:boolean,raw?:string){
+  if(closingRename.current||!rename)return;
+  closingRename.current=true;
+  const next=(raw??rename.draft).trim();
+  const screen=graph.screens.find(item=>item.id===rename.id);
+  if(save&&screen&&next&&next!==screen.title)onRename?.(rename.id,next);
+  returnFocusId.current=rename.id;
+  setRename(undefined);
+ }
  function closeInspector(){
   const node=inspected&&screenElement(inspected.id);
   onCloseInspector?.();
   (node?.tabIndex===0?node:node?.querySelector<HTMLElement>('.screen-node-heading'))?.focus();
  }
+ function emptyCanvasTarget(target:EventTarget|null){if(!target||!('classList' in target))return false;const element=target as Element;return element.classList.contains('canvas-surface')||!!element.closest('.canvas-lines');}
+ function armEmptyClick(event:PointerEvent<HTMLElement>){emptyClick.current=undefined;if(event.button!==0||contextMenu||hideInspector||!inspected||!emptyCanvasTarget(event.target))return;emptyClick.current={x:event.clientX,y:event.clientY};}
+ function finishEmptyClick(event:PointerEvent<HTMLElement>){const start=emptyClick.current;emptyClick.current=undefined;if(!start||event.button!==0||!emptyCanvasTarget(event.target)||Math.hypot(event.clientX-start.x,event.clientY-start.y)>4)return;closeInspector();}
  return <div className="canvas-board-wrap"><div className="canvas-toolbar" role="toolbar" aria-label="Canvas zoom"><span>Drag screen headers or captures · scroll to pan{onAdd&&' · Right-click for node options'}</span><button onClick={()=>setZoom(value=>Math.max(.4,value-.1))} aria-label="Zoom out"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14"/></svg></button><span>{Math.round(zoom*100)}%</span><button onClick={()=>setZoom(value=>Math.min(1.4,value+.1))} aria-label="Zoom in"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14M12 5v14"/></svg></button><button onClick={()=>setZoom(.85)} aria-label="Reset zoom" title="Reset zoom"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 4v6h-6"/><path d="M20 10a8 8 0 1 0-2 8"/></svg></button></div>
- <div className="canvas-viewport" ref={viewportRef} onScroll={event=>{const node=event.currentTarget;onViewportChange?.({zoom,scrollLeft:node.scrollLeft,scrollTop:node.scrollTop});}} role="region" aria-label={result?'Executed screen canvas':'Screen test canvas'}><div style={{width:2700*zoom,height:boardHeight*zoom}}><div className="canvas-surface" tabIndex={onAdd||onRun?0:undefined} onContextMenu={event=>openMenu(event)} ref={surface} style={{height:boardHeight,transform:`scale(${zoom})`,'--canvas-zoom':zoom} as CSSProperties}>
+ <div className="canvas-viewport" ref={viewportRef} onScroll={event=>{const node=event.currentTarget;onViewportChange?.({zoom,scrollLeft:node.scrollLeft,scrollTop:node.scrollTop});}} role="region" aria-label={result?'Executed screen canvas':'Screen test canvas'}><div style={{width:2700*zoom,height:boardHeight*zoom}}><div className="canvas-surface" tabIndex={onAdd||onRun?0:undefined} onPointerDown={armEmptyClick} onPointerUp={finishEmptyClick} onPointerCancel={()=>{emptyClick.current=undefined;}} onContextMenu={event=>openMenu(event)} ref={surface} style={{height:boardHeight,transform:`scale(${zoom})`,'--canvas-zoom':zoom} as CSSProperties}>
  <svg className="canvas-lines" width="2700" height={boardHeight} aria-label="Screen transitions"><defs><marker id={marker} viewBox="0 0 8 8" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" refX="7" refY="4" orient="auto"><path d="M1,1 L7,4 L1,7" fill="none" stroke="context-stroke" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/></marker></defs>{!versionPreview&&graph.edges.map(edge=>{
  const from=graph.screens.find(screen=>screen.id===edge.from);const to=graph.screens.find(screen=>screen.id===edge.to);if(!from||!to)return null;
  const parallel=graph.edges.filter(item=>item.from===edge.from&&item.to===edge.to||item.from===edge.to&&item.to===edge.from);const offset=parallel.indexOf(edge)*64;const forward=to.x>=from.x;const start=[from.x+(forward?258:-8),from.y+58+offset];const end=[to.x+(forward?-8:258),to.y+58+offset];const middle=(start[0]+end[0])/2;const status=result?.edges.find(item=>item.id===edge.id)?.status;
- const highlighted=highlightedEdgeId===edge.id;
- return <g key={edge.id} role="img" aria-label={'Connection '+from.title+' to '+to.title} data-edge-id={edge.id} data-highlighted={highlighted?'true':undefined} className={(selectedEdges.has(edge.id)?'selected-transition':'unselected-transition')+(highlighted?' highlighted-transition':'')}><path d={`M${start[0]},${start[1]} C${middle},${start[1]} ${middle},${end[1]} ${end[0]},${end[1]}`} stroke={highlighted?'var(--inspector-highlight)':selectedEdges.has(edge.id)?color(status):'var(--border-strong)'} strokeWidth={highlighted?3:selectedEdges.has(edge.id)?1.25:1} fill="none" markerEnd={`url(#${marker})`} strokeDasharray={highlighted||selectedEdges.has(edge.id)?undefined:'6 5'}/><foreignObject x={middle-80} y={Math.max(4,(start[1]+end[1])/2-72)} width="160" height="48"><div className="transition-label">{edge.responseCondition}{selectedEdges.has(edge.id)&&<small>{status??'Visits '+route!.edgeIds.flatMap((id,index)=>id===edge.id?[index+1+' → '+(index+2)]:[]).join(', ')}</small>}{result&&!selectedEdges.has(edge.id)&&<small>Outside scenario</small>}</div></foreignObject></g>;
+ const highlighted=highlightedEdgeId===edge.id;const box=edgeLabelBox({x:start[0],y:start[1]},{x:end[0],y:end[1]});
+ return <g key={edge.id} role="img" aria-label={'Connection '+from.title+' to '+to.title} data-edge-id={edge.id} data-highlighted={highlighted?'true':undefined} className={(selectedEdges.has(edge.id)?'selected-transition':'unselected-transition')+(highlighted?' highlighted-transition':'')}><path d={`M${start[0]},${start[1]} C${middle},${start[1]} ${middle},${end[1]} ${end[0]},${end[1]}`} stroke={highlighted?'var(--inspector-highlight)':selectedEdges.has(edge.id)?color(status):'var(--border-strong)'} strokeWidth={highlighted?3:selectedEdges.has(edge.id)?1.25:1} fill="none" markerEnd={`url(#${marker})`} strokeDasharray={highlighted||selectedEdges.has(edge.id)?undefined:'6 5'}/><foreignObject x={box.x} y={box.y} width={box.width} height={box.height}><div className="transition-label"><span>{edge.responseCondition}</span>{selectedEdges.has(edge.id)&&<small>{status??'Visits '+route!.edgeIds.flatMap((id,index)=>id===edge.id?[index+1+' → '+(index+2)]:[]).join(', ')}</small>}{result&&!selectedEdges.has(edge.id)&&<small>Outside scenario</small>}</div></foreignObject></g>;
  })}</svg>
- {graph.screens.map(screen=>{if(versionPreview)return null;const outcome=result?.screens.find(item=>item.id===screen.id)?.status;const added=draftOverlay?.existing.find(item=>item.screenId===screen.id);return <article key={screen.id} data-screen-id={screen.id} className={'screen-node '+(added?'has-ai-draft-steps ':'')+(selectedScreens.has(screen.id)?'on-route ':'')+(selected===screen.id?'selected-screen':'')} style={{left:screen.x,top:screen.y,borderColor:selectedScreens.has(screen.id)?color(outcome):undefined}} aria-label={'Screen '+screen.title} tabIndex={onDelete||onInfo?0:undefined} onContextMenu={event=>openMenu(event,screen.id)} onKeyDown={event=>{
-  if(event.target!==event.currentTarget||!renderInspector)return;
+ {graph.screens.map(screen=>{if(versionPreview)return null;const outcome=result?.screens.find(item=>item.id===screen.id)?.status;const added=draftOverlay?.existing.find(item=>item.screenId===screen.id);const steps=screenNodeSteps(graph,route,screen.id);const editing=rename?.id===screen.id;return <article key={screen.id} data-screen-id={screen.id} className={'screen-node '+(added?'has-ai-draft-steps ':'')+(selectedScreens.has(screen.id)?'on-route ':'')+(selected===screen.id?'selected-screen':'')} style={{left:screen.x,top:screen.y,borderColor:selectedScreens.has(screen.id)?color(outcome):undefined}} aria-label={'Screen '+screen.title} tabIndex={onDelete||onInfo?0:undefined} onContextMenu={event=>openMenu(event,screen.id)} onKeyDown={event=>{
+  const tag=(event.target as HTMLElement).tagName;
+  if(tag!=='INPUT'&&tag!=='TEXTAREA'&&(event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey)&&(onDelete||onInfo||onAppend||onRename)){event.preventDefault();openMenu(event,screen.id);return;}
+  if(tag==='INPUT'||tag==='TEXTAREA'||event.target!==event.currentTarget||!renderInspector)return;
   if(event.key==='Enter'&&onSelect){event.preventDefault();focusInspector.current=screen.id;onSelect(screen.id);if(selected===screen.id)relayout(value=>value+1);}
   if(event.key==='Escape'&&inspected?.id===screen.id){event.preventDefault();closeInspector();}
  }}>
- <button className="screen-node-heading" aria-label={'Select screen '+screen.title} onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>startDrag(event,screen.id,screen.x,screen.y)} onPointerMove={event=>dragMove(event,screen.id)} onPointerUp={endDrag} onPointerCancel={endDrag} onKeyDown={event=>{const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const direction=vectors[event.key];if(!direction||!onMove)return;event.preventDefault();const amount=event.shiftKey?40:10;onMove(screen.id,Math.max(0,Math.min(2400,screen.x+direction[0]*amount)),Math.max(0,Math.min(1400,screen.y+direction[1]*amount)));}}><span className="screen-icon">▣</span><span><span className={onRename?'screen-title-placeholder':undefined}>{screen.title}</span></span><span className="node-handle"/></button>
- {onRename&&<NodeTitle screenId={screen.id} title={screen.title} onRename={title=>onRename(screen.id,title)} onSelect={()=>onSelect?.(screen.id)}/>}
- {screen.referenceScreenshot?<div className="screen-reference-frame" onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>startDrag(event,screen.id,screen.x,screen.y)} onPointerMove={event=>dragMove(event,screen.id)} onPointerUp={endDrag} onPointerCancel={endDrag}><img className="screen-reference" draggable={false} src={screen.referenceScreenshot} alt={'Reference for '+screen.title}/>{onRemoveCapture&&<button type="button" className="screen-reference-delete" aria-label={'Delete capture for '+screen.title} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onRemoveCapture(screen.id);}}><DeleteIcon/></button>}</div>:<p className="screen-capture-label">No capture yet</p>}
+ {editing?<div className="screen-node-heading" onPointerDown={event=>startDrag(event,screen.id,screen.x,screen.y)} onPointerMove={event=>dragMove(event,screen.id)} onPointerUp={endDrag} onPointerCancel={endDrag}><span className="screen-icon">▣</span><input ref={titleInput} className="screen-node-title" aria-label={'Screen title for '+screen.title} maxLength={120} value={rename.draft} onPointerDown={event=>event.stopPropagation()} onChange={event=>setRename(current=>current&&current.id===screen.id?{...current,draft:event.target.value}:current)} onBlur={event=>{if(!closingRename.current)finishRename(true,event.currentTarget.value);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();event.stopPropagation();finishRename(true,event.currentTarget.value);}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();finishRename(false);}}}/><span className="node-handle"/></div>:<button className="screen-node-heading" aria-label={'Select screen '+screen.title} onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>startDrag(event,screen.id,screen.x,screen.y)} onPointerMove={event=>dragMove(event,screen.id)} onPointerUp={endDrag} onPointerCancel={endDrag} onKeyDown={event=>{const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};const direction=vectors[event.key];if(!direction||!onMove)return;event.preventDefault();const amount=event.shiftKey?40:10;onMove(screen.id,Math.max(0,Math.min(2400,screen.x+direction[0]*amount)),Math.max(0,Math.min(1400,screen.y+direction[1]*amount)));}}><span className="screen-icon">▣</span><span>{screen.title}</span><span className="node-handle"/></button>}
+ {screen.referenceScreenshot?<div className="screen-reference-frame" onClick={()=>onSelect?.(screen.id)} onPointerDown={event=>startDrag(event,screen.id,screen.x,screen.y)} onPointerMove={event=>dragMove(event,screen.id)} onPointerUp={endDrag} onPointerCancel={endDrag}><img className="screen-reference" draggable={false} src={screen.referenceScreenshot} alt={'Reference for '+screen.title}/>{onRemoveCapture&&<button type="button" className="screen-reference-delete" aria-label={'Delete capture for '+screen.title} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onRemoveCapture(screen.id);}}><DeleteIcon/></button>}</div>:null}
+ {!!steps.length&&<ol className="screen-node-steps">{steps.map((step,index)=>{const boundary=index>0&&step.visit!==steps[index-1].visit;const className=[step.specified?'is-specified':'',boundary?'starts-visit':''].filter(Boolean).join(' ');return <li key={index} className={className||undefined}>{step.text}</li>;})}</ol>}
  {added&&<ol className="ai-draft-steps ai-draft-on-screen" data-testid="ai-draft-existing-steps">{added.steps.map((step,index)=><li key={index} data-testid="ai-draft-step" className={step.specified?'is-specified':undefined}>{step.text}</li>)}</ol>}
  {(outcome==='passed'||outcome==='failed')&&<p className={'node-outcome outcome '+outcome}>{outcome==='passed'?'✓':outcome==='failed'?'✕':'○'} {outcome}</p>}
  </article>;})}
@@ -323,12 +393,13 @@ export function CanvasBoard({onInspect,graph,pathId,result,onMove,onSelect,selec
  {versionPreview&&<VersionPreviewLayer preview={versionPreview}/>}
  {!graph.screens.length&&!draftOverlay?.nodes.length&&!versionPreview&&<div className="canvas-empty"><h3>Build your screen map</h3><p>Add a screen and describe its checks. Screen titles are descriptive.</p></div>}
  </div></div></div>
- {contextMenu&&(contextMenu.screenId?onDelete||onInfo||onAppend:onAdd||onRun)&&<div ref={menu} className="canvas-context-menu" role="menu" aria-label={contextMenu.screenId?'Node menu':'Canvas menu'} style={{left:contextMenu.left,top:contextMenu.top}} onContextMenu={event=>event.preventDefault()} onKeyDown={event=>{
+ {contextMenu&&(contextMenu.screenId?onDelete||onInfo||onAppend||onRename:onAdd||onRun)&&<div ref={menu} className="canvas-context-menu" role="menu" aria-label={contextMenu.screenId?'Node menu':'Canvas menu'} style={{left:contextMenu.left,top:contextMenu.top}} onContextMenu={event=>event.preventDefault()} onKeyDown={event=>{
   if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
   event.preventDefault();const items=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const index=items.indexOf(document.activeElement as HTMLButtonElement);
   const next=event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length;items[next]?.focus();
  }}>
  {contextMenu.screenId&&onAppend&&<button role="menuitem" aria-label={'Add '+graph.screens.find(screen=>screen.id===contextMenu.screenId)?.title+' to scenario sequence'} onClick={()=>{setContextMenu(undefined);onAppend(contextMenu.screenId!);}}>Add to sequence</button>}
+ {contextMenu.screenId&&onRename&&<button role="menuitem" onClick={()=>{const id=contextMenu.screenId!;setContextMenu(undefined);beginRename(id);}}>Rename</button>}
  {contextMenu.screenId&&onInfo&&<button role="menuitem" onClick={()=>{setContextMenu(undefined);onInfo(contextMenu.screenId!);}}>Node info</button>}
  {(contextMenu.screenId?onDelete:onAdd)&&<button role="menuitem" disabled={!contextMenu.screenId&&graph.screens.length>=40} onClick={()=>{setContextMenu(undefined);if(contextMenu.screenId)onDelete?.(contextMenu.screenId);else onAdd?.(contextMenu.x,contextMenu.y);}}>{contextMenu.screenId?'Delete node':'Add node'}</button>}
  {!contextMenu.screenId&&onRun&&<button role="menuitem" onClick={()=>{setContextMenu(undefined);onRun();}}>Run scenario</button>}
@@ -609,14 +680,6 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
   if(edges.length>1)throw new Error('Several connections reach this node. Choose the named connection at the current end.');
   appendConnection(edges[0].id);
  }
- function copyToVisit(screenId:string,test:CanvasTest,index:number){
-  let next=freezeVisitOperations(graph!);const current=next.paths.find(item=>item.id===pathId)!;const visit=routeVisits(next,current)[index];const id=identity();
-  const copy={...structuredClone(test),id,scenarioIds:scenarioId?[scenarioId]:undefined};next={...next,screens:next.screens.map(screen=>screen.id===screenId?{...screen,tests:[...screen.tests,copy]}:screen)};
-  next=updateVisitOperations(next,pathId,visit.id,[...visitOperations(next,current,index),id]);
-  const connections=next.edges.filter(edge=>edge.from===screenId&&edgeActions(edge).includes(test.id));
-  if(!test.check&&connections.length===1){const edge=connections[0];next={...next,edges:next.edges.map(item=>item.id===edge.id?{...item,actionTestIds:[...edgeActions(item),id]}:item)};next=connectCanvasAction(next,screenId,id,edge.to,pathId).graph;}
-  changeChecks(next);setExpandedRow(id);setSelectedVisit(visit.id);setSelected(screenId);
- }
  function membershipControl(test:CanvasTest){return <details className="operation-scenarios"><summary>Scenarios</summary>{scenarios.map(item=><label className="checkbox-label" key={item.id}><input type="checkbox" aria-label={'Use '+canvasTestLabel(test)+' in '+item.name} checked={assignedScenarios(test).includes(item.id)} onChange={event=>perform(()=>assignOperation(test,item.id,event.target.checked))}/>{item.name}</label>)}</details>;}
  function addVisitStep(visitId:string,command:string){
   if(command==='runScript'){
@@ -780,7 +843,6 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  {edge&&<button aria-label={'Add action to connection '+edge.responseCondition} disabled={operations.length>=30||node.tests.length>=600} onClick={()=>perform(()=>addAction(screenId,edge.id))}>Add action</button>}
  {!edge&&<>{!scenarioMode&&graph!.edges.filter(edge=>edge.from===screenId&&edge.actionTestIds!==undefined).map(edge=><div key={edge.id}>{renderChecks(screenId,edge.id)}</div>)}{visit&&renderAnchored(pendingScripts(visit.id),orderedSteps().length,visit.id)}{visit?(!runLocked&&<AddStepMenu disabled={!!newStep||operations.length>=30||node.tests.length>=600} includeScript={offersScript(visit.id)} onAdd={command=>perform(()=>addVisitStep(visit.id,command))}/>):<><button aria-label={'Add action to '+node.title} disabled={operations.length>=30||node.tests.length>=600} onClick={()=>perform(()=>addAction(screenId,undefined,visitIndex))}>Add action</button>
  <button aria-label={'Add check to '+node.title} disabled={operations.length>=30||node.tests.length>=600} onClick={()=>perform(()=>addCheck(screenId,visitIndex))}>Add check</button></>}
-{visit&&node.tests.some(test=>isAuthored(test)&&!visitIds?.includes(test.id))&&<details className="unused-operations"><summary>Copy existing steps</summary>{node.tests.filter(test=>isAuthored(test)&&!visitIds?.includes(test.id)).map(test=><button key={test.id} aria-label={'Copy '+canvasTestLabel(test)+' to Visit '+(visitIndex!+1)} onClick={()=>perform(()=>copyToVisit(screenId,test,visitIndex!))}>{canvasTestLabel(test)}</button>)}</details>}
 {scenarioMode&&!visit&&scenarioId&&node.tests.some(test=>isAuthored(test)&&!visibleOperation(test))&&<details className="unused-operations"><summary>Use existing actions/checks</summary>{node.tests.filter(test=>isAuthored(test)&&!visibleOperation(test)).map(test=><div key={test.id}><p>{canvasTestLabel(test)}</p>{membershipControl(test)}</div>)}</details>}
 </>}
  </fieldset>;}

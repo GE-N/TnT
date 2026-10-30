@@ -5,13 +5,21 @@ import { JSDOM } from "jsdom";
 import { act, createElement, useState, type ChangeEvent } from "react";
 import { refreshChecks, writeChecks } from "../shared/canvas-authoring.js";
 import type { CanvasGraph, CanvasTest } from "../server/canvas.js";
-import type { Rect } from "../src/inspector-placement.js";
+import { inspectorGap, inspectorWidth, type Rect } from "../src/inspector-placement.js";
+import { openStepMenuItem } from "./step-menu.js";
 
 // Compare DOM nodes by identity: assert's diff of a jsdom node exhausts the heap.
 const same = (actual: unknown, expected: unknown, message = "same node") =>
   assert.ok(actual === expected, message);
 const absent = (actual: unknown, message = "expected no node") =>
   assert.ok(actual == null, message);
+async function clickStep(document: Document, scope: ParentNode, label: string) {
+  await act(async () => {
+    const button = openStepMenuItem(document, label, scope);
+    assert.ok(button, label);
+    button.click();
+  });
+}
 
 const reference = {
   kind: "step" as const,
@@ -109,7 +117,7 @@ type View = {
 };
 
 async function mount(
-  options: { initialView?: View; rects?: Map<string, Rect>; graph?:CanvasGraph; workbench?:boolean } = {},
+  options: { initialView?: View; rects?: Map<string, Rect>; graph?:CanvasGraph; workbench?:boolean; windowSize?:{width:number;height:number} } = {},
 ) {
   const dom = new JSDOM('<div id="root"'+(options.workbench?' class="workbench"':'')+'></div>', { url: "http://localhost/" });
   const window = dom.window;
@@ -169,11 +177,11 @@ async function mount(
     },
   });
   Object.defineProperty(window, "innerWidth", {
-    value: 1200,
+    value: options.windowSize?.width ?? 1200,
     configurable: true,
   });
   Object.defineProperty(window, "innerHeight", {
-    value: 800,
+    value: options.windowSize?.height ?? 800,
     configurable: true,
   });
   const { createRoot } = await import("react-dom/client");
@@ -726,7 +734,7 @@ test("inspector styles keep 300px width, 44px targets, 12px text and the #0a63d1
       `${selector} is raised to 12px`,
     );
   assert.match(minimum.body, /font-size:12px/);
-  assert.match(css, /\.transition-label\{font:12px\/1\.5 system-ui;/);
+  assert.match(css, /\.transition-label\{font:11px\/1\.35 system-ui;/);
 });
 
 test('visit menu filters groups, adds with arrows/Enter and restores focus on Escape',async()=>{
@@ -846,7 +854,7 @@ test('an external Undo refreshes an open draft without moving focus or writing t
 test('summaries retain command quotes and destination, and last-step Move down is disabled',async()=>{
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
-  assert.equal(page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary')!.textContent,'2 tapOn "Avatar" → Profile');assert.equal(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Move action 1 down"]')!.disabled,true);
+  assert.equal(page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary')!.textContent,'2 tapOn "Avatar" → Profile');await act(async()=>{const item=openStepMenuItem(page.document,'Move action 1 down',page.card()!);assert.equal(item!.disabled,true);});
   const before=page.saved();const graph={...before.graph,edges:[{...before.graph.edges[0],id:'foreign',from:'settings',to:'home'},...before.graph.edges]};await page.restore({graph,yaml:before.yaml});assert.equal(page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary')!.textContent,'2 tapOn "Avatar" → Profile','Destination lookup must be scoped to this screen');
  }finally{await page.close();}
 });
@@ -886,25 +894,129 @@ test('first valid new step and destination commit once and Undo restores exact g
 test('visit review styles retain minimum hit targets and accessible validation colours',()=>{
  const css=readFileSync(new URL('../src/style.css',import.meta.url),'utf8');const rules=[...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([,selector,body])=>({selector:selector.trim(),body}));
  const rule=(selector:string)=>rules.find(item=>item.selector===selector)!.body;
- for(const selector of ['.floating-inspector .visit-step-summary','.visit-step-actions summary','.visit-step-actions button','.navigation-hint button,.visit-yaml-link'])assert.match(rule(selector),/min-height:44px/);
- assert.match(rule('.visit-step-actions summary'),/min-width:44px/);assert.match(rule('.navigation-hint button,.visit-yaml-link'),/font-size:12px/);
+ for(const selector of ['.floating-inspector .visit-step-summary','.visit-step-actions .step-actions-trigger','.step-actions-menu [role=menuitem]','.navigation-hint button,.visit-yaml-link'])assert.match(rule(selector),/min-height:44px/);
+ assert.match(rule('.visit-step-actions .step-actions-trigger'),/min-width:44px/);assert.match(rule('.visit-step-actions .step-actions-trigger'),/background:transparent/);
+ const triggerHover=rule('.visit-step:hover .step-actions-trigger,.script-row:hover .step-actions-trigger,.visit-step-actions .step-actions-trigger:hover:not(:disabled),.visit-step-actions .step-actions-trigger[aria-expanded="true"]');
+ assert.match(triggerHover,/background:var\(--subtle\)/);assert.doesNotMatch(triggerHover,/--surface/);
+ assert.match(rule('.step-actions-menu'),/position:fixed/);assert.match(rule('.step-actions-menu'),/z-index:70/);
+ assert.match(rule('.navigation-hint button,.visit-yaml-link'),/font-size:12px/);
  assert.match(rule('.visit-selector-error'),/color:#b3261e/);assert.match(rule('.visit-selector-error'),/font-size:12px/);assert.match(rule('.visit-inline-fields input[aria-invalid=true]'),/border:2px solid #b3261e/);
  assert.match(css,/--warning: #8a4b00/);assert.match(css,/--warning-surface: #fff4e5/);assert.match(rule('.navigation-hint'),/color:var\(--warning\)/);assert.match(rule('.navigation-hint'),/background:var\(--warning-surface\)/);
  assert.match(rule('.floating-inspector .selected-visit>.visit-section-heading'),/width:calc\(100% \+ 16px\)/);
+});
+
+test('step menu portals above later rows, flips, and Esc returns to the trigger',async()=>{
+ const graph=structuredClone(canvas);graph.screens[0].tests.push(check('home-extra','Extra'));graph.paths[0].visits![0]={...graph.paths[0].visits![0],operationIds:['home-ready','avatar','home-extra']};
+ const rects=new Map([['step-trigger',{left:400,top:700,width:44,height:44}]]);
+ const page=await mount({graph,rects,initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const rows=[...page.card()!.querySelectorAll<HTMLElement>('.visit-step')];
+  assert.equal(rows.length,3);
+  const trigger=rows[0].querySelector<HTMLButtonElement>('.step-actions-trigger')!;
+  trigger.dataset.layout='step-trigger';
+  Object.defineProperty(page.window.HTMLElement.prototype,'offsetHeight',{configurable:true,get(){return this.classList.contains('step-actions-menu')?200:0;}});
+  Object.defineProperty(page.window.HTMLElement.prototype,'offsetWidth',{configurable:true,get(){return this.classList.contains('step-actions-menu')?180:0;}});
+  trigger.focus();
+  await page.press(trigger,'Enter');
+  const menu=page.document.querySelector<HTMLElement>('.step-actions-menu')!;
+  assert.equal(menu.getAttribute('role'),'menu');
+  assert.equal(menu.parentElement,page.document.body);
+  assert.equal(page.card()!.contains(menu),false);
+  for(const row of rows)assert.equal(row.contains(menu),false);
+  assert.equal(menu.style.top,'500px');assert.equal(menu.style.left,'264px');
+  const items=[...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
+  same(page.document.activeElement,items[0]);
+  await page.press(page.document.activeElement!,'ArrowDown');
+  same(page.document.activeElement,items[1]);
+  await page.press(page.document.activeElement!,'Home');
+  same(page.document.activeElement,items[0]);
+  await page.press(page.document.activeElement!,'End');
+  same(page.document.activeElement,items.at(-1)!);
+  await page.click(rows[2].querySelector<HTMLButtonElement>('.step-actions-trigger')!);
+  assert.equal(page.document.querySelectorAll('.step-actions-menu').length,1);
+  assert.equal(trigger.getAttribute('aria-expanded'),'false');
+  await page.press(page.document.activeElement!,'Escape');
+  same(page.document.activeElement,rows[2].querySelector('.step-actions-trigger'));
+  assert.ok(page.card(),'Esc from the step menu leaves the inspector open');
+  await page.press(rows[2].querySelector('.step-actions-trigger')!,' ');
+  assert.ok(page.document.querySelector('.step-actions-menu'));
+  await page.press(page.document.activeElement!,'Tab');
+  absent(page.document.querySelector('.step-actions-menu'));
+  await page.press(rows[0].querySelector('.step-actions-trigger')!,'Enter');
+  await act(async()=>page.document.body.dispatchEvent(new page.window.PointerEvent('pointerdown',{bubbles:true,cancelable:true})));
+  absent(page.document.querySelector('.step-actions-menu'));
+  await page.press(rows[0].querySelector('.step-actions-trigger')!,'Enter');
+  await act(async()=>page.card()!.dispatchEvent(new page.window.Event('scroll')));
+  absent(page.document.querySelector('.step-actions-menu'),'Inspector scroll closes the menu');
+  assert.ok(page.card());
+ }finally{await page.close();}
+});
+
+test('step menu Tab, scroll, and resize return focus to the trigger',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  const trigger=()=>page.card()!.querySelector<HTMLButtonElement>('.visit-step .step-actions-trigger')!;
+  trigger().focus();
+  await page.press(trigger(),'Enter');
+  assert.equal(page.document.activeElement?.getAttribute('role'),'menuitem');
+  assert.equal(await page.press(page.document.activeElement!,'Tab'),true);
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,trigger(),'Tab returns focus to the trigger');
+  assert.notEqual(page.document.activeElement,page.document.body);
+  assert.ok(page.card(),'Tab from the step menu leaves the inspector open');
+  await page.press(trigger(),'Enter');
+  await act(async()=>{
+   const event=new page.window.KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true});
+   page.document.activeElement!.dispatchEvent(event);
+   assert.equal(event.defaultPrevented,true);
+  });
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,trigger(),'Shift+Tab returns focus to the trigger');
+  await page.press(trigger(),'Enter');
+  assert.equal(page.document.activeElement?.getAttribute('role'),'menuitem');
+  await act(async()=>page.card()!.dispatchEvent(new page.window.Event('scroll')));
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,trigger(),'Scroll returns focus to the trigger');
+  assert.ok(page.card(),'Scroll from the step menu leaves the inspector open');
+  await page.press(trigger(),'Enter');
+  const heading=page.heading(1,'Home');
+  heading.focus();
+  await act(async()=>page.card()!.dispatchEvent(new page.window.Event('scroll')));
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,heading,'Scroll leaves focus outside the menu where it is');
+  await page.press(trigger(),'Enter');
+  assert.equal(page.document.activeElement?.getAttribute('role'),'menuitem');
+  await act(async()=>page.window.dispatchEvent(new page.window.Event('resize')));
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,trigger(),'Resize returns focus to the trigger');
+  assert.ok(page.card());
+  await page.press(trigger(),'Enter');
+  heading.focus();
+  await act(async()=>page.window.dispatchEvent(new page.window.Event('resize')));
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,heading,'Resize leaves focus outside the menu where it is');
+  await page.press(trigger(),'Enter');
+  assert.equal(page.document.activeElement?.getAttribute('role'),'menuitem');
+  await act(async()=>page.document.body.dispatchEvent(new page.window.PointerEvent('pointerdown',{bubbles:true,cancelable:true})));
+  absent(page.document.querySelector('.step-actions-menu'));
+  same(page.document.activeElement,page.document.body,'Outside pointerdown does not pull focus back to the trigger');
+  assert.ok(page.card());
+ }finally{await page.close();}
 });
 
 test('step menu moves retain focus, announce position and undo in one change',async()=>{
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
   const before=page.saved();const row=()=>page.card()!.querySelector<HTMLElement>('[data-operation-id="home-ready"]')!;
-  const menu=row().querySelector<HTMLElement>('[aria-label="Step actions"]');assert.ok(menu);
-  assert.equal(row().querySelector<HTMLButtonElement>('[aria-label="Move check 1 up"]')!.disabled,true);
-  await page.click(row().querySelector<HTMLButtonElement>('[aria-label="Move check 1 down"]')!);
+  const trigger=()=>row().querySelector<HTMLButtonElement>('.step-actions-trigger')!;
+  assert.equal(trigger().getAttribute('aria-label'),'Step actions');assert.equal(trigger().getAttribute('aria-haspopup'),'menu');
+  await act(async()=>{const item=openStepMenuItem(page.document,'Move check 1 up',row());assert.equal(item!.disabled,true);});
+  await clickStep(page.document,row(),'Move check 1 down');
   assert.deepEqual(page.saved().graph.paths[0].visits![0].operationIds,['avatar','home-ready']);
   same(page.document.activeElement,row().querySelector('.visit-step-summary'));
   assert.match(page.card()!.querySelector('[role=status]')!.textContent!,/Step 1 moved to position 2/);
-  assert.equal(row().querySelector<HTMLButtonElement>('[aria-label="Move check 1 down"]')!.disabled,true);
-  assert.equal(row().querySelector('details')!.open,false);
+  assert.equal(page.document.querySelector('.step-actions-menu'),null);assert.equal(trigger().getAttribute('aria-expanded'),'false');
+  await act(async()=>{const item=openStepMenuItem(page.document,'Move check 1 down',row());assert.equal(item!.disabled,true);});
   await page.click([...page.document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Undo canvas deletion')!);
   assert.deepEqual(page.saved(),before);
  }finally{await page.close();}
@@ -930,13 +1042,13 @@ test('delete step offers live Undo toast and restores focus without a dialog',as
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
   const before=page.saved();const row=page.card()!.querySelector<HTMLElement>('[data-operation-id="home-ready"]')!;
-  await page.click(row.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  await clickStep(page.document,row,'Delete check 1');
   absent(page.document.querySelector('[role=alertdialog]'));absent(page.card()!.querySelector('[data-operation-id="home-ready"]'));
   const toast=page.document.querySelector<HTMLElement>('.step-undo-toast[role=status]');assert.ok(toast);assert.match(toast.textContent!,/Step 1 deleted · Undo/);
   const undo=toast.querySelector<HTMLButtonElement>('button')!;assert.equal(undo.disabled,false);
   same(page.document.activeElement,page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary'));
   await page.click(undo);assert.deepEqual(page.saved(),before);same(page.document.activeElement,page.card()!.querySelector('[data-operation-id="home-ready"] .visit-step-summary'));absent(page.document.querySelector('.step-undo-toast'));
-  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete action 1"]')!);
+  await clickStep(page.document,page.card()!,'Delete action 1');
   assert.equal(page.saved().graph.paths[0].edgeIds.length,0,'only outgoing action cuts the route');
   same(page.document.activeElement,page.card()!.querySelector('.add-visit-step'));
   await page.click(page.card()!.querySelector<HTMLButtonElement>('.visit-step-summary')!);
@@ -950,7 +1062,7 @@ test('deletion toast expires and cannot revive when the deleted snapshot returns
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
   context.mock.timers.enable({apis:['setTimeout']});
-  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  await clickStep(page.document,page.card()!,'Delete check 1');
   const deleted=page.saved();assert.ok(page.document.querySelector('.step-undo-toast'));
   await act(async()=>context.mock.timers.tick(8001));absent(page.document.querySelector('.step-undo-toast'));
   await page.restore(deleted);absent(page.document.querySelector('.step-undo-toast'));
@@ -984,7 +1096,7 @@ test('switching to another path invalidates step Undo without moving focus or re
  const graph=structuredClone(canvas);graph.paths.push({id:'other',name:'Other',scenarioId:'other-scenario',screenId:'settings',edgeIds:[],visits:[{id:'other-visit',operationIds:['settings-ready']}]});
  const page=await mount({graph,initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
-  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  await clickStep(page.document,page.card()!,'Delete check 1');
   assert.ok(page.document.querySelector('.step-undo-toast'),'deletion offers Undo in its original path');
   const deleted=page.saved();const control=page.document.querySelector<HTMLSelectElement>('[aria-label="Selected scenario path"]')!;
   async function choose(id:string){await act(async()=>{control.focus();Object.getOwnPropertyDescriptor(page.window.HTMLSelectElement.prototype,'value')!.set!.call(control,id);control.dispatchEvent(new page.window.Event('change',{bubbles:true}));});}
@@ -1038,7 +1150,7 @@ test('temporary disablement hides step Undo without discarding it or restarting 
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
   context.mock.timers.enable({apis:['setTimeout']});const before=page.saved();
-  const remove=()=>page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  const remove=()=>clickStep(page.document,page.card()!,'Delete check 1');
   await remove();await page.disable(true);absent(page.document.querySelector('.step-undo-toast'));
   await act(async()=>context.mock.timers.tick(1000));await page.disable(false);
   const undo=page.document.querySelector<HTMLButtonElement>('.step-undo-toast button');assert.ok(undo,'temporary submit/run state must preserve matching Undo');assert.equal(undo.disabled,false);
@@ -1054,11 +1166,11 @@ test('menu moves stay adjacent in the full visit order including repair steps',a
  const page=await mount({graph:graphWithRepairStep(),initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
   const row=page.card()!.querySelector<HTMLElement>('[data-operation-id="avatar"]')!;
-  await page.click(row.querySelector<HTMLButtonElement>('[aria-label="Move action 1 up"]')!);
+  await clickStep(page.document,row,'Move action 1 up');
   assert.deepEqual(page.saved().graph.paths[0].visits![0].operationIds,['home-ready','avatar','profile-ready']);
   assert.match(row.querySelector('.visit-step-summary')!.textContent!,/^2 /);same(page.document.activeElement,row.querySelector('.visit-step-summary'));
-  assert.equal(row.querySelector<HTMLButtonElement>('[aria-label="Move action 1 down"]')!.disabled,false,'a repair step still occupies the next visit position');
-  await page.click(row.querySelector<HTMLButtonElement>('[aria-label="Move action 1 down"]')!);
+  await act(async()=>{const item=openStepMenuItem(page.document,'Move action 1 down',row);assert.equal(item!.disabled,false,'a repair step still occupies the next visit position');});
+  await clickStep(page.document,row,'Move action 1 down');
   assert.deepEqual(page.saved().graph.paths[0].visits![0].operationIds,['home-ready','profile-ready','avatar']);
  }finally{await page.close();}
 });
@@ -1077,16 +1189,173 @@ test('drag targets use full visit positions across repair steps and one Undo res
 test('delete focus skips repair steps to the next editable step',async()=>{
  const page=await mount({graph:graphWithRepairStep(),initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
-  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);
+  await clickStep(page.document,page.card()!,'Delete check 1');
   same(page.document.activeElement,page.card()!.querySelector('[data-operation-id="avatar"] .visit-step-summary'),'repair rows must not divert next-step focus to Add step');
+ }finally{await page.close();}
+});
+
+test('Node details omits Copy existing steps and still lists unassigned actions before a start',async()=>{
+ const withVisit=structuredClone(canvas);withVisit.screens[0].tests.push(tap('spare','Spare'));
+ const started=await mount({graph:withVisit,initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ try{
+  assert.equal([...started.card()!.querySelectorAll('summary')].some(node=>node.textContent==='Copy existing steps'),false);
+  assert.equal([...started.card()!.querySelectorAll('summary')].some(node=>node.textContent==='Use existing actions/checks'),false);
+  assert.ok(started.card()!.querySelector('[aria-label="Check 1 selector"]'));
+ }finally{await started.close();}
+ const beforeStart=structuredClone(canvas);beforeStart.paths=[{id:'route',name:'Main',scenarioId:'main',edgeIds:[]}];
+ const unstarted=await mount({graph:beforeStart,initialView:{selectedScreenId:'home'}});
+ try{
+  const summaries=[...unstarted.card()!.querySelectorAll('summary')].map(node=>node.textContent);
+  assert.equal(summaries.includes('Copy existing steps'),false);
+  assert.ok(summaries.includes('Use existing actions/checks'));
+ }finally{await unstarted.close();}
+});
+
+test('a primary click on empty canvas closes Node details and a longer drag does not',async()=>{
+ const page=await mount();
+ const gesture=async(target:Element,x:number,y:number,x2=x,y2=y,button=0)=>act(async()=>{
+  const event=(type:string,clientX:number,clientY:number)=>target.dispatchEvent(new page.window.PointerEvent(type,{bubbles:true,cancelable:true,clientX,clientY,button,pointerId:1}));
+  event('pointerdown',x,y);event('pointerup',x2,y2);
+ });
+ try{
+  const surface=page.document.querySelector<HTMLElement>('.canvas-surface')!;
+  await gesture(surface,40,40);
+  absent(page.card());
+  absent(page.document.querySelector('.selected-screen'));
+  await page.select('Profile');
+  assert.ok(page.card());
+  await gesture(surface,40,40);
+  absent(page.card(),'A click on empty canvas closes the inspector');
+  absent(page.document.querySelector('.selected-screen'));
+  same(page.document.activeElement,page.node('profile'),'Focus returns to the screen, not the document body');
+  await page.select('Profile');
+  await gesture(surface,40,40,45,40);
+  assert.ok(page.card(),'Moving more than 4px does not close');
+  assert.ok(page.node('profile').classList.contains('selected-screen'));
+  await gesture(surface,40,40,44,40);
+  absent(page.card(),'A release within 4px still closes');
+  await page.select('Settings');
+  const home=page.document.querySelector<HTMLElement>('[aria-label="Select screen Home"]')!;
+  await act(async()=>{home.dispatchEvent(new page.window.PointerEvent('pointerdown',{bubbles:true,cancelable:true,clientX:8,clientY:8,button:0,pointerId:1}));home.dispatchEvent(new page.window.PointerEvent('pointerup',{bubbles:true,cancelable:true,clientX:8,clientY:8,button:0,pointerId:1}));home.click();});
+  assert.equal(page.card()!.querySelector('h3')!.textContent,'Home','A screen click selects instead of closing');
+  assert.ok(page.node('home').classList.contains('selected-screen'));
+  const edge=page.document.querySelector('.canvas-lines path')!;
+  await gesture(edge,80,80);
+  absent(page.card(),'A click on the edge SVG closes the inspector');
+  same(page.document.activeElement,page.node('home'));
+  await page.select('Profile');
+  await gesture(surface,20,20,20,20,2);
+  assert.ok(page.card(),'A secondary button does not close');
+  await act(async()=>surface.dispatchEvent(new page.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));
+  assert.ok(page.document.querySelector('[role=menu]'));
+  await gesture(surface,30,30);
+  absent(page.document.querySelector('[role=menu]'));
+  assert.ok(page.card(),'Dismissing the canvas menu does not close the inspector');
+  assert.ok(page.node('profile').classList.contains('selected-screen'));
+  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Close Profile inspector"]')!);
+  absent(page.card());
+  absent(page.document.querySelector('.selected-screen'));
+  await page.select('Profile');
+  await page.press(page.card()!,'Escape');
+  absent(page.card(),'Esc still closes');
+  same(page.document.activeElement,page.node('profile'));
  }finally{await page.close();}
 });
 
 test('a graph edit while temporarily disabled permanently invalidates deletion Undo',async()=>{
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
-  await page.click(page.card()!.querySelector<HTMLButtonElement>('[aria-label="Delete check 1"]')!);const deleted=page.saved();
+  await clickStep(page.document,page.card()!,'Delete check 1');const deleted=page.saved();
   await page.disable(true);const edited=structuredClone(deleted);edited.graph.screens[0].title='Edited Home';await page.restore(edited);
   await page.restore(deleted);await page.disable(false);absent(page.document.querySelector('.step-undo-toast'),'reverting a later edit must not revive a discarded Undo');
  }finally{await page.close();}
+});
+
+const dockedAiField: Rect = { left: 440, top: 832, width: 560, height: 44 };
+const dockedScenarios: Rect = { left: 24, top: 168, width: 280, height: 560 };
+
+function overlaps(a: Rect, b: Rect) {
+  const width = Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left);
+  const height = Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
+  return width > 0 && height > 0;
+}
+
+async function mountDockedWorkbench(node: Rect) {
+  const page = await mount({
+    workbench: true,
+    windowSize: { width: 1440, height: 900 },
+    initialView: { selectedScreenId: "home" },
+    rects: new Map<string, Rect>([
+      ["viewport", { left: 0, top: 0, width: 1440, height: 900 }],
+      ["home", node],
+    ]),
+  });
+  const panel = page.document.createElement("aside");
+  panel.className = "scenario-details-panel";
+  panel.dataset.layout = "scenarios-panel";
+  page.rects.set("scenarios-panel", dockedScenarios);
+  const field = page.document.createElement("div");
+  field.className = "ai-flow-field";
+  field.dataset.layout = "ai-field";
+  page.rects.set("ai-field", dockedAiField);
+  page.document.getElementById("root")!.append(panel, field);
+  await page.relayout();
+  return page;
+}
+
+function popupBox(page: Awaited<ReturnType<typeof mountDockedWorkbench>>): Rect {
+  const place = page.placement();
+  const maxHeight = Number.parseFloat(page.card()!.style.maxHeight);
+  return { left: place.left, top: place.top, width: inspectorWidth, height: Math.min(400, maxHeight) };
+}
+
+function assertClearOfDocks(page: Awaited<ReturnType<typeof mountDockedWorkbench>>) {
+  const popup = popupBox(page);
+  assert.equal(overlaps(popup, dockedAiField), false, "popup covers the AI field");
+  assert.equal(overlaps(popup, dockedScenarios), false, "popup covers the Scenarios panel");
+}
+
+test("a mid-canvas node keeps the popup on its right when the AI field is docked", async () => {
+  const node: Rect = { left: 480, top: 250, width: 160, height: 86 };
+  const page = await mountDockedWorkbench(node);
+  try {
+    assert.equal(page.placement().side, "right");
+    assert.equal(page.placement().left, node.left + node.width + inspectorGap);
+    assert.equal(page.placement().top, node.top);
+    assertClearOfDocks(page);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a node near the right edge flips the popup to its left", async () => {
+  const node: Rect = { left: 1120, top: 250, width: 160, height: 86 };
+  const page = await mountDockedWorkbench(node);
+  try {
+    assert.equal(page.placement().side, "left");
+    assert.equal(page.placement().left + inspectorWidth, node.left - inspectorGap);
+    assert.equal(page.placement().top, node.top);
+    assertClearOfDocks(page);
+  } finally {
+    await page.close();
+  }
+});
+
+test("pan and zoom keep the popup beside the selected node", async () => {
+  const node: Rect = { left: 480, top: 250, width: 160, height: 86 };
+  const page = await mountDockedWorkbench(node);
+  try {
+    const moved: Rect = { left: 640, top: 320, width: 150, height: 90 };
+    page.rects.set("home", moved);
+    await act(async () => {
+      page.window.dispatchEvent(new page.window.Event("scroll"));
+      page.window.dispatchEvent(new page.window.Event("resize"));
+    });
+    assert.equal(page.placement().side, "right");
+    assert.equal(page.placement().left, moved.left + moved.width + inspectorGap);
+    assert.equal(page.placement().top, moved.top);
+    assertClearOfDocks(page);
+  } finally {
+    await page.close();
+  }
 });

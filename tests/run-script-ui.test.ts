@@ -11,6 +11,7 @@ import {approveScriptTrust} from '../src/run-script-client.js';
 import {importFilenameClaim} from '../src/workspace-transfer.js';
 import {anchorForNewScript,anchorMatches,anchorTargetsDraft,batchReasonLabel,batchSummary,batchWithScriptBlocks,blockDisplayMessage,blocksFor,DRAFT_STEP_TEXT,endAnchorFingerprint,evidenceScrubFailed,importedNeedsTrust,moveScript,newScriptId,orderedScenarioSteps,readScriptRun,reservedPlacements,runHitCap,scenariosForSave,scenarioShowsMockVariables,scriptBlock,scriptFirstLine,scriptFollowsFailure,scriptRowView,scriptSourceLine,sha256,stableScriptOrder,stepNotRun,trustFor,untrustedCount,SCRIPT_EXAMPLE,SCRIPT_TIMEOUT,SCRUB_FAILED_TEXT,TRUST_LOAD_TEXT,type OrderedStep,type ScriptRecord} from '../src/run-script.js';
 import type {RunScriptModel} from '../src/run-script-ui.js';
+import {openStepMenuItem} from './step-menu.js';
 
 const fingerprint='ab'.repeat(32);
 const other='cd'.repeat(32);
@@ -301,9 +302,12 @@ async function mount(seed:ScriptRecord[]=[],granted:ScriptTrust[]=[]){
 }
 
 async function click(document:Document,selector:string){
-  const node=document.querySelector<HTMLElement>(selector);
-  assert.ok(node,selector);
-  await act(async()=>node.click());
+  await act(async()=>{
+    const label=selector.match(/^\[aria-label="([^"]+)"\]$/)?.[1];
+    const node=document.querySelector<HTMLElement>(selector)??(label?openStepMenuItem(document,label):undefined);
+    assert.ok(node,selector);
+    node.click();
+  });
 }
 
 test('the script menu, editor, end anchor, trust panel, and run states render inline',async()=>{
@@ -419,6 +423,27 @@ test('Escape removes a blank script and delete leaves an inline undo',async()=>{
     await click(page.document,'.script-undo button');
     assert.equal(page.rows().length,1);
     assert.equal(page.document.querySelector('.script-undo'),null);
+  }finally{await page.close();}
+});
+
+test('script actions menu is portaled and still moves a row',async()=>{
+  const page=await mount([
+    row('before',0,fingerprint,{source:'1',label:'Before'}),
+    row('after',1,endAnchorFingerprint(fingerprint),{source:'2',label:'After'}),
+  ]);
+  try{
+    const host=page.document.querySelector('[data-script-id="before"]')!;
+    const trigger=host.querySelector<HTMLButtonElement>('.step-actions-trigger')!;
+    assert.equal(trigger.getAttribute('aria-label'),'Script actions Before');
+    assert.equal(trigger.getAttribute('aria-haspopup'),'menu');
+    await act(async()=>trigger.click());
+    const menu=page.document.querySelector('.step-actions-menu')!;
+    assert.equal(menu.parentElement,page.document.body);
+    assert.equal(host.contains(menu),false);
+    assert.equal(page.document.querySelector('.floating-inspector')!.contains(menu),false);
+    await act(async()=>menu.querySelector<HTMLButtonElement>('[aria-label="Move Before down"]')!.click());
+    assert.equal(page.document.querySelector('[data-script-id="before"]')!.nextElementSibling?.className,'script-undo');
+    assert.equal(page.document.querySelector('.step-actions-menu'),null);
   }finally{await page.close();}
 });
 

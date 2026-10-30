@@ -46,6 +46,7 @@ test('an offline author creates a draft, adds ordered contextual checks, reopens
   await act(async()=>document.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
   assert.ok(![...document.querySelectorAll('legend')].some(node=>node.textContent==='Screen inspector'));
   await act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));await click('Add node');
+  await act(async()=>document.querySelector('[aria-label="Screen New screen"]')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:140,clientY:140})));await click('Rename');
   await fill('Screen title for New screen','Welcome');await act(async()=>field('Screen title for New screen')!.dispatchEvent(new dom.window.FocusEvent('focusout',{bubbles:true})));
   const node=document.querySelector('[aria-label="Screen Welcome"]')!;const inspector=await inspectScreen(document,{title:'Welcome'});
   assert.ok(inspector.querySelector('[aria-label="Add action to Welcome"]'),'Actions are authored within their node inspector');
