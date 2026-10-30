@@ -6,6 +6,7 @@ import { act, createElement, useState, type ChangeEvent } from "react";
 import { refreshChecks, writeChecks } from "../shared/canvas-authoring.js";
 import type { CanvasGraph, CanvasTest } from "../server/canvas.js";
 import { inspectorGap, inspectorWidth, type Rect } from "../src/inspector-placement.js";
+import { getSidePanel, openPanel, resetSidePanels } from "../src/side-panels.js";
 import { openStepMenuItem } from "./step-menu.js";
 
 // Compare DOM nodes by identity: assert's diff of a jsdom node exhausts the heap.
@@ -1324,6 +1325,45 @@ test("a mid-canvas node keeps the popup on its right when the AI field is docked
     assert.equal(page.placement().top, node.top);
     assertClearOfDocks(page);
   } finally {
+    await page.close();
+  }
+});
+
+test("node details stays clear of an open right sheet", async () => {
+  const node: Rect = { left: 900, top: 250, width: 160, height: 86 };
+  const sheet: Rect = { left: 1116, top: 96, width: 300, height: 652 };
+  const page = await mountDockedWorkbench(node);
+  try {
+    const aside = page.document.createElement("aside");
+    aside.className = "ai-versions-sheet";
+    aside.dataset.sideSheet = "versions";
+    aside.dataset.layout = "versions-sheet";
+    page.rects.set("versions-sheet", sheet);
+    page.document.body.append(aside);
+    await page.relayout();
+    const popup = popupBox(page);
+    assert.equal(overlaps(popup, sheet), false, "popup covers the versions sheet");
+    assert.equal(page.placement().side, "left");
+    assert.equal(page.placement().left + inspectorWidth, node.left - inspectorGap);
+    assert.equal(page.placement().top, node.top);
+  } finally {
+    await page.close();
+  }
+});
+
+test("selecting a node closes Versions and Versions closes node details", async () => {
+  resetSidePanels();
+  openPanel("versions");
+  const page = await mount();
+  try {
+    await page.select("Home");
+    assert.ok(page.card(), "selecting a node opens Node details");
+    assert.equal(getSidePanel(), "nodeDetails");
+    await act(async () => { openPanel("versions"); });
+    assert.equal(page.document.querySelector(".floating-inspector"), null);
+    assert.equal(getSidePanel(), "versions");
+  } finally {
+    await act(async () => { resetSidePanels(); });
     await page.close();
   }
 });

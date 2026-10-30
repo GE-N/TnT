@@ -251,6 +251,8 @@ test('sequence bar mount keeps the Scenarios trigger last and a node closes info
   };
   await withDom(async (window, root) => {
     installFetch(detail('up-to-date'));
+    const {resetSidePanels} = await import('../src/side-panels.js');
+    resetSidePanels();
     const {CanvasEditor} = await import('../src/canvas.js');
     let dismissed = 0;
     await act(async () => {

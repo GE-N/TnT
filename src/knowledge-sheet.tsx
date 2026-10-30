@@ -2,7 +2,7 @@ import {createPortal} from 'react-dom';
 import {useEffect,useId,useLayoutEffect,useRef,useState} from 'react';
 import {knowledgeClient,knowledgeReaderPath,type FlowStep,type Freshness,type ScenarioDetail} from './knowledge-client.js';
 
-/** Matches T1's coordinator (`useSidePanels`) until that module is merged. */
+/** Same shape as T1's `useSidePanels()` coordinator. */
 export type SidePanelKind = 'info' | 'versions' | 'nodeDetails';
 export type SidePanels = {
   open: SidePanelKind | null;
@@ -13,7 +13,6 @@ export type SidePanels = {
 export type KnowledgeMount = {
   token: string;
   workspaceId: string;
-  panels?: SidePanels;
   onDismissVersions?: () => void;
 };
 
