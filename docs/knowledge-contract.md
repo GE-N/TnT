@@ -174,6 +174,10 @@ Recovery enqueues rebuilds from source; generated artifacts are disposable.
    `RootGuard { assertOwned(): void }` and call it immediately before each mutation.
    T2 ships a default always-owned guard for tests; T5 exports the real guard from
    `server/root-ownership.ts` (`acquireRootOwnership(root) → { guard, release }`).
-   T6 wires T5's guard into T2's constructors.
+   Production passes the held guard into `createKnowledgeService` together with
+   `renderKnowledgeHtml`, reconciles saved sources before accepting requests, and
+   injects that same service as `createApiHandler`'s sixth argument. Its workspace
+   store shares the existing root-keyed serialization queue; no second queue or
+   always-owned production writer is created by the HTTP fallback.
 4. Tests and `npm run dev` keep working: tests use their own temp roots; the lock is
    released on clean exit and recovered when its owner is provably dead.

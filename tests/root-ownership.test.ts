@@ -9,6 +9,7 @@ import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { acquireRootOwnership, RootOwnershipError, type ProcessLiveness, type RootGuard } from '../server/root-ownership.js';
+import { createWorkspaceStore } from '../server/workspace-store.js';
 
 const staleStart = 'Thu Jan  1 00:00:00 1970';
 
@@ -343,6 +344,50 @@ test('a second production server refuses the same root, sweeps nothing, and a re
   } finally {
     await stopServer(first);
     await stopServer(third);
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test('production knowledge uses the held root guard and the standalone renderer', { timeout: 60_000 }, async t => {
+  const cwd = await mkdtemp(join(tmpdir(), 'tnt-root-knowledge-'));
+  const root = join(cwd, '.tnt');
+  const store = createWorkspaceStore(root, workspace => workspace);
+  const workspace = await store.save({ id: '', name: 'Guarded knowledge', yaml: 'appId: example.App\n---\n- launchApp\n', scenarios: [{ id: 'one', name: 'One', steps: [], inputs: {}, parameters: {}, enabledHandlerIds: [] }] });
+  let child: ChildProcess | undefined;
+  try {
+    const port = await freePort();
+    const started = startServer(cwd, port, t.signal);
+    child = started.child;
+    await waitUntilListening(child, started.output);
+    const base = `http://127.0.0.1:${port}`;
+    const token = (await (await fetch(base + '/api/status')).json()).token as string;
+    const path = `/api/knowledge/workspaces/${workspace.id}/scenarios/one/context`;
+    const context = { purpose: 'Open the directory', expectedOutcome: 'Directory visible', rationale: 'Find a person', preconditions: '', exceptions: '', scope: '' };
+    const save = (revision: number, purpose = context.purpose) => fetch(base + path, { method: 'PUT', headers: { origin: base, 'x-tnt-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ expectedContextRevision: revision, context: { ...context, purpose } }) });
+    assert.equal((await save(0)).status, 200);
+    const reader = base + `/knowledge/workspaces/${workspace.id}/`;
+    let html = '';
+    for (let attempt = 0; attempt < 100; attempt++) {
+      html = await (await fetch(reader)).text();
+      if (html.includes('Up to date')) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.match(html, /Up to date/);
+    assert.match(html, /Why this flow exists/);
+    assert.match(html, /Open the directory/);
+    const sidecar = join(root, 'workspaces', workspace.id, 'knowledge', 'scenarios', 'one.json');
+    const pointer = join(root, 'knowledge', 'current', `workspace-${workspace.id}.json`);
+    const beforeContext = await readFile(sidecar, 'utf8');
+    const beforePointer = await readFile(pointer, 'utf8');
+    const lock = JSON.parse(await lockText(root));
+    await writeFile(lockPath(root), JSON.stringify({ ...lock, nonce: randomUUID() }));
+    const rejected = await save(1, 'Must not be written');
+    assert.equal(rejected.status, 503);
+    assert.equal((await rejected.json()).code, 'KNOWLEDGE_UNAVAILABLE');
+    assert.equal(await readFile(sidecar, 'utf8'), beforeContext);
+    assert.equal(await readFile(pointer, 'utf8'), beforePointer);
+  } finally {
+    await stopServer(child);
     await rm(cwd, { recursive: true, force: true });
   }
 });
