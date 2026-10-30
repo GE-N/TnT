@@ -1,4 +1,4 @@
-import {addVisitStep,commitVisitEdits,editVisitField,inspectorCard,inspectorOwner,inspectScreen,workspaceCommand} from './workspace-ui-helpers.js';
+import {addVisitStep,commitVisitEdits,editVisitField,inspectorCard,inspectorOwner,inspectScreen,openScenarioPanel,workspaceCommand} from './workspace-ui-helpers.js';
 import assert from 'node:assert/strict';
 import {test,describe} from 'node:test';
 import {JSDOM} from 'jsdom';
@@ -99,6 +99,8 @@ async function journey(work:(ui:{
   if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',settle);
   if(await addVisitStep(document,label))return;
   await commitVisitEdits(document);
+  const ready=()=>[...document.querySelectorAll<HTMLElement>('button,summary')].some(item=>item.getAttribute('data-testid')!=='scenario-bar-trigger'&&(item.getAttribute('aria-label')??item.textContent)===label);
+  if(!ready())await openScenarioPanel(document,act);
   return act(async()=>{
    const node=[...document.querySelectorAll<HTMLElement>('button,summary')].find(item=>(item.getAttribute('aria-label')??item.textContent)===label);
    assert.ok(node,label);
@@ -115,11 +117,13 @@ async function journey(work:(ui:{
   await click('Use Home as scenario start');
   await click('Append connection 1 → 2');
   await click('Append connection 2 → 3');
-  // Appended destination visits start empty; copy each screen's existing check into its visit.
+  // Appended destination visits start empty; add each screen's check into its visit.
   await inspectScreen(document,{title:'Mid'},{number:2});
-  await click('Copy Visible text · Mid to Visit 2');
+  await click('Add check to Mid');
+  await fill('Check 1 selector','Mid');
   await inspectScreen(document,{title:'End'},{number:3});
-  await click('Copy Visible text · End to Visit 3');
+  await click('Add check to End');
+  await fill('Check 1 selector','End');
   await click('Finish sequence');
   await click('Save workspace');
   await work({document,click,fill,holdNext:()=>{hold=true;returnRunning=true;},holdPicker:()=>{holdCapture=true;},failNext:(index=5)=>{fail=true;failIndex=index;},setToken,settle});
@@ -140,7 +144,7 @@ test('running locks the inspector, shows spinner progress, Stop, and edge highli
  holdNext();
  await act(async()=>{document.querySelector<HTMLButtonElement>('[aria-label="Run scenario"]')!.click();await settle();});
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,50));await settle();});
- assert.ok(document.querySelector('[aria-label="Stop scenario"]'),'Stop lives in the global run control');
+ assert.ok(document.querySelector('.scenario-row [aria-label="Stop scenario"]'),'Stop replaces the running scenario play button');
  assert.equal(document.querySelector('.add-visit-step'),null);
  assert.equal(document.querySelector('.visit-step-drag'),null);
  assert.equal(document.querySelector('.visit-step-actions'),null);
@@ -195,12 +199,12 @@ test('invalid draft shows the warning, inline field errors, and disables Run wit
  const field=document.querySelector('[aria-label$="selector"][aria-invalid="true"], .visit-step-summary[aria-describedby]');
  assert.ok(field);
  assert.ok(field.getAttribute('aria-describedby')||document.querySelector('[aria-describedby]'));
- const run=document.querySelector<HTMLButtonElement>('.run-toolbar [aria-label^="Run scenario"]')!;
+ const run=document.querySelector<HTMLButtonElement>('[aria-label^="Run scenario"]')!;
  assert.ok(run.disabled);
  assert.equal(run.getAttribute('aria-label'),'Run scenario — Draft kept, not valid yet');
 }));
 
-test('autosave paused by the picker shows a primary Save button',()=>journey(async({document,click,fill,holdPicker,settle})=>{
+test('autosave paused by the picker keeps the workspace status without a floating Save button',()=>journey(async({document,click,fill,holdPicker,settle})=>{
  await inspectScreen(document,{title:'Home'},{number:1});
  await click('Add action to Home');
  await fill('Action 2 selector','Gear');
@@ -218,9 +222,7 @@ test('autosave paused by the picker shows a primary Save button',()=>journey(asy
  });
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,80));await settle();});
  assert.match(document.querySelector('.picker button.confirm')?.textContent??'',/Inspecting/);
- const save=[...document.querySelectorAll<HTMLButtonElement>('.run-toolbar button')].find(button=>button.textContent==='Save');
- assert.ok(save,'Primary Save appears while the picker pauses autosave');
- assert.ok(save.classList.contains('primary'));
+ assert.equal([...document.querySelectorAll('button')].some(button=>button.textContent==='Save'),false,'Save stays off the simulator state control while the picker pauses autosave');
  assert.match(document.querySelector('.workspace-save-status')?.getAttribute('title')??'',/while the picker is open/);
  assert.equal(document.querySelector('.workspace-save-text')?.textContent,'Unsaved changes · Autosave paused');
 }));
@@ -234,7 +236,7 @@ test('autosave paused without a runner keeps edits in-tab with leave warning and
  assert.equal(status.querySelector('.workspace-save-text')?.textContent,'Unsaved changes · Autosave paused');
  assert.match(status.getAttribute('title')??'',/Changes are kept in this tab/);
  assert.match(status.getAttribute('title')??'',/Autosave resumes automatically/);
- assert.equal([...document.querySelectorAll('.run-toolbar button')].some(button=>button.textContent==='Save'),false);
+ assert.equal([...document.querySelectorAll('button')].some(button=>button.textContent==='Save'),false);
  let warned=false;
  const leave=document.createEvent('BeforeUnloadEvent');
  leave.initEvent('beforeunload',false,true);

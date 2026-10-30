@@ -3,8 +3,9 @@ import type {FileHandle} from 'node:fs/promises';
 import {dirname,join,resolve,sep} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import type {Workspace} from './scenarios.js';
+import type {ScriptSourceWorkspace} from './run-script-contract.js';
 
-export type WorkspaceMetadata={createdAt:string;updatedAt:string;openedAt:string;revision:number};
+export type WorkspaceMetadata={createdAt:string;updatedAt:string;openedAt:string;revision:number;sourceWorkspace?:ScriptSourceWorkspace};
 export type WorkspaceSummary=WorkspaceMetadata & {id:string;name:string;screens:number;scenarios:number;hasDraft?:boolean};
 export type WorkspaceLibrary={items:WorkspaceSummary[];unreadable:number};
 export type DraftContent={yaml?:unknown;flows?:unknown;canvas?:unknown;scenarios?:unknown;automation?:unknown;mock?:unknown};
@@ -19,6 +20,22 @@ export type WorkspaceView=Record<string,unknown> & {
  allocatedDraftRevision?:number;
 };
 export type WorkspaceSession={lastActiveId:string|null;updatedAt:string;unavailable?:boolean};
+// C0/C1 controls (including LF) and bidi overrides that can spoof a displayed claim.
+const claimControls=/[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069\uFEFF]/;
+function readSourceWorkspace(value:unknown):ScriptSourceWorkspace|undefined{
+ if(value===undefined)return;
+ if(!value||typeof value!=='object'||!('name' in value)||typeof value.name!=='string'||!value.name.trim()||value.name.length>120||claimControls.test(value.name))throw new Error('Unreadable source workspace name.');
+ if('kind' in value&&value.kind==='copy')return {kind:'copy',name:value.name};
+ if('kind' in value&&value.kind==='import'&&'filename' in value&&(value.filename===null||typeof value.filename==='string'&&!!value.filename.trim()&&value.filename.length<=255&&!/[\\/]/.test(value.filename)&&!claimControls.test(value.filename)))return {kind:'import',name:value.name,filename:value.filename};
+ throw new Error('Provide an import filename of 1–255 characters without path separators or control characters, or omit it.');
+}
+/** Drop every character that cannot be stored as a source claim. An empty result means the claim is omitted. */
+export function readableClaimName(name:string){return name.replace(new RegExp(claimControls.source,'g'),'').trim().slice(0,120);}
+function assertClaimTitle(name:string,previous?:string){if(claimControls.test(name)&&name!==previous)throw new Error('Unreadable source workspace name.');}
+function readStoredSourceWorkspace(value:unknown):ScriptSourceWorkspace|undefined{
+ if(value===undefined)return;
+ try{return readSourceWorkspace(value);}catch{return;}
+}
 export type WorkspaceStoreFaults={
  /** Awaited before a temp file is created. Tests hold this to queue a write. */
  beforeWrite?:()=>Promise<void>;
@@ -28,6 +45,8 @@ export type WorkspaceStoreFaults={
  failBeforeRename?:()=>unknown;
  /** Return an error for session or draft cleanup after workspace.json has been renamed. */
  failAfterCommit?:()=>unknown;
+ /** Awaited at the end of a workspace read, while that read still holds the store queue. */
+ beforeRead?:()=>Promise<void>;
 };
 export class WorkspaceConflict extends Error { constructor(){super('Another editor saved a newer revision. Current edits are retained. Save a copy to recover them, and keep the saved version intact.');} }
 export class DraftConflict extends Error { constructor(){super('This workspace was changed in another tab.');} }
@@ -78,7 +97,7 @@ export function createWriteFaults(){
 }
 
 /** The existing local workspace records, with serialized atomic metadata/content writes. */
-export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>Workspace,options?:{faults?:WorkspaceStoreFaults;now?:()=>Date}){
+export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>Workspace,options?:{faults?:WorkspaceStoreFaults;now?:()=>Date;beforePublish?:(next:Workspace,previous?:Workspace)=>Promise<void>;onScenarioClosed?:(workspace:Workspace,scenarioId:string)=>Promise<void>}){
  const queueKey=resolve(root);
  const faults=options?.faults;
  const now=()=>(options?.now??(()=>new Date()))().toISOString();
@@ -124,6 +143,8 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   const content=readContent(raw);
   const date=(value:unknown,fallback:string)=>typeof value==='string'&&Number.isFinite(Date.parse(value))?value:fallback;
   const metadata:WorkspaceMetadata={createdAt:date(raw.metadata?.createdAt,dates.birthtime.toISOString()),updatedAt:date(raw.metadata?.updatedAt,dates.mtime.toISOString()),openedAt:date(raw.metadata?.openedAt,dates.birthtime.toISOString()),revision:Number.isSafeInteger(raw.metadata?.revision)&&raw.metadata.revision>=0?raw.metadata.revision:0};
+  const sourceWorkspace=readStoredSourceWorkspace(raw.metadata?.sourceWorkspace);if(sourceWorkspace)metadata.sourceWorkspace=sourceWorkspace;
+  await faults?.beforeRead?.();
   return {...content,metadata};
  }
  async function write(value:Workspace){const path=await file(value.id,true);await writeJson(path,{...value,canvasDiagnostics:undefined},recordLimit,'Workspace record exceeds the supported size.');return value;}
@@ -203,6 +224,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   if(!Number.isSafeInteger(input.baseRevision)||input.baseRevision<0||!Number.isSafeInteger(input.expectedDraftRevision)||input.expectedDraftRevision<0)throw new Error('Invalid draft revision.');
   if(typeof input.name!=='string'||!input.name.trim()||input.name.trim().length>120)throw new Error('Use a workspace title of 1–120 characters.');
   const workspace=await read(id);
+  assertClaimTitle(input.name.trim(),workspace.name);
   if(workspace.metadata!.revision!==input.baseRevision)throw new DraftConflict();
   const current=await readDraftOnce(id);
   if(current.draftError)throw new Error('A recovered draft could not be read. Discard it before saving a new draft.');
@@ -253,19 +275,24 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   readDraft:(id:string)=>serialize(()=>readDraftOnce(id)),
   readView:(id:string)=>serialize(()=>readView(id)),
   bundle:(id:string)=>serialize(async()=>{const workspace=await read(id);const draftState=await readDraftOnce(id);const view=await readView(id);return {...workspace,draft:draftState.draft,draftError:draftState.draftError,view};}),
-  importCopy:(content:Workspace)=>serialize(async()=>{
+  withWorkspace:<T>(id:string,operation:(workspace:Workspace)=>Promise<T>)=>serialize(async()=>operation(await read(id))),
+  importCopy:(content:Workspace,beforePublish?:(next:Workspace)=>Promise<void>,sourceWorkspace?:ScriptSourceWorkspace)=>serialize(async()=>{
+   assertClaimTitle(content.name);
    const stamp=now();const id=randomUUID();
    let written:Workspace;
-   try{written=await write({...content,id,metadata:{createdAt:stamp,updatedAt:stamp,openedAt:stamp,revision:1}});}
+   try{const source=readSourceWorkspace(sourceWorkspace);const next={...content,id,metadata:{createdAt:stamp,updatedAt:stamp,openedAt:stamp,revision:1,...(source?{sourceWorkspace:source}:{})}};await (beforePublish??options?.beforePublish)?.(next);written=await write(next);}
    catch(error){await rm(join(await base(),id),{recursive:true,force:true});throw error;}
    try{await writeSession({lastActiveId:id,updatedAt:stamp});}catch(error){console.error('Import committed; session update failed.',error);}
    return written;
   }),
-  save:(content:Workspace,expectedRevision:number=0,clearDraftRevision?:number)=>serialize(async()=>{
+  save:(content:Workspace,expectedRevision:number=0,clearDraftRevision?:number,beforePublish?:(next:Workspace,previous?:Workspace)=>Promise<void>)=>serialize(async()=>{
    const previous=content.id?await read(content.id):undefined;
    if(previous&&previous.metadata!.revision!==expectedRevision)throw new WorkspaceConflict();
+   assertClaimTitle(content.name,previous?.name);
    const stamp=now();
-   const written=await write({...content,id:content.id||randomUUID(),metadata:{createdAt:previous?.metadata?.createdAt??stamp,updatedAt:stamp,openedAt:previous?.metadata?.openedAt??stamp,revision:(previous?.metadata?.revision??0)+1}});
+   const next={...content,id:content.id||randomUUID(),metadata:{...previous?.metadata,createdAt:previous?.metadata?.createdAt??stamp,updatedAt:stamp,openedAt:previous?.metadata?.openedAt??stamp,revision:(previous?.metadata?.revision??0)+1}};
+   await (beforePublish??options?.beforePublish)?.(next,previous);
+   const written=await write(next);
    let draftCleared=false;
    try{
     if(!previous||clearDraftRevision!==undefined){const failed=faults?.failAfterCommit?.();if(failed)throw toError(failed);}
@@ -279,6 +306,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
    const stamp=now();const id=randomUUID();
    const draftContent=assertContent(input.content);const fields=assertFields(input.fields);
    if(typeof input.name!=='string'||!input.name.trim()||input.name.trim().length>120)throw new Error('Use a workspace title of 1–120 characters.');
+   assertClaimTitle(content.name);assertClaimTitle(input.name.trim());
    const written=await write({...content,id,metadata:{createdAt:stamp,updatedAt:stamp,openedAt:stamp,revision:1}});
    const draft:WorkspaceDraft={format:1,workspaceId:id,baseRevision:1,draftRevision:1,savedAt:stamp,name:input.name.trim(),content:draftContent,fields};
    try{await writeDraft(draft);await writeSession({lastActiveId:id,updatedAt:stamp});}
@@ -296,12 +324,13 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
    await rm(path,{force:true});return {discarded:true};
   }),
   saveView:(id:string,patch:unknown)=>serialize(async()=>{
-   await read(id);
+   const workspace=await read(id);
    if(!patch||typeof patch!=='object'||Array.isArray(patch))throw new Error('View preferences must be an object.');
    const existing=await readView(id);
    const view=mergeView(existing,patch as Record<string,unknown>);
    const path=await contained(await workspaceDirectory(id),'view.json',true);
    await writeJson(path,view,viewLimit,'View preferences exceed the supported size.');
+   if(typeof existing?.scenarioId==='string'&&existing.scenarioId!==view.scenarioId)await options?.onScenarioClosed?.(workspace,existing.scenarioId);
    return view;
   }),
   session:()=>serialize(async()=>{
@@ -312,7 +341,7 @@ export function createWorkspaceStore(root:string,readContent:(value:Workspace)=>
   }),
   setSession:(id:string|null)=>serialize(async()=>{if(id)await read(validId(id));const session={lastActiveId:id,updatedAt:now()};await writeSession(session);return session;}),
   open:(id:string)=>serialize(async()=>{const value=await read(id);const written=await write({...value,metadata:{...value.metadata!,openedAt:now()}});try{const failed=faults?.failAfterCommit?.();if(failed)throw toError(failed);await writeSession({lastActiveId:id,updatedAt:now()});}catch(error){console.error('Workspace open committed; session update failed.',error);}const draftState=await readDraftOnce(id);return {...written,draft:draftState.draft,draftError:draftState.draftError,view:await readView(id)};}),
-  rename:(id:string,name:string,expectedRevision:number)=>serialize(async()=>{if(typeof name!=='string'||!name.trim()||name.trim().length>120)throw new Error('Use a workspace title of 1–120 characters.');const value=await read(id);if(value.metadata!.revision!==expectedRevision)throw new WorkspaceConflict();return write({...value,name:name.trim(),metadata:{...value.metadata!,updatedAt:now(),revision:value.metadata!.revision+1}});}),
+  rename:(id:string,name:string,expectedRevision:number)=>serialize(async()=>{if(typeof name!=='string'||!name.trim()||name.trim().length>120)throw new Error('Use a workspace title of 1–120 characters.');assertClaimTitle(name.trim());const value=await read(id);if(value.metadata!.revision!==expectedRevision)throw new WorkspaceConflict();return write({...value,name:name.trim(),metadata:{...value.metadata!,updatedAt:now(),revision:value.metadata!.revision+1}});}),
   list:(query=''):Promise<WorkspaceLibrary>=>serialize(async()=>{
    const items:WorkspaceSummary[]=[];let unreadable=0;
    for(const entry of await readdir(await base(),{withFileTypes:true})){

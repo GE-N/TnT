@@ -1,3 +1,10 @@
+import {AuthoringHttpError} from './authoring/errors.js';
+import {decodeAuthoringJson} from './authoring/schema.js';
+import {REQUEST_LIMIT} from './authoring/types.js';
+import {AiHttpError} from './ai/errors.js';
+import type {AiService} from './ai/index.js';
+import {ScriptBlocked} from './script-validation.js';
+import {ScriptTrustConflict} from './script-trust-store.js';
 import {DraftConflict,WorkspaceConflict,WorkspacePayloadTooLarge} from './workspace-store.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
@@ -8,7 +15,8 @@ import type { createScenarios } from './scenarios.js';
 
 export function createApiHandler(runner: ReturnType<typeof createRunner>, artifactDirectory: string,
   fallback?: (request: IncomingMessage, response: ServerResponse) => void,
-  scenarios?: ReturnType<typeof createScenarios>) {
+  scenarios?: ReturnType<typeof createScenarios>,
+  ai?: AiService) {
   const token = randomBytes(32).toString('hex');
   let launching = false;
   return async (request: IncomingMessage, response: ServerResponse) => {
@@ -34,8 +42,8 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         catch (error) { return json(200, { ready: false, devices: [], token, tool: 'Xcode simctl', error: message(error) }); }
       }
       if (request.headers['x-tnt-token'] !== token) return json(403, { error: 'Refresh the workbench to establish a runner session.' });
-      if (request.method === 'POST' && request.headers.origin !== `http://${host}`) return json(403, { error: 'A same-origin workbench request is required.' });
-      if (request.method === 'POST' && !request.headers['content-type']?.startsWith('application/json')) return json(415, { error: 'Send JSON.' });
+      if ((request.method === 'POST' || request.method === 'PUT') && request.headers.origin !== `http://${host}`) return json(403, { error: 'A same-origin workbench request is required.' });
+      if ((request.method === 'POST' || request.method === 'PUT') && !request.headers['content-type']?.startsWith('application/json')) return json(415, { error: 'Send JSON.' });
       const apps = /^\/api\/devices\/([^/]+)\/apps$/.exec(url.pathname);
       if (request.method === 'GET' && apps) return json(200, await runner.apps(apps[1]));
       if (request.method === 'POST' && url.pathname === '/api/picker/captures') return json(200, await runner.picker.capture(await readJson(request)));
@@ -54,6 +62,8 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         return response.end(image);
       }
       if (scenarios) {
+        if(request.method==='GET'&&url.pathname==='/api/scripts/trust')return json(200,await scenarios.scriptTrust(url.searchParams.get('workspace')??''));
+        if(request.method==='POST'&&url.pathname==='/api/scripts/trust')return json(200,await scenarios.trustScript(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/canvas/references') return json(200, await scenarios.references(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/automation/preview') return json(200, await scenarios.preview(await readJson(request)));
         if (request.method === 'GET' && url.pathname === '/api/session') return json(200, await scenarios.session());
@@ -64,6 +74,7 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         if (request.method === 'POST' && url.pathname === '/api/workspaces/import/review') return json(200, await scenarios.reviewWorkspacePackage(await readJson(request,2_300_000)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/import') return json(200, await scenarios.importWorkspace(await readJson(request,2_300_000)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/copy') return json(200, await scenarios.copyWorkspace(await readJson(request)));
+        if (request.method === 'POST' && url.pathname === '/api/scenarios/duplicate') return json(200, await scenarios.duplicateScenario(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/workspaces/draft') return json(200, await scenarios.createDraftWorkspace(await readJson(request,17_000_000)));
         const draftDiscard = /^\/api\/workspaces\/([0-9a-f-]{36})\/draft\/discard$/.exec(url.pathname);
         if (request.method === 'POST' && draftDiscard) return json(200, await scenarios.discardDraft(draftDiscard[1],(await readJson(request)).expectedDraftRevision));
@@ -76,6 +87,12 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         if(request.method==='POST'&&lifecycle)return json(200,lifecycle[2]==='trash'?await scenarios.trashWorkspace(lifecycle[1]):await scenarios.restoreWorkspace(lifecycle[1]));
         const management = /^\/api\/workspaces\/([0-9a-f-]{36})\/(open|rename)$/.exec(url.pathname);
         if(request.method==='POST' && management){const input=await readJson(request);return json(200,management[2]==='open'?await scenarios.openWorkspace(management[1]):await scenarios.renameWorkspace(management[1],input.name,input.expectedRevision));}
+        if (request.method === 'POST' && url.pathname === '/api/authoring/context') { const body = await readAuthoring(request); return json(200, await scenarios.authoring.context(body.value, body.topKeys)); }
+        if (request.method === 'POST' && url.pathname === '/api/authoring/preview') { const body = await readAuthoring(request); return json(200, await scenarios.authoring.preview(body.value, body.topKeys)); }
+        if (request.method === 'POST' && url.pathname === '/api/authoring/apply') { const body = await readAuthoring(request); return json(200, await scenarios.authoring.apply(body.value, body.topKeys)); }
+        if (request.method === 'POST' && url.pathname === '/api/authoring/undo') { const body = await readAuthoring(request); return json(200, await scenarios.authoring.undo(body.value, body.topKeys)); }
+        const flow = /^\/api\/authoring\/flows\/([A-Za-z][A-Za-z0-9_-]{0,63})$/.exec(url.pathname);
+        if (request.method === 'GET' && flow) return json(200, await scenarios.authoring.readBack(flow[1], url.searchParams.get('workspaceId')));
         const workspace = /^\/api\/workspaces\/([0-9a-f-]{36})$/.exec(url.pathname);
         if (request.method === 'GET' && workspace) return json(200, await scenarios.workspaceDetail(workspace[1]));
         if (request.method === 'POST' && url.pathname === '/api/batches') return json(202, await scenarios.startBatch(await readJson(request)));
@@ -124,12 +141,37 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
           return response.end(screen);
         }
       }
+      if (ai) {
+        if (request.method === 'GET' && url.pathname === '/api/ai/config') return json(200, await ai.getConfig());
+        if (request.method === 'PUT' && url.pathname === '/api/ai/config') return json(200, await ai.putConfig(await readJson(request)));
+        if (request.method === 'POST' && url.pathname === '/api/ai/config/test') return json(200, await ai.testConnection(await readJson(request)));
+        if (request.method === 'GET' && url.pathname === '/api/ai/models') return json(200, await ai.listModels(url.searchParams.get('provider')));
+        if (request.method === 'POST' && url.pathname === '/api/ai/generations') return json(202, await ai.start(await readJson(request)));
+        const generation = /^\/api\/ai\/generations\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(cancel))?$/.exec(url.pathname);
+        if (generation) {
+          if (request.method === 'GET' && !generation[2]) return json(200, await ai.get(generation[1]));
+          if (request.method === 'POST' && generation[2] === 'cancel') return json(200, await ai.cancel(generation[1]));
+        }
+      }
       return json(404, { error: 'Unknown runner operation.' });
     } catch (error) {
+      if (error instanceof AuthoringHttpError) return json(error.status, error.body);
+      if (error instanceof AiHttpError) return json(error.status, error.body);
+      if(error instanceof ScriptBlocked)return json(url.pathname==='/api/runs'?422:400,{blocked:error.blocked,error:error.message});
+      if(error instanceof ScriptTrustConflict)return json(409,{error:error.message});
       const code = (error as NodeJS.ErrnoException).code;
       return json(error instanceof WorkspacePayloadTooLarge?413:error instanceof WorkspaceConflict||error instanceof DraftConflict?409:code === 'ENOENT' ? 404 : 400, { error: message(error) });
     }
   };
+}
+
+async function readAuthoring(request: IncomingMessage) {
+  let body = '';
+  for await (const chunk of request) {
+    body += chunk.toString();
+    if (Buffer.byteLength(body) > REQUEST_LIMIT) throw new AuthoringHttpError(413, 'REQUEST_TOO_LARGE', `Authoring request exceeds ${REQUEST_LIMIT} bytes.`);
+  }
+  return decodeAuthoringJson(body);
 }
 
 async function readJson(request: IncomingMessage, limit = 1_100_000) {

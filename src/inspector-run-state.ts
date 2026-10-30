@@ -2,7 +2,7 @@ import type {CanvasGraph,CanvasResult} from '../server/canvas.js';
 import {routeVisits,visitOperations,visitScreenId} from '../shared/canvas-authoring.js';
 import type {Run} from '../server/scenarios.js';
 
-export type InspectorStepTone='running'|'passed'|'failed';
+export type InspectorStepTone='running'|'passed'|'failed'|'not-run';
 export type InspectorStepStatus={tone:InspectorStepTone;detail?:string};
 export type InspectorRunView={
  activeVisitId?:string;
@@ -86,5 +86,5 @@ export function inspectorRunView(graph:CanvasGraph|undefined,pathId:string|undef
 }
 
 export function runStatusLabel(status:InspectorStepTone){
- return status==='running'?'Running':status==='passed'?'✓ Passed':'✕ Failed';
+ return status==='running'?'Running':status==='passed'?'✓ Passed':status==='not-run'?'○ Not run':'✕ Failed';
 }

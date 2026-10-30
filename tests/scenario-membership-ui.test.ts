@@ -1,4 +1,4 @@
-import {addVisitStep,commitVisitEdits,inspectorCard,inspectorOwner,inspectScreen,workspaceCommand} from './workspace-ui-helpers.js';
+import {addVisitStep,commitVisitEdits,inspectorCard,inspectorOwner,inspectScreen,openScenarioPanel,workspaceCommand} from './workspace-ui-helpers.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
@@ -13,7 +13,7 @@ import {parseAllDocuments} from 'yaml';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import type {CanvasGraph} from '../server/canvas.js';
 
-for(const shareBeforeStart of [false,true])test('a second scenario shares operations '+(shareBeforeStart?'before':'after')+' setting its start and runs its saved flow',async()=>{
+for(const shareBeforeStart of [false,true])test('a second scenario '+(shareBeforeStart?'shares operations before setting its start and runs its saved flow':'has no Copy existing steps after its start is set'),async()=>{
  const directory=await mkdtemp(join(tmpdir(),'tnt-membership-ui-'));
  const deviceId='E5C92F6E-40DC-493C-93B4-469E67193736';let executed='';
  const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=> '2.11.0',run:async({directory,flow})=>{
@@ -35,17 +35,17 @@ for(const shareBeforeStart of [false,true])test('a second scenario shares operat
  const fetch=(path:string,options?:{body?:string})=>{const result=request(path,options);pending.push(result);return result;};
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='fetch'?fetch:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root')!);
- const click=async(label:string)=>{const owner=inspectorOwner(label);if(owner)await inspectScreen(document,{title:owner});if(await addVisitStep(document,label))return;await commitVisitEdits(document);if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',async()=>{do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});return act(async()=>{const node=[...document.querySelectorAll<HTMLElement>('button,summary,input[type=checkbox]')].find(node=>(node.getAttribute('aria-label')??node.textContent)===label);assert.ok(node,label);node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);})};
+ const click=async(label:string)=>{const owner=inspectorOwner(label);if(owner)await inspectScreen(document,{title:owner});if(await addVisitStep(document,label))return;await commitVisitEdits(document);if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',async()=>{do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);});const matches=(node:HTMLElement)=>node.getAttribute('data-testid')!=='scenario-bar-trigger'&&(node.getAttribute('aria-label')??node.textContent)===label;if(![...document.querySelectorAll<HTMLElement>('button,summary,input[type=checkbox]')].some(matches))await openScenarioPanel(document,act);return act(async()=>{const node=[...document.querySelectorAll<HTMLElement>('button,summary,input[type=checkbox]')].find(matches);assert.ok(node,label);node.click();do{await Promise.all(pending.splice(0));await new Promise(resolve=>setImmediate(resolve));}while(pending.length);})};
  try{
   await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));
   await click('Open saved workspace');await click('Scenario 2');
   assert.ok(!(await inspectScreen(document,{title:'Home'})).querySelector('[aria-label="Action 1 selector"]'),'Another scenario action is not presented as active');
   if(!shareBeforeStart){await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.doesNotMatch(executed,/tapOn|assertVisible/);}
-  if(shareBeforeStart){await click('Use existing actions/checks');await click('Scenarios');await click('Use Tap text · Go in Scenario 2');await inspectScreen(document,{title:'Done'});await click('Use existing actions/checks');await click('Scenarios');await click('Use Visible text · Done in Scenario 2');await click('Use Home as scenario start');}
-  else{await click('Copy existing steps');await click('Copy Tap text · Go to Visit 1');await inspectScreen(document,{title:'Done'});await click('Copy existing steps');await click('Copy Visible text · Done to Visit 2');}
-  assert.equal((await inspectScreen(document,{title:'Home'})).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go');
-  await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.match(executed,/tapOn/);assert.match(executed,/\^Done\$/);
-  await click('Save workspace');await click('Open saved workspace');await click('Scenario 2');assert.equal((await inspectScreen(document,{title:'Home'})).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go');
+  if(shareBeforeStart){const joined=await inspectScreen(document,{title:'Home'});assert.ok([...joined.querySelectorAll('summary')].some(node=>node.textContent==='Use existing actions/checks'));assert.equal([...joined.querySelectorAll('summary')].some(node=>node.textContent==='Copy existing steps'),false);await click('Use existing actions/checks');await click('Scenarios');await click('Use Tap text · Go in Scenario 2');await inspectScreen(document,{title:'Done'});await click('Use existing actions/checks');await click('Scenarios');await click('Use Visible text · Done in Scenario 2');await click('Use Home as scenario start');
+   assert.equal((await inspectScreen(document,{title:'Home'})).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go');
+   await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.match(executed,/tapOn/);assert.match(executed,/\^Done\$/);
+   await click('Save workspace');await click('Open saved workspace');await click('Scenario 2');assert.equal((await inspectScreen(document,{title:'Home'})).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go');
+  }else{for(const title of ['Home','Done']){const card=await inspectScreen(document,{title});assert.equal([...card.querySelectorAll('summary')].some(node=>node.textContent==='Copy existing steps'),false,title);}}
   await click('Scenario 1');assert.equal((await inspectScreen(document,{title:'Home'})).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go');
   await click('Add check to Home');
   await inspectScreen(document,{title:'Home'});await act(async()=>{const input=inspectorCard(document)!.querySelector('[aria-label="Check 1 selector"]')!;Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value')!.set!.call(input,'First only');input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});

@@ -1,6 +1,7 @@
+import {ScriptBlocked} from './script-validation.js';
 import {randomUUID} from 'node:crypto';
 import type {Run,RunInput,Workspace} from './scenarios.js';
-export type BatchEntry = {scenarioId:string;name:string;status:'queued'|'not-run'|Run['status'];runId?:string;reason?:string};
+export type BatchEntry = {scenarioId:string;name:string;status:'queued'|'not-run'|'failed'|Run['status'];runId?:string;reason?:string};
 export type Batch = {
  id:string;workspaceId:string;deviceId:string;startedAt:string;finishedAt?:string;
  status:'running'|'cancelling'|'completed'|'cancelled'|'blocked';entries:BatchEntry[];
@@ -37,7 +38,7 @@ export function createBatches(dependencies:Dependencies){
     state.batch=batch;
     for(const entry of entries){
      try{await dependencies.preview({...workspace,scenarioId:entry.scenarioId,runtimeInputs:input.runtimeInputs,resetApp:input.resetApp});}
-     catch(error){entry.status='not-run';entry.reason=message(error);}
+     catch(error){if(error instanceof ScriptBlocked){entry.status='failed';entry.reason=error.blocked.some(item=>item.kind==='untrusted')?'Script needs trust':error.message;}else{entry.status='not-run';entry.reason=message(error);}}
     }
     await dependencies.persist(batch);
     state.done=(async()=>{
@@ -46,11 +47,16 @@ export function createBatches(dependencies:Dependencies){
        if(state.cancelled){stopQueue(batch,'Batch cancelled before dispatch.');break;}
        if(entry.status!=='queued')continue;
        entry.status='running';await dependencies.persist(batch);
-       const run=await dependencies.start({workspaceId:workspace.id,deviceId:input.deviceId,scenarioId:entry.scenarioId,runtimeInputs:input.runtimeInputs,resetApp:input.resetApp},structuredClone(workspace),state.controller.signal);
+       let run:Run;
+       try{run=await dependencies.start({workspaceId:workspace.id,deviceId:input.deviceId,scenarioId:entry.scenarioId,runtimeInputs:input.runtimeInputs,resetApp:input.resetApp},structuredClone(workspace),state.controller.signal);}catch(error){
+        if(error instanceof ScriptBlocked){entry.status='failed';entry.reason=error.blocked.some(item=>item.kind==='untrusted')?'Script needs trust':error.message;await dependencies.persist(batch);continue;}
+        throw error;
+       }
        entry.runId=run.id;state.runId=run.id;await dependencies.persist(batch);
        const result=state.cancelled?await dependencies.cancel(run.id).catch(()=>dependencies.wait(run.id)):await dependencies.wait(run.id);
-       state.runId=undefined;entry.status=result.status;
-       if(!result.cleanup.verified||!['passed','assertion-failed','path-failed'].includes(result.status)){
+       state.runId=undefined;entry.status=result.status==='script-error'?'failed':result.status;
+       if(result.status==='script-error')entry.reason='Script failed';
+       if(!result.cleanup.verified||!['passed','assertion-failed','path-failed','script-error'].includes(result.status)){
         batch.status=state.cancelled||result.status==='cancelled'?'cancelled':'blocked';
         stopQueue(batch,!result.cleanup.verified?'Owned-process cleanup is unverified; device reuse blocked.':`Dispatch stopped after ${result.status}.`);
         await dependencies.persist(batch);break;
@@ -66,7 +72,8 @@ export function createBatches(dependencies:Dependencies){
       if(state.runId){
        try{
         const result=await dependencies.cancel(state.runId).catch(()=>dependencies.wait(state.runId!));
-        if(entry)entry.status=result.status;
+        if(entry)entry.status=result.status==='script-error'?'failed':result.status;
+        if(entry&&result.status==='script-error')entry.reason='Script failed';
        }catch{if(entry)entry.status='tool-error';}
        state.runId=undefined;
       }

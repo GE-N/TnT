@@ -1,4 +1,4 @@
-import {addVisitStep,commitVisitEdits,editVisitField,inspectorCard,inspectorOwner,inspectScreen,workspaceCommand} from './workspace-ui-helpers.js';
+import {addVisitStep,commitVisitEdits,editVisitField,inspectorCard,inspectorOwner,inspectScreen,openScenarioPanel,workspaceCommand} from './workspace-ui-helpers.js';
 import assert from 'node:assert/strict';
 import {test,describe} from 'node:test';
 import {JSDOM} from 'jsdom';
@@ -107,8 +107,10 @@ async function journey(work:(ui:{
   if(label==='Save workspace'||label==='Open saved workspace')return workspaceCommand(document,label==='Save workspace'?'save':'open',settle);
   if(await addVisitStep(document,label))return;
   await commitVisitEdits(document);
+  const matches=(node:HTMLElement)=>node.getAttribute('data-testid')!=='scenario-bar-trigger'&&(node.getAttribute('aria-label')??node.textContent)===label;
+  if(![...document.querySelectorAll<HTMLElement>('button,summary')].some(matches))await openScenarioPanel(document,act);
   return act(async()=>{
-   const node=[...document.querySelectorAll<HTMLElement>('button,summary')].find(item=>(item.getAttribute('aria-label')??item.textContent)===label);
+   const node=[...document.querySelectorAll<HTMLElement>('button,summary')].find(matches);
    assert.ok(node,label);
    assert.ok(!(node as HTMLButtonElement).disabled,label+' is enabled');
    node.click();
@@ -131,17 +133,21 @@ async function journey(work:(ui:{
    await click('Append connection 1 → 2');
    await click('Append connection 2 → 3');
    await inspectScreen(document,{title:'Mid'},{number:2});
-   await click('Copy Visible text · Mid to Visit 2');
+   await click('Add check to Mid');
+   await fill('Check 1 selector','Mid');
    await inspectScreen(document,{title:'End'},{number:3});
-   await click('Copy Visible text · End to Visit 3');
+   await click('Add check to End');
+   await fill('Check 1 selector','End');
    await click('Finish sequence');
    await click('Save workspace');
   }else{
    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,400));await settle();});
   }
+  if(document.querySelector('[data-testid="scenario-panel"]'))await act(async()=>{document.querySelector<HTMLButtonElement>('[data-testid="scenario-bar-trigger"]')!.click();await settle();});
   await work({document,window,click,fill,press,holdNext:()=>{hold=true;returnRunning=true;},failNext:(index=5)=>{fail=true;failIndex=index;},settle});
  }finally{
   releaseHold?.();
+  await settle();
   await act(async()=>root.unmount());
   dom.window.close();
   for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}
@@ -166,9 +172,11 @@ test('step list stays one tab stop; arrows move; deleting the last focused row k
  const lastId=summaries().at(-1)!.closest<HTMLElement>('[data-operation-id]')!.dataset.operationId!;
  await act(async()=>{
   const row=card.querySelector(`[data-operation-id="${lastId}"]`)!;
-  const menu=row.querySelector<HTMLDetailsElement>('.visit-step-actions')!;
-  menu.open=true;
-  row.querySelector<HTMLButtonElement>('[aria-label^="Delete "]')!.click();
+  row.querySelector<HTMLButtonElement>('.step-actions-trigger')!.click();
+  await settle();
+ });
+ await act(async()=>{
+  document.querySelector<HTMLButtonElement>('.step-actions-menu [aria-label^="Delete "]')!.click();
   await settle();
  });
  assert.equal(summaries().some(item=>item.closest<HTMLElement>('[data-operation-id]')?.dataset.operationId===lastId),false);
@@ -196,7 +204,7 @@ test('running keeps one list tab stop and arrow navigation without unlocking edi
  await inspectScreen(document,{title:'Home'},{number:1});
  const card=inspectorCard(document)!;
  holdNext();
- await act(async()=>{document.querySelector<HTMLButtonElement>('[aria-label="Run scenario"]')!.click();await settle();});
+ await click('Run scenario');
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,50));await settle();});
  const summaries=[...card.querySelectorAll<HTMLButtonElement>('.visit-step-summary')];
  assert.equal(summaries.filter(item=>item.tabIndex===0).length,1,'run keeps a composite list stop');

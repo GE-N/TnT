@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "mode": "createScenario",
+  "name": "CoordinatorFromHome",
+  "appId": "com.example.HybridApp",
+  "parameters": [],
+  "execution": {
+    "kind": "unresolved",
+    "description": "Initial navigation/execution details are not available because no screen ids or targets were supplied in the context."
+  },
+  "screens": [
+    {
+      "kind": "unresolved",
+      "description": "home screen definition/id is not available in context"
+    },
+    {
+      "kind": "unresolved",
+      "description": "coordinator screen definition/id is not available in context"
+    }
+  ],
+  "visits": [
+    {
+      "id": "visitHome",
+      "screenId": "home",
+      "assertions": [
+        {
+          "type": "visible",
+          "target": {
+            "text": "Coordinator"
+          }
+        }
+      ],
+      "action": {
+        "type": "tap",
+        "target": {
+          "text": "Coordinator"
+        },
+        "destination": "visitCoordinator"
+      }
+    },
+    {
+      "id": "visitCoordinator",
+      "screenId": "coordinator",
+      "assertions": [
+        {
+          "type": "visible",
+          "target": {
+            "text": "Coordinator"
+          }
+        }
+      ]
+    }
+  ],
+  "scripts": [],
+  "assumptions": [
+    "Screen ids and execution start details are not present in the context, so they are represented as unresolved rather than invented.",
+    "The request's 'home' is used as a local starting-screen label and 'coordinator' as the next-screen label.",
+    "Both 'Coordinator' checks are interpreted as visible-text assertions using an explicit text target.",
+    "The tap on visible text 'Coordinator' is assumed to navigate to the next local visit."
+  ]
+}
