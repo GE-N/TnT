@@ -108,7 +108,7 @@ test('late publication cannot resurrect a trashed workspace or replace newer sav
  const f=await fixture({faults:{async hit(stage){if(block&&stage==='after-descriptor-capture'){captured();await gate;}}}});
  try{
   await f.service.publish(f.workspace.id);const old=await pointer(f.root,f.workspace.id);block=true;const publishing=f.service.publish(f.workspace.id);await reached;
-  await f.store.trash(f.workspace.id);release();await assert.rejects(publishing,error=>error instanceof KnowledgeError&&error.status===404);assert.deepEqual(await pointer(f.root,f.workspace.id),old);
+  await f.store.trash(f.workspace.id);await f.store.purge(f.workspace.id);release();await assert.rejects(publishing,error=>error instanceof KnowledgeError&&error.status===404);assert.deepEqual(await pointer(f.root,f.workspace.id),old);
   await assert.rejects(readFile(join(f.root,'workspaces',f.workspace.id,'workspace.json')),/ENOENT/);
  }finally{release?.();await f.close();}
 });
@@ -158,4 +158,33 @@ for(const stage of ['artifact-write','before-pointer-rename'] as const)test('own
 
 test('maximum context strings with JSON escapes round-trip within the documented byte limit',async()=>{
  const f=await fixture();try{const escaped=Object.fromEntries(Object.keys(content).map(field=>[field,'\u0001'.repeat(16000)])) as ContextContent;const saved=await f.service.saveContext(f.workspace.id,'directory',{expectedContextRevision:0,context:escaped});assert.equal(saved.context.purpose,escaped.purpose);assert.equal((await f.service.readContext(f.workspace.id,'directory')).context.scope,escaped.scope);}finally{await f.close();}
+});
+
+test('rebuilding a corrupt current index retains the previous complete generation',async()=>{
+ const f=await fixture();try{
+  await f.service.publish(f.workspace.id);const complete=await pointer(f.root,f.workspace.id);await f.service.publish(f.workspace.id);const corrupt=await pointer(f.root,f.workspace.id);
+  await writeFile(join(f.root,'knowledge','generations','workspace-'+f.workspace.id,corrupt.generationId,'index.jsonl'),'corrupt index');
+  await f.service.publish(f.workspace.id);const rebuilt=await pointer(f.root,f.workspace.id);assert.equal(rebuilt.previousGenerationId,complete.generationId);assert.equal((await readdir(join(f.root,'knowledge','generations','workspace-'+f.workspace.id))).length,2);
+ }finally{await f.close();}
+});
+
+test('HTML and indexed text use the same source/context generation and authored text is inert',async()=>{
+ const f=await fixture();try{
+  const purpose='<script>alert("authored")</script><a href="javascript:alert(1)">link</a>';
+  await f.service.saveContext(f.workspace.id,'directory',{expectedContextRevision:0,context:{...content,purpose}});await f.service.publish(f.workspace.id);const pinned=await f.service.pinCurrent(f.workspace.id);
+  try{
+   const html=await readFile(join(pinned.directory,'index.html'),'utf8');assert.doesNotMatch(html,/<script|<a href/);assert.match(html,/&lt;script&gt;/);
+   const text=await readFile(join(pinned.directory,'documents','directory.txt'),'utf8');assert.ok(text.includes(purpose));const rows=(await readFile(join(pinned.directory,'index.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line));const authored=rows.find(row=>row.section==='purpose');assert.equal(authored.text,purpose);assert.equal(authored.generationId,pinned.pointer.generationId);assert.deepEqual(authored.sourceDescriptor,pinned.manifest.sources[0].sourceDescriptor);assert.equal(authored.contextRevision,pinned.manifest.sources[0].contextRevision);
+  }finally{pinned.release();}
+ }finally{await f.close();}
+});
+
+test('a context save during a build supersedes the captured generation without overwriting newer context',async()=>{
+ let release!:()=>void;let reached!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);const captured=new Promise<void>(resolve=>reached=resolve);let block=true;
+ const f=await fixture({faults:{async hit(stage){if(block&&stage==='after-descriptor-capture'){reached();await gate;}}}});
+ try{
+  const pending=f.service.publish(f.workspace.id);await captured;
+  await f.service.saveContext(f.workspace.id,'directory',{expectedContextRevision:0,context:content});release();assert.equal((await pending).published,false);block=false;
+  await f.service.publish(f.workspace.id);assert.equal((await f.service.readContext(f.workspace.id,'directory')).context.purpose,content.purpose);
+ }finally{release?.();await f.close();}
 });

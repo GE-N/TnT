@@ -137,7 +137,9 @@ pointer committed. Other scopes' pointers are untouched.
 Core exports `createKnowledgeService({root,store?,guard?,queue?,now?,faults?,readRuns?,renderHtml?})`.
 `store` is `ReturnType<typeof createWorkspaceStore>`; its `withKnowledge` method
 captures/commits under the existing serialization queue and supplies the validated
-active workspace directory. `queue` is `{enqueue(scopeId,job): void | Promise<void>}`;
+active workspace directory. Sidecar source reads run outside the queue, with a
+shared writer epoch and saved workspace revision rechecked inside it; final commits
+reject a superseded capture. Every sidecar writer advances that epoch in the queue. `queue` is `{enqueue(scopeId,job): void | Promise<void>}`;
 its result is never awaited by save or run. `readRuns(workspaceId)` returns existing
 completed/running run records. `renderHtml(generation)` returns a map of relative
 HTML paths to UTF-8 strings and must include `index.html` and
