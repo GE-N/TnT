@@ -128,6 +128,10 @@ function installDom(dom:JSDOM){
   }};
 }
 
+// Headroom for one slow workspace save under parallel CPU load. The previous 8s
+// limit missed a single round trip; this is still a hard deadline, not an open-ended wait.
+export const PUBLISHED_WAIT_MS=20_000;
+
 export async function runUi(fixture:GoldenFixture,hooks:{beforeRequest?:(path:string)=>Promise<void>}={}):Promise<GoldenSnapshot>{
   return withSeededIdsAsync(async()=>{
     const {mkdtemp,rm}=await import('node:fs/promises');
@@ -146,6 +150,7 @@ export async function runUi(fixture:GoldenFixture,hooks:{beforeRequest?:(path:st
     let latest:{yaml:string;canvas:CanvasGraph}|undefined;
     let saveEpoch=0;
     let refsAtSave=0;
+    let inFlight=0;
     const request=async(path:string,options?:{body?:string})=>{
       try{
         if(hooks.beforeRequest)await hooks.beforeRequest(path);
@@ -159,7 +164,12 @@ export async function runUi(fixture:GoldenFixture,hooks:{beforeRequest?:(path:st
         return Response.json(result??{ok:true});
       }catch(error){return Response.json({error:error instanceof Error?error.message:'Failed'},{status:400});}
     };
-    const fetch=(path:string,options?:{body?:string})=>{const result=request(path,options);installed.pending.push(result);return result;};
+    const fetch=(path:string,options?:{body?:string})=>{
+      inFlight+=1;
+      const result=request(path,options).finally(()=>{inFlight-=1;});
+      installed.pending.push(result);
+      return result;
+    };
     installed.define(fetch);
     const {createRoot}=await import('react-dom/client');
     const {Scenarios}=await import('../src/scenarios.js');
@@ -168,17 +178,23 @@ export async function runUi(fixture:GoldenFixture,hooks:{beforeRequest?:(path:st
     const report=console.error;
     // The save wait polls real timers, so React's act warning is not a snapshot failure.
     console.error=(...args:unknown[])=>{if(args.map(String).join(' ').includes('not wrapped in act'))return;report.apply(console,args);};
+    const saveStatus=()=>document.querySelector('.workspace-save-status')?.getAttribute('aria-label')??'missing';
     const published=async(savesAtStart?:number)=>{
-      const deadline=Date.now()+8000;
+      const started=Date.now();
+      const deadline=started+PUBLISHED_WAIT_MS;
       while(Date.now()<deadline){
-        await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20));});
-        await settle();
-        const status=document.querySelector('.workspace-save-status')?.getAttribute('aria-label');
+        await act(async()=>{await new Promise(resolve=>setTimeout(resolve,Math.min(20,Math.max(0,deadline-Date.now()))));});
+        // Drain completed requests without waiting past the deadline, so a hung save still times out.
+        await Promise.race([
+          settle(),
+          new Promise<void>(resolve=>setTimeout(resolve,Math.max(0,deadline-Date.now()))),
+        ]);
+        const status=saveStatus();
         const saveLanded=savesAtStart===undefined||(saveEpoch>savesAtStart&&refsAtSave===saveEpoch);
         if(status==='Saved locally'&&latest&&saveLanded)return latest;
       }
-      const status=document.querySelector('.workspace-save-status')?.getAttribute('aria-label')??'missing';
-      throw new Error('The workspace page did not acknowledge a save ('+status+').');
+      const waited=Date.now()-started;
+      throw new Error('The workspace page did not acknowledge a save after '+waited+'ms ('+saveStatus()+'; pending='+inFlight+'; saveEpoch='+saveEpoch+'; refsAtSave='+refsAtSave+').');
     };
     try{
       await act(async()=>root.render(createElement(Scenarios,{token:'test',deviceId,bundleId:'com.example.App',launchBusy:false,onRunning:()=>{}})));
