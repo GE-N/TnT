@@ -1,11 +1,12 @@
-import {readFile,readdir,rm} from 'node:fs/promises';
+import {readdir,rm,stat} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {createWorkspaceStore,subscribeWorkspaceChanges} from '../workspace-store.js';
 import type {Workspace,Run} from '../scenarios.js';
 import {atomicWrite,readSafe,safeDirectory,safeFile,relativeParts} from './files.js';
 import {canonical,sha256,makeDetail,sourceDescriptor} from './projection.js';
-import {buildArtifacts,minimalHtml} from './artifacts.js';
+import {minimalHtml} from './artifacts.js';
+import {projectInBackground,artifactsInBackground} from './background.js';
 import {alwaysOwned,contextFields,emptyContext,validateContent,validateSave,workspaceId,scenarioId,scopeId,KnowledgeError,ContextRevisionConflict} from './types.js';
 import type {RootGuard,KnowledgeFaults,IndexingQueue,GenerationInput,ScenarioContext,ScenarioDetail,Pointer,Manifest,FaultStage} from './types.js';
 export * from './types.js';
@@ -22,6 +23,7 @@ function serializeCommit<T>(key:string,job:()=>Promise<T>):Promise<T>{const next
 const isMissing=(error:unknown)=>(error as NodeJS.ErrnoException).code==='ENOENT';
 const publicationMessage=(error:unknown)=>error instanceof Error?error.message:'Knowledge publication failed.';
 const generationId=(value:unknown):value is string=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+async function readFilePresence(directory:string,name:string){await stat(await safeFile(directory,name));}
 
 export function createKnowledgeService(options:KnowledgeOptions){
  const root=resolve(options.root);const guard=options.guard??alwaysOwned;guard.assertOwned();
@@ -56,12 +58,12 @@ export function createKnowledgeService(options:KnowledgeOptions){
   return runs;
  }
  async function rawCapture(id:string){return inWorkspace(id,async(workspace,directory)=>{
-  const contexts:Record<string,ScenarioContext>={};for(const scenario of workspace.scenarios??[]){scenarioId(scenario.id);contexts[scenario.id]=await readContextFile(directory,id,scenario.id);}
+  const contexts:Record<string,ScenarioContext>={};await Promise.all((workspace.scenarios??[]).map(async scenario=>{scenarioId(scenario.id);contexts[scenario.id]=await readContextFile(directory,id,scenario.id);}));
   return {workspace:structuredClone(workspace),contexts};
  });}
- async function capture(id:string){
+ async function capture(id:string,background=false){
   const [{workspace,contexts},runs]=await Promise.all([rawCapture(id),readRuns(id)]);
-  const scenarios=(workspace.scenarios??[]).map(scenario=>makeDetail(workspace,scenario,contexts[scenario.id],runs));
+  const scenarios=background?await projectInBackground(workspace,contexts,runs):(workspace.scenarios??[]).map(scenario=>makeDetail(workspace,scenario,contexts[scenario.id],runs));
   const inputHash=sha256(canonical({workspaceId:id,workspaceTitle:workspace.name,scenarios}));
   return {workspace,contexts,scenarios,inputHash};
  }
@@ -69,29 +71,32 @@ export function createKnowledgeService(options:KnowledgeOptions){
   if(!generationId(gen))throw new Error('Invalid generation identity.');
   return safeDirectory(root,['knowledge','generations',scopeId(id),gen],guard,create);
  }
- async function validateGeneration(id:string,gen:string){
+ async function validateGeneration(id:string,gen:string,deep=true){
   const directory=await generationDirectory(id,gen);const manifest=JSON.parse(await readSafe(directory,'manifest.json')) as Manifest;
   if(manifest.formatVersion!==1||manifest.generationId!==gen||manifest.scopeId!==scopeId(id)||manifest.workspaceId!==id||!Array.isArray(manifest.artifacts)||!Array.isArray(manifest.documents)||!Array.isArray(manifest.sources))throw new Error('Invalid generation manifest.');
   const required=new Set(['index.html','workspaces/'+id+'.html','index.jsonl']);
   for(const source of manifest.sources){scenarioId(source.scenarioId);required.add('documents/'+source.scenarioId+'.txt');if(!manifest.documents.some(doc=>doc.path==='documents/'+source.scenarioId+'.txt'))throw new Error('Mandatory text document is missing.');}
   const paths=new Set<string>();
-  for(const artifact of manifest.artifacts){
+  await Promise.all(manifest.artifacts.map(async artifact=>{
    if(paths.has(artifact.path))throw new Error('Duplicate generation artifact.');paths.add(artifact.path);
    const parts=relativeParts(artifact.path);const name=parts.pop()!;const folder=await safeDirectory(directory,parts,guard);
-   const text=await readSafe(folder,name);if(sha256(text)!==artifact.sha256)throw new Error('Generation artifact checksum mismatch.');required.delete(artifact.path);
-  }
+   if(deep){const text=await readSafe(folder,name);if(sha256(text)!==artifact.sha256)throw new Error('Generation artifact checksum mismatch.');}
+   else await readFilePresence(folder,name);
+   required.delete(artifact.path);
+  }));
   if(required.size)throw new Error('Generation is missing mandatory HTML or LLM text index.');
   for(const document of manifest.documents){if(!manifest.artifacts.some(artifact=>artifact.path===document.path&&artifact.sha256===document.sha256))throw new Error('Invalid text document checksum.');}
+  if(!deep)return {directory,manifest};
   const lines=(await readSafe(directory,'index.jsonl')).trim();const rows=lines?lines.split('\n').map(line=>JSON.parse(line) as Record<string,unknown>):[];
   if(rows.some(row=>row.generationId!==gen||row.workspaceId!==id||typeof row.scenarioId!=='string'||!manifest.sources.some(source=>source.scenarioId===row.scenarioId&&canonical(source.sourceDescriptor)===canonical(row.sourceDescriptor)&&source.contextRevision===row.contextRevision)))throw new Error('Text index source descriptor mismatch.');
   if(manifest.sources.some(source=>!rows.some(row=>row.scenarioId===source.scenarioId&&row.section==='flow')))throw new Error('Text index is missing scenario flow sections.');
   return {directory,manifest};
  }
- async function pointer(id:string):Promise<Pointer|null>{
+ async function pointer(id:string,deep=true):Promise<Pointer|null>{
   try{
    const directory=await safeDirectory(root,['knowledge','current'],guard);const value=JSON.parse(await readSafe(directory,scopeId(id)+'.json')) as Pointer;
    if(value.formatVersion!==1||value.scopeId!==scopeId(id)||!generationId(value.generationId)||(value.previousGenerationId!==null&&!generationId(value.previousGenerationId))||typeof value.inputHash!=='string')throw new Error('Invalid knowledge pointer.');
-   await validateGeneration(id,value.generationId);return value;
+   await validateGeneration(id,value.generationId,deep);return value;
   }catch(error){if(isMissing(error))return null;throw error;}
  }
  async function decorated(id:string){
@@ -159,9 +164,10 @@ export function createKnowledgeService(options:KnowledgeOptions){
   async publish(id:string){
    workspaceId(id);guard.assertOwned();
    return serializePublication(root+':'+scopeId(id),async()=>{
-    guard.assertOwned();const captured=await capture(id);const gen=randomUUID();await hit('after-descriptor-capture',id,gen);
+    guard.assertOwned();const captured=await capture(id,true);const gen=randomUUID();await hit('after-descriptor-capture',id,gen);
     const input:GenerationInput={generationId:gen,scopeId:scopeId(id),workspaceId:id,workspaceTitle:captured.workspace.name,generatedAt:now(),scenarios:captured.scenarios};
-    const {files}=await buildArtifacts(input,options.renderHtml??minimalHtml);
+    const html=await (options.renderHtml??minimalHtml)(input);
+    const {files}=await artifactsInBackground(input,html);
     guard.assertOwned();const directory=await generationDirectory(id,gen,true);
     for(const [path,text] of Object.entries(files)){
      await hit('artifact-write',id,gen,path);const parts=relativeParts(path);const name=parts.pop()!;const folder=await safeDirectory(directory,parts,guard,true);await atomicWrite(folder,name,text,guard);
@@ -169,23 +175,25 @@ export function createKnowledgeService(options:KnowledgeOptions){
     await hit('before-generation-complete',id,gen);await hit('before-validation',id,gen);const complete=await validateGeneration(id,gen);await hit('after-validation',id,gen);
     // Detect tampering/faults after validation too; a missing index never gets switched in.
     await validateGeneration(id,gen);
+    let previous:Pointer|null=null;try{previous=await pointer(id);}catch{/* Generated files are rebuildable from authored source. */}
     await hit('before-final-check',id,gen);
     let committed:Pointer|null=null;
     await inWorkspace(id,async(workspace,directory)=>{
      if(workspace.metadata?.revision!==captured.workspace.metadata?.revision||workspace.name!==captured.workspace.name)return;
-     for(const [scenario,context] of Object.entries(captured.contexts)){if(canonical(await readContextFile(directory,id,scenario))!==canonical(context))return;}
+     const matching=await Promise.all(Object.entries(captured.contexts).map(async([scenario,context])=>canonical(await readContextFile(directory,id,scenario))===canonical(context)));
+     if(matching.some(match=>!match))return;
      if(canonical((workspace.scenarios??[]).map(item=>item.id))!==canonical(captured.scenarios.map(item=>item.scenarioId)))return;
      await hit('after-final-check',id,gen);guard.assertOwned();
      await serializeCommit(root+':'+scopeId(id),async()=>{
-      const current=await pointer(id);const next:Pointer={formatVersion:1,scopeId:scopeId(id),generationId:gen,previousGenerationId:current?.generationId??null,generatedAt:input.generatedAt,inputHash:captured.inputHash};
+      const next:Pointer={formatVersion:1,scopeId:scopeId(id),generationId:gen,previousGenerationId:previous?.generationId??null,generatedAt:input.generatedAt,inputHash:captured.inputHash};
       const pointerDirectory=await safeDirectory(root,['knowledge','current'],guard,true);
-      await atomicWrite(pointerDirectory,scopeId(id)+'.json',JSON.stringify(next)+'\n',guard,async()=>{await hit('before-pointer-rename',id,gen);await validateGeneration(id,gen);});
+      await atomicWrite(pointerDirectory,scopeId(id)+'.json',JSON.stringify(next)+'\n',guard,async()=>{await hit('before-pointer-rename',id,gen);await validateGeneration(id,gen,false);});
       committed=next;await hit('after-pointer-rename',id,gen);
      });
     });
     if(!committed)return {published:false,generationId:null};
     errors.delete(id);await serializeCommit(root+':'+scopeId(id),()=>cleanup(id,committed!));return {published:true,generationId:complete.manifest.generationId};
-   });
+   }).catch(error=>{errors.set(id,publicationMessage(error));throw error;});
   },
   async rebuild(id:string){workspaceId(id);await rawCapture(id);schedule(id);return {queued:true};},
   async reconcile(){
@@ -195,12 +203,13 @@ export function createKnowledgeService(options:KnowledgeOptions){
   async pinCurrent(id:string){
    workspaceId(id);
    // Pins and cleanup share the scope serialization; no check/pin deletion race.
-   await rawCapture(id);
-   return serializeCommit(root+':'+scopeId(id),async()=>{
-    const current=await pointer(id);if(!current)throw new KnowledgeError(503,'KNOWLEDGE_UNAVAILABLE','Knowledge publication is pending.');
-    const directory=await generationDirectory(id,current.generationId);pins.set(directory,(pins.get(directory)??0)+1);let released=false;
-    return {pointer:current,directory,manifest:(await validateGeneration(id,current.generationId)).manifest,release(){if(released)return;released=true;const count=(pins.get(directory)??1)-1;if(count)pins.set(directory,count);else pins.delete(directory);}};
-   });
+   return inWorkspace(id,async workspace=>serializeCommit(root+':'+scopeId(id),async()=>{
+    const current=await pointer(id,false);if(!current)throw new KnowledgeError(503,'KNOWLEDGE_UNAVAILABLE','Knowledge publication is pending.');
+    const {directory,manifest}=await validateGeneration(id,current.generationId,false);
+    if(manifest.sources.some(source=>!workspace.scenarios?.some(scenario=>scenario.id===source.scenarioId)))throw new KnowledgeError(503,'KNOWLEDGE_UNAVAILABLE','Knowledge visibility changed; publication is pending.');
+    pins.set(directory,(pins.get(directory)??0)+1);let released=false;
+    return {pointer:current,directory,manifest,release(){if(released)return;released=true;const count=(pins.get(directory)??1)-1;if(count)pins.set(directory,count);else pins.delete(directory);}};
+   }));
   },
   close(){closed=true;unsubscribe();if(interval)clearInterval(interval);},
   /** Test/shutdown helper; callers must not await this in save/run paths. */

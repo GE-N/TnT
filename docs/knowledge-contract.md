@@ -124,7 +124,8 @@ IDs are stable (`purpose`, `expectedOutcome`, `rationale`, `preconditions`, `flo
 The evidence notice is included. No search is exposed in this slice.
 
 Pointer: `{formatVersion:1,scopeId,generationId,previousGenerationId,generatedAt,inputHash}`.
-Builds run outside the workspace queue. Required files, matching descriptors,
+CPU-heavy flow projection and text/index construction run in worker threads, outside
+the runner event loop and workspace queue. Required files, matching descriptors,
 checksums, HTML and all text documents are validated before the final queued
 source/lifecycle comparison. The fsynced temporary pointer is atomically renamed
 under the scope serialization and workspace store queue. A partial generation

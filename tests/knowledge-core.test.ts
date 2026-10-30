@@ -137,3 +137,25 @@ test('evidence uses latest completed scenario result and never publishes logs or
   try{const detail=await service.readContext(f.workspace.id,'directory');assert.equal(detail.evidence.runId,'old');assert.match(detail.evidence.notice,/do not establish/);await service.publish(f.workspace.id);const pinned=await service.pinCurrent(f.workspace.id);try{const text=await readFile(join(pinned.directory,'documents','directory.txt'),'utf8');assert.doesNotMatch(text,/SECRET/);assert.match(text,/passed/);}finally{pinned.release();}}finally{service.close();}
  }finally{await f.close();}
 });
+
+test('saved scenario deletion is hidden immediately from pinned readers before a rebuild',async()=>{
+ const f=await fixture();try{
+  await f.service.publish(f.workspace.id);await f.store.save({...f.workspace,scenarios:[]},1);
+  await assert.rejects(f.service.pinCurrent(f.workspace.id),error=>error instanceof KnowledgeError&&error.status===503);
+  await assert.rejects(f.service.readContext(f.workspace.id,'directory'),error=>error instanceof KnowledgeError&&error.status===404);
+ }finally{await f.close();}
+});
+
+for(const artifact of ['documents/directory.txt','index.html','workspaces/WORKSPACE.html','index.jsonl','manifest.json'])test('failure writing '+artifact+' leaves the previous generation current',async()=>{
+ let fail=false;const f=await fixture({faults:{hit(stage,detail){if(fail&&stage==='artifact-write'&&detail.path===artifact.replace('WORKSPACE',f.workspace.id))throw new Error('Artifact failed');}}});
+ try{await f.service.saveContext(f.workspace.id,'directory',{expectedContextRevision:0,context:content});await f.service.publish(f.workspace.id);const old=await pointer(f.root,f.workspace.id);fail=true;await assert.rejects(f.service.publish(f.workspace.id),/Artifact failed/);assert.deepEqual(await pointer(f.root,f.workspace.id),old);assert.equal((await f.service.status(f.workspace.id)).freshness,'needs-review');}finally{await f.close();}
+});
+
+for(const stage of ['artifact-write','before-pointer-rename'] as const)test('ownership revoked at '+stage+' prevents the next mutation',async()=>{
+ let owned=true;let revoke=false;const f=await fixture({guard:{assertOwned(){if(!owned)throw new Error('Ownership lost');}},faults:{hit(point){if(revoke&&point===stage)owned=false;}}});
+ try{await f.service.publish(f.workspace.id);const old=await pointer(f.root,f.workspace.id);revoke=true;await assert.rejects(f.service.publish(f.workspace.id),/Ownership lost/);assert.deepEqual(await pointer(f.root,f.workspace.id),old);}finally{await f.close();}
+});
+
+test('maximum context strings with JSON escapes round-trip within the documented byte limit',async()=>{
+ const f=await fixture();try{const escaped=Object.fromEntries(Object.keys(content).map(field=>[field,'\u0001'.repeat(16000)])) as ContextContent;const saved=await f.service.saveContext(f.workspace.id,'directory',{expectedContextRevision:0,context:escaped});assert.equal(saved.context.purpose,escaped.purpose);assert.equal((await f.service.readContext(f.workspace.id,'directory')).context.scope,escaped.scope);}finally{await f.close();}
+});

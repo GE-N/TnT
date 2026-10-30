@@ -19,7 +19,7 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
   scenarios?: ReturnType<typeof createScenarios>,
   ai?: AiService,
   knowledge?: KnowledgeService) {
-  const knowledgeService=knowledge??(scenarios?createKnowledgeService({root:dirname(artifactDirectory)}):undefined);
+  let knowledgeService=knowledge;
   const token = randomBytes(32).toString('hex');
   let launching = false;
   return async (request: IncomingMessage, response: ServerResponse) => {
@@ -48,6 +48,7 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       if ((request.method === 'POST' || request.method === 'PUT') && request.headers.origin !== `http://${host}`) return json(403, { error: 'A same-origin workbench request is required.' });
       if ((request.method === 'POST' || request.method === 'PUT') && !request.headers['content-type']?.startsWith('application/json')) return json(415, { error: 'Send JSON.' });
       if(url.pathname.startsWith('/api/knowledge/')){
+        knowledgeService??=scenarios?createKnowledgeService({root:dirname(artifactDirectory)}):undefined;
         if(!knowledgeService)return json(503,{code:'KNOWLEDGE_UNAVAILABLE',error:'Knowledge service is unavailable.'});
         const context=/^\/api\/knowledge\/workspaces\/([^/]+)\/scenarios\/([^/]+)\/context$/.exec(url.pathname);
         const status=/^\/api\/knowledge\/workspaces\/([^/]+)\/status$/.exec(url.pathname);

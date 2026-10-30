@@ -11,7 +11,7 @@ export async function safeDirectory(root:string,parts:string[],guard:RootGuard,c
   if(!part||part==='.'||part==='..'||/[\\/\0]/.test(part))throw new Error('Unsafe knowledge path.');
   directory=join(directory,part);
   try{const entry=await lstat(directory);if(entry.isSymbolicLink()||!entry.isDirectory())throw new Error('Unsafe knowledge directory.');}
-  catch(error){if(!create||!absent(error))throw error;guard.assertOwned();await mkdir(directory);}
+  catch(error){if(!create||!absent(error))throw error;guard.assertOwned();await mkdir(directory);guard.assertOwned();await syncDirectory(join(directory,'..'));}
   if(!(await realpath(directory)).startsWith(base+sep))throw new Error('Knowledge path escapes its root.');
  }
  return directory;

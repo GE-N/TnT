@@ -20,7 +20,14 @@ function parsed(yaml:string){
 function commandLabel(value:unknown):string {
  const key=typeof value==='string'?value:value&&typeof value==='object'?Object.keys(value)[0]:undefined;
  if(!key)return 'Unavailable command';
- // Values (including input values, arbitrary JS and mock payloads) are not indexed.
+ // Only known authored selector labels are included; input values and script bodies stay out.
+ const argument=typeof value==='object'&&value?(value as Record<string,unknown>)[key]:undefined;
+ if(['tapOn','assertVisible','assertNotVisible'].includes(key)){
+  const selector=typeof argument==='string'?{text:argument}:argument&&typeof argument==='object'?argument as Record<string,unknown>:undefined;
+  const target=selector&&typeof selector.text==='string'?'text':selector&&typeof selector.id==='string'?'element':undefined;
+  const text=target==='text'?selector!.text:selector?.id;
+  if(target)return (key==='tapOn'?'Tap':key==='assertVisible'?'Visible':'Absent')+' '+target+' · '+text;
+ }
  const names:Record<string,string>={launchApp:'Launch app',tapOn:'Tap',assertVisible:'Visible',assertNotVisible:'Absent',inputText:'Input text',back:'Back',runFlow:'Reusable flow',runScript:'Opaque script',evalScript:'Opaque script'};
  return names[key]??key;
 }
@@ -34,9 +41,8 @@ export function sourceProjection(workspace:Workspace,scenario:ScenarioDefinition
  const tests=new Map(graph?.screens.flatMap(screen=>screen.tests.map(test=>[test.id,test] as const))??[]);
  let selected:unknown[];let visits:unknown[]|undefined;
  if(scenario.authoring==='canvas'&&graph&&path){
-  const selectedIds=new Set<string>();
   visits=routeVisits(graph,path).map((visit,index)=>({id:visit.id,screenId:visitScreenId(graph,path,index)??null,operations:visitOperations(graph,path,index).map(id=>{
-   selectedIds.add(id);const test=tests.get(id);
+   const test=tests.get(id);
    return test?{id,role:test.role,check:test.check,tap:test.tap,input:test.input,back:test.back,backSelector:test.backSelector,command:root.commands[test.reference.index??-1]??{missing:true},referenceKind:test.reference.kind,file:test.reference.file}: {id,missing:true};
   })}));
   const ownedIndices=new Set([...tests.values()].filter(test=>test.reference.kind==='step').map(test=>test.reference.index));
@@ -64,24 +70,29 @@ export function sourceProjection(workspace:Workspace,scenario:ScenarioDefinition
 export function sourceDescriptor(workspace:Workspace,scenario:ScenarioDefinition):SourceDescriptor{return {projectionVersion:1,workspaceRevision:workspace.metadata?.revision??0,sourceHash:sha256(canonical(sourceProjection(workspace,scenario)))};}
 export function deriveFlow(workspace:Workspace,scenario:ScenarioDefinition):FlowFacts {
  const result:FlowFacts={steps:[],visits:[],diagnostics:[]};const {graph,path}=route(workspace,scenario);const root=parsed(workspace.yaml);
+ let anchor=0;const shownScripts=new Set<string>();
+ function scripts(visitId?:string){return (scenario.scripts??[]).filter(script=>script.beforeStep.index===anchor).map(script=>{shownScripts.add(script.id);const number=result.steps.length+1;const step={number,text:number+' · Opaque script · '+script.label,...(visitId?{visitId}:{})};result.steps.push(step);return step;});}
  if(root.invalid)result.diagnostics.push('Saved YAML is unavailable or invalid.');
  if(graph&&path){
   const tests=new Map(graph.screens.flatMap(screen=>screen.tests.map(test=>[test.id,test] as const)));
   result.visits=routeVisits(graph,path).map((visit,index)=>{
    const screenId=visitScreenId(graph,path,index)??'';const screen=graph.screens.find(screen=>screen.id===screenId);
    if(!screen)result.diagnostics.push('Missing screen for visit '+(index+1)+'.');
-   const steps=visitOperations(graph,path,index).map(id=>{
+   const steps=visitOperations(graph,path,index).flatMap(id=>{
     const test=tests.get(id);if(!test)result.diagnostics.push('Missing saved operation '+id+'.');
     else if(test.reference.kind==='step'&&root.commands[test.reference.index??-1]===undefined)result.diagnostics.push('Unavailable command for '+id+'.');
-    const number=result.steps.length+1;const step={number,text:number+' · '+(test?canvasTestLabel(test):'Unavailable operation'),visitId:visit.id,testId:id};result.steps.push(step);return step;
+    const before=test?.reference.kind==='step'?scripts(visit.id):[];
+    const number=result.steps.length+1;const step={number,text:number+' · '+(test?canvasTestLabel(test):'Unavailable operation'),visitId:visit.id,testId:id};result.steps.push(step);if(test?.reference.kind==='step')anchor++;return [...before,step];
    });
    return {number:index+1,id:visit.id,screenId,title:screen?.title??'Unavailable screen',steps};
   });
+  for(const id of unconnectedScenarioActions(graph,scenario.id))result.diagnostics.push('Saved action '+id+' has no destination.');
  }else {
   if(scenario.pathId)result.diagnostics.push('Saved scenario path is unavailable.');
-  for(const ref of scenario.steps){const number=result.steps.length+1;const command=root.commands[ref.index??-1];if(command===undefined)result.diagnostics.push('Unavailable step '+number+'.');result.steps.push({number,text:number+' · '+commandLabel(command)});}
+  for(const ref of scenario.steps){scripts();const number=result.steps.length+1;const command=root.commands[ref.index??-1];if(command===undefined)result.diagnostics.push('Unavailable step '+number+'.');result.steps.push({number,text:number+' · '+commandLabel(command)});anchor++;}
  }
- for(const script of scenario.scripts??[]){const number=result.steps.length+1;result.steps.push({number,text:number+' · Opaque script · '+script.label});}
+ const ending=scripts(result.visits.at(-1)?.id);result.visits.at(-1)?.steps.push(...ending);
+ for(const script of scenario.scripts??[])if(!shownScripts.has(script.id))result.diagnostics.push('Opaque script '+script.label+' has an unavailable saved anchor.');
  return result;
 }
 export const evidenceNotice='Run results do not establish authored expected outcomes.';
