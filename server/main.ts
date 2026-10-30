@@ -67,7 +67,7 @@ if (production) {
   };
 } else {
   const { createServer: createViteServer } = await import('vite');
-  const vite = await createViteServer({ server: { middlewareMode: true, hmr: { server } }, appType: 'spa' });
+  const vite = await createViteServer({ server: { middlewareMode: true, hmr: { server }, watch: { ignored: ['**/.tnt/**'] } }, appType: 'spa' });
   serve = (request, response) => vite.middlewares(request, response);
 }
 server.on('request', createApiHandler(runner, artifactDirectory, serve, scenarios, ai, knowledge));
