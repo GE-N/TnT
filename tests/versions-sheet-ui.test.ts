@@ -23,3 +23,19 @@ test('the Versions and Undo controls show their fill and underline only for keyb
   }
   assert.match(css, /\.ai-flow \.ai-versions-toggle:focus-visible[^{]*\{[^}]*background:#eef4fd/);
 });
+
+test('Versions and Node details share the 16px panel inset and close alignment', () => {
+  const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+  const rule = (selector: string) => css.match(new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\{([^}]+)\\}'))?.[1] ?? '';
+  assert.match(rule('.ai-versions-sheet'), /padding:0 16px/);
+  assert.match(rule('.ai-versions-head'), /padding:16px 0 8px/);
+  assert.match(rule('.ai-versions-sheet .ai-versions-close'), /margin:-12px -16px 0 auto/);
+  assert.match(rule('.ai-versions-list'), /margin:0 -8px/);
+  assert.match(rule('.ai-version-option'), /padding:8px;/);
+  assert.match(rule('.ai-versions-foot'), /padding:12px 0 16px/);
+  assert.match(rule('.floating-inspector'), /padding:0 16px 16px/);
+  assert.match(rule('.floating-inspector-header'), /margin:0;padding:16px 0 12px/);
+  assert.match(rule('.floating-inspector-close'), /margin:-10px -16px -10px 0/);
+  assert.match(rule('.inspector-bottom-fade'), /bottom:-16px;height:28px;margin:-28px -16px -16px/);
+  assert.match(rule('.floating-inspector'), /width:300px/, 'popup width (and so its 12px gap) is unchanged');
+});
