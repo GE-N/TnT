@@ -148,9 +148,8 @@ test('running locks the inspector, shows spinner progress, Stop, and edge highli
  assert.equal(document.querySelector('.add-visit-step'),null);
  assert.equal(document.querySelector('.visit-step-drag'),null);
  assert.equal(document.querySelector('.visit-step-actions'),null);
- const yaml=document.querySelector<HTMLButtonElement>('[aria-label^="Open YAML"]')!;
- assert.equal(yaml.getAttribute('aria-disabled'),'true');
- assert.match(yaml.getAttribute('aria-label')??'',/Unavailable while the scenario is running/);
+ assert.equal(document.querySelector('.visit-yaml-link'),null);
+ assert.equal(document.querySelector('[aria-label^="Open YAML"]'),null);
  const badges=[...document.querySelectorAll('.run-status-badge.running')];
  assert.equal(badges.length,2,'Spinner status appears on the current visit and step only');
  assert.ok(badges.every(node=>node.getAttribute('role')==='status'&&/Running/.test(node.textContent??'')));
@@ -158,6 +157,14 @@ test('running locks the inspector, shows spinner progress, Stop, and edge highli
  assert.equal(document.activeElement,beforeFocus,'Running does not move focus');
  assert.equal(document.querySelector('.canvas-visit-section.selected-visit')?.getAttribute('data-visit-id'),document.querySelector('[data-visit-id]')?.getAttribute('data-visit-id'));
  assert.ok(selectedBefore===undefined||document.querySelector('[data-visit-id="'+selectedBefore+'"]'));
+ await act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new document.defaultView!.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:30,clientY:30})));
+ const viewYaml=[...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find(button=>button.textContent==='View YAML');
+ assert.ok(viewYaml,'View YAML stays on the canvas menu while a run is locked');
+ assert.equal(viewYaml.disabled,true);
+ assert.equal(viewYaml.title,'Unavailable while the scenario is running.');
+ await act(async()=>viewYaml.click());
+ assert.equal(document.querySelector('[role="dialog"][aria-label="YAML"]'),null);
+ await act(async()=>document.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
  await click('Stop scenario');
 }));
 

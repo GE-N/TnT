@@ -269,8 +269,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       assert.equal(page.document.activeElement,pick);
       page.viewport.width=1200;
       await act(async()=>page.window.dispatchEvent(new page.window.Event('resize')));
-      const opener=page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!;
-      await act(async()=>opener.click());
+      const opener=await openYaml(page);
       const yaml=page.card('YAML')!;
       assert.ok(yaml.querySelector('[aria-label="YAML form and code editor"]'));
       assert.equal(yaml.querySelector('textarea')!.id,'yaml-card');
@@ -303,7 +302,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       const deadline=Date.now()+8000;
       while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<deadline){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
       await inspectScreen(page.document,{id:'home'},{id:'visit-home'});
-      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
+      await openYaml(page);
       assert.deepEqual(page.origin('YAML'),snapped);
       const restored=page.card('YAML')!;
       assert.equal(page.document.querySelectorAll('#form-command').length,1);
@@ -323,8 +322,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
     const page=await openWorkspace('tap');
     const typeInto=async(input:HTMLInputElement,value:string)=>{await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});};
     try{
-      const opener=page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!;
-      await act(async()=>opener.click());
+      const opener=await openYaml(page);
       const yaml=page.card('YAML')!;
       await act(async()=>[...yaml.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
       await act(async()=>yaml.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
@@ -351,7 +349,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       await page.settle();
       const kept=(await page.service.workspaceDetail(page.workspace.id)).draft?.fields??{};
       assert.equal(kept['yaml-command'],'New command');
-      await act(async()=>opener.click());
+      await openYaml(page);
       const reopened=page.card('YAML')!;
       assert.equal(reopened.querySelector<HTMLInputElement>('#yaml-card-form-value')!.value,'New command');
       assert.equal(reopened.querySelector<HTMLInputElement>('.yaml-value input')!.value,'Gear pending');
@@ -366,7 +364,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       const afterRestore=Date.now()+8000;
       while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<afterRestore){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
       await inspectScreen(page.document,{id:'home'},{id:'visit-home'});
-      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
+      await openYaml(page);
       const recovered=page.card('YAML')!;
       await act(async()=>[...recovered.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
       await act(async()=>recovered.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
@@ -397,7 +395,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
     const page=await openWorkspace('tap');
     const typeInto=async(input:HTMLInputElement,value:string)=>{await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});};
     try{
-      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
+      await openYaml(page);
       const yaml=page.card('YAML')!;
       await act(async()=>[...yaml.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
       await act(async()=>yaml.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
@@ -420,7 +418,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       const afterRestore=Date.now()+8000;
       while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<afterRestore){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
       await inspectScreen(page.document,{id:'home'},{id:'visit-home'});
-      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
+      await openYaml(page);
       const card=page.card('YAML')!;
       await act(async()=>[...card.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
       await act(async()=>card.querySelector<HTMLButtonElement>('[aria-label="Details step 2"]')!.click());
@@ -445,7 +443,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
     const page=await openWorkspace('tap');
     const typeInto=async(input:HTMLInputElement,value:string)=>{await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});};
     try{
-      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
+      await openYaml(page);
       const card=page.card('YAML')!;
       await act(async()=>[...card.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
       await typeInto(card.querySelector<HTMLInputElement>('#yaml-card-form-value')!,'card pending');
@@ -471,7 +469,7 @@ describe('match by, pick from screen and pop-out cards',{concurrency:1},()=>{
       const afterRestore=Date.now()+8000;
       while(!page.document.querySelector('[data-screen-id="home"]')&&Date.now()<afterRestore){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});await page.settle();}
       await inspectScreen(page.document,{id:'home'},{id:'visit-home'});
-      await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
+      await openYaml(page);
       const restoredCard=page.card('YAML')!;
       await act(async()=>[...restoredCard.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
       const restoredAdvanced=await showAdvanced(page.document);
@@ -741,8 +739,17 @@ type WorkspacePage=Awaited<ReturnType<typeof openWorkspace>>;
 async function typeInto(page:WorkspacePage,input:HTMLInputElement,value:string){
   await act(async()=>{Object.getOwnPropertyDescriptor(page.window.HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new page.window.Event('input',{bubbles:true}));});
 }
+async function openYaml(page:WorkspacePage){
+  const surface=page.document.querySelector<HTMLElement>('.canvas-surface');
+  assert.ok(surface,'canvas surface');
+  await act(async()=>surface.dispatchEvent(new page.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:80})));
+  const item=[...page.document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button=>button.textContent==='View YAML');
+  assert.ok(item,'View YAML');
+  await act(async()=>item.click());
+  return surface;
+}
 async function openYamlForms(page:WorkspacePage){
-  await act(async()=>page.document.querySelector<HTMLButtonElement>('[aria-label="Open YAML"]')!.click());
+  await openYaml(page);
   const card=[...page.document.querySelectorAll<HTMLElement>('[role="dialog"][aria-label="YAML"]')].find(item=>!item.hidden);
   assert.ok(card);
   await act(async()=>[...card.querySelectorAll('button')].find(item=>item.textContent==='Command forms')!.click());
