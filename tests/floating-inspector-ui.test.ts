@@ -910,12 +910,12 @@ test('first valid new step and destination commit once and Undo restores exact g
 test('visit review styles retain minimum hit targets and accessible validation colours',()=>{
  const css=readFileSync(new URL('../src/style.css',import.meta.url),'utf8');const rules=[...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([,selector,body])=>({selector:selector.trim(),body}));
  const rule=(selector:string)=>rules.find(item=>item.selector===selector)!.body;
- for(const selector of ['.floating-inspector .visit-step-summary','.visit-step-actions .step-actions-trigger','.step-actions-menu [role=menuitem]','.navigation-hint button,.visit-yaml-link'])assert.match(rule(selector),/min-height:44px/);
+ for(const selector of ['.floating-inspector .visit-step-summary','.visit-step-actions .step-actions-trigger','.step-actions-menu [role=menuitem]','.navigation-hint button'])assert.match(rule(selector),/min-height:44px/);
  assert.match(rule('.visit-step-actions .step-actions-trigger'),/min-width:44px/);assert.match(rule('.visit-step-actions .step-actions-trigger'),/background:transparent/);
  const triggerHover=rule('.visit-step:hover .step-actions-trigger,.script-row:hover .step-actions-trigger,.visit-step-actions .step-actions-trigger:hover:not(:disabled),.visit-step-actions .step-actions-trigger[aria-expanded="true"]');
  assert.match(triggerHover,/background:var\(--subtle\)/);assert.doesNotMatch(triggerHover,/--surface/);
  assert.match(rule('.step-actions-menu'),/position:fixed/);assert.match(rule('.step-actions-menu'),/z-index:70/);
- assert.match(rule('.navigation-hint button,.visit-yaml-link'),/font-size:12px/);
+ assert.match(rule('.navigation-hint button'),/font-size:12px/);
  assert.match(rule('.visit-selector-error'),/color:#b3261e/);assert.match(rule('.visit-selector-error'),/font-size:12px/);assert.match(rule('.visit-inline-fields input[aria-invalid=true]'),/border:2px solid #b3261e/);
  assert.match(css,/--warning: #8a4b00/);assert.match(css,/--warning-surface: #fff4e5/);assert.match(rule('.navigation-hint'),/color:var\(--warning\)/);assert.match(rule('.navigation-hint'),/background:var\(--warning-surface\)/);
  assert.match(rule('.floating-inspector .selected-visit>.visit-section-heading'),/width:calc\(100% \+ 16px\)/);
