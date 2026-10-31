@@ -784,6 +784,21 @@ test('bottom fade is shown only when the inspector content overflows',async()=>{
  }finally{await page.close();}
 });
 
+test('the bottom fade resets for a short popup instead of keeping itself alive',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ const proto=page.window.HTMLElement.prototype;const previous=Object.getOwnPropertyDescriptor(proto,'clientHeight');
+ try{
+  assert.ok(page.card()!.querySelector('.inspector-bottom-fade'),'a tall popup shows the fade');
+  // Switch to another node whose content fits: client height equals content height.
+  Object.defineProperty(proto,'clientHeight',{configurable:true,get(this:HTMLElement){return this.classList.contains('floating-inspector')?400:0;}});
+  await page.select('Settings');
+  assert.ok(page.card());
+  absent(page.card()!.querySelector('.inspector-bottom-fade'),'switching to a short popup clears the fade');
+  const css=readFileSync(new URL('../src/style.css',import.meta.url),'utf8');
+  assert.match(css.match(/\.inspector-bottom-fade\{([^}]+)\}/)?.[1]??'',/margin:-28px -16px 0;/,'the fade adds no height, so it cannot shorten the popup');
+ }finally{if(previous)Object.defineProperty(proto,'clientHeight',previous);else delete (proto as any).clientHeight;await page.close();}
+});
+
 test('empty selector Enter and blur retain the draft, save nothing, and expose an accessible error',async()=>{
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
