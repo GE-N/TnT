@@ -6,7 +6,7 @@ import { act, createElement, useState, type ChangeEvent } from "react";
 import { refreshChecks, writeChecks } from "../shared/canvas-authoring.js";
 import type { CanvasGraph, CanvasTest } from "../server/canvas.js";
 import { inspectorGap, inspectorWidth, type Rect } from "../src/inspector-placement.js";
-import { getSidePanel, openPanel, resetSidePanels } from "../src/side-panels.js";
+import { closePanel, getSidePanel, openPanel, resetSidePanels } from "../src/side-panels.js";
 import { openStepMenuItem } from "./step-menu.js";
 
 // Compare DOM nodes by identity: assert's diff of a jsdom node exhausts the heap.
@@ -1351,19 +1351,47 @@ test("node details stays clear of an open right sheet", async () => {
   }
 });
 
-test("selecting a node closes Versions and Versions closes node details", async () => {
+for (const panel of ["versions", "info"] as const) test(`opening ${panel} clears the selection and closing it leaves every side panel closed`, async () => {
   resetSidePanels();
-  openPanel("versions");
+  openPanel(panel);
   const page = await mount();
   try {
     await page.select("Home");
     assert.ok(page.card(), "selecting a node opens Node details");
     assert.equal(getSidePanel(), "nodeDetails");
-    await act(async () => { openPanel("versions"); });
-    assert.equal(page.document.querySelector(".floating-inspector"), null);
-    assert.equal(getSidePanel(), "versions");
+    await page.click(page.heading(1, "Home"));
+    assert.equal(page.views.at(-1)?.selectedVisitId, "v1");
+    assert.ok(page.node("home").classList.contains("selected-screen"));
+    await act(async () => { openPanel(panel); });
+    absent(page.card());
+    assert.equal(getSidePanel(), panel);
+    assert.equal(page.document.querySelector(".selected-screen"), null);
+    assert.equal(page.views.at(-1)?.selectedScreenId, "");
+    assert.equal(page.views.at(-1)?.selectedVisitId, "");
+    await act(async () => { closePanel(panel); });
+    absent(page.card(), "closing the sheet must not reopen Node details");
+    assert.equal(getSidePanel(), null);
+    assert.equal(page.document.querySelector(".selected-screen"), null);
   } finally {
     await act(async () => { resetSidePanels(); });
+    await page.close();
+  }
+});
+
+test("a restored selection opens Node details only on mount", async () => {
+  resetSidePanels();
+  const page = await mount({ initialView: { selectedScreenId: "home", selectedVisitId: "v1" } });
+  try {
+    assert.ok(page.card());
+    assert.equal(getSidePanel(), "nodeDetails");
+    assert.equal(page.heading(1, "Home").getAttribute("aria-expanded"), "true");
+    await act(async () => { closePanel("nodeDetails"); });
+    assert.equal(getSidePanel(), null, "later panel changes must not reopen the coordinator");
+    assert.ok(page.node("home").classList.contains("selected-screen"));
+    await page.select("Home");
+    assert.equal(getSidePanel(), "nodeDetails");
+    assert.ok(page.card(), "selecting the same node explicitly opens Node details again");
+  } finally {
     await page.close();
   }
 });
