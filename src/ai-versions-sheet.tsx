@@ -40,7 +40,7 @@ export function VersionsSheet({versions, nowId, selectedId, onSelect, onClose, o
   return <aside className="ai-versions-sheet" id="ai-versions-sheet" role="dialog" aria-modal="true" aria-labelledby={labelId} data-testid="ai-versions-sheet" data-side-sheet="versions" onKeyDown={move}>
     <header className="ai-versions-head">
       <h2 id={labelId}>Versions</h2>
-      <button type="button" className="ai-versions-close" aria-label="Close" onClick={onClose}>×</button>
+      <button type="button" className="ai-versions-close" aria-label="Close" onClick={onClose}>✕</button>
     </header>
     <div className="ai-versions-list" role="listbox" aria-label="Flow versions" aria-activedescendant={selected ? optionId(selected.id) : undefined}>
       {versions.map(version => {
