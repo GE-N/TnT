@@ -1249,6 +1249,11 @@ test('AI flow authoring UI', async t => {
       assert.equal(h.document.querySelectorAll('[data-testid="ai-versions-sheet"], .floating-inspector').length, 1);
       await h.click('[data-testid="ai-versions"]');
       await h.until(() => !!h.document.querySelector('[data-testid="ai-versions-sheet"]') && !h.document.querySelector('.floating-inspector'), 'Versions closes Node details again');
+      assert.equal(h.document.querySelector('.selected-screen'), null, 'Versions clears the node selection');
+      await h.click('[data-testid="ai-versions-sheet"] .ai-versions-close');
+      await h.until(() => !h.document.querySelector('[data-testid="ai-versions-sheet"]'), 'Versions closed with the close button');
+      assert.equal(h.document.querySelector('.floating-inspector'), null, 'closing Versions leaves Node details closed');
+      assert.equal(h.document.querySelector('.selected-screen'), null);
     } finally { await h.cleanup(); }
   });
 

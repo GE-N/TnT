@@ -441,8 +441,8 @@ export function CanvasEditor({graph,onChange,catalog,diagnostics,pathId,onPathCh
  const [selected,setSelectedState]=useState(()=>initialView?.selectedScreenId&&graph?.screens.some(screen=>screen.id===initialView.selectedScreenId)?initialView.selectedScreenId:'');const [selectedVisit,setSelectedVisit]=useState(()=>{const restored=graph?.paths.find(item=>item.id===pathId);return initialView?.selectedVisitId&&graph&&restored&&routeVisits(graph,restored).some((visit,index)=>visit.id===initialView.selectedVisitId&&visitScreenId(graph!,restored,index)===initialView.selectedScreenId)?initialView.selectedVisitId:'';});
  const panels=useSidePanels();
  function setSelected(id:string){setSelectedState(id);if(id)openPanel('nodeDetails');else closePanel('nodeDetails');}
- useEffect(()=>{if(!selected||panels.open==='versions'||panels.open==='info'||panels.open==='nodeDetails')return;openPanel('nodeDetails');},[selected,panels.open]);
- useEffect(()=>()=>{closePanel('nodeDetails');},[]);
+ useEffect(()=>{if(selected&&(panels.open==='versions'||panels.open==='info')){setSelectedState('');setSelectedVisit('');}},[selected,panels.open]);
+ useEffect(()=>{if(selected&&panels.open!=='versions'&&panels.open!=='info')openPanel('nodeDetails');return()=>{closePanel('nodeDetails');};},[]);
  const [referenceIndex,setReferenceIndex]=useState('');const [testLabel,setTestLabel]=useState(restoredForms.testLabel??'');const [role,setRole]=useState<CanvasTest['role']>('test');
  const [repairTarget,setRepairTarget]=useState<{ownerId:string;visitId?:string}>();
  const [repairTest,setRepairTest]=useState('');const [from,setFrom]=useState(restoredForms.from??'');const [to,setTo]=useState(restoredForms.to??'');const [action,setAction]=useState(restoredForms.action??'');const [assertion,setAssertion]=useState(restoredForms.assertion??'');const [condition,setCondition]=useState(restoredForms.condition??'');const [pathName,setPathName]=useState(restoredForms.pathName??'');const [nextEdge,setNextEdge]=useState(restoredForms.nextEdge??'');const [error,setError]=useState('');
