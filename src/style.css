@@ -411,6 +411,9 @@ textarea:focus{outline:1px solid var(--accent)}
 .floating-inspector-close{flex:none;display:inline-flex;align-items:center;justify-content:center;width:44px;min-width:44px;min-height:44px;height:44px;margin:-12px -16px -12px 0;padding:0;border:0;border-radius:8px;background:transparent;color:var(--text);font-size:16px;line-height:1}
 .floating-inspector-close:hover{background:var(--subtle)}
 .floating-inspector-note{font-size:12px;color:var(--muted);margin:12px 0 0;line-height:16px}
+.floating-inspector-body{padding-top:12px}
+.floating-inspector-body>:first-child{margin-top:0}
+.floating-inspector-body>:last-child{margin-bottom:0}
 .floating-inspector :focus-visible{outline:3px solid var(--inspector-highlight);outline-offset:2px}
 .floating-inspector button,.floating-inspector select,.floating-inspector input:not([type=checkbox]),.floating-inspector summary{min-height:44px;font-size:13px}
 .floating-inspector .field-hint,.floating-inspector small,.floating-inspector .unused-operations,.floating-inspector .operation-scenarios label,.floating-inspector .canvas-navigation-actions>input,.floating-inspector .canvas-delete-operation,.floating-inspector legend,.floating-inspector .outcome{font-size:12px}

@@ -37,6 +37,10 @@ test('Versions and Node details share the 16px panel inset and close alignment',
   assert.match(rule('.floating-inspector-header'), /margin:0;padding:16px 0 12px/);
   assert.match(rule('.floating-inspector-close'), /margin:-12px -16px -12px 0/);
   assert.match(rule('.floating-inspector-header h3'), /font-size:14px;font-weight:600;line-height:20px/, 'Node details title uses the sheet title style');
+  assert.match(rule('.floating-inspector-note'), /margin:12px 0 0/, 'breadcrumb sits 12px under the header divider');
+  assert.match(rule('.floating-inspector-body'), /padding-top:12px/, 'first content sits 12px under the divider or breadcrumb');
+  assert.match(rule('.floating-inspector-body>:first-child'), /margin-top:0/, 'first content adds no extra top margin');
+  assert.match(rule('.floating-inspector-body>:last-child'), /margin-bottom:0/, 'last content sits on the 16px bottom padding');
   assert.match(rule('.ai-versions-head h2'), /font-size:14px;font-weight:600;line-height:20px/);
   assert.match(rule('.inspector-bottom-fade'), /bottom:0;height:28px;margin:-28px -16px 0;/, 'the fade takes no layout space, so it cannot keep a short popup shortened');
   assert.match(rule('.floating-inspector'), /width:300px/, 'popup width (and so its 12px gap) is unchanged');
