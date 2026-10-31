@@ -8,35 +8,36 @@
 .knowledge-info-button:focus-visible::after{content:"";position:absolute;left:12px;right:12px;bottom:2px;height:2px;border-radius:1px;background:#0a84ff}
 .workbench .scenario-sequence-bar .knowledge-info-button:focus-visible{outline:none;background:transparent;isolation:isolate}
 
-.knowledge-sheet{position:fixed;right:24px;top:96px;bottom:152px;z-index:48;display:flex;flex-direction:column;box-sizing:border-box;width:300px;padding:8px 12px 10px;border:1px solid #e2e5e9;border-radius:16px;background:#fff;box-shadow:0 16px 40px #25304124;color:#253041;font-size:13px}
-.knowledge-sheet-head{display:flex;align-items:flex-start;gap:8px;min-height:44px;margin:0}
-.knowledge-sheet-head h2{margin:0;font-size:14px;font-weight:600;line-height:1.35}
-.knowledge-sheet-kicker{margin:2px 0 0;color:#5f6368;font-size:12px;font-weight:400;line-height:1.4}
+.knowledge-sheet{position:fixed;right:24px;top:96px;bottom:152px;z-index:48;display:flex;flex-direction:column;box-sizing:border-box;width:300px;padding:0 16px;border:1px solid #e2e5e9;border-radius:16px;background:#fff;box-shadow:0 16px 40px #25304124;color:#253041;font-size:13px}
+.knowledge-sheet-head{display:flex;align-items:flex-start;gap:8px;margin:0;padding:16px 0 0}
+.knowledge-sheet-head h2{margin:0;font-size:14px;font-weight:600;line-height:20px;overflow-wrap:anywhere}
+.knowledge-sheet-kicker{margin:4px 0 0;color:#5f6368;font-size:12px;font-weight:400;line-height:16px}
 .knowledge-sheet-heading{flex:1;min-width:0}
-.knowledge-sheet-close{flex:none;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;min-height:44px;margin:0;padding:0;border:0;border-radius:8px;background:transparent;box-shadow:none;color:#5f6368;font-size:16px;font-weight:500}
+.knowledge-sheet-close{flex:none;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;min-height:44px;margin:-12px -16px 0 0;padding:0;border:0;border-radius:8px;background:transparent;box-shadow:none;color:#5f6368;font-size:16px;font-weight:500;line-height:1}
 .knowledge-sheet-close:hover{background:rgba(10,99,209,.08)}
-.knowledge-sheet-body{flex:1;min-height:0;overflow:auto;margin:0 -4px;padding:0 4px 8px}
-.knowledge-status{display:flex;align-items:center;gap:6px;margin:4px 0 12px;color:#5f6368;font-size:12px;line-height:1.4}
-.knowledge-status-dot{width:7px;height:7px;border-radius:50%;background:#5f6368;flex:none}
+.knowledge-sheet-body{flex:1;min-height:0;overflow:auto;margin:0 -16px;padding:0 16px 16px}
+.knowledge-status{display:flex;align-items:center;gap:8px;margin:8px 0 0;color:#5f6368;font-size:12px;line-height:16px}
+.knowledge-status-dot{width:8px;height:8px;border-radius:50%;background:#5f6368;flex:none}
 .knowledge-status-dot.is-up-to-date{background:#256747}
 .knowledge-status-dot.is-updating{background:#5f6368}
 .knowledge-status-dot.is-needs-review{background:#8a4b00}
-.knowledge-field{margin:0 0 12px}
-.knowledge-label{margin:0 0 2px;color:#5f6368;font-size:11px;font-weight:600;letter-spacing:.2px}
-.knowledge-text{margin:0;color:#253041;font-size:13.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
-.knowledge-sections{margin:0;padding:0;border-top:1px solid #e2e5e9}
-.knowledge-section{display:flex;align-items:center;gap:6px;width:100%;min-height:44px;margin:0;padding:8px 0;border:0;border-bottom:1px solid #e2e5e9;border-radius:0;background:transparent;box-shadow:none;color:#253041;font-size:12.5px;line-height:1.4;text-align:left}
-.knowledge-section:hover{background:transparent;color:#253041}
-.knowledge-chevron{flex:none;color:#5f6368}
+.knowledge-field{margin:16px 0 0}
+.knowledge-label{margin:0 0 4px;color:#5f6368;font-size:11px;font-weight:600;line-height:16px;letter-spacing:.2px}
+.knowledge-text{margin:0;color:#253041;font-size:13px;line-height:20px;white-space:pre-wrap;overflow-wrap:anywhere}
+.knowledge-sections{margin:16px 0 0;padding:0;border-top:1px solid #e2e5e9}
+.knowledge-section{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;margin:0;padding:0;border:0;border-bottom:1px solid #e2e5e9;border-radius:0;background:transparent;box-shadow:none;color:#253041;font-size:13px;line-height:20px;text-align:left}
+.knowledge-section:hover,.knowledge-sheet .knowledge-section:hover:not(:disabled){background:transparent;color:#253041}
+.knowledge-chevron{flex:none;color:#5f6368;margin-right:-5px}
+.knowledge-section[aria-expanded="true"]{border-bottom:0}
 .knowledge-section-label{flex:1;min-width:0}
-.knowledge-section-hint{flex:none;color:#5f6368;font-size:11.5px;font-weight:400}
-.knowledge-section-body{margin:0;padding:2px 0 10px 20px;color:#253041;font-size:12.5px;line-height:1.5}
+.knowledge-section-hint{flex:none;color:#5f6368;font-size:12px;font-weight:400;line-height:16px;text-align:right}
+.knowledge-section-body{margin:0;padding:4px 0 12px;border-bottom:1px solid #e2e5e9;color:#253041;font-size:13px;line-height:20px}
 .knowledge-section-body p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .knowledge-flow{margin:0;padding:0;list-style:none}
 .knowledge-flow li{margin:0 0 4px}
-.knowledge-notice{margin:6px 0 0;color:#5f6368;font-size:12px;line-height:1.45}
-.knowledge-sheet-foot{flex:none;display:flex;align-items:center;justify-content:flex-end;min-height:44px;padding-top:8px;border-top:1px solid #eef0f4}
-.knowledge-reader{display:inline-flex;align-items:center;min-height:44px;padding:0 4px;border:0;background:none;box-shadow:none;color:#0a63d1;font-size:12px;line-height:1.4;text-decoration:none}
+.knowledge-notice{margin:8px 0 0;color:#5f6368;font-size:12px;line-height:16px}
+.knowledge-sheet-foot{flex:none;display:flex;align-items:center;justify-content:flex-start;min-height:44px;margin:0;padding:4px 0;border-top:1px solid #eef0f4}
+.knowledge-reader{display:inline-flex;align-items:center;min-height:44px;padding:0;border:0;background:none;box-shadow:none;color:#0a63d1;font-size:12px;line-height:16px;text-decoration:none}
 .knowledge-reader:hover{text-decoration:underline;text-underline-offset:2px}
 .knowledge-sheet button:focus,.knowledge-sheet button:focus-visible,.knowledge-sheet a:focus,.knowledge-sheet a:focus-visible,.knowledge-info-button:focus,.knowledge-info-button:focus-visible{outline:none;box-shadow:none}
 .knowledge-sheet button:focus-visible,.knowledge-sheet a:focus-visible{background:#eef4fd;border-radius:8px;box-shadow:inset 0 -2px 0 #0a84ff}

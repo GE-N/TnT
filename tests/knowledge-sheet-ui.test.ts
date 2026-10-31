@@ -73,6 +73,24 @@ test('info sheet stylesheet keeps the trigger geometry and the docked sheet', ()
   assert.match(css, /\.knowledge-section\{[^}]*border:0/);
 });
 
+test('info sheet content uses one 16px inset and a 4px spacing scale', () => {
+  assert.match(css, /\.knowledge-sheet\{[^}]*padding:0 16px/);
+  assert.match(css, /\.knowledge-sheet-body\{[^}]*margin:0 -16px;padding:0 16px 16px/);
+  assert.match(css, /\.knowledge-sheet-head\{[^}]*padding:16px 0 0/);
+  // The 44px close target is pulled into the inset so the glyph sits on the right inset, centred on the first title line.
+  assert.match(css, /\.knowledge-sheet-close\{[^}]*margin:-12px -16px 0 0/);
+  assert.match(css, /\.knowledge-sheet-head h2\{[^}]*line-height:20px/);
+  for (const rule of ['knowledge-field', 'knowledge-sections']) assert.match(css, new RegExp(`\\.${rule}\\{[^}]*margin:16px 0 0`));
+  assert.match(css, /\.knowledge-section-body\{[^}]*padding:4px 0 12px/, 'expanded text sits on the same column, no extra indent');
+  assert.match(css, /\.knowledge-sheet-foot\{[^}]*justify-content:flex-start/);
+  assert.match(css, /\.knowledge-reader\{[^}]*padding:0;/);
+  assert.match(css, /\.knowledge-sheet \.knowledge-section:hover:not\(:disabled\)\{background:transparent/, 'rows never fill on hover');
+  for (const value of css.matchAll(/(?:margin|padding|gap)[^:;{}]*:([^;}]+)/g)) {
+    if (!value[0].startsWith('margin') && !value[0].startsWith('padding') && !value[0].startsWith('gap')) continue;
+    for (const px of value[1].matchAll(/-?(\d+(?:\.\d+)?)px/g)) assert.equal(Number(px[1]) % 1, 0, value[0]);
+  }
+});
+
 async function withDom(body: (window: Window, root: {render: (node: ReactNode) => void; unmount: () => void}) => Promise<void>) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', {url: 'http://127.0.0.1:4319/'});
   const window = dom.window;

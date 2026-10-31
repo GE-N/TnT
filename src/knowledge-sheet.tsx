@@ -189,9 +189,9 @@ export function KnowledgeScenarioControl({token, workspaceId, scenarioId, scenar
           const bodyId = sheetId + '-' + section.id;
           return <div key={section.id}>
             <button type="button" className="knowledge-section" data-testid={'knowledge-section-' + section.id} aria-expanded={open} aria-controls={bodyId} onClick={() => setExpanded(current => current === section.id ? null : section.id)}>
-              <Chevron open={open}/>
               <span className="knowledge-section-label">{section.label}</span>
               {hint(section.id) && <span className="knowledge-section-hint">{hint(section.id)}</span>}
+              <Chevron open={open}/>
             </button>
             {open && <div className="knowledge-section-body" id={bodyId} data-testid="knowledge-section-body">{sectionBody(section.id, detail)}</div>}
           </div>;
