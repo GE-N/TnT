@@ -3,22 +3,28 @@ import {decodeAuthoringJson} from './authoring/schema.js';
 import {REQUEST_LIMIT} from './authoring/types.js';
 import {AiHttpError} from './ai/errors.js';
 import type {AiService} from './ai/index.js';
+import {createKnowledgeService,KnowledgeError,ContextRevisionConflict,type KnowledgeService} from './knowledge/index.js';
+import {handleKnowledgeReader,renderKnowledgeHtml} from './knowledge/html/index.js';
 import {ScriptBlocked} from './script-validation.js';
 import {ScriptTrustConflict} from './script-trust-store.js';
 import {DraftConflict,WorkspaceConflict,WorkspacePayloadTooLarge} from './workspace-store.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname,join } from 'node:path';
 import type { createRunner } from './runner.js';
 import type { createScenarios } from './scenarios.js';
 
 export function createApiHandler(runner: ReturnType<typeof createRunner>, artifactDirectory: string,
   fallback?: (request: IncomingMessage, response: ServerResponse) => void,
   scenarios?: ReturnType<typeof createScenarios>,
-  ai?: AiService) {
+  ai?: AiService,
+  knowledge?: KnowledgeService) {
+  let knowledgeService=knowledge;
   const token = randomBytes(32).toString('hex');
   let launching = false;
+  const knowledgeRoot=dirname(artifactDirectory);
+  const ensureKnowledge=()=>{knowledgeService??=scenarios?createKnowledgeService({root:knowledgeRoot,renderHtml:renderKnowledgeHtml}):undefined;return knowledgeService;};
   return async (request: IncomingMessage, response: ServerResponse) => {
     const json = (status: number, value: unknown) => {
       response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
@@ -32,6 +38,11 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
     let url: URL;
     try { url = new URL(request.url ?? '/', `http://${host}`); }
     catch { return json(400, { error: 'Invalid request URL.' }); }
+    if (url.pathname === '/knowledge' || url.pathname.startsWith('/knowledge/')) {
+      const service = ensureKnowledge();
+      if (!service) return json(503, { code: 'KNOWLEDGE_UNAVAILABLE', error: 'Knowledge service is unavailable.' });
+      return handleKnowledgeReader(request, response, url, service, knowledgeRoot);
+    }
     if (!url.pathname.startsWith('/api/')) {
       if (fallback) return fallback(request, response);
       return json(404, { error: 'Not found.' });
@@ -44,6 +55,23 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       if (request.headers['x-tnt-token'] !== token) return json(403, { error: 'Refresh the workbench to establish a runner session.' });
       if ((request.method === 'POST' || request.method === 'PUT') && request.headers.origin !== `http://${host}`) return json(403, { error: 'A same-origin workbench request is required.' });
       if ((request.method === 'POST' || request.method === 'PUT') && !request.headers['content-type']?.startsWith('application/json')) return json(415, { error: 'Send JSON.' });
+      if(url.pathname.startsWith('/api/knowledge/')){
+        ensureKnowledge();
+        if(!knowledgeService)return json(503,{code:'KNOWLEDGE_UNAVAILABLE',error:'Knowledge service is unavailable.'});
+        const context=/^\/api\/knowledge\/workspaces\/([^/]+)\/scenarios\/([^/]+)\/context$/.exec(url.pathname);
+        const status=/^\/api\/knowledge\/workspaces\/([^/]+)\/status$/.exec(url.pathname);
+        const decode=(value:string)=>{try{return decodeURIComponent(value);}catch{throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','Invalid identifier encoding.');}};
+        if(context){
+          if(request.method==='GET')return json(200,await knowledgeService.readContext(decode(context[1]),decode(context[2])));
+          if(request.method==='PUT'){
+            let input:unknown;try{input=await readJson(request,650000);}catch(error){throw new KnowledgeError(error instanceof WorkspacePayloadTooLarge?413:400,error instanceof WorkspacePayloadTooLarge?'KNOWLEDGE_TOO_LARGE':'INVALID_KNOWLEDGE_INPUT',message(error));}
+            return json(200,await knowledgeService.saveContext(decode(context[1]),decode(context[2]),input));
+          }
+          return json(405,{code:'INVALID_KNOWLEDGE_INPUT',error:'Use GET or PUT for scenario context.'});
+        }
+        if(status){if(request.method!=='GET')return json(405,{code:'INVALID_KNOWLEDGE_INPUT',error:'Use GET for knowledge status.'});return json(200,await knowledgeService.status(decode(status[1])));}
+        return json(404,{code:'KNOWLEDGE_NOT_FOUND',error:'Knowledge route not found.'});
+      }
       const apps = /^\/api\/devices\/([^/]+)\/apps$/.exec(url.pathname);
       if (request.method === 'GET' && apps) return json(200, await runner.apps(apps[1]));
       if (request.method === 'POST' && url.pathname === '/api/picker/captures') return json(200, await runner.picker.capture(await readJson(request)));
@@ -155,6 +183,9 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       }
       return json(404, { error: 'Unknown runner operation.' });
     } catch (error) {
+      if(error instanceof ContextRevisionConflict)return json(409,{code:error.code,error:error.message,currentContextRevision:error.currentContextRevision,context:error.context});
+      if(error instanceof KnowledgeError)return json(error.status,{code:error.code,error:error.message});
+      if(url.pathname.startsWith('/api/knowledge/'))return json(503,{code:'KNOWLEDGE_UNAVAILABLE',error:message(error)});
       if (error instanceof AuthoringHttpError) return json(error.status, error.body);
       if (error instanceof AiHttpError) return json(error.status, error.body);
       if(error instanceof ScriptBlocked)return json(url.pathname==='/api/runs'?422:400,{blocked:error.blocked,error:error.message});
