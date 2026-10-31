@@ -14,3 +14,12 @@ test('Versions is a right-docked sheet and opening it does not shift the AI fiel
   assert.match(css, /\.ai-flow\{[^}]*left:50%/);
   assert.match(css, /\.ai-flow\{[^}]*transform:translateX\(-50%\)/);
 });
+
+test('the Versions and Undo controls show their fill and underline only for keyboard focus', () => {
+  const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+  for (const rule of css.matchAll(/([^{}]*\.ai-(?:versions-toggle|capsule-undo):focus[^{}]*)\{([^}]*)\}/g)) {
+    if (!/background|box-shadow/.test(rule[2])) continue;
+    for (const selector of rule[1].split(',')) assert.match(selector.trim(), /:focus-visible$/, `mouse focus must not fill: ${selector.trim()}`);
+  }
+  assert.match(css, /\.ai-flow \.ai-versions-toggle:focus-visible[^{]*\{[^}]*background:#eef4fd/);
+});
