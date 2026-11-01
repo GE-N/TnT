@@ -1384,16 +1384,14 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   const failed = draft.status === 'failed';
   const refining = !!draft.refining;
   const fieldRef = useRef<HTMLTextAreaElement>(null);
-  const escFocus = useRef(false);
   const errorId = useId();
   const [live, setLive] = useState('');
   const [collapsed, setCollapsed] = useState(false);
-  const [focused, setFocused] = useState(false);
+  const [setupNeeded, setSetupNeeded] = useState(false);
   const count = draft.prompt.length;
   const over = count > PROMPT_CHAR_LIMIT;
   const entry = control.config?.providers?.[control.provider];
-  const savedModel = entry?.model ?? '';
-  const configured = !control.config || (!!entry?.configured && !!savedModel.trim());
+  const configured = !control.config || (!!entry?.configured && !!entry.model?.trim());
   const busy = generating || draft.status === 'applying';
   const kind = retryKind(draft.error?.code);
   const neutral = draft.error?.code === 'CANCELLED' || draft.error?.code === 'INTERRUPTED' || (!draft.error && !!draft.notice);
@@ -1409,8 +1407,16 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   }, [draft.error, draft.model, neutral]);
 
   useEffect(() => {
-    if (generating || refining || control.disclosure || draft.error) setCollapsed(false);
-  }, [generating, refining, control.disclosure, draft.error]);
+    if (control.disclosure || draft.error || draft.notice) setCollapsed(false);
+  }, [control.disclosure, draft.error, draft.notice]);
+  useEffect(() => {
+    // Tests open AI settings after the model line is gone. No effect unless a test set the hook.
+    const hooks = (globalThis as {__tntTestHooks?: {openAiSettings?: (returnTo?: HTMLElement) => void}}).__tntTestHooks;
+    if (!hooks) return;
+    const open = (returnTo?: HTMLElement) => control.openSettings(returnTo);
+    hooks.openAiSettings = open;
+    return () => { if (hooks.openAiSettings === open) delete hooks.openAiSettings; };
+  });
 
   useLayoutEffect(() => {
     const node = fieldRef.current;
@@ -1422,10 +1428,7 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   function collapsePanel() {
     setCollapsed(true);
     const field = fieldRef.current;
-    if (field && document.activeElement !== field) {
-      escFocus.current = true;
-      field.focus();
-    }
+    if (field && document.activeElement !== field) field.focus();
   }
 
   function onPanelKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -1442,7 +1445,7 @@ export function AiFlow({control}: {control: AiDraftControl}) {
     if (event.key !== 'Enter' || event.shiftKey || control.disclosure) return;
     event.preventDefault();
     if (!draft.prompt.trim() || busy || over) return;
-    if (!configured) { setCollapsed(false); return; }
+    if (!configured) { setSetupNeeded(true); setCollapsed(false); return; }
     void control.generate();
   }
 
@@ -1468,43 +1471,37 @@ export function AiFlow({control}: {control: AiDraftControl}) {
     sheetWasOpen.current = control.versionsOpen;
     if (wasOpen && !control.versionsOpen && sidePanels.open !== 'nodeDetails') focusCapsule();
   }, [control.versionsOpen, sidePanels.open]);
-  useEffect(() => {
-    if (mode !== 'idle' && !open && !refining) setFocused(false);
-  }, [mode, open, refining]);
-  const composer = mode === 'idle' || open || refining || generating;
-  const showPanel = composer && (generating || refining || !!control.disclosure || (!collapsed && (focused || count > 0 || open || !!draft.error || (failed && !neutral))));
+  const nearLimit = count >= PROMPT_COUNTER_AT;
+  const hasIssues = failed && composerIssues.length > 0;
+  const showPanel = !collapsed && (!!control.disclosure || (!generating && (!!copy || hasIssues || nearLimit || (setupNeeded && !configured))));
+  const progressText = refining ? 'Refining…' : PHASE_LABEL[draft.phase ?? 'model'];
   return <>
   <div className="ai-flow" data-testid="ai-flow" data-ai-status={draft.status}>
     <p className="sr-only" aria-live="polite" data-testid="ai-live">{live}</p>
+    {generating && <div className="sr-only" role="progressbar" aria-valuetext={progressText} aria-label={refining ? 'Refining draft' : 'Generating flow'} />}
     {draft.status === 'stale' && <p className="ai-muted">The workspace changed since this draft was prepared. <button type="button" className="ai-text" data-testid="ai-refresh" onClick={() => void control.refresh()}>Refresh</button></p>}
     {provenanceId && <p className="ai-provenance" data-testid="ai-provenance">Applied as “{provenanceName || 'this flow'}” · not run yet</p>}
-    {showPanel && <section className={'ai-panel' + (failed && !neutral ? ' is-error' : '') + (generating ? ' is-busy' : '') + (over ? ' is-over' : '')} aria-label={refining ? 'Refine draft' : 'AI flow'} aria-busy={busy || undefined} onKeyDown={onPanelKeyDown} onMouseDown={event => { const target = event.target instanceof Element ? event.target : null; if (target?.closest('a')) return; event.preventDefault(); }}>
+    {showPanel && <section className={'ai-panel' + (failed && !neutral ? ' is-error' : '') + (over ? ' is-over' : '')} aria-label={refining ? 'Refine draft' : 'AI flow'} aria-busy={busy || undefined} onKeyDown={onPanelKeyDown} onMouseDown={event => { const target = event.target instanceof Element ? event.target : null; if (target?.closest('a')) return; event.preventDefault(); }}>
       <div className="ai-panel-bar">
-        <h3 className="ai-draft-heading">{refining ? 'Refine draft' : 'Describe a flow'}</h3>
         <button type="button" className="ai-text" aria-label="Close" onClick={() => { if (generating) return; control.closePanel(); collapsePanel(); }}>✕</button>
       </div>
       {control.disclosure ? <><p className="ai-prompt-preview">{draft.prompt}</p><Disclosure control={control} /></> : <>
-        <p className="ai-hint">Enter generates · Shift+Enter new line · Esc closes</p>
-        {count >= PROMPT_COUNTER_AT && <p className={over ? 'ai-error' : 'ai-muted'} data-testid="ai-char-count">{over ? (count - PROMPT_CHAR_LIMIT) + ' characters over the limit. Shorten the text to generate. Nothing is trimmed for you.' : count.toLocaleString('en-US') + ' / ' + PROMPT_CHAR_LIMIT.toLocaleString('en-US')}</p>}
-        {generating && <div className="ai-progress" role="progressbar" aria-valuetext={refining ? 'Refining…' : PHASE_LABEL[draft.phase ?? 'model']} aria-label={refining ? 'Refining draft' : 'Generating flow'} />}
-        {generating && <p className="ai-status" aria-live="polite"><span className="ai-spinner" aria-hidden="true" /> {refining ? 'Refining…' : 'Generating flow…'} <span className="ai-muted" data-testid="ai-progress-model">{providerLabel(control.provider, savedModel || draft.model)}</span></p>}
-        {!configured && <p className="ai-error" role="alert" data-testid="ai-error">✕ AI isn’t set up <span className="ai-muted">Add an API key and model in AI settings. Your text is kept here.</span></p>}
+        {nearLimit && <p className={over ? 'ai-error' : 'ai-muted'} data-testid="ai-char-count">{over ? (count - PROMPT_CHAR_LIMIT) + ' characters over the limit. Shorten the text to generate. Nothing is trimmed for you.' : count.toLocaleString('en-US') + ' / ' + PROMPT_CHAR_LIMIT.toLocaleString('en-US')}</p>}
+        {setupNeeded && !configured && <p className="ai-error" role="alert" data-testid="ai-error">✕ AI isn’t set up <span className="ai-muted">Add an API key and model in AI settings. Your text is kept here.</span></p>}
         {copy && <p id={errorId} className={neutral ? 'ai-muted' : 'ai-error'} role={neutral ? 'status' : 'alert'} data-testid={draft.error && !neutral ? 'ai-error' : 'ai-notice'}>{neutral ? '' : '✕ '}{copy}</p>}
         {failed && !!composerIssues.length && <ol className="ai-issues" data-testid="ai-composer-issues">{composerIssues.map((item, index) => <li key={item.path + item.code + index}><span className="ai-issue-no">{index + 1}</span> {item.message}</li>)}</ol>}
         {draft.error?.code === 'CREDITS_REQUIRED' && <p><a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">Open OpenRouter account</a></p>}
         {draft.error?.code === 'AUTH_FAILED' && <p><a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">Open OpenRouter keys</a></p>}
-        <SavedModelLine control={control} />
         <div className="ai-actions">
-          {generating ? <button type="button" className="ai-text" data-testid="ai-cancel" onClick={() => void control.cancel()}>Cancel</button>
-            : kind === 'retry' || kind === 'network' ? <button type="button" className="ai-text" data-testid="ai-retry" onClick={() => void control.generate()}>{kind === 'network' ? 'Retry · may send another request' : 'Retry'}</button>
-            : kind === 'settings' || !configured ? <button type="button" className="ai-text" data-testid="ai-open-settings" onClick={event => { control.openPanel(); control.openSettings(event.currentTarget); }}>Open AI settings</button>
+          {kind === 'retry' || kind === 'network' ? <button type="button" className="ai-text" data-testid="ai-retry" onClick={() => void control.generate()}>{kind === 'network' ? 'Retry · may send another request' : 'Retry'}</button>
+            : kind === 'settings' || (setupNeeded && !configured) ? <button type="button" className="ai-text" data-testid="ai-open-settings" onClick={event => { control.openPanel(); control.openSettings(event.currentTarget); }}>Open AI settings</button>
             : kind === 'refine' ? <button type="button" className="ai-text" data-testid="ai-refine" onClick={() => control.refine()}>Refine</button>
             : kind === 'refresh' ? <button type="button" className="ai-text" data-testid="ai-retry" onClick={() => void control.generate()}>Refresh and generate again</button>
-            : <button type="button" className="ai-text" data-testid="ai-generate" disabled={!draft.prompt.trim() || busy || over || !configured} onClick={() => void control.generate()}>✦ Generate</button>}
+            : null}
         </div>
       </>}
     </section>}
-    {mode === 'draft' ? <AiCapsule control={control} askRef={askRef} /> : mode !== 'idle' && !open ? <HistoryCapsule control={control} mode={mode} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : <div className="ai-flow-field"><textarea ref={fieldRef} className="ai-flow-input" data-testid="ai-flow-field" rows={1} aria-label="Describe a flow" placeholder="✦ Describe a flow" value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={showPanel && copy ? errorId : undefined} onChange={event => { setCollapsed(false); control.setPrompt(event.target.value); }} onFocus={() => { setFocused(true); if (escFocus.current) { escFocus.current = false; return; } setCollapsed(false); }} onBlur={() => setFocused(false)} onKeyDown={onFieldKeyDown} /></div>}
+    {mode === 'draft' ? <AiCapsule control={control} askRef={askRef} /> : mode !== 'idle' && !open ? <HistoryCapsule control={control} mode={mode} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : <div className={'ai-flow-field' + (generating ? ' is-generating' : '')}><Sparkles size={20} /><textarea ref={fieldRef} className="ai-flow-input" data-testid="ai-flow-field" rows={1} aria-label="Ask AI" placeholder="Ask AI" value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={showPanel && copy ? errorId : undefined} onChange={event => { if (event.target.value.length >= PROMPT_COUNTER_AT) setCollapsed(false); control.setPrompt(event.target.value); }} onKeyDown={onFieldKeyDown} />{generating ? <button type="button" className="ai-send is-stop" data-testid="ai-cancel" aria-label="Stop" title="Stop" onClick={() => void control.cancel()}><StopIcon /></button> : draft.prompt.trim() ? <button type="button" className="ai-send" aria-label="Send" title="Send (Enter) · Shift+Enter for a new line" disabled={busy || over || !configured || !!control.disclosure} onClick={() => void control.generate()}><SendIcon /></button> : null}</div>}
   </div>
   {control.versionsOpen && !!control.sheetVersions.length && createPortal(<VersionsSheet versions={control.sheetVersions} nowId={control.nowVersionId} selectedId={control.selectedVersionId} onSelect={control.selectVersion} onClose={closeVersions} onKeepCurrent={control.keepCurrent} onRestore={() => { const id = control.selectedVersionId; if (id) void control.restore(id); }} restoreDisabled={!!control.restoreReason} restoreNote={control.restoreReason} restoreError={control.restoreError} />, document.body)}
   </>;
@@ -1527,7 +1524,7 @@ function HistoryCapsule({control, mode, versionsRef, undoRef, askRef}: {control:
     <form className="ai-capsule" data-testid="ai-capsule" onSubmit={event => { event.preventDefault(); submit(); }}>
       <div className="ai-capsule-row">
         <Sparkles />
-        <input ref={askRef} className="ai-capsule-input" aria-label="Ask for changes" placeholder="Ask for changes" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
+        <input ref={askRef} className="ai-capsule-input" aria-label="Ask AI" placeholder="Ask AI" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
         {mode === 'undo' && <button type="button" ref={undoRef} className="ai-capsule-undo" data-testid="ai-undo" onClick={() => void control.undoApply()}>↶ Undo</button>}
         {mode === 'versions' && <VersionsControl control={control} buttonRef={versionsRef} />}
       </div>
@@ -1567,7 +1564,7 @@ function AiCapsule({control, askRef}: {control: AiDraftControl; askRef: {current
       </div>}
       <div className="ai-capsule-row">
         <Sparkles />
-        <input ref={askRef} className="ai-capsule-input" aria-label="Ask for changes" placeholder="Ask for changes" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
+        <input ref={askRef} className="ai-capsule-input" aria-label="Ask AI" placeholder="Ask AI" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
         <button type="button" ref={applyRef} className="ai-capsule-apply" data-testid="ai-confirm" aria-disabled={reason ? true : undefined} aria-describedby={reason ? reasonId : undefined} onClick={() => { if (!reason) void control.confirm(); }}>✓ Apply</button>
         <button type="button" className="ai-capsule-dismiss" data-testid="ai-discard" aria-label="Dismiss draft" onClick={() => void control.discard()}>✕</button>
       </div>
@@ -1590,18 +1587,6 @@ function Disclosure({control}: {control: AiDraftControl}) {
       <button type="button" className="ai-text ai-confirm" data-testid="ai-disclosure-continue" onClick={() => control.continueDisclosure()}>Continue</button>
     </div>
   </div>;
-}
-
-function SavedModelLine({control}: {control: AiDraftControl}) {
-  const model = control.config?.providers?.[control.provider]?.model;
-  return <div className="ai-chip-wrap">
-    <button type="button" className="ai-text" data-testid="ai-provider-chip" onClick={event => { control.openPanel(); control.openSettings(event.currentTarget); }}>{providerLabel(control.provider, model)}</button>
-  </div>;
-}
-
-function providerLabel(id: ProviderId, model?: string) {
-  const name = id === 'openrouter' ? 'OpenRouter' : 'OpenAI-compatible';
-  return model ? name + ' · ' + model : name;
 }
 
 function retryKind(code: string | undefined) {
@@ -1637,6 +1622,14 @@ function errorCopy(code: string | undefined, message: string, model?: string) {
   }
 }
 
-function Sparkles() {
-  return <svg className="ai-spark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3.2l1.15 4.05L17.2 8.4l-4.05 1.15L12 13.6l-1.15-4.05L6.8 8.4l4.05-1.15L12 3.2z"/><path d="M18 14.2l.55 1.85L20.4 16.6l-1.85.55L18 19l-.55-1.85L15.6 16.6l1.85-.55L18 14.2z"/></svg>;
+function Sparkles({size = 22}: {size?: number}) {
+  return <svg className="ai-spark" viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3.2l1.15 4.05L17.2 8.4l-4.05 1.15L12 13.6l-1.15-4.05L6.8 8.4l4.05-1.15L12 3.2z"/><path d="M18 14.2l.55 1.85L20.4 16.6l-1.85.55L18 19l-.55-1.85L15.6 16.6l1.85-.55L18 14.2z"/></svg>;
+}
+
+function SendIcon() {
+  return <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>;
+}
+
+function StopIcon() {
+  return <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor" stroke="none"/></svg>;
 }

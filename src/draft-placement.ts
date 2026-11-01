@@ -6,7 +6,7 @@ export const DRAFT_REVIEW_BAR = 72;
 /** Empty margin around the floating AI control so a new screen never sits under it. */
 export const AI_CHROME_PAD = 16;
 /**
- * At-rest "Describe a flow" control.
+ * At-rest "Ask AI" field.
  * Anchored like `.ai-flow` (right 24px, bottom 80px). The width covers the label at 14px
  * with 16px of horizontal padding; the height is the 44px hit target.
  */
