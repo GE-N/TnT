@@ -1015,7 +1015,8 @@ test('AI flow authoring UI', async t => {
         assert.match(body, /border-bottom:\s*0/);
         assert.match(body, /text-decoration:\s*none/);
       }
-      assert.ok(inputRules.some(([, selector, body]) => selector.includes(':focus') && body.includes('box-shadow:0 0 0 2px')), 'capsule focus ring');
+      assert.ok(inputRules.every(([, , body]) => /background:\s*transparent/.test(body) && /box-shadow:\s*none/.test(body) && /outline:\s*none/.test(body) && /border-radius:\s*0/.test(body)), 'text sits in the pill with no inner box');
+      assert.equal(inputRules.some(([, , body]) => /rgba\(10,132,255/.test(body) || /box-shadow:\s*0 0 0/.test(body)), false);
       await act(async () => { field.focus(); });
       assert.equal(h.document.querySelector('.ai-panel'), null);
       await h.fill('Ask AI', 'Pay the electric bill');
