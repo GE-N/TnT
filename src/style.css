@@ -981,7 +981,7 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .ai-panel-body{flex:1;min-width:0;order:0}
 .ai-panel-body>:first-child{margin-top:0;line-height:20px}
 .ai-panel-body>.ai-issues:first-child>li:first-child{margin-top:0}
-.ai-flow .ai-panel-bar>button{order:1;flex:none;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;min-height:44px;margin:-12px 0 0;padding:0;line-height:20px}
+.ai-flow .ai-panel-bar>button{order:1;flex:none;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;min-height:44px;margin:-12px -16px 0 0;padding:0;line-height:20px}
 .ai-panel-bar h3{margin:0}
 .ai-draft-heading{margin:0 0 4px;color:var(--ai-info-text);font-size:14px;font-weight:600}
 .ai-prompt-field,.ai-panel input,.ai-panel select{width:100%;min-height:44px;margin:0 0 8px;padding:8px 0;border:0;border-bottom:1.5px solid var(--ai-focus);border-radius:0;background:transparent;box-shadow:none}
