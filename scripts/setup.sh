@@ -111,7 +111,8 @@ curl_hint() {
   case "$1" in
     5) echo "could not resolve the proxy. Check HTTPS_PROXY." ;;
     6) echo "could not resolve github.com. Check DNS, VPN or set HTTPS_PROXY." ;;
-    7) echo "could not connect. If you are behind a company proxy, set HTTPS_PROXY=http://proxy:port." ;;
+    7) if [ -n "${HTTPS_PROXY:-${https_proxy:-}}" ]; then echo "could not connect through HTTPS_PROXY. Check the proxy address/port."
+       else echo "could not connect. If you are behind a company proxy, set HTTPS_PROXY=http://proxy:port."; fi ;;
     22) echo "the server returned an HTTP error (blocked by a proxy/firewall, or the URL changed)." ;;
     28) echo "the download timed out. Retry, or check the proxy/VPN." ;;
     35|60|77|83) echo "TLS certificate problem. A company network that inspects HTTPS needs its CA: export CURL_CA_BUNDLE=/path/to/company-ca.pem and retry." ;;
