@@ -299,8 +299,9 @@ install_maestro() {
   else
     rm -f "$zip" "$zip.part"
     echo "  Downloading Maestro $MAESTRO_VERSION (~300 MB) from GitHub releases..."
-    local code=0
-    curl -fL --retry 2 --connect-timeout 20 --progress-bar -o "$zip.part" "$MAESTRO_URL" || code=$?
+    local code=0 progress="-sS"
+    [ -t 2 ] && progress="--progress-bar"
+    curl -fL --retry 2 --connect-timeout 20 "$progress" -o "$zip.part" "$MAESTRO_URL" || code=$?
     if [ "$code" -ne 0 ]; then
       rm -f "$zip.part"
       MAESTRO_ERR="download failed: $(curl_hint "$code")"
