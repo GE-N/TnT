@@ -5,6 +5,8 @@ import {AiHttpError} from './errors.js';
 import {createKeychainStore, type SecretStore} from './keychain.js';
 import {formatAiLog} from './log.js';
 import {fetchModelCatalog, OPENROUTER_BASE_URL, probeKey, providerEndpoint, type AiModelInfo, type ProviderId} from './probe.js';
+import {createCopilotSdkProvider} from './providers/copilot-sdk.js';
+import {sharedCopilotRuntime} from './providers/copilot-runtime.js';
 import {createOpenAiCompatibleProvider} from './providers/openai-compatible.js';
 import type {FlowModelProvider} from './providers/types.js';
 
@@ -27,31 +29,43 @@ export type AiProviderSettings = {
   storageAvailable: boolean;
 };
 
+export type CopilotPublicSettings = {model: string};
+
 export type AiPublicConfig = {
   settingsRevision: number;
   selected: ProviderId;
-  providers: Record<ProviderId, AiProviderSettings>;
+  providers: {
+    openrouter: AiProviderSettings;
+    'openai-compatible': AiProviderSettings;
+    copilot: CopilotPublicSettings;
+  };
 };
 
 export type AiTestResult = {testId: string; ok: boolean; code?: string; message?: string};
 
+type KeyedProviderId = Exclude<ProviderId, 'copilot'>;
 type ProviderFile = {model: string; baseUrl?: string; credentialRevision: number; storage?: StorageKind};
-type FileConfig = {settingsRevision: number; selected: ProviderId; providers: Record<ProviderId, ProviderFile>};
+type CopilotFile = {model: string};
+type FileConfig = {
+  settingsRevision: number;
+  selected: ProviderId;
+  providers: {openrouter: ProviderFile; 'openai-compatible': ProviderFile; copilot: CopilotFile};
+};
 type CredentialAction =
   | {action: 'keep'}
   | {action: 'replace'; apiKey: string; storage: StorageKind}
   | {action: 'remove'};
 type PutBody = {
   expectedSettingsRevision: number;
-  selected: ProviderId;
-  provider: ProviderId;
+  selected: KeyedProviderId;
+  provider: KeyedProviderId;
   model: string;
   baseUrl?: string;
   credential: CredentialAction;
 };
 type TestBody =
-  | {provider: ProviderId; testId: string; source: 'stored'; credentialRevision: number}
-  | {provider: ProviderId; testId: string; source: 'replacement'; apiKey: string};
+  | {provider: KeyedProviderId; testId: string; source: 'stored'; credentialRevision: number}
+  | {provider: KeyedProviderId; testId: string; source: 'replacement'; apiKey: string};
 type Snapshot = {session?: string; keychain?: string};
 
 export function secretService(provider: string) {
@@ -91,7 +105,7 @@ function assertModel(value: unknown) {
   return value;
 }
 
-function assertProviderId(value: unknown): ProviderId {
+function assertProviderId(value: unknown): KeyedProviderId {
   if (value === 'ollama' || value === 'local' || value === 'lmstudio') throw new AiHttpError(400, 'INVALID_CONFIG', 'Local model providers are not available in this version.');
   if (value === 'anthropic') throw new AiHttpError(400, 'INVALID_CONFIG', 'Anthropic is not available in this version.');
   if (value !== 'openrouter' && value !== 'openai-compatible') throw new AiHttpError(400, 'INVALID_CONFIG', 'Choose OpenRouter or an OpenAI-compatible provider.');
@@ -172,11 +186,18 @@ function emptyFile(): FileConfig {
     providers: {
       openrouter: {model: '', credentialRevision: 0},
       'openai-compatible': {model: '', baseUrl: DEFAULT_BASE_URL, credentialRevision: 0},
+      copilot: {model: 'auto'},
     },
   };
 }
 
-function providerFile(provider: ProviderId, value: unknown): ProviderFile {
+function copilotFile(value: unknown): CopilotFile {
+  const record = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const model = typeof record.model === 'string' && record.model ? record.model : 'auto';
+  return {model};
+}
+
+function providerFile(provider: KeyedProviderId, value: unknown): ProviderFile {
   const record = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const storage = record.storage === 'keychain' || record.storage === 'session' ? record.storage : undefined;
   const entry: ProviderFile = {model: typeof record.model === 'string' ? record.model : '', credentialRevision: revisionOf(record.credentialRevision), ...(storage ? {storage} : {})};
@@ -185,7 +206,7 @@ function providerFile(provider: ProviderId, value: unknown): ProviderFile {
 }
 
 function fileJson(config: FileConfig) {
-  const provider = (id: ProviderId, entry: ProviderFile) => {
+  const provider = (id: KeyedProviderId, entry: ProviderFile) => {
     const record: Record<string, unknown> = {model: entry.model};
     if (id === 'openai-compatible') record.baseUrl = entry.baseUrl ?? DEFAULT_BASE_URL;
     record.credentialRevision = entry.credentialRevision;
@@ -198,6 +219,7 @@ function fileJson(config: FileConfig) {
     providers: {
       openrouter: provider('openrouter', config.providers.openrouter),
       'openai-compatible': provider('openai-compatible', config.providers['openai-compatible']),
+      copilot: {model: config.providers.copilot.model || 'auto'},
     },
   });
 }
@@ -206,6 +228,7 @@ function nextFile(current: FileConfig, body: PutBody): FileConfig {
   const providers: FileConfig['providers'] = {
     openrouter: {...current.providers.openrouter},
     'openai-compatible': {...current.providers['openai-compatible']},
+    copilot: {model: current.providers.copilot.model || 'auto'},
   };
   const target = providers[body.provider];
   target.model = body.model;
@@ -227,9 +250,9 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
   const log = deps.log ?? ((line: string) => console.info(line));
   const now = deps.now ?? Date.now;
   const file = join(deps.root, 'ai-config.json');
-  const sessionKeys = new Map<ProviderId, string>();
+  const sessionKeys = new Map<KeyedProviderId, string>();
   const catalogCache = new Map<string, {at: number; models: AiModelInfo[]}>();
-  const inflight = new Set<{provider: ProviderId; abort: () => void}>();
+  const inflight = new Set<{provider: KeyedProviderId; abort: () => void}>();
   let pending: Promise<unknown> = Promise.resolve();
 
   function exclusive<T>(work: () => Promise<T>): Promise<T> {
@@ -268,7 +291,7 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     const blank = emptyFile();
     if (!record.providers || typeof record.providers !== 'object' || Array.isArray(record.providers)) {
       if (record.provider === undefined && record.model === undefined && record.baseUrl === undefined) return blank;
-      const provider: ProviderId = record.provider === 'openrouter' ? 'openrouter' : 'openai-compatible';
+      const provider: KeyedProviderId = record.provider === 'openrouter' ? 'openrouter' : 'openai-compatible';
       const model = typeof record.model === 'string' ? record.model : '';
       const baseUrl = typeof record.baseUrl === 'string' && record.baseUrl ? record.baseUrl : DEFAULT_BASE_URL;
       if (provider === 'openrouter') blank.providers.openrouter = {model, credentialRevision: 0};
@@ -279,10 +302,11 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     const providers = record.providers as Record<string, unknown>;
     return {
       settingsRevision: revisionOf(record.settingsRevision),
-      selected: record.selected === 'openrouter' || record.selected === 'openai-compatible' ? record.selected : 'openrouter',
+      selected: record.selected === 'openrouter' || record.selected === 'openai-compatible' || record.selected === 'copilot' ? record.selected : 'openrouter',
       providers: {
         openrouter: providerFile('openrouter', providers.openrouter),
         'openai-compatible': providerFile('openai-compatible', providers['openai-compatible']),
+        copilot: copilotFile(providers.copilot),
       },
     };
   }
@@ -306,7 +330,7 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
   }
 
   /** A removed provider (revision bumped, no storage) stays unconfigured, even when the dev env key is set. */
-  async function resolveKey(provider: ProviderId, entry: ProviderFile): Promise<{key: string; source: KeySource} | undefined> {
+  async function resolveKey(provider: KeyedProviderId, entry: ProviderFile): Promise<{key: string; source: KeySource} | undefined> {
     if (entry.storage === 'session') {
       const key = sessionKeys.get(provider);
       return key ? {key, source: 'session'} : undefined;
@@ -321,11 +345,11 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     return key ? {key, source: 'env'} : undefined;
   }
 
-  async function snapshotCredential(provider: ProviderId): Promise<Snapshot> {
+  async function snapshotCredential(provider: KeyedProviderId): Promise<Snapshot> {
     return {session: sessionKeys.get(provider), keychain: await readSecret(secretService(provider))};
   }
 
-  async function restoreCredential(provider: ProviderId, snapshot: Snapshot) {
+  async function restoreCredential(provider: KeyedProviderId, snapshot: Snapshot) {
     if (snapshot.session) sessionKeys.set(provider, snapshot.session);
     else sessionKeys.delete(provider);
     const service = secretService(provider);
@@ -333,7 +357,7 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     else await secrets.delete(service);
   }
 
-  async function applyCredential(provider: ProviderId, credential: CredentialAction) {
+  async function applyCredential(provider: KeyedProviderId, credential: CredentialAction) {
     if (credential.action === 'keep') return;
     const service = secretService(provider);
     if (credential.action === 'remove') {
@@ -361,7 +385,7 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
   async function publicConfig(): Promise<AiPublicConfig> {
     const config = await readFileConfig();
     const available = await storageAvailable();
-    const one = async (provider: ProviderId): Promise<AiProviderSettings> => {
+    const one = async (provider: KeyedProviderId): Promise<AiProviderSettings> => {
       const entry = config.providers[provider];
       const resolved = await resolveKey(provider, entry);
       const settings: AiProviderSettings = {
@@ -377,11 +401,15 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     return {
       settingsRevision: config.settingsRevision,
       selected: config.selected,
-      providers: {openrouter: await one('openrouter'), 'openai-compatible': await one('openai-compatible')},
+      providers: {
+        openrouter: await one('openrouter'),
+        'openai-compatible': await one('openai-compatible'),
+        copilot: {model: config.providers.copilot.model || 'auto'},
+      },
     };
   }
 
-  function bindRemoval(provider: ProviderId) {
+  function bindRemoval(provider: KeyedProviderId) {
     return (abort: () => void) => {
       const entry = {provider, abort};
       inflight.add(entry);
@@ -389,7 +417,7 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     };
   }
 
-  function abortInflight(provider: ProviderId) {
+  function abortInflight(provider: KeyedProviderId) {
     for (const entry of [...inflight]) if (entry.provider === provider) entry.abort();
   }
 
@@ -400,6 +428,15 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
   async function connect(): Promise<{provider: FlowModelProvider; model: string; providerId: ProviderId; bindRemoval: (abort: () => void) => () => void}> {
     const config = await readFileConfig();
     const selected = config.selected;
+    if (selected === 'copilot') {
+      const model = config.providers.copilot.model || 'auto';
+      return {
+        model,
+        providerId: 'copilot',
+        bindRemoval: () => () => {},
+        provider: createCopilotSdkProvider({runtime: sharedCopilotRuntime(join(deps.root, 'copilot')), model}),
+      };
+    }
     const entry = config.providers[selected];
     if (!entry.model) throw new AiHttpError(400, 'PROVIDER_CONFIG', 'Choose a model.');
     let baseUrl = OPENROUTER_BASE_URL;

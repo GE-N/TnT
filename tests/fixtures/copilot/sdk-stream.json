@@ -1,0 +1,26 @@
+[
+  {
+    "type": "assistant.message_delta",
+    "data": {
+      "messageId": "629d4c42-2da7-4aa0-9a62-94a99f0be3a5",
+      "deltaContent": "OK"
+    }
+  },
+  {
+    "type": "assistant.usage",
+    "data": {
+      "model": "gpt-6-luna",
+      "inputTokens": 2714,
+      "outputTokens": 1828,
+      "copilotUsage": {"totalNanoAiu": 95153000},
+      "quotaSnapshots": {
+        "chat": {"entitlementRequests": 200, "usedRequests": 1},
+        "premium_interactions": {"entitlementRequests": 0, "usedRequests": 0}
+      }
+    }
+  },
+  {
+    "type": "session.idle",
+    "data": {}
+  }
+]

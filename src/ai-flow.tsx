@@ -813,7 +813,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         return;
       }
       const provider = settings.selected;
-      const entry = settings.providers[provider];
+      const entry = provider === 'copilot' ? undefined : settings.providers[provider];
       const model = entry?.model?.trim() || '';
       if (!entry?.configured || !model) {
         const failure = {code: 'AI_NOT_CONFIGURED' as const, message: 'Add an API key and model in AI settings. Your text is kept here.', retryable: false};
@@ -1391,7 +1391,8 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   const [focused, setFocused] = useState(false);
   const count = draft.prompt.length;
   const over = count > PROMPT_CHAR_LIMIT;
-  const entry = control.config?.providers?.[control.provider];
+  const rawEntry = control.config?.providers?.[control.provider];
+  const entry = rawEntry && 'configured' in rawEntry ? rawEntry : undefined;
   const savedModel = entry?.model ?? '';
   const configured = !control.config || (!!entry?.configured && !!savedModel.trim());
   const busy = generating || draft.status === 'applying';

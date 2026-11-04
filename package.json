@@ -35,6 +35,9 @@
     "typescript": "7.0.2",
     "vite": "8.3.2"
   },
+  "optionalDependencies": {
+    "@github/copilot-sdk": "1.0.28"
+  },
   "overrides": {
     "@faker-js/faker": "10.6.0"
   }
