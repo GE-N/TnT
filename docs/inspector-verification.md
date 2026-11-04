@@ -5,7 +5,7 @@ Parent: [#40](https://github.com/GE-N/TnT/issues/40) Option 1 floating inspector
 ## What changed
 
 - **Tab order:** visit step summaries form one composite list (a single `tabIndex={0}` stop; Arrow Up/Down/Home/End move between rows). The one-stop / arrow contract stays active while a run is locked (edits stay blocked). Drag handles and the ⋯ trigger stay out of the tab order (`tabIndex={-1}`; ArrowRight reaches ⋯ when unlocked). Deleting or discarding the focused row heals the list stop onto a surviving row. Legacy stay and missing-destination rows keep their own controls and are not eligible for that stop; if the stored row stops rendering as a visit step, the stop moves to a remaining visit step.
-- **Inline edit order:** fields → Destination → Pick from screen (Element mode) → YAML → ✕. Pick stays inside the Element field, next to the selector. Tab from Destination moves to Pick (then Done) when that differs from DOM order. Native Tab is left alone for every other stop, including leaving the inspector.
+- **Inline edit order:** fields → Destination → Pick from screen (Element mode) → Done → ✕. Pick stays inside the Element field, next to the selector. Tab from Destination moves to Pick (then Done) when that differs from DOM order. Close stays last in the inspector. View YAML now opens from the canvas menu, so the inspector has no Open YAML stop. Native Tab is left alone for every other stop, including leaving the inspector.
 - **Focus stability:** run / save / autosave still do not move focus (covered by #50 journeys and kept here). Esc closes the inspector only when the target is not an editable field; inline edit Esc still cancels the row first.
 - **Shortcut suppression:** shared `isEditableTarget` suppresses single-key inspector/canvas shortcuts inside inputs, textareas, selects, comboboxes and the YAML editor (floating-card Esc/arrows, screen-node nudge arrows, step-list arrows).
 - **Accessible structure:** errors keep `role="alert"`; run/status badges and notices keep `role="status"`. Targets remain ≥44px. Danger palette aligned to AA tokens `#b3261e` on `#fdecea`; warning `#8a4b00` on `#fff4e5`; primary `#0a63d1`.
@@ -19,7 +19,7 @@ The #51 edits stay in the inspector UI, these tests, and this review. This branc
 - one tab stop + Arrow/Home/End; deleting the last focused row keeps a stop
 - discarding a new active row restores a surviving stop
 - running keeps one list stop and arrow navigation without unlocking edits
-- edit tab order is observed by walking focus: matching, then Destination, then Pick from screen, then Open YAML, then Close. The test does not assert CSS ancestry.
+- edit tab order is observed by walking focus: matching, then Destination, then Pick from screen, then Done, then Close. The inspector has no Open YAML control. The test does not assert CSS ancestry.
 - a persisted legacy stay row before a visit step, and a focused visit step that becomes a stay row, each leave one reachable summary stop. Warning and destination controls stay on the legacy rows. The in-memory missing-destination UI cases remain as a supplement.
 - deleting a script shows Undo, and switching scenarios removes that Undo without replacing the other scenario's script.
 - shortcut suppression in a focused selector; failed run announces `role="status"` / `role="alert"`
@@ -55,7 +55,7 @@ Token names are recorded separately and are not treated as the contrast result.
 
 ### Targets at least 44px
 
-Contrast shot, with the portal step menu open: close 44×44, summary 254×47, Add step 254×48, Destination 254×44, Pick from screen 254×44, Done 254×44, Open YAML 86×44, Match by 124×44, Delete 150×44.
+Contrast shot, with the portal step menu open: close 44×44, summary 254×47, Add step 254×48, Destination 254×44, Pick from screen 254×44, Done 254×44, Open YAML 86×44, Match by 124×44, Delete 150×44. That Open YAML measurement is from the shot taken before View YAML moved to the canvas menu. The inspector no longer contains that control.
 
 On shots that are not editing, Destination, Pick, Done, Match by and Delete are absent (recorded as null). Delete is measured from the open portal menu, not from a closed trigger.
 

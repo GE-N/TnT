@@ -6,6 +6,7 @@ import { act, createElement, useState, type ChangeEvent } from "react";
 import { refreshChecks, writeChecks } from "../shared/canvas-authoring.js";
 import type { CanvasGraph, CanvasTest } from "../server/canvas.js";
 import { inspectorGap, inspectorWidth, type Rect } from "../src/inspector-placement.js";
+import { closePanel, getSidePanel, openPanel, resetSidePanels } from "../src/side-panels.js";
 import { openStepMenuItem } from "./step-menu.js";
 
 // Compare DOM nodes by identity: assert's diff of a jsdom node exhausts the heap.
@@ -783,6 +784,21 @@ test('bottom fade is shown only when the inspector content overflows',async()=>{
  }finally{await page.close();}
 });
 
+test('the bottom fade resets for a short popup instead of keeping itself alive',async()=>{
+ const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
+ const proto=page.window.HTMLElement.prototype;const previous=Object.getOwnPropertyDescriptor(proto,'clientHeight');
+ try{
+  assert.ok(page.card()!.querySelector('.inspector-bottom-fade'),'a tall popup shows the fade');
+  // Switch to another node whose content fits: client height equals content height.
+  Object.defineProperty(proto,'clientHeight',{configurable:true,get(this:HTMLElement){return this.classList.contains('floating-inspector')?400:0;}});
+  await page.select('Settings');
+  assert.ok(page.card());
+  absent(page.card()!.querySelector('.inspector-bottom-fade'),'switching to a short popup clears the fade');
+  const css=readFileSync(new URL('../src/style.css',import.meta.url),'utf8');
+  assert.match(css.match(/\.inspector-bottom-fade\{([^}]+)\}/)?.[1]??'',/margin:-28px -16px 0;/,'the fade adds no height, so it cannot shorten the popup');
+ }finally{if(previous)Object.defineProperty(proto,'clientHeight',previous);else delete (proto as any).clientHeight;await page.close();}
+});
+
 test('empty selector Enter and blur retain the draft, save nothing, and expose an accessible error',async()=>{
  const page=await mount({initialView:{selectedScreenId:'home',selectedVisitId:'v1'}});
  try{
@@ -894,12 +910,12 @@ test('first valid new step and destination commit once and Undo restores exact g
 test('visit review styles retain minimum hit targets and accessible validation colours',()=>{
  const css=readFileSync(new URL('../src/style.css',import.meta.url),'utf8');const rules=[...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([,selector,body])=>({selector:selector.trim(),body}));
  const rule=(selector:string)=>rules.find(item=>item.selector===selector)!.body;
- for(const selector of ['.floating-inspector .visit-step-summary','.visit-step-actions .step-actions-trigger','.step-actions-menu [role=menuitem]','.navigation-hint button,.visit-yaml-link'])assert.match(rule(selector),/min-height:44px/);
+ for(const selector of ['.floating-inspector .visit-step-summary','.visit-step-actions .step-actions-trigger','.step-actions-menu [role=menuitem]','.navigation-hint button'])assert.match(rule(selector),/min-height:44px/);
  assert.match(rule('.visit-step-actions .step-actions-trigger'),/min-width:44px/);assert.match(rule('.visit-step-actions .step-actions-trigger'),/background:transparent/);
  const triggerHover=rule('.visit-step:hover .step-actions-trigger,.script-row:hover .step-actions-trigger,.visit-step-actions .step-actions-trigger:hover:not(:disabled),.visit-step-actions .step-actions-trigger[aria-expanded="true"]');
  assert.match(triggerHover,/background:var\(--subtle\)/);assert.doesNotMatch(triggerHover,/--surface/);
  assert.match(rule('.step-actions-menu'),/position:fixed/);assert.match(rule('.step-actions-menu'),/z-index:70/);
- assert.match(rule('.navigation-hint button,.visit-yaml-link'),/font-size:12px/);
+ assert.match(rule('.navigation-hint button'),/font-size:12px/);
  assert.match(rule('.visit-selector-error'),/color:#b3261e/);assert.match(rule('.visit-selector-error'),/font-size:12px/);assert.match(rule('.visit-inline-fields input[aria-invalid=true]'),/border:2px solid #b3261e/);
  assert.match(css,/--warning: #8a4b00/);assert.match(css,/--warning-surface: #fff4e5/);assert.match(rule('.navigation-hint'),/color:var\(--warning\)/);assert.match(rule('.navigation-hint'),/background:var\(--warning-surface\)/);
  assert.match(rule('.floating-inspector .selected-visit>.visit-section-heading'),/width:calc\(100% \+ 16px\)/);
@@ -1323,6 +1339,73 @@ test("a mid-canvas node keeps the popup on its right when the AI field is docked
     assert.equal(page.placement().left, node.left + node.width + inspectorGap);
     assert.equal(page.placement().top, node.top);
     assertClearOfDocks(page);
+  } finally {
+    await page.close();
+  }
+});
+
+test("node details stays clear of an open right sheet", async () => {
+  const node: Rect = { left: 900, top: 250, width: 160, height: 86 };
+  const sheet: Rect = { left: 1116, top: 96, width: 300, height: 652 };
+  const page = await mountDockedWorkbench(node);
+  try {
+    const aside = page.document.createElement("aside");
+    aside.className = "ai-versions-sheet";
+    aside.dataset.sideSheet = "versions";
+    aside.dataset.layout = "versions-sheet";
+    page.rects.set("versions-sheet", sheet);
+    page.document.body.append(aside);
+    await page.relayout();
+    const popup = popupBox(page);
+    assert.equal(overlaps(popup, sheet), false, "popup covers the versions sheet");
+    assert.equal(page.placement().side, "left");
+    assert.equal(page.placement().left + inspectorWidth, node.left - inspectorGap);
+    assert.equal(page.placement().top, node.top);
+  } finally {
+    await page.close();
+  }
+});
+
+for (const panel of ["versions", "info"] as const) test(`opening ${panel} clears the selection and closing it leaves every side panel closed`, async () => {
+  resetSidePanels();
+  openPanel(panel);
+  const page = await mount();
+  try {
+    await page.select("Home");
+    assert.ok(page.card(), "selecting a node opens Node details");
+    assert.equal(getSidePanel(), "nodeDetails");
+    await page.click(page.heading(1, "Home"));
+    assert.equal(page.views.at(-1)?.selectedVisitId, "v1");
+    assert.ok(page.node("home").classList.contains("selected-screen"));
+    await act(async () => { openPanel(panel); });
+    absent(page.card());
+    assert.equal(getSidePanel(), panel);
+    assert.equal(page.document.querySelector(".selected-screen"), null);
+    assert.equal(page.views.at(-1)?.selectedScreenId, "");
+    assert.equal(page.views.at(-1)?.selectedVisitId, "");
+    await act(async () => { closePanel(panel); });
+    absent(page.card(), "closing the sheet must not reopen Node details");
+    assert.equal(getSidePanel(), null);
+    assert.equal(page.document.querySelector(".selected-screen"), null);
+  } finally {
+    await act(async () => { resetSidePanels(); });
+    await page.close();
+  }
+});
+
+test("a restored selection opens Node details only on mount", async () => {
+  resetSidePanels();
+  const page = await mount({ initialView: { selectedScreenId: "home", selectedVisitId: "v1" } });
+  try {
+    assert.ok(page.card());
+    assert.equal(getSidePanel(), "nodeDetails");
+    assert.equal(page.heading(1, "Home").getAttribute("aria-expanded"), "true");
+    await act(async () => { closePanel("nodeDetails"); });
+    assert.equal(getSidePanel(), null, "later panel changes must not reopen the coordinator");
+    assert.ok(page.node("home").classList.contains("selected-screen"));
+    await page.select("Home");
+    assert.equal(getSidePanel(), "nodeDetails");
+    assert.ok(page.card(), "selecting the same node explicitly opens Node details again");
   } finally {
     await page.close();
   }

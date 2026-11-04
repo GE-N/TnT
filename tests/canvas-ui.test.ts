@@ -1,6 +1,6 @@
 import {inspectorCard,inspectorOwner,inspectScreen,showLegacyCanvasControls,workspaceCommand,singleWorkspaceLibrary} from './workspace-ui-helpers.js';
 import {openStepMenuItem} from './step-menu.js';
-import {test} from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';import {act,createElement,useState,type ChangeEvent} from 'react';import {CanvasEditor,CanvasBoard} from '../src/canvas.js';import {selectedCanvasPath} from '../server/canvas.js';import type {CanvasGraph,CatalogEntry} from '../server/canvas.js';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {JSDOM} from 'jsdom';import {act,createElement,useState,type ChangeEvent} from 'react';import {CanvasEditor,CanvasBoard} from '../src/canvas.js';import {selectedCanvasPath} from '../server/canvas.js';import type {CanvasGraph,CatalogEntry} from '../server/canvas.js';
 async function addNode(dom:JSDOM,title:string){
  const document=dom.window.document;
  await act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));
@@ -234,8 +234,9 @@ test('canvas Run scenario uses the selected path and shows blocked runs in a dis
  const runFromMenu=async()=>{await context();await act(async()=>{const menu=document.querySelector('[role=menu]')!;menu.querySelectorAll<HTMLButtonElement>('button')[1].click();});};
  try{
   await render();await click('Open saved workspace');await showLegacyCanvasControls(document,act);
-  await context();assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(node=>node.textContent),['Add node','Run scenario']);
+  await context();assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(node=>node.textContent),['Add node','Run scenario','View YAML']);
   await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'Run scenario');
+  await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'View YAML');
   await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'Add node');
   await runFromMenu();assert.ok(!document.querySelector('[role=menu]'));assert.equal(requests[0].pathId,'');
   const toast=document.querySelector('.run-error-toast[role=alert]')!;assert.match(toast.textContent!,/Cannot run scenario.*Select a nonempty explicit scenario path/);assert.equal(document.querySelector('.scenario-editor [role=alert]'),null);
@@ -243,7 +244,7 @@ test('canvas Run scenario uses the selected path and shows blocked runs in a dis
   await runFromMenu();assert.ok(document.querySelector('.run-error-toast'));
   await act(async()=>{const label=[...document.querySelectorAll('label')].find(node=>node.textContent==='Scenario path')!;const select=document.getElementById(label.htmlFor) as HTMLSelectElement;select.value='route';select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
   rejectRun=false;await runFromMenu();assert.equal(requests.at(-1)!.pathId,'route');assert.equal(requests.at(-1)!.deviceId,'device');assert.equal(document.querySelector('.run-error-toast'),null);assert.match(document.querySelector('.result-tag')!.textContent!,/passed/);
-  await render('');await context();assert.equal(document.querySelectorAll('[role=menu] button').length,1,'Offline canvas only offers Add node');assert.equal(document.querySelector('[aria-label="Run scenario"]'),null,'Offline work does not offer an enabled Run scenario control');assert.equal(requests.length,3,'Missing device does not submit a run');
+  await render('');await context();assert.deepEqual([...document.querySelectorAll('[role=menu] button')].map(node=>node.textContent),['Add node','View YAML'],'Offline canvas offers Add node and View YAML');assert.equal(document.querySelector('[aria-label="Run scenario"]'),null,'Offline work does not offer an enabled Run scenario control');assert.equal(requests.length,3,'Missing device does not submit a run');
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
 
@@ -259,4 +260,154 @@ test('Run scenario receives menu focus when the canvas node limit disables Add n
   await act(async()=>dom.window.document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));
   assert.equal(dom.window.document.activeElement?.textContent,'Run scenario');
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
+});
+
+const reference={kind:'step' as const,file:'flow.yaml',index:0,fingerprint:'draft'};
+const scenarioGraph:CanvasGraph={
+ screens:[
+  {id:'home',title:'Home',x:40,y:40,tests:[{id:'go',label:'Go',role:'action',reference,tap:{target:'text',match:'exact',value:'Go'}}]},
+  {id:'done',title:'Done',x:420,y:40,tests:[{id:'ready',label:'Ready',role:'assertion',reference:{...reference,index:1},check:{visibility:'visible',target:'text',match:'exact',value:'Ready'}}]},
+  {id:'other',title:'Other',x:40,y:280,tests:[]},
+ ],
+ edges:[{id:'home-done',from:'home',to:'done',actionTestId:'go',assertionTestId:'ready',responseCondition:'Go'}],
+ paths:[{id:'route',name:'Main',scenarioId:'main',screenId:'home',edgeIds:['home-done'],visits:[{id:'v-home'},{id:'v-done'}]}],
+};
+const scenarioYaml='appId: com.example.App\n---\n- launchApp\n';
+
+async function withDom(run:(dom:JSDOM)=>Promise<void>){
+ const dom=new JSDOM('<div id="root"></div>');
+ const keys=['window','document','HTMLElement','Node','Event','KeyboardEvent','MouseEvent','PointerEvent','ResizeObserver','MutationObserver','IS_REACT_ACT_ENVIRONMENT'];
+ const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ class ResizeObserver{observe(){}disconnect(){}}
+ for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
+ try{await run(dom);}finally{dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
+}
+
+test('Node details has no YAML row for any node or visit',async()=>{
+ await withDom(async dom=>{
+  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);
+  const document=dom.window.document;
+  function Host(){const [graph,setGraph]=useState(scenarioGraph);const [yaml,setYaml]=useState(scenarioYaml);return createElement(CanvasEditor,{graph,onChange:next=>{if(next)setGraph(next);},yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode:true,scenarioId:'main',scenarios:[{id:'main',name:'Main',pathId:'route'}],onRun:()=>{}});}
+  try{
+   await act(async()=>root.render(createElement(Host)));
+   for(const visit of [{title:'Home',number:1},{title:'Done',number:2}] as const){
+    const section=await inspectScreen(document,{title:visit.title},{number:visit.number});
+    assert.equal(section.querySelector('.visit-yaml-link'),null,visit.title);
+    assert.equal(section.textContent?.includes('YAML'),false,visit.title);
+    assert.equal(section.querySelector('[aria-label^="Open YAML"]'),null,visit.title);
+   }
+   const other=await inspectScreen(document,{title:'Other'});
+   assert.equal(other.querySelector('.visit-yaml-link'),null);
+   assert.equal(document.querySelector('.visit-yaml-link'),null);
+   assert.equal(document.querySelector('[aria-label^="Open YAML"]'),null);
+   assert.equal(inspectorCard(document)?.textContent?.includes('{ } YAML'),false);
+  }finally{await act(async()=>root.unmount());}
+ });
+});
+
+test('View YAML on the empty-canvas menu opens the existing YAML card and returns focus to the canvas',async()=>{
+ await withDom(async dom=>{
+  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);
+  const document=dom.window.document;
+  function Host(){const [graph,setGraph]=useState(scenarioGraph);const [yaml,setYaml]=useState(scenarioYaml);return createElement(CanvasEditor,{graph,onChange:next=>{if(next)setGraph(next);},yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode:true,scenarioId:'main',scenarios:[{id:'main',name:'Main',pathId:'route'}],onRun:()=>{}});}
+  try{
+   await act(async()=>root.render(createElement(Host)));
+   const surface=document.querySelector<HTMLElement>('.canvas-surface')!;
+   await act(async()=>surface.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:80})));
+   const items=[...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')];
+   assert.deepEqual(items.map(item=>item.textContent),['Add node','Run scenario','View YAML']);
+   const view=items.at(-1)!;
+   assert.equal(view.className,items[0].className);
+   assert.equal(view.disabled,false);
+   assert.equal(view.getAttribute('title'),null);
+   await act(async()=>view.click());
+   assert.equal(document.querySelector('[role=menu]'),null);
+   const card=document.querySelector<HTMLElement>('[role="dialog"][aria-label="YAML"]');
+   assert.ok(card);
+   assert.equal(card.hidden,false);
+   assert.equal(card.querySelector('textarea')?.id,'yaml-card');
+   await act(async()=>card.querySelector<HTMLButtonElement>('[aria-label="Close YAML"]')!.click());
+   assert.equal(document.querySelector('[role="dialog"][aria-label="YAML"]:not([hidden])'),null);
+   assert.equal(document.activeElement,surface);
+  }finally{await act(async()=>root.unmount());}
+ });
+});
+
+test('View YAML is disabled with the run-lock reason and the menu still opens when it is the only action',async()=>{
+ await withDom(async dom=>{
+  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);
+  const document=dom.window.document;
+  function Host(){const [graph,setGraph]=useState(scenarioGraph);const [yaml,setYaml]=useState(scenarioYaml);return createElement(CanvasEditor,{graph,onChange:next=>{if(next)setGraph(next);},yaml,onYamlChange:setYaml,catalog:[],diagnostics:[],pathId:'route',onPathChange:()=>{},disabled:false,scenarioMode:true,scenarioId:'main',scenarios:[{id:'main',name:'Main',pathId:'route'}],onRun:()=>{},run:{status:'running'}});}
+  try{
+   await act(async()=>root.render(createElement(Host)));
+   await act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:90,clientY:90})));
+   const items=[...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')];
+   assert.deepEqual(items.map(item=>item.textContent),['View YAML']);
+   assert.equal(items[0].disabled,true);
+   assert.equal(items[0].title,'Unavailable while the scenario is running.');
+   await act(async()=>items[0].click());
+   assert.equal(document.querySelector('[role="dialog"][aria-label="YAML"]'),null);
+   await act(async()=>root.render(createElement(CanvasBoard,{graph:scenarioGraph,onViewYaml:()=>{}})));
+   await act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:90,clientY:90})));
+   assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(item=>item.textContent),['View YAML']);
+  }finally{await act(async()=>root.unmount());}
+ });
+});
+
+test('the node menu keeps Add to sequence, Rename, Node info, and Delete node',async()=>{
+ await withDom(async dom=>{
+  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);
+  const document=dom.window.document;
+  const css=readFileSync(new URL('../src/style.css',import.meta.url),'utf8');
+  try{
+   await act(async()=>root.render(createElement(CanvasBoard,{graph:scenarioGraph,onAdd:()=>{},onRun:()=>{},onViewYaml:()=>{},onAppend:()=>{},onRename:()=>{},onInfo:()=>{},onDelete:()=>{}})));
+   const node=document.querySelector('[data-screen-id="home"]')!;
+   await act(async()=>node.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:40})));
+   const menu=document.querySelector<HTMLElement>('[role=menu]')!;
+   assert.equal(menu.getAttribute('aria-label'),'Node menu');
+   assert.equal(menu.className,'canvas-context-menu');
+   assert.equal(menu.style.width,'');
+   assert.match(css,/\.canvas-context-menu\{[^}]*width:180px/);
+   assert.deepEqual([...menu.querySelectorAll('[role=menuitem]')].map(item=>item.textContent),['Add to sequence','Rename','Node info','Delete node']);
+   assert.equal([...menu.querySelectorAll('[role=menuitem]')].some(item=>item.textContent==='View YAML'),false);
+  }finally{await act(async()=>root.unmount());}
+ });
+});
+
+test('canvas and node menus clamp to the window using their rendered size',async()=>{
+ await withDom(async dom=>{
+  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root')!);
+  const document=dom.window.document;
+  const innerWidth=400;const innerHeight=300;const width=220;const height=200;
+  Object.defineProperty(dom.window,'innerWidth',{configurable:true,value:innerWidth});
+  Object.defineProperty(dom.window,'innerHeight',{configurable:true,value:innerHeight});
+  const original=dom.window.HTMLElement.prototype.getBoundingClientRect;
+  dom.window.HTMLElement.prototype.getBoundingClientRect=function(this:HTMLElement){
+   if(this.classList.contains('canvas-context-menu')){
+    const left=parseFloat(this.style.left)||0;const top=parseFloat(this.style.top)||0;
+    return {x:left,y:top,left,top,width,height,right:left+width,bottom:top+height,toJSON(){return {};}} as DOMRect;
+   }
+   return original.call(this);
+  };
+  const open=async(target:Element)=>act(async()=>target.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:innerWidth-4,clientY:innerHeight-4})));
+  try{
+   await act(async()=>root.render(createElement(CanvasBoard,{graph:scenarioGraph,onAdd:()=>{},onRun:()=>{},onViewYaml:()=>{},onAppend:()=>{},onRename:()=>{},onInfo:()=>{},onDelete:()=>{}})));
+   await open(document.querySelector('.canvas-surface')!);
+   const canvasMenu=document.querySelector<HTMLElement>('[aria-label="Canvas menu"]')!;
+   assert.equal(parseFloat(canvasMenu.style.left),172);
+   assert.equal(parseFloat(canvasMenu.style.top),92);
+   const canvasRect=canvasMenu.getBoundingClientRect();
+   assert.ok(canvasRect.left>=8&&canvasRect.top>=8);
+   assert.ok(canvasRect.right<=innerWidth-8&&canvasRect.bottom<=innerHeight-8);
+   await act(async()=>document.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+   await open(document.querySelector('[data-screen-id="done"]')!);
+   const nodeMenu=document.querySelector<HTMLElement>('[aria-label="Node menu"]')!;
+   assert.equal(parseFloat(nodeMenu.style.left),172);
+   assert.equal(parseFloat(nodeMenu.style.top),92);
+   const nodeRect=nodeMenu.getBoundingClientRect();
+   assert.ok(nodeRect.left>=8&&nodeRect.top>=8);
+   assert.ok(nodeRect.right<=innerWidth-8&&nodeRect.bottom<=innerHeight-8);
+   assert.deepEqual([...nodeMenu.querySelectorAll('[role=menuitem]')].map(item=>item.textContent),['Add to sequence','Rename','Node info','Delete node']);
+  }finally{dom.window.HTMLElement.prototype.getBoundingClientRect=original;await act(async()=>root.unmount());}
+ });
 });

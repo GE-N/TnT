@@ -236,7 +236,7 @@ test('running keeps one list tab stop and arrow navigation without unlocking edi
  await click('Stop scenario');
 }));
 
-test('edit tab order is fields → Destination → Pick → YAML → ✕',()=>journey(async({document,press})=>{
+test('edit tab order is fields → Destination → Pick → ✕',()=>journey(async({document,press})=>{
  await inspectScreen(document,{title:'Home'},{number:1});
  const card=inspectorCard(document)!;
  const row=[...card.querySelectorAll<HTMLElement>('[data-operation-id]')].find(item=>item.querySelector('.visit-step-summary')?.textContent?.includes('Stay'))
@@ -268,8 +268,10 @@ test('edit tab order is fields → Destination → Pick → YAML → ✕',()=>jo
  const at=(part:string)=>seen.findIndex(label=>label===part||label.endsWith(part)||label.startsWith(part));
  assert.ok(at('matching')>=0&&at('matching')<at('destination'),seen.join(' | '));
  assert.ok(at('destination')<at('Pick from screen'),seen.join(' | '));
- assert.ok(at('Pick from screen')<at('Open YAML'),seen.join(' | '));
- assert.ok(at('Open YAML')<at('Close '),seen.join(' | '));
+ assert.ok(at('Pick from screen')<at('Done')&&at('Done')<at('Close '),seen.join(' | '));
+ assert.equal(seen.at(-1)?.startsWith('Close '),true,seen.join(' | '));
+ assert.equal(card.querySelector('.visit-yaml-link,[aria-label^="Open YAML"]'),null);
+ assert.equal(stops().at(-1)?.getAttribute('aria-label')?.startsWith('Close '),true);
 }));
 
 test('shortcuts stay suppressed in fields; failed run announces status',()=>journey(async({document,press,failNext,click,settle})=>{
