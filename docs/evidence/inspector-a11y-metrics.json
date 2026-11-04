@@ -1,4 +1,5 @@
 {
+  "testedCommit": "fdaf7b78371e613b3dec1422bdbd8ba8ecc4c4d7",
   "shots": [
     {
       "name": "inspector-a11y-1440x900",
@@ -23,17 +24,14 @@
           "h": 44
         },
         "summary": {
-          "w": 254,
+          "w": 250,
           "h": 44
         },
         "addStep": {
-          "w": 254,
+          "w": 250,
           "h": 48
         },
-        "yaml": {
-          "w": 86,
-          "h": 44
-        },
+        "yaml": null,
         "pick": null,
         "destination": null,
         "done": null,
@@ -55,7 +53,33 @@
       ],
       "focusOutline": "rgb(10, 132, 255) solid 3px",
       "focused": "Edit Check 1",
-      "tabStops": 1
+      "tabStops": 1,
+      "header": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "closeTop": 4,
+        "titleTop": 16,
+        "headerTop": 0,
+        "headerHeight": 49,
+        "titleInHeader": true,
+        "closeInHeaderRow": true,
+        "titleFontSize": "14px",
+        "titleFontWeight": "600",
+        "titleLineHeight": "20px",
+        "headerPadding": "16px 52px 12px 0px"
+      },
+      "fade": {
+        "present": false,
+        "height": 0
+      },
+      "scroll": {
+        "height": 394,
+        "client": 394,
+        "top": 0
+      },
+      "yamlInInspector": false
     },
     {
       "name": "inspector-a11y-1280x800",
@@ -80,17 +104,14 @@
           "h": 44
         },
         "summary": {
-          "w": 254,
+          "w": 250,
           "h": 44
         },
         "addStep": {
-          "w": 254,
+          "w": 250,
           "h": 48
         },
-        "yaml": {
-          "w": 86,
-          "h": 44
-        },
+        "yaml": null,
         "pick": null,
         "destination": null,
         "done": null,
@@ -112,7 +133,33 @@
       ],
       "focusOutline": "rgb(10, 132, 255) solid 3px",
       "focused": "Edit Check 1",
-      "tabStops": 1
+      "tabStops": 1,
+      "header": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "closeTop": 4,
+        "titleTop": 16,
+        "headerTop": 0,
+        "headerHeight": 49,
+        "titleInHeader": true,
+        "closeInHeaderRow": true,
+        "titleFontSize": "14px",
+        "titleFontWeight": "600",
+        "titleLineHeight": "20px",
+        "headerPadding": "16px 52px 12px 0px"
+      },
+      "fade": {
+        "present": false,
+        "height": 0
+      },
+      "scroll": {
+        "height": 394,
+        "client": 394,
+        "top": 0
+      },
+      "yamlInInspector": false
     },
     {
       "name": "inspector-a11y-flip-below",
@@ -137,17 +184,14 @@
           "h": 44
         },
         "summary": {
-          "w": 254,
+          "w": 250,
           "h": 44
         },
         "addStep": {
-          "w": 254,
+          "w": 250,
           "h": 48
         },
-        "yaml": {
-          "w": 86,
-          "h": 44
-        },
+        "yaml": null,
         "pick": null,
         "destination": null,
         "done": null,
@@ -169,7 +213,33 @@
       ],
       "focusOutline": "rgb(10, 132, 255) solid 3px",
       "focused": "Edit Check 1",
-      "tabStops": 1
+      "tabStops": 1,
+      "header": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "closeTop": 4,
+        "titleTop": 16,
+        "headerTop": 0,
+        "headerHeight": 49,
+        "titleInHeader": true,
+        "closeInHeaderRow": true,
+        "titleFontSize": "14px",
+        "titleFontWeight": "600",
+        "titleLineHeight": "20px",
+        "headerPadding": "16px 52px 12px 0px"
+      },
+      "fade": {
+        "present": false,
+        "height": 0
+      },
+      "scroll": {
+        "height": 289,
+        "client": 289,
+        "top": 0
+      },
+      "yamlInInspector": false
     },
     {
       "name": "inspector-a11y-zoom-fixed",
@@ -194,17 +264,14 @@
           "h": 44
         },
         "summary": {
-          "w": 254,
+          "w": 250,
           "h": 44
         },
         "addStep": {
-          "w": 254,
+          "w": 250,
           "h": 48
         },
-        "yaml": {
-          "w": 86,
-          "h": 44
-        },
+        "yaml": null,
         "pick": null,
         "destination": null,
         "done": null,
@@ -226,7 +293,33 @@
       ],
       "focusOutline": "rgb(10, 132, 255) solid 3px",
       "focused": "Edit Check 1",
-      "tabStops": 1
+      "tabStops": 1,
+      "header": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "closeTop": 4,
+        "titleTop": 16,
+        "headerTop": 0,
+        "headerHeight": 49,
+        "titleInHeader": true,
+        "closeInHeaderRow": true,
+        "titleFontSize": "14px",
+        "titleFontWeight": "600",
+        "titleLineHeight": "20px",
+        "headerPadding": "16px 52px 12px 0px"
+      },
+      "fade": {
+        "present": false,
+        "height": 0
+      },
+      "scroll": {
+        "height": 338,
+        "client": 338,
+        "top": 0
+      },
+      "yamlInInspector": false
     },
     {
       "name": "inspector-a11y-contrast-targets",
@@ -254,31 +347,28 @@
           "h": 44
         },
         "summary": {
-          "w": 254,
+          "w": 250,
           "h": 47
         },
         "addStep": {
-          "w": 254,
+          "w": 250,
           "h": 48
         },
-        "yaml": {
-          "w": 86,
-          "h": 44
-        },
+        "yaml": null,
         "pick": {
-          "w": 254,
+          "w": 250,
           "h": 44
         },
         "destination": {
-          "w": 254,
+          "w": 250,
           "h": 44
         },
         "done": {
-          "w": 254,
+          "w": 250,
           "h": 44
         },
         "matchBy": {
-          "w": 124,
+          "w": 122,
           "h": 44
         },
         "delete": {
@@ -313,7 +403,33 @@
       ],
       "focusOutline": "",
       "focused": "Move check 1 down",
-      "tabStops": 1
+      "tabStops": 1,
+      "header": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "closeTop": 4,
+        "titleTop": 16,
+        "headerTop": 0,
+        "headerHeight": 49,
+        "titleInHeader": true,
+        "closeInHeaderRow": true,
+        "titleFontSize": "14px",
+        "titleFontWeight": "600",
+        "titleLineHeight": "20px",
+        "headerPadding": "16px 52px 12px 0px"
+      },
+      "fade": {
+        "present": true,
+        "height": 28
+      },
+      "scroll": {
+        "height": 986,
+        "client": 611,
+        "top": 0
+      },
+      "yamlInInspector": false
     },
     {
       "name": "inspector-a11y-clamped",
@@ -339,17 +455,14 @@
           "h": 44
         },
         "summary": {
-          "w": 254,
+          "w": 250,
           "h": 44
         },
         "addStep": {
-          "w": 254,
+          "w": 250,
           "h": 48
         },
-        "yaml": {
-          "w": 86,
-          "h": 44
-        },
+        "yaml": null,
         "pick": null,
         "destination": null,
         "done": null,
@@ -371,7 +484,33 @@
       ],
       "focusOutline": "",
       "focused": "body",
-      "tabStops": 1
+      "tabStops": 1,
+      "header": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "closeTop": 4,
+        "titleTop": 16,
+        "headerTop": 0,
+        "headerHeight": 49,
+        "titleInHeader": true,
+        "closeInHeaderRow": true,
+        "titleFontSize": "14px",
+        "titleFontWeight": "600",
+        "titleLineHeight": "20px",
+        "headerPadding": "16px 52px 12px 0px"
+      },
+      "fade": {
+        "present": true,
+        "height": 28
+      },
+      "scroll": {
+        "height": 394,
+        "client": 260,
+        "top": 0
+      },
+      "yamlInInspector": false
     },
     {
       "name": "inspector-a11y-keyboard-journey",
@@ -396,17 +535,14 @@
           "h": 44
         },
         "summary": {
-          "w": 254,
+          "w": 250,
           "h": 44
         },
         "addStep": {
-          "w": 254,
+          "w": 250,
           "h": 48
         },
-        "yaml": {
-          "w": 86,
-          "h": 44
-        },
+        "yaml": null,
         "pick": null,
         "destination": null,
         "done": null,
@@ -429,6 +565,32 @@
       "focusOutline": "rgb(10, 132, 255) solid 3px",
       "focused": "Edit Check 1",
       "tabStops": 1,
+      "header": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "closeTop": 4,
+        "titleTop": 16,
+        "headerTop": 0,
+        "headerHeight": 49,
+        "titleInHeader": true,
+        "closeInHeaderRow": true,
+        "titleFontSize": "14px",
+        "titleFontWeight": "600",
+        "titleLineHeight": "20px",
+        "headerPadding": "16px 52px 12px 0px"
+      },
+      "fade": {
+        "present": false,
+        "height": 0
+      },
+      "scroll": {
+        "height": 397,
+        "client": 397,
+        "top": 0
+      },
+      "yamlInInspector": false,
       "keyboard": [
         {
           "step": "step list",
@@ -491,12 +653,12 @@
         },
         {
           "step": "linked step",
-          "id": "3beb5482-9a11-4f91-a8ac-2427e58f3fa0",
+          "id": "cd23f6e1-1392-4917-b937-4e54e921db90",
           "text": "3 tapOn \"created-id\" → Profile",
           "orderedIds": [
             "home-ready",
             "avatar",
-            "3beb5482-9a11-4f91-a8ac-2427e58f3fa0"
+            "cd23f6e1-1392-4917-b937-4e54e921db90"
           ]
         },
         {
@@ -504,11 +666,11 @@
           "beforeOrder": [
             "home-ready",
             "avatar",
-            "3beb5482-9a11-4f91-a8ac-2427e58f3fa0"
+            "cd23f6e1-1392-4917-b937-4e54e921db90"
           ],
           "afterOrder": [
             "home-ready",
-            "3beb5482-9a11-4f91-a8ac-2427e58f3fa0",
+            "cd23f6e1-1392-4917-b937-4e54e921db90",
             "avatar"
           ],
           "changed": true,
@@ -545,13 +707,222 @@
           },
           "remaining": [
             "home-ready",
-            "3beb5482-9a11-4f91-a8ac-2427e58f3fa0"
+            "cd23f6e1-1392-4917-b937-4e54e921db90"
           ],
           "focusImmediately": "+ Add step",
           "focusAfter": "Edit Check 1",
           "stops": 1
+        },
+        {
+          "step": "close order",
+          "order": [
+            "Action 1 selector",
+            "Action 1 matching",
+            "Action 1 type",
+            "Action 1 destination",
+            "Pick from screen",
+            "Done",
+            "Cancel",
+            "+ Add step",
+            "Close Home inspector"
+          ],
+          "yamlInInspector": false
         }
       ]
+    },
+    {
+      "name": "inspector-a11y-scrolled",
+      "width": 1440,
+      "height": 900,
+      "zoom": 0.85,
+      "screen": "home",
+      "file": "evidence/inspector-a11y-scrolled.png",
+      "side": "below",
+      "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "left": 34,
+      "top": 193,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 250,
+          "h": 44
+        },
+        "addStep": {
+          "w": 250,
+          "h": 48
+        },
+        "yaml": null,
+        "pick": {
+          "w": 250,
+          "h": 44
+        },
+        "destination": {
+          "w": 250,
+          "h": 44
+        },
+        "done": {
+          "w": 250,
+          "h": 44
+        },
+        "matchBy": {
+          "w": 122,
+          "h": 44
+        },
+        "delete": null
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "primary Add step",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
+          "ratio": 5.65
+        }
+      ],
+      "focusOutline": "",
+      "focused": "body",
+      "tabStops": 1,
+      "header": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "closeTop": 4,
+        "titleTop": 16,
+        "headerTop": 0,
+        "headerHeight": 49,
+        "titleInHeader": true,
+        "closeInHeaderRow": true,
+        "titleFontSize": "14px",
+        "titleFontWeight": "600",
+        "titleLineHeight": "20px",
+        "headerPadding": "16px 52px 12px 0px"
+      },
+      "fade": {
+        "present": true,
+        "height": 28
+      },
+      "scroll": {
+        "height": 913,
+        "client": 611,
+        "top": 302
+      },
+      "yamlInInspector": false,
+      "scrolled": {
+        "scrollTop": 302,
+        "scrolled": true,
+        "closeTop": 4,
+        "closeSize": {
+          "w": 44,
+          "h": 44
+        },
+        "closeInside": true,
+        "hitClose": true
+      }
+    },
+    {
+      "name": "inspector-a11y-short",
+      "width": 1440,
+      "height": 900,
+      "zoom": 0.85,
+      "screen": "settings",
+      "file": "evidence/inspector-a11y-short.png",
+      "side": "right",
+      "clamped": false,
+      "inspectorWidth": 300,
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "left": 905,
+      "top": 164,
+      "targets": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "summary": {
+          "w": 250,
+          "h": 44
+        },
+        "addStep": {
+          "w": 250,
+          "h": 48
+        },
+        "yaml": null,
+        "pick": null,
+        "destination": null,
+        "done": null,
+        "matchBy": null,
+        "delete": null
+      },
+      "primary": "#0a63d1",
+      "danger": "#b3261e",
+      "dangerSurface": "#fdecea",
+      "warning": "#8a4b00",
+      "warningSurface": "#fff4e5",
+      "contrasts": [
+        {
+          "label": "primary Add step",
+          "foreground": "#0a63d1",
+          "background": "#ffffff",
+          "ratio": 5.65
+        }
+      ],
+      "focusOutline": "rgb(10, 132, 255) solid 3px",
+      "focused": "▾Visit 3 · SettingsMain",
+      "tabStops": 1,
+      "header": {
+        "close": {
+          "w": 44,
+          "h": 44
+        },
+        "closeTop": 4,
+        "titleTop": 16,
+        "headerTop": 0,
+        "headerHeight": 49,
+        "titleInHeader": true,
+        "closeInHeaderRow": true,
+        "titleFontSize": "14px",
+        "titleFontWeight": "600",
+        "titleLineHeight": "20px",
+        "headerPadding": "16px 52px 12px 0px"
+      },
+      "fade": {
+        "present": false,
+        "height": 0
+      },
+      "scroll": {
+        "height": 289,
+        "client": 289,
+        "top": 0
+      },
+      "yamlInInspector": false,
+      "extraScroll": 0
+    },
+    {
+      "name": "inspector-a11y-view-yaml",
+      "width": 1440,
+      "height": 900,
+      "zoom": 0.85,
+      "screen": "home",
+      "file": "evidence/inspector-a11y-view-yaml.png",
+      "yaml": {
+        "open": true,
+        "inspectorYaml": false
+      }
     }
   ],
   "keyboard": [
@@ -616,12 +987,12 @@
     },
     {
       "step": "linked step",
-      "id": "3beb5482-9a11-4f91-a8ac-2427e58f3fa0",
+      "id": "cd23f6e1-1392-4917-b937-4e54e921db90",
       "text": "3 tapOn \"created-id\" → Profile",
       "orderedIds": [
         "home-ready",
         "avatar",
-        "3beb5482-9a11-4f91-a8ac-2427e58f3fa0"
+        "cd23f6e1-1392-4917-b937-4e54e921db90"
       ]
     },
     {
@@ -629,11 +1000,11 @@
       "beforeOrder": [
         "home-ready",
         "avatar",
-        "3beb5482-9a11-4f91-a8ac-2427e58f3fa0"
+        "cd23f6e1-1392-4917-b937-4e54e921db90"
       ],
       "afterOrder": [
         "home-ready",
-        "3beb5482-9a11-4f91-a8ac-2427e58f3fa0",
+        "cd23f6e1-1392-4917-b937-4e54e921db90",
         "avatar"
       ],
       "changed": true,
@@ -670,11 +1041,26 @@
       },
       "remaining": [
         "home-ready",
-        "3beb5482-9a11-4f91-a8ac-2427e58f3fa0"
+        "cd23f6e1-1392-4917-b937-4e54e921db90"
       ],
       "focusImmediately": "+ Add step",
       "focusAfter": "Edit Check 1",
       "stops": 1
+    },
+    {
+      "step": "close order",
+      "order": [
+        "Action 1 selector",
+        "Action 1 matching",
+        "Action 1 type",
+        "Action 1 destination",
+        "Pick from screen",
+        "Done",
+        "Cancel",
+        "+ Add step",
+        "Close Home inspector"
+      ],
+      "yamlInInspector": false
     }
   ]
 }

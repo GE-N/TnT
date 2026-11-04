@@ -28,9 +28,9 @@ The #51 edits stay in the inspector UI, these tests, and this review. This branc
 
 ## Desktop browser review
 
-Reviewed with the real `CanvasEditor` fixture via Vite + Chrome headless (`scripts/inspector-browser-review.mjs`) on Linux, Node 22. Metrics: `docs/evidence/inspector-a11y-metrics.json`.
+Reviewed on commit `fdaf7b78371e613b3dec1422bdbd8ba8ecc4c4d7` with the real `CanvasEditor` fixture via Vite + Chrome headless (`scripts/inspector-browser-review.mjs`) on Linux, Node 22. Metrics: `docs/evidence/inspector-a11y-metrics.json` (`testedCommit` is that SHA). These shots replace the captures taken before the header CSS merge.
 
-Desktop shots open the named screen with Enter on its article, then Tab to the step summary. The keyboard journey uses `page.keyboard` for navigation and activation, including ArrowDown and End inside the step menu. It does not call `focus()`, set control values, or click controls. The contrast shot clicks the step-menu trigger so the rendered portal menu can be measured. That click is not part of the keyboard journey.
+Desktop shots open the named screen with Enter on its article, then Tab to the step summary. The keyboard journey uses `page.keyboard` for navigation and activation, including ArrowDown and End inside the step menu and the walk through Done and Close. It does not call `focus()`, set control values, or click controls. The contrast shot clicks the step-menu trigger so the rendered portal menu can be measured. That click is not part of the keyboard journey. View YAML is opened from the canvas-surface menu, then activated with the keyboard.
 
 | Shot | Viewport | Recorded |
 | --- | --- | --- |
@@ -41,6 +41,9 @@ Desktop shots open the named screen with Enter on its article, then Tab to the s
 | Contrast and targets | 1440×900 Home, editing, failed check, draft notice, step menu open | Rendered contrast below. Focus is the open menu item `Move check 1 down`, outside the inspector, so this shot is not a focus-ring shot. |
 | Clamp | 420×520, Home parked far right/bottom (`clamp=1`) | **`clamped: true`**, side right, left 112, top 164, width 300, viewport 420×520. Focus was not moved; outline is empty. |
 | Keyboard journey | 1440×900 Home | Trace below. The screenshot is the end state after delete. |
+| Scrolled edit | 1440×900, zoom 0.85, Home editing | Body scrolled 302px. Close stays 44×44, 4px from the card top, and `elementFromPoint` hits the button. |
+| Short Settings | 1440×900, zoom 0.85 | Scroll height equals the client height (289). No bottom fade. |
+| View YAML | 1440×900, zoom 0.85 | Canvas menu opens the YAML card. The inspector has no YAML control. |
 
 ### Rendered contrast
 
@@ -55,9 +58,11 @@ Token names are recorded separately and are not treated as the contrast result.
 
 ### Targets at least 44px
 
-Contrast shot, with the portal step menu open: close 44×44, summary 254×47, Add step 254×48, Destination 254×44, Pick from screen 254×44, Done 254×44, Open YAML 86×44, Match by 124×44, Delete 150×44. That Open YAML measurement is from the shot taken before View YAML moved to the canvas menu. The inspector no longer contains that control.
+At 1440×900 and 1280×800, zoom 0.85, the header and Close share one row. The title is 14px / 600 with a 20px line height, 16px from the top of the card. Close is 44×44 and sits 4px from the top of the card. Header padding is `16px 52px 12px 0`. The same header measurements hold on the flip, zoom, clamp, short, and scrolled shots.
 
-On shots that are not editing, Destination, Pick, Done, Match by and Delete are absent (recorded as null). Delete is measured from the open portal menu, not from a closed trigger.
+Contrast shot, with the portal step menu open: close 44×44, summary 250×47, Add step 250×48, Destination 250×44, Pick from screen 250×44, Done 250×44, Match by 122×44, Delete 150×44. Open YAML is absent (`yaml: null`).
+
+On shots that are not editing, Destination, Pick, Done, Match by and Delete are absent (recorded as null). Delete is measured from the open portal menu, not from a closed trigger. A short Settings card has no fade and no leftover scroll. The editing contrast card does overflow, and its fade is 28px with a negative margin so it overlays the body instead of adding height.
 
 ### Keyboard-only journey
 
@@ -65,7 +70,7 @@ Recorded under `keyboard` in the metrics:
 
 1. Enter on Screen Home, Tab to the list. One stop. ArrowDown, ArrowUp and End moved Check 1 ↔ Action 1.
 2. Tab to Add step, Enter, Enter to create a Tap. Shift+Tab, ArrowRight to Element, type `created-id`.
-3. Tab order from the selector: matching → type → **destination → Pick from screen**. Pick's box stays with the element field (top 309, directly under the selector at 259) and above Destination (top 477).
+3. Tab order from the selector: matching → type → **destination → Pick from screen**. Pick's box stays with the element field (top 309, directly under the selector at 259) and above Destination (top 477). A separate keyboard pass on Action 1 continues that order through **Done**, Cancel, Add step, and **Close Home inspector**. The inspector has no Open YAML control.
 4. Shift+Tab back to the focused Destination select. ArrowDown twice changed that select from empty to `profile`. Enter on Done committed the step.
 5. The created row's summary text is `3 tapOn "created-id" → Profile`. Ordered ids were `home-ready`, `avatar`, then the new id.
 6. On that focused row: ArrowRight, Enter to open the menu, End, ArrowDown back to **Move action 2 up**, Enter. Order changed to `home-ready`, the new id, `avatar`.
@@ -87,9 +92,15 @@ Recorded under `keyboard` in the metrics:
 
 ![After keyboard create / link / reorder / delete](evidence/inspector-a11y-keyboard-journey.png)
 
+![Close stays put while the editing inspector is scrolled](evidence/inspector-a11y-scrolled.png)
+
+![Short Settings card with no bottom fade](evidence/inspector-a11y-short.png)
+
+![View YAML opened from the canvas menu](evidence/inspector-a11y-view-yaml.png)
+
 ## Keyboard-only walkthrough (recorded)
 
-The trace above is the walkthrough. It creates a step, links Destination to Profile from the keyboard (the new row shows Profile), reorders that row from its own menu with End and ArrowDown, and deletes the last row (`avatar`) with End. Focus can return to the one list tab stop from the keyboard. Pick stays visually with the element field and is reached after Destination.
+The trace above is the walkthrough on `fdaf7b78371e613b3dec1422bdbd8ba8ecc4c4d7`. It creates a step, links Destination to Profile from the keyboard (the new row shows Profile), reorders that row from its own menu with End and ArrowDown, and deletes the last row (`avatar`) with End. Focus can return to the one list tab stop from the keyboard. Pick stays visually with the element field and is reached after Destination, then Done, then Close. View YAML opens from the canvas menu.
 
 ## Verification
 

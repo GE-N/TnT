@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-import {spawn} from 'node:child_process';
+import {execFileSync,spawn} from 'node:child_process';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import puppeteer from 'puppeteer-core';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+const testedCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
 const evidence=resolve(root,'docs/evidence');
 const port=43151;
 await mkdir(evidence,{recursive:true});
@@ -65,6 +66,16 @@ const measureScript=()=>{
  };
  const inspector=document.querySelector('.floating-inspector');
  if(!inspector)return {error:'missing inspector'};
+ const header=inspector.querySelector('.floating-inspector-header');
+ const title=header?.querySelector('h3');
+ const closeEl=inspector.querySelector('.floating-inspector-close');
+ const fade=inspector.querySelector('.inspector-bottom-fade');
+ const inspectorBox=inspector.getBoundingClientRect();
+ const headerBox=header?.getBoundingClientRect();
+ const titleBox=title?.getBoundingClientRect();
+ const closeBox=closeEl?.getBoundingClientRect();
+ const titleStyle=title?getComputedStyle(title):null;
+ const headerStyle=header?getComputedStyle(header):null;
  const visible=selector=>[...inspector.querySelectorAll(selector)].find(element=>element.getBoundingClientRect().height>=44)||null;
  const close=visible('.floating-inspector-close');
  const summary=visible('.visit-step-summary');
@@ -109,6 +120,22 @@ const measureScript=()=>{
   focusOutline:active&&inspector.contains(active)?getComputedStyle(active).outline:'',
   focused:active&&active!==document.body?(active.getAttribute('aria-label')||(active.textContent||'').replace(/\s+/g,' ').trim().slice(0,80)||active.tagName):'body',
   tabStops:inspector.querySelectorAll('.visit-step-summary[tabindex="0"]').length,
+  header:{
+   close:sizeOf(closeEl),
+   closeTop:closeBox?Math.round(closeBox.top-inspectorBox.top):null,
+   titleTop:titleBox?Math.round(titleBox.top-inspectorBox.top):null,
+   headerTop:headerBox?Math.round(headerBox.top-inspectorBox.top):null,
+   headerHeight:headerBox?Math.round(headerBox.height):null,
+   titleInHeader:!!(titleBox&&headerBox&&titleBox.top>=headerBox.top-1&&titleBox.bottom<=headerBox.bottom+1),
+   closeInHeaderRow:!!(closeBox&&headerBox&&closeBox.top<headerBox.bottom&&closeBox.bottom>headerBox.top),
+   titleFontSize:titleStyle?.fontSize??null,
+   titleFontWeight:titleStyle?.fontWeight??null,
+   titleLineHeight:titleStyle?.lineHeight??null,
+   headerPadding:headerStyle?.padding??null,
+  },
+  fade:{present:!!fade,height:fade?Math.round(fade.getBoundingClientRect().height):0},
+  scroll:{height:inspector.scrollHeight,client:inspector.clientHeight,top:inspector.scrollTop},
+  yamlInInspector:!!inspector.querySelector('.visit-yaml-link,[aria-label="Open YAML"],[aria-label^="Open YAML"]'),
  };
 };
 
@@ -350,12 +377,119 @@ try{
   results.push({name:'inspector-a11y-keyboard-journey',width:1440,height:900,zoom:0.85,screen:'home',edit:false,file:'evidence/inspector-a11y-keyboard-journey.png',...afterMetrics,keyboard:keyboardLog});
   await page.close();
  }
+
+ // Keyboard order through Done and Close, without committing the create/link walk.
+ {
+  const page=await browser.newPage();
+  await page.setViewport({width:1440,height:900,deviceScaleFactor:1});
+  await page.goto(`http://127.0.0.1:${port}/scripts/inspector-review.html?zoom=0.85&screen=home`,{waitUntil:'networkidle0',timeout:60_000});
+  await page.waitForSelector('.floating-inspector',{timeout:15_000});
+  await openScreen(page,'Home');
+  await tabUntil(page,info=>info.className.includes('visit-step-summary'),8);
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.floating-inspector .visit-inline-fields:not([hidden]) [aria-label$=" selector"]');
+  await tabUntil(page,info=>info.label.endsWith(' selector'),12);
+  await page.keyboard.down('Shift');await page.keyboard.press('Tab');await page.keyboard.up('Shift');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Tab');
+  await page.waitForFunction(()=>(document.activeElement?.getAttribute('aria-label')??'').endsWith(' selector'));
+  const order=[];
+  for(let step=0;step<16;step++){
+   order.push((await focused(page)).label);
+   if(order.at(-1)?.startsWith('Close '))break;
+   await page.keyboard.press('Tab');
+  }
+  const at=part=>order.findIndex(label=>label===part||label.endsWith(part)||label.startsWith(part));
+  const yamlInInspector=await page.evaluate(()=>!!document.querySelector('.floating-inspector .visit-yaml-link, .floating-inspector [aria-label^="Open YAML"]'));
+  if(at('destination')<0||at('Pick from screen')<=at('destination')||at('Done')<=at('Pick from screen')||at('Close ')<=at('Done'))throw new Error('Expected Destination → Pick → Done → Close: '+order.join(' | '));
+  if(yamlInInspector)throw new Error('Inspector still contains an Open YAML control');
+  keyboardLog.push({step:'close order',order,yamlInInspector});
+  console.log('keyboard close order',order.join(' | '));
+  await page.close();
+ }
+
+ // Long inspector: Close stays in the header while the body scrolls.
+ {
+  const page=await browser.newPage();
+  await page.setViewport({width:1440,height:900,deviceScaleFactor:1});
+  await page.goto(`http://127.0.0.1:${port}/scripts/inspector-review.html?zoom=0.85&screen=home&edit=1`,{waitUntil:'networkidle0',timeout:60_000});
+  await page.waitForSelector('.floating-inspector .visit-inline-fields:not([hidden])',{timeout:15_000});
+  await new Promise(r=>setTimeout(r,400));
+  const scrolled=await page.evaluate(()=>{
+   const inspector=document.querySelector('.floating-inspector');
+   inspector.scrollTop=inspector.scrollHeight;
+   const close=inspector.querySelector('.floating-inspector-close');
+   const ir=inspector.getBoundingClientRect();
+   const cr=close.getBoundingClientRect();
+   const hit=document.elementFromPoint(cr.left+cr.width/2,cr.top+cr.height/2);
+   return {
+    scrollTop:inspector.scrollTop,
+    scrolled:inspector.scrollTop>20,
+    closeTop:Math.round(cr.top-ir.top),
+    closeSize:{w:Math.round(cr.width),h:Math.round(cr.height)},
+    closeInside:cr.top>=ir.top-1&&cr.bottom<=ir.bottom+1,
+    hitClose:hit===close||!!close.contains(hit),
+   };
+  });
+  if(!scrolled.scrolled||!scrolled.closeInside||!scrolled.hitClose||scrolled.closeSize.w<44||scrolled.closeSize.h<44)throw new Error('Close is not usable while the inspector is scrolled: '+JSON.stringify(scrolled));
+  const metrics=await page.evaluate(measureScript);
+  const file=resolve(evidence,'inspector-a11y-scrolled.png');
+  await page.screenshot({path:file,fullPage:false});
+  results.push({name:'inspector-a11y-scrolled',width:1440,height:900,zoom:0.85,screen:'home',file:'evidence/inspector-a11y-scrolled.png',...metrics,scrolled});
+  console.log('inspector-a11y-scrolled',scrolled);
+  await page.close();
+ }
+
+ // Short card: the fade is omitted when nothing overflows.
+ {
+  const page=await browser.newPage();
+  await page.setViewport({width:1440,height:900,deviceScaleFactor:1});
+  await page.goto(`http://127.0.0.1:${port}/scripts/inspector-review.html?zoom=0.85&screen=settings`,{waitUntil:'networkidle0',timeout:60_000});
+  await page.waitForSelector('.floating-inspector',{timeout:15_000});
+  await openScreen(page,'Settings');
+  await new Promise(r=>setTimeout(r,400));
+  const metrics=await page.evaluate(measureScript);
+  const extra=metrics.scroll.height-metrics.scroll.client;
+  if(metrics.fade.present)throw new Error('Short inspector still paints a bottom fade: '+JSON.stringify(metrics.fade));
+  if(extra>1)throw new Error('Short inspector has leftover scroll space: '+extra);
+  const file=resolve(evidence,'inspector-a11y-short.png');
+  await page.screenshot({path:file,fullPage:false});
+  results.push({name:'inspector-a11y-short',width:1440,height:900,zoom:0.85,screen:'settings',file:'evidence/inspector-a11y-short.png',...metrics,extraScroll:extra});
+  console.log('inspector-a11y-short',{fade:metrics.fade,scroll:metrics.scroll,header:metrics.header});
+  await page.close();
+ }
+
+ // View YAML is on the canvas menu, not in the inspector.
+ {
+  const page=await browser.newPage();
+  await page.setViewport({width:1440,height:900,deviceScaleFactor:1});
+  await page.goto(`http://127.0.0.1:${port}/scripts/inspector-review.html?zoom=0.85&screen=home`,{waitUntil:'networkidle0',timeout:60_000});
+  await page.waitForSelector('.floating-inspector',{timeout:15_000});
+  await openScreen(page,'Home');
+  const yamlInInspector=await page.evaluate(()=>!!document.querySelector('.floating-inspector .visit-yaml-link, .floating-inspector [aria-label^="Open YAML"]'));
+  if(yamlInInspector)throw new Error('Inspector still contains an Open YAML control');
+  const box=await page.$eval('.canvas-surface',element=>{const rect=element.getBoundingClientRect();return {x:rect.left+24,y:rect.top+24};});
+  await page.mouse.click(box.x,box.y,{button:'right'});
+  await page.waitForSelector('[aria-label="Canvas menu"]');
+  await page.focus('[aria-label="Canvas menu"] button');
+  for(let step=0;step<6&&(await focused(page)).label!=='View YAML';step++)await page.keyboard.press('ArrowDown');
+  if((await focused(page)).label!=='View YAML')throw new Error('Canvas menu did not reach View YAML: '+(await focused(page)).label);
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[aria-label="YAML"]');
+  const yaml=await page.evaluate(()=>({open:!!document.querySelector('[aria-label="YAML"]'),inspectorYaml:!!document.querySelector('.floating-inspector .visit-yaml-link')}));
+  const file=resolve(evidence,'inspector-a11y-view-yaml.png');
+  await page.screenshot({path:file,fullPage:false});
+  results.push({name:'inspector-a11y-view-yaml',width:1440,height:900,zoom:0.85,screen:'home',file:'evidence/inspector-a11y-view-yaml.png',yaml});
+  console.log('inspector-a11y-view-yaml',yaml);
+  await page.close();
+ }
 }finally{
  await browser.close();
  vite.kill('SIGTERM');
 }
 
-await writeFile(resolve(evidence,'inspector-a11y-metrics.json'),JSON.stringify({shots:results,keyboard:keyboardLog},null,2));
+await writeFile(resolve(evidence,'inspector-a11y-metrics.json'),JSON.stringify({testedCommit,shots:results,keyboard:keyboardLog},null,2));
 console.log('Wrote',results.length,'screenshots and metrics');
 const clamped=results.find(item=>item.name==='inspector-a11y-clamped');
 if(!clamped?.clamped){
