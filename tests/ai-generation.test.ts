@@ -7,6 +7,7 @@ import {test} from 'node:test';
 import {createAi} from '../server/ai/index.js';
 import {MAX_OUTPUT_TOKENS, MAX_PROVIDER_RETRIES, MAX_UPSTREAM_POSTS, RESPONSE_BYTE_LIMIT, SUBMISSION_DEADLINE_MS} from '../server/ai/job.js';
 import {PROMPT_CHAR_LIMIT, REQUEST_BYTE_LIMIT, USER_PROMPT_CHAR_LIMIT, packPrompt, schemaAttachment} from '../server/ai/prompt.js';
+import {createFakeCopilotRuntime} from '../server/ai/providers/copilot-runtime.js';
 import {createFakeProvider, type FakeResult} from '../server/ai/providers/fake.js';
 import {createOpenAiCompatibleProvider} from '../server/ai/providers/openai-compatible.js';
 import {ProviderRequestError} from '../server/ai/providers/types.js';
@@ -818,6 +819,7 @@ test('a generation error keeps the saved key and removing it aborts the in-fligh
   };
   const ai = createAi({
     root: f.root, authoring: f.service.authoring, readWorkspace: id => f.service.workspace(id), env: {}, secrets, fetch: fetchImpl, log: () => {},
+    copilotRuntime: createFakeCopilotRuntime({kind: 'ok', text: 'OK'}, {signedIn: false}),
   });
   await ai.ready;
   const save = {expectedSettingsRevision: 0, selected: 'openrouter', provider: 'openrouter', model: 'vendor/model', credential: {action: 'replace', apiKey: 'sk-LIVE-KEY', storage: 'keychain'}};
@@ -826,6 +828,7 @@ test('a generation error keeps the saved key and removing it aborts the in-fligh
     const failing = createAi({
       root: f.root, authoring: f.service.authoring, readWorkspace: id => f.service.workspace(id), env: {}, secrets, log: () => {},
       fetch: async () => new Response(JSON.stringify({error: {message: 'nope sk-LIVE-KEY'}}), {status: 401, headers: {'content-type': 'application/json'}}),
+      copilotRuntime: createFakeCopilotRuntime({kind: 'ok', text: 'OK'}, {signedIn: false}),
     });
     await failing.ready;
     const failed = await settle(failing, (await failing.start({...inputOf(f.workspace), expectedSettingsRevision: 1})).id);

@@ -170,6 +170,7 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         }
       }
       if (ai) {
+        if (request.method === 'GET' && url.pathname === '/api/ai/copilot/status') return json(200, await ai.copilotStatus(url.searchParams.get('refresh')));
         if (request.method === 'GET' && url.pathname === '/api/ai/config') return json(200, await ai.getConfig());
         if (request.method === 'PUT' && url.pathname === '/api/ai/config') return json(200, await ai.putConfig(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/ai/config/test') return json(200, await ai.testConnection(await readJson(request)));

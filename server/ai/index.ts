@@ -1,6 +1,7 @@
-import {createAiConfig, type AiPublicConfig, type AiTestResult, type SecretStore} from './config.js';
+import {createAiConfig, type AiPublicConfig, type AiTestResult, type CopilotStatus, type SecretStore} from './config.js';
 import {createJobs, realScheduler, type Scheduler, type Timeouts} from './job.js';
 import type {AiModelInfo, ProviderId} from './probe.js';
+import type {CopilotRuntime} from './providers/copilot-runtime.js';
 import type {FlowModelProvider} from './providers/types.js';
 import {createJobStore, type GenerationView} from './store.js';
 import type {Preview} from '../authoring/types.js';
@@ -17,6 +18,7 @@ export type AiService = {
   putConfig(input: unknown): Promise<AiPublicConfig>;
   testConnection(input: unknown): Promise<AiTestResult>;
   listModels(provider: string | null): Promise<{provider: ProviderId; models: AiModelInfo[]}>;
+  copilotStatus(refresh: string | null): Promise<CopilotStatus>;
 };
 
 export function createAi(deps: {
@@ -32,10 +34,11 @@ export function createAi(deps: {
   provider?: FlowModelProvider;
   scheduler?: Scheduler;
   timeouts?: Partial<Timeouts>;
+  copilotRuntime?: CopilotRuntime;
 }): AiService {
   const now = deps.now ?? (() => new Date());
   const log = deps.log ?? ((line: string) => { console.info(line); });
-  const config = createAiConfig({root: deps.root, env: deps.env, dev: deps.dev, secrets: deps.secrets, fetch: deps.fetch, log, now: () => now().getTime()});
+  const config = createAiConfig({root: deps.root, env: deps.env, dev: deps.dev, secrets: deps.secrets, fetch: deps.fetch, log, now: () => now().getTime(), copilotRuntime: deps.copilotRuntime});
   const jobs = createJobs({
     authoring: deps.authoring,
     readWorkspace: deps.readWorkspace,
@@ -56,5 +59,6 @@ export function createAi(deps: {
     putConfig: input => config.put(input),
     testConnection: input => config.testConnection(input),
     listModels: provider => config.listModels(provider),
+    copilotStatus: refresh => config.copilotStatus(refresh),
   };
 }
