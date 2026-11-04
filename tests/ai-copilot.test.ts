@@ -132,7 +132,7 @@ test('an old config without copilot still loads, and connect does not read a key
       selected: 'openrouter',
       providers: {openrouter: {model: 'vendor/model', credentialRevision: 1}},
     }));
-    const config = createAiConfig({root: f.root, env: {GH_TOKEN: 'github_pat_SHOULD_NOT_LAND', GITHUB_TOKEN: 'gho_SHOULD_NOT_LAND'}, secrets, dev: false, log: () => {}});
+    const config = createAiConfig({root: f.root, env: {GH_TOKEN: 'github_pat_SHOULD_NOT_LAND', GITHUB_TOKEN: 'gho_SHOULD_NOT_LAND'}, secrets, dev: false, log: () => {}, copilotRuntime: createFakeCopilotRuntime({kind: 'ok', text: '{}'}, {signedIn: false})});
     const loaded = await config.get();
     assert.equal(loaded.providers.copilot.model, 'auto');
     assert.equal(loaded.selected, 'openrouter');
@@ -159,7 +159,11 @@ test('an old config without copilot still loads, and connect does not read a key
     assert.equal(connected.provider.id, 'copilot');
     assert.equal(connected.provider.sendsJsonSchema, false);
     assert.deepEqual(secrets.gets, []);
-    await assert.rejects(() => config.put({expectedSettingsRevision: 2, selected: 'copilot', provider: 'copilot', model: 'auto', credential: {action: 'keep'}}), (error: unknown) => (error as {code?: string}).code === 'INVALID_CONFIG');
+    const saved = await config.put({expectedSettingsRevision: 2, selected: 'copilot', provider: 'copilot', model: 'gpt-5-mini', credential: {action: 'keep'}});
+    assert.equal(saved.settingsRevision, 3);
+    assert.equal(saved.selected, 'copilot');
+    assert.equal(saved.providers.copilot.model, 'gpt-5-mini');
+    assert.equal(secrets.values.size, 0);
   } finally { await f.cleanup(); }
 });
 
@@ -488,4 +492,30 @@ test('a token in a session error is not returned or logged', async () => {
     }
     assert.equal(job.error?.message.includes('Unset GH_TOKEN'), true);
   } finally { await ai.idle(); await f.cleanup(); }
+});
+
+test('an already-aborted Copilot run does not create a session or send', async () => {
+  const seen = {start: 0, sessions: 0, send: 0, forceStop: 0};
+  class CopilotClient {
+    constructor(_options: object) {}
+    async start() { seen.start += 1; }
+    async stop() { return []; }
+    async forceStop() { seen.forceStop += 1; }
+    async getAuthStatus() { return {isAuthenticated: true, login: 'octocat', authType: 'gh-cli' as const}; }
+    async listModels() { return []; }
+    async createSession() {
+      seen.sessions += 1;
+      return {on() {}, async send() { seen.send += 1; }, async abort() {}, async disconnect() {}};
+    }
+  }
+  const directory = await mkdtemp(join(tmpdir(), 'tnt-copilot-preabort-'));
+  const runtime = createSdkCopilotRuntime({baseDirectory: directory, loadSdk: async () => ({CopilotClient}), idleMs: 60_000});
+  const events = [];
+  for await (const event of runtime.run({system: 'Stay terse.', prompt: 'hi', model: 'auto', signal: AbortSignal.abort()})) events.push(event);
+  assert.deepEqual(events, []);
+  assert.equal(seen.start, 0);
+  assert.equal(seen.sessions, 0);
+  assert.equal(seen.send, 0);
+  assert.equal(seen.forceStop, 0);
+  await runtime.stop();
 });

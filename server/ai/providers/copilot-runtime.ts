@@ -290,6 +290,8 @@ export function createSdkCopilotRuntime(options: {
       });
     },
     async *run(input) {
+      // Already aborted: do not start the client or open a session.
+      if (input.signal.aborted) return;
       let current: SdkClient;
       try { current = await ensure(); }
       catch (error) {
@@ -321,7 +323,7 @@ export function createSdkCopilotRuntime(options: {
       if (input.signal.aborted) onAbort();
       else input.signal.addEventListener('abort', onAbort, {once: true});
       try {
-        await session.send({prompt: input.prompt});
+        if (!input.signal.aborted) await session.send({prompt: input.prompt});
         while (!finished || queue.length) {
           if (input.signal.aborted && !queue.length) break;
           if (queue.length) { yield queue.shift()!; continue; }
@@ -371,14 +373,14 @@ const SCRIPT_ERRORS: Record<string, {kind: CopilotErrorKind; message: string}> =
   rateLimited: {kind: 'rate-limit', message: '429'},
 };
 
-export function createFakeCopilotRuntime(script: FakeCopilotScript | ((call: number, input: {system: string; prompt: string; model: string}) => FakeCopilotScript), auth: CopilotAuth = {signedIn: true, login: 'octocat', via: 'gh-cli'}): FakeCopilotRuntime {
+export function createFakeCopilotRuntime(script: FakeCopilotScript | ((call: number, input: {system: string; prompt: string; model: string}) => FakeCopilotScript), auth: CopilotAuth = {signedIn: true, login: 'octocat', via: 'gh-cli'}, models: CopilotModel[] = [{id: 'auto', name: 'Auto', enabled: true}]): FakeCopilotRuntime {
   const prompts: FakeCopilotRuntime['prompts'] = [];
   let call = 0;
   const runtime: FakeCopilotRuntime = {
     prompts,
     leaked: false,
     async authStatus() { return auth; },
-    async models() { return [{id: 'auto', name: 'Auto', enabled: true}]; },
+    async models() { return models; },
     async *run(input) {
       call += 1;
       prompts.push({system: input.system, prompt: input.prompt, model: input.model});

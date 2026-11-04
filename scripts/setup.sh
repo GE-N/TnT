@@ -402,20 +402,27 @@ else
 fi
 
 # ---------------------------------------------------------------- AI (info)
+# Informational only. READY does not depend on this line. No login, no token, no run().
 step "AI (optional, informational)"
-if command -v copilot >/dev/null 2>&1; then
-  COP_V="$(copilot --version 2>/dev/null | head -1)"
-  record "Copilot CLI" "INFO" "present (${COP_V:-version unknown}); TnT does not use it yet"
-else
-  record "Copilot CLI" "INFO" "not installed; TnT does not use it yet"
+COPILOT_LINE="Copilot: SDK not installed"
+if [ "$NODE_OK" -eq 1 ]; then
+  COPILOT_OUT="$(node "$ROOT/scripts/copilot-auth-line.mjs" 2>/dev/null || true)"
+  case "$COPILOT_OUT" in
+    *"gho_"*|*"ghu_"*|*"ghp_"*|*"github_pat_"*|*"GH_TOKEN"*|*"GITHUB_TOKEN"*)
+      COPILOT_LINE="Copilot: not signed in → run \`copilot login\`" ;;
+    "Copilot: signed in as "*|"Copilot: signed in (via "*|"Copilot: not signed in → run \`copilot login\`"|"Copilot: SDK not installed")
+      COPILOT_LINE="$COPILOT_OUT" ;;
+    *)
+      COPILOT_LINE="Copilot: not signed in → run \`copilot login\`" ;;
+  esac
 fi
+record "Copilot" "INFO" "$COPILOT_LINE"
 if command -v gh >/dev/null 2>&1; then
   if gh auth status >/dev/null 2>&1; then record "GitHub CLI" "INFO" "gh present, signed in"
   else record "GitHub CLI" "INFO" "gh present, not signed in"; fi
 else
   record "GitHub CLI" "INFO" "gh not installed"
 fi
-echo "  ${C_DIM}In-app AI today needs an OpenRouter / OpenAI-compatible key; Copilot support is not built yet. No tokens were read.${C_OFF}"
 
 # ---------------------------------------------------------------- Fixes
 FIXES=0
