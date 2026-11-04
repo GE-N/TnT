@@ -6,6 +6,7 @@ import { hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import { runShutdownHooks } from './shutdown-hooks.js';
 
 /**
  * Exclusive ownership of one canonical `.tnt` root.
@@ -337,7 +338,7 @@ function bindProcessLifecycle(directory: string, lock: string, nonce: string, re
     if (stopping) return;
     stopping = true;
     const code = signal === 'SIGINT' ? 130 : signal === 'SIGHUP' ? 129 : 143;
-    release().catch(() => undefined).finally(() => process.exit(code));
+    runShutdownHooks().catch(() => undefined).then(() => release()).catch(() => undefined).finally(() => process.exit(code));
   };
   process.once('SIGINT', () => stop('SIGINT'));
   process.once('SIGTERM', () => stop('SIGTERM'));

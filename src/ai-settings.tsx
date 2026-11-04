@@ -1,7 +1,12 @@
 import {forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent} from 'react';
 import {AiFlowRequestError, createAiFlowClient, type AiPublicConfig, type CatalogModel, type ProviderId} from './ai-flow-client.js';
 
-const PROVIDERS: ProviderId[] = ['openrouter', 'openai-compatible'];
+type SettingsProviderId = Exclude<ProviderId, 'copilot'>;
+const PROVIDERS: SettingsProviderId[] = ['openrouter', 'openai-compatible'];
+
+function settingsProvider(id: ProviderId): SettingsProviderId {
+  return id === 'openai-compatible' ? 'openai-compatible' : 'openrouter';
+}
 const configListeners = new Set<(config: AiPublicConfig) => void>();
 
 /** Settings Save and the composer share one config snapshot. Keys stay out of this store. */
@@ -27,7 +32,7 @@ function catalogMatch(item: CatalogModel, query: string) {
 type Slice = {model: string; baseUrl: string; apiKey: string; editVersion: number; modelDirty: boolean; baseDirty: boolean; revealed: boolean; useSession: boolean};
 type TestRecord = {
   testId: string;
-  provider: ProviderId;
+  provider: SettingsProviderId;
   source: 'replacement' | 'stored';
   editVersion: number;
   credentialRevision: number;
@@ -35,7 +40,7 @@ type TestRecord = {
   code?: string;
   message?: string;
 };
-type Pending = {kind: 'close'} | {kind: 'provider'; id: ProviderId} | null;
+type Pending = {kind: 'close'} | {kind: 'provider'; id: SettingsProviderId} | null;
 
 export type AiSettingsHandle = {
   hasUnsavedKey: () => boolean;
@@ -46,7 +51,7 @@ function emptySlice(baseUrl = ''): Slice {
   return {model: '', baseUrl, apiKey: '', editVersion: 0, modelDirty: false, baseDirty: false, revealed: false, useSession: false};
 }
 
-function providerName(id: ProviderId) {
+function providerName(id: SettingsProviderId) {
   return id === 'openrouter' ? 'OpenRouter' : 'OpenAI-compatible';
 }
 
@@ -85,7 +90,7 @@ function keyProblem(value: string) {
   return '';
 }
 
-function statusText(config: AiPublicConfig | undefined, id: ProviderId) {
+function statusText(config: AiPublicConfig | undefined, id: SettingsProviderId) {
   const entry = config?.providers?.[id];
   if (!entry?.configured) return 'No API key saved';
   if (entry.keySource === 'env') return 'API key saved (from TNT_AI_API_KEY, dev only)';
@@ -93,7 +98,7 @@ function statusText(config: AiPublicConfig | undefined, id: ProviderId) {
   return 'API key saved';
 }
 
-function testFailure(id: ProviderId, code?: string, message?: string) {
+function testFailure(id: SettingsProviderId, code?: string, message?: string) {
   const name = providerName(id);
   if (code === 'AUTH_FAILED') return 'Key rejected (401). Check you copied the whole key from openrouter.ai/keys, without spaces. Your typed key and any saved key are unchanged.';
   if (code === 'TIMEOUT' || code === 'NETWORK_ERROR') return `Couldn't reach ${name}. Timed out after 15 s, or this Mac is offline. Check the connection and test again. You can still Save without a test.`;
@@ -104,12 +109,12 @@ function testFailure(id: ProviderId, code?: string, message?: string) {
 export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonce: number; onCloseCard: () => void}>(function AiSettings({token, focusNonce, onCloseCard}, ref) {
   const client = useMemo(() => createAiFlowClient(token), [token]);
   const keyRef = useRef<HTMLInputElement>(null);
-  const forms = useRef<Record<ProviderId, Slice>>({openrouter: emptySlice(), 'openai-compatible': emptySlice(DEFAULT_BASE)});
+  const forms = useRef<Record<SettingsProviderId, Slice>>({openrouter: emptySlice(), 'openai-compatible': emptySlice(DEFAULT_BASE)});
   const [form, setForm] = useState(forms.current);
   const [config, setConfig] = useState<AiPublicConfig>();
   const configRef = useRef(config);
   configRef.current = config;
-  const [provider, setProvider] = useState<ProviderId>('openrouter');
+  const [provider, setProvider] = useState<SettingsProviderId>('openrouter');
   const providerRef = useRef(provider);
   providerRef.current = provider;
   const [test, setTest] = useState<TestRecord | null>(null);
@@ -119,13 +124,13 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [sessionOffer, setSessionOffer] = useState(false);
   const [pending, setPending] = useState<Pending>(null);
-  const [catalog, setCatalog] = useState<{provider: ProviderId; models: CatalogModel[]; failed: boolean; loading: boolean; query: string; open: boolean}>({provider: 'openrouter', models: [], failed: false, loading: false, query: '', open: false});
+  const [catalog, setCatalog] = useState<{provider: SettingsProviderId; models: CatalogModel[]; failed: boolean; loading: boolean; query: string; open: boolean}>({provider: 'openrouter', models: [], failed: false, loading: false, query: '', open: false});
   const revealTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const searchRef = useRef<HTMLInputElement>(null);
   const booted = useRef(false);
   const listId = useId();
 
-  function write(id: ProviderId, patch: Partial<Slice>) {
+  function write(id: SettingsProviderId, patch: Partial<Slice>) {
     const next = {...forms.current[id], ...patch};
     forms.current = {...forms.current, [id]: next};
     setForm(forms.current);
@@ -154,7 +159,7 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
       forms.current = seeded;
       setForm(seeded);
       publishAiConfig(next);
-      if (!booted.current) { booted.current = true; setProvider(next.selected); }
+      if (!booted.current) { booted.current = true; setProvider(settingsProvider(next.selected)); }
     }).catch(() => { /* A missing config leaves the form editable. Save reports the failure. */ });
     return () => { cancelled = true; };
   }, [client]);
@@ -198,7 +203,7 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
     publishAiConfig(next);
   }
 
-  function choose(next: ProviderId) {
+  function choose(next: SettingsProviderId) {
     if (next === provider) return true;
     if (slice.apiKey) { setPending({kind: 'provider', id: next}); return false; }
     setProvider(next);
@@ -237,7 +242,7 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
     if (action?.kind === 'close') onCloseCard();
   }
 
-  async function loadCatalog(id: ProviderId) {
+  async function loadCatalog(id: SettingsProviderId) {
     setCatalog({provider: id, models: [], failed: false, loading: true, query: '', open: true});
     try {
       const result = await client.listModels(id);
