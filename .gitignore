@@ -2,5 +2,7 @@ node_modules/
 dist/
 .tnt/
 .scratch/
-.agents/
+# Ignore local agent scratch, but keep installed skills so every session can load them.
+.agents/*
+!.agents/skills/
 .DS_Store
