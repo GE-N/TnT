@@ -6,6 +6,7 @@ import {test} from 'node:test';
 import {AiHttpError} from '../server/ai/errors.js';
 import {createKeychainStore} from '../server/ai/keychain.js';
 import {createAi} from '../server/ai/index.js';
+import {createFakeCopilotRuntime} from '../server/ai/providers/copilot-runtime.js';
 import {createFakeProvider} from '../server/ai/providers/fake.js';
 import {createApiHandler} from '../server/http.js';
 import {createRunner} from '../server/runner.js';
@@ -21,8 +22,9 @@ async function configFixture(options: {env?: NodeJS.ProcessEnv; fetch?: typeof f
   const secrets = options.secrets ?? memorySecrets();
   const f = await authoringFixture();
   const ai = createAi({
-    root: f.root, authoring: f.service.authoring, readWorkspace: id => f.service.workspace(id), env: options.env ?? {}, dev: options.dev, secrets, fetch: options.fetch, now: options.now, log: line => logs.push(line),
+    root: f.root, authoring: f.service.authoring, readWorkspace: id => f.service.workspace(id), env: options.env ?? {}, dev: options.dev, secrets, fetch: options.fetch, now: options.now,     log: line => logs.push(line),
     provider: createFakeProvider(() => ({kind: 'ok', text: '{}'})),
+    copilotRuntime: createFakeCopilotRuntime({kind: 'ok', text: 'OK'}, {signedIn: false}),
   });
   await ai.ready;
   return {ai, f, logs, secrets, cleanup: async () => { await ai.idle(); await f.cleanup(); }};
@@ -176,6 +178,7 @@ test('a hand-edited local base URL is not called', async () => {
     assert.equal(loaded.providers['openai-compatible'].baseUrl, 'http://127.0.0.1:11434');
     const connected = createAi({
       root: g.f.root, authoring: g.f.service.authoring, readWorkspace: id => g.f.service.workspace(id), env: {}, secrets: g.secrets, fetch: async () => { called = true; return new Response('no'); }, log: line => g.logs.push(line),
+      copilotRuntime: createFakeCopilotRuntime({kind: 'ok', text: 'OK'}, {signedIn: false}),
     });
     await connected.ready;
     const workspace = g.f.workspace;

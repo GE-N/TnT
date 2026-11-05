@@ -38,7 +38,7 @@ export interface FlowModelProvider {
     signal: AbortSignal;
     budget?: UpstreamBudget;
   }): AsyncIterable<{delta?: string; done?: ModelDone}>;
-  check(): Promise<{ok: boolean; model?: string; error?: string}>;
+  check(): Promise<{ok: boolean; model?: string; error?: string; login?: string}>;
 }
 
 export class ProviderRequestError extends Error {

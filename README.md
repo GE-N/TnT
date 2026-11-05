@@ -17,6 +17,17 @@ Inspect the captured screen. Click **I can see the app** only when the expected 
 
 The UI reports missing devices, tools, apps, invalid identifiers, and command failures. Expand **Launch log** for the evidence. Launch records and captured screens are retained locally under `.tnt/launches/` until you remove them; this directory is ignored by Git and may contain app data visible on-screen. There is no history browser yet. Restarting the server refreshes the session token; refreshing the page establishes the new session.
 
+## Set up on a new Mac
+
+```sh
+git clone https://github.com/GE-N/TnT.git && cd TnT
+bash scripts/setup.sh           # check, install project-local parts, build
+bash scripts/setup.sh --start   # same, then start on http://127.0.0.1:4317
+bash scripts/setup.sh --check   # check only, install nothing
+```
+
+The script never uses `sudo`, installs nothing system-wide, and does not edit shell files. It installs only inside the repo: exact dependencies with `npm ci`, and Maestro 2.11.0 from the official release into `.tnt/tools/maestro` (SHA-256 verified). It checks, and explains how to fix, macOS, Xcode with an iOS simulator runtime, Node.js 22.12+, and Java 17+, including no-admin options. Downloads respect `HTTPS_PROXY`; behind TLS inspection set `CURL_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS` to your company CA. Use `--port N` to start on another port. It ends with a summary block to paste when asking for help. `npm run setup` runs the same script after `npm` is available.
+
 ## Production and verification
 
 ```sh

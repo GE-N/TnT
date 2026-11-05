@@ -6,7 +6,7 @@ const CATALOG_BODY_LIMIT = 8_000_000;
 const CATALOG_MODEL_CAP = 2_000;
 const MODEL_NAME_LIMIT = 200;
 
-export type ProviderId = 'openrouter' | 'openai-compatible';
+export type ProviderId = 'openrouter' | 'openai-compatible' | 'copilot';
 export type AiModelInfo = {id: string; name?: string; capabilities?: string[]};
 export type KeyProbe = {ok: true; message: string} | {ok: false; code: string; message: string};
 
@@ -54,6 +54,7 @@ function codeFor(status: number) {
 }
 
 export async function probeKey(options: {provider: ProviderId; baseUrl: string; apiKey: string; fetch: typeof fetch}): Promise<KeyProbe> {
+  if (options.provider === 'copilot') return {ok: false, code: 'AI_NOT_CONFIGURED', message: 'Copilot has no API key.'};
   const url = options.provider === 'openrouter' ? providerEndpoint(OPENROUTER_BASE_URL, 'key') : providerEndpoint(options.baseUrl, 'models');
   let response: Response;
   try {

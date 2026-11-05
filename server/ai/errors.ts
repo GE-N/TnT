@@ -33,6 +33,9 @@ function numericEmbedded(code: number | string | undefined) {
 /** Maps a provider failure onto an app code. Internal provider codes stay off the API. */
 export function mapProviderFailure(error: ProviderRequestError): AppFailure {
   if (error.outputTooLarge) return {code: 'INVALID_AI_OUTPUT', message: 'The model output was too large.', retryable: false};
+  if (error.embeddedCode === 'not-signed-in') return {code: 'NOT_SIGNED_IN', message: error.message, retryable: false};
+  if (error.embeddedCode === 'policy-off') return {code: 'POLICY_OFF', message: error.message, retryable: false};
+  if (error.embeddedCode === 'no-seat') return {code: 'NO_SEAT', message: error.message, retryable: false};
   if (error.reason === 'network') return {code: 'NETWORK_ERROR', message: 'The provider could not be reached.', retryable: true};
   if (error.code === 'PROVIDER_TIMEOUT') return {code: 'TIMEOUT', message: 'The generation timed out.', retryable: true};
   const lookup = error.reason === 'embedded' ? numericEmbedded(error.embeddedCode) : error.status;
@@ -50,6 +53,7 @@ export function mapProviderFailure(error: ProviderRequestError): AppFailure {
 
 /** Automatic retry is only an explicit HTTP 429 or 503. Embedded and transport failures stay put. */
 export function canAutoRetry(error: ProviderRequestError) {
+  if (error.embeddedCode === 'not-signed-in' || error.embeddedCode === 'policy-off' || error.embeddedCode === 'no-seat') return false;
   if (error.outputTooLarge || error.reason === 'embedded' || error.reason === 'network' || error.reason === 'budget') return false;
   if (error.code === 'PROVIDER_TIMEOUT') return false;
   return error.status === 429 || error.status === 503;
