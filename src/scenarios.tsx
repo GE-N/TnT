@@ -108,7 +108,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     const back=aiReturn.current;
     aiReturn.current=null;
     if(back?.isConnected)back.focus();
-    else document.querySelector<HTMLElement>('[aria-label="Describe a flow"]')?.focus();
+    else document.querySelector<HTMLElement>('[data-testid="ai-flow-field"]')?.focus();
   },[aiSettingsOpen]);
   const [acknowledged,setAcknowledged]=useState('');
   const [saveFailed,setSaveFailed]=useState(false);
@@ -746,7 +746,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     {!noWorkspace&&<AiFlow control={ai}/>}
     {!noWorkspace&&<>
 
-    <details ref={advanced} className="workspace-advanced" hidden={!SHOW_ADVANCED_MODE&&!advancedRevealed} onToggle={event=>{const el=event.currentTarget as HTMLDetailsElement;if(SHOW_ADVANCED_MODE){rememberView({panels:{advanced:el.open}});return;}if(el.open||!advancedRevealed)return;const back=revealReturn.current;revealReturn.current=null;pendingReveal.current=null;if(back?.isConnected&&!el.contains(back))back.focus();else document.querySelector<HTMLElement>('[aria-label="Describe a flow"]')?.focus();setAdvancedRevealed(false);}}><summary>Advanced mode · legacy authoring and settings</summary><button className="confirm" onClick={()=>{setLegacyCanvas(value=>!value);if(advanced.current)advanced.current.open=false;}}>{legacyCanvas?'Return to contextual canvas':'Show legacy canvas controls'}</button>
+    <details ref={advanced} className="workspace-advanced" hidden={!SHOW_ADVANCED_MODE&&!advancedRevealed} onToggle={event=>{const el=event.currentTarget as HTMLDetailsElement;if(SHOW_ADVANCED_MODE){rememberView({panels:{advanced:el.open}});return;}if(el.open||!advancedRevealed)return;const back=revealReturn.current;revealReturn.current=null;pendingReveal.current=null;if(back?.isConnected&&!el.contains(back))back.focus();else document.querySelector<HTMLElement>('[data-testid="ai-flow-field"]')?.focus();setAdvancedRevealed(false);}}><summary>Advanced mode · legacy authoring and settings</summary><button className="confirm" onClick={()=>{setLegacyCanvas(value=>!value);if(advanced.current)advanced.current.open=false;}}>{legacyCanvas?'Return to contextual canvas':'Show legacy canvas controls'}</button>
     <ScenarioLibrary key={'scenarios-'+loadRevision} items={definitions} onChange={setDefinitions} selected={scenarioId} onSelect={selectScenario} catalog={catalog} files={(()=>{try{return Object.keys(JSON.parse(flows));}catch{return [];}})()} canvas={canvas} automation={automation} mock={mock} disabled={running||submitting||pickerBusy||launchBusy} onError={setDefinitionError} inputAlert={inputReserved?{message:inputReserved.reason.message,testId:inputReserved.reason.kind==='reserved-input'?'reserved-input-error':'reserved-variable-error'}:undefined}/>
     <MockSetup key={loadRevision} initialPlan={loadedMock} disabled={running||submitting||pickerBusy} onChange={setMockPlan}/>
     <div className="scenario-editor">

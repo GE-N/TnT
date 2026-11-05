@@ -122,7 +122,7 @@ test('actions that need Advanced reveal it on demand and hide it when closed', a
     await closeAdvanced();
     assert.equal(advanced().hidden, true);
     assert.equal(advanced().open, false);
-    assert.ok(document.activeElement === review || document.activeElement === document.querySelector('[aria-label="Describe a flow"]'));
+    assert.ok(document.activeElement === review || document.activeElement === document.querySelector('[data-testid="ai-flow-field"]'));
     assert.notEqual(document.activeElement, document.body);
     await reload(omitted.id);
     assert.equal(advanced().hidden, true);
