@@ -6,7 +6,7 @@ import type {Workspace} from '../server/scenarios.js';
 import type {WorkspaceLibrary} from '../server/workspace-store.js';
 
 type Action={kind:'trash';id:string;name:string}|{kind:'restore';id:string}|{kind:'import';name:string;package:WorkspacePackage;filename?:string}|{kind:'open';id:string}|{kind:'new'|'copy';name:string}|{kind:'rename';name:string};
-type IconName='document'|'search'|'chevron'|'arrow'|'copy'|'save'|'plus'|'close'|'check'|'more'|'warning';
+type IconName='document'|'search'|'chevron'|'arrow'|'copy'|'save'|'plus'|'close'|'check'|'more'|'warning'|'gear';
 function WorkspaceIcon({name}:{name:IconName}){
  const paths:Record<IconName,ReactNode>={
   document:<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></>,
@@ -17,6 +17,7 @@ function WorkspaceIcon({name}:{name:IconName}){
   more:<><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></>,
   plus:<path d="M12 5v14M5 12h14"/>,close:<path d="m6 6 12 12M6 18 18 6"/>,check:<path d="m5 12 4 4L19 6"/>,
   warning:<><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9v5"/><path d="M12 17h.01"/></>,
+  gear:<><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></>,
  };
  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -24,7 +25,7 @@ function workspaceDate(value:string){
  const date=new Date(value);const today=new Date();const yesterday=new Date(today);yesterday.setDate(today.getDate()-1);
  return date.toDateString()===today.toDateString()?'Today':date.toDateString()===yesterday.toDateString()?'Yesterday':date.toLocaleDateString(undefined,{month:'short',day:'numeric',...(date.getFullYear()!==today.getFullYear()?{year:'numeric' as const}:{})});
 }
-export function WorkspaceManager({token,id,name,status,statusNote,busy,blocked,dirty,onAction,onSave,onPrepare,recovery,notice,openSignal,onExport,empty=false,imported=false,onRecover,recoveryOpen=false}:{token:string;id:string;name:string;status:string;statusNote?:string;busy:boolean;blocked:boolean;dirty:boolean;onAction:(action:Action,saved?:Workspace,options?:{discard?:boolean})=>Promise<void>;onSave:()=>Promise<Workspace>;onPrepare:(action:Action)=>Promise<Workspace|undefined>;recovery:boolean;notice?:string;openSignal?:number;onExport:(options:ExportOptions)=>Promise<PackageResult>;empty?:boolean;imported?:boolean;onRecover?:(button:HTMLButtonElement)=>void;recoveryOpen?:boolean}){
+export function WorkspaceManager({token,id,name,status,statusNote,busy,blocked,dirty,onAction,onSave,onPrepare,recovery,notice,openSignal,onExport,empty=false,imported=false,onRecover,recoveryOpen=false,onOpenSettings}:{token:string;id:string;name:string;status:string;statusNote?:string;busy:boolean;blocked:boolean;dirty:boolean;onAction:(action:Action,saved?:Workspace,options?:{discard?:boolean})=>Promise<void>;onSave:()=>Promise<Workspace>;onPrepare:(action:Action)=>Promise<Workspace|undefined>;recovery:boolean;notice?:string;openSignal?:number;onExport:(options:ExportOptions)=>Promise<PackageResult>;empty?:boolean;imported?:boolean;onRecover?:(button:HTMLButtonElement)=>void;recoveryOpen?:boolean;onOpenSettings?:()=>void}){
  const [panel,setPanel]=useState<'compact'|'library'|'rename'|'new'|'copy'|'export'|'import'|'trash'|'delete'>();
  const [droppedFiles,setDroppedFiles]=useState<File[]|undefined>();const [fileDrag,setFileDrag]=useState(false);
  const [deleteTarget,setDeleteTarget]=useState<{id:string;name:string}>();
@@ -180,7 +181,7 @@ export function WorkspaceManager({token,id,name,status,statusNote,busy,blocked,d
      <button className="workspace-command" disabled={busy||blocked||empty} onClick={startCopy}><WorkspaceIcon name="copy"/><span>Save a copy</span></button>
     </div>
     <div className="workspace-trash-commands">{id&&<button className="workspace-command workspace-danger" disabled={busy||blocked||working} onClick={event=>startDelete({id,name},event.currentTarget)}>Delete workspace</button>}<button className="workspace-command" disabled={working} onClick={()=>{setError('');setPanel('trash');}}>Trash</button></div>
-    <footer className="workspace-manager-footer"><button className="workspace-command" disabled={busy||blocked} onClick={startNew}><WorkspaceIcon name="plus"/><span>New workspace</span></button><small>On this computer · Autosave</small></footer>
+    <footer className="workspace-manager-footer"><button className="workspace-command" disabled={busy||blocked} onClick={startNew}><WorkspaceIcon name="plus"/><span>New workspace</span></button><button type="button" className="workspace-command workspace-settings" data-testid="workspace-settings" disabled={working} onClick={()=>{onOpenSettings?.();close();}}><WorkspaceIcon name="gear"/><span>Settings</span><span className="ws-settings-kbd">⌘,</span></button><small>On this computer · Autosave</small></footer>
    </>}
    {actionError&&<p className="workspace-feedback workspace-error" role="alert">{actionError}{reopenTarget&&<button disabled={busy||working} onClick={()=>void reopen(reopenTarget)}>Retry Open</button>}</p>}
    {error&&<p className="workspace-feedback workspace-error" role="alert">{error} {(panel==='compact'||panel==='library'||panel==='trash')&&<button disabled={busy} onClick={()=>setRetry(value=>value+1)}>Retry library</button>}</p>}

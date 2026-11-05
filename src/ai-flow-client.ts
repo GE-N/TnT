@@ -1,9 +1,9 @@
 import type {ApplyResult, Diagnostic, Preview} from '../server/authoring/types.js';
-import type {AiModelInfo, AiPublicConfig, AiTestResult, ProviderId, StorageKind} from '../server/ai/config.js';
+import type {AiModelInfo, AiPublicConfig, AiTestResult, CopilotStatus, ProviderId, StorageKind} from '../server/ai/config.js';
 import type {ClarifyingAnswer} from '../server/ai/questions.js';
 import type {GenerationPhase, GenerationState, GenerationView, JobError} from '../server/ai/store.js';
 
-export type {AiModelInfo, AiPublicConfig, AiTestResult, ApplyResult, Diagnostic, GenerationPhase, GenerationState, GenerationView, JobError, Preview, ProviderId, StorageKind};
+export type {AiModelInfo, AiPublicConfig, AiTestResult, ApplyResult, CopilotStatus, Diagnostic, GenerationPhase, GenerationState, GenerationView, JobError, Preview, ProviderId, StorageKind};
 
 export const AI_POLL_MS = 500;
 export const PROMPT_CHAR_LIMIT = 4000;
@@ -33,8 +33,9 @@ export type ConfigPut = {
 };
 
 export type TestInput =
-  | {provider: ProviderId; testId: string; source: 'stored'; credentialRevision: number}
-  | {provider: ProviderId; testId: string; source: 'replacement'; apiKey: string};
+  | {provider: Exclude<ProviderId, 'copilot'>; testId: string; source: 'stored'; credentialRevision: number}
+  | {provider: Exclude<ProviderId, 'copilot'>; testId: string; source: 'replacement'; apiKey: string}
+  | {provider: 'copilot'; testId: string; model?: string};
 
 export type GenerationRequest = {
   workspaceId: string;
@@ -74,6 +75,8 @@ export function createAiFlowClient(token: string) {
     getConfig: () => request<AiPublicConfig>(token, 'GET', '/api/ai/config'),
     putConfig: (body: ConfigPut) => request<AiPublicConfig>(token, 'PUT', '/api/ai/config', body),
     testConnection: (body: TestInput) => request<AiTestResult>(token, 'POST', '/api/ai/config/test', body),
+    /** Readiness only. Never starts a generation or a connection test. */
+    copilotStatus: (refresh = false) => request<CopilotStatus>(token, 'GET', '/api/ai/copilot/status' + (refresh ? '?refresh=1' : '')),
     listModels: (provider: ProviderId) => request<ModelCatalog>(token, 'GET', '/api/ai/models?provider=' + encodeURIComponent(provider)),
     /** Preview requires a contextId. Refresh creates one at the saved revision, then posts the stored draft. */
     createContext: (body: ContextRequest) => request<AuthoringContext>(token, 'POST', '/api/authoring/context', body),

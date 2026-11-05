@@ -221,6 +221,8 @@ test('AI flow authoring UI', async t => {
       const settings = h.document.querySelector('[data-testid="ai-settings"]')?.textContent ?? '';
       assert.match(settings, /OpenRouter/);
       assert.match(settings, /OpenAI-compatible/);
+      assert.match(settings, /GitHub Copilot/);
+      assert.equal(h.document.querySelector('.ai-settings-sheet'), null);
       assert.doesNotMatch(h.document.body.textContent ?? '', /ollama|lm studio/i);
     } finally { await h.cleanup(); }
   });
@@ -376,38 +378,33 @@ test('AI flow authoring UI', async t => {
     } finally { await h.cleanup(); }
   });
 
-  await t.test('provider choices are visible radios and an unsaved key blocks the switch', async () => {
+  await t.test('provider choices are a dropdown and an unsaved key blocks the switch', async () => {
     const h = await harness('ready');
     try {
       await h.render();
       await h.openSettings();
       await h.until(() => /API key saved/.test(h.document.querySelector('[data-testid="ai-has-key"]')?.textContent ?? ''), 'settings loaded');
-      const radios = [...h.document.querySelectorAll<HTMLInputElement>('#ai-settings input[type="radio"]')];
-      assert.deepEqual(radios.map(radio => radio.name), ['ai-provider', 'ai-provider']);
-      assert.deepEqual(radios.map(radio => radio.value), ['openrouter', 'openai-compatible']);
-      for (const radio of radios) {
-        assert.equal(radio.hidden, false);
-        assert.doesNotMatch(radio.getAttribute('style') ?? '', /display:\s*none|opacity:\s*0/);
-      }
-      const rule = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8').match(/\.ai-settings \.ai-provider-option input\[type="radio"\]\{([^}]*)\}/)?.[1] ?? '';
-      assert.match(rule, /appearance:auto/);
-      assert.match(rule, /opacity:1/);
-      assert.doesNotMatch(rule, /display:\s*none|opacity:\s*0/);
-      await h.click('#ai-settings input[value="openai-compatible"]');
-      await h.until(() => (h.document.querySelector('#ai-settings input[value="openai-compatible"]') as HTMLInputElement).checked, 'radio selects openai-compatible');
+      const select = h.document.querySelector<HTMLSelectElement>('[data-testid="ai-provider"]');
+      assert.ok(select);
+      assert.equal(select.tagName, 'SELECT');
+      assert.deepEqual([...select.options].map(option => option.value), ['openrouter', 'openai-compatible', 'copilot']);
+      assert.deepEqual([...select.options].map(option => option.text), ['OpenRouter', 'OpenAI-compatible', 'GitHub Copilot']);
+      assert.equal(h.document.querySelector('#ai-settings input[type="radio"]'), null);
+      const rule = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+      assert.match(rule, /\.ai-provider-select\{[^}]*appearance:none/);
+      assert.doesNotMatch(rule, /\.ai-settings-sheet\{[^}]*left:24px/);
+      await chooseProvider(h, 'openai-compatible');
+      await h.until(() => (h.document.querySelector('[data-testid="ai-provider"]') as HTMLSelectElement).value === 'openai-compatible', 'dropdown selects openai-compatible');
       assert.ok(h.document.querySelector('[aria-label="Base URL"]'));
-      await act(async () => { h.document.querySelector('#ai-settings input[value="openai-compatible"]')!.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowLeft', bubbles: true, cancelable: true})); });
-      await h.until(() => (h.document.querySelector('#ai-settings input[value="openrouter"]') as HTMLInputElement).checked, 'arrow selects openrouter');
+      await chooseProvider(h, 'openrouter');
+      await h.until(() => (h.document.querySelector('[data-testid="ai-provider"]') as HTMLSelectElement).value === 'openrouter', 'dropdown selects openrouter');
       assert.equal(h.document.querySelector('[aria-label="Base URL"]'), null);
       await h.fill('API key', 'sk-unsaved-provider');
-      await h.click('#ai-settings input[value="openai-compatible"]');
+      await chooseProvider(h, 'openai-compatible');
       assert.ok(h.document.querySelector('[data-testid="ai-unsaved-guard"]'));
-      assert.equal((h.document.querySelector('#ai-settings input[value="openrouter"]') as HTMLInputElement).checked, true);
-      await act(async () => { h.document.querySelector('#ai-settings [role="radiogroup"]')!.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowRight', bubbles: true, cancelable: true})); });
-      assert.equal((h.document.querySelector('#ai-settings input[value="openrouter"]') as HTMLInputElement).checked, true);
-      assert.ok(h.document.querySelector('[data-testid="ai-unsaved-guard"]'));
+      assert.equal((h.document.querySelector('[data-testid="ai-provider"]') as HTMLSelectElement).value, 'openrouter');
       await h.click('[data-testid="ai-discard-key"]');
-      await h.until(() => (h.document.querySelector('#ai-settings input[value="openai-compatible"]') as HTMLInputElement).checked, 'discard switches provider');
+      await h.until(() => (h.document.querySelector('[data-testid="ai-provider"]') as HTMLSelectElement).value === 'openai-compatible', 'discard switches provider');
     } finally { await h.cleanup(); }
   });
 
@@ -1765,6 +1762,138 @@ test('AI flow authoring UI', async t => {
       assert.equal(counted.ai.generations, 0);
     } finally { await counted.cleanup(); }
   });
+
+  await t.test('Settings in the workspace menu and Ctrl+, open the same right sheet', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.click('[aria-label="Manage workspace"]');
+      const row = h.document.querySelector<HTMLButtonElement>('[data-testid="workspace-settings"]');
+      assert.ok(row);
+      assert.match(row.textContent ?? '', /Settings/);
+      assert.match(row.textContent ?? '', /⌘,/);
+      assert.equal(h.document.querySelector('[aria-label="Settings"]'), null);
+      await h.click('[data-testid="workspace-settings"]');
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-settings"]'), 'menu opened settings');
+      const sheet = h.document.querySelector<HTMLElement>('[data-testid="ai-settings"]');
+      assert.ok(sheet?.classList.contains('knowledge-sheet'));
+      assert.ok(sheet?.classList.contains('settings-sheet'));
+      assert.equal(sheet?.getAttribute('data-side-sheet'), 'settings');
+      assert.match(sheet?.textContent ?? '', /Settings/);
+      assert.match(sheet?.textContent ?? '', /All workspaces · this Mac only/);
+      assert.equal(h.document.querySelector('.workspace-management-surface'), null);
+      await h.click('[data-testid="ai-settings-close"]');
+      await h.until(() => !h.document.querySelector('[data-testid="ai-settings"]'), 'settings closed');
+      await act(async () => {
+        h.dom.window.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: ',', ctrlKey: true, bubbles: true, cancelable: true}));
+      });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-settings"]'), 'shortcut opened settings');
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('a saved Copilot provider is configured without an API key', async () => {
+    const h = await harness('ready');
+    try {
+      h.ai.selectCopilot();
+      await h.render();
+      await h.until(() => h.requests.some(item => item.path === '/api/ai/config'), 'config');
+      const field = h.document.querySelector<HTMLTextAreaElement>('[data-testid="ai-flow-field"]');
+      assert.equal(field?.placeholder, 'Ask AI');
+      await h.fill('Ask AI', 'Add a checkout step after Cart');
+      assert.equal(h.document.querySelector<HTMLButtonElement>('[aria-label="Send"]')?.disabled, false);
+      await act(async () => { field!.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); });
+      await h.until(() => !!h.document.querySelector('[data-testid="ai-disclosure"]'), 'copilot disclosure');
+      assert.match(h.document.querySelector('[data-testid="ai-disclosure"]')?.textContent ?? '', /Sent to GitHub Copilot/);
+      assert.doesNotMatch(h.document.querySelector('[data-testid="ai-disclosure"]')?.textContent ?? '', /OpenAI-compatible/);
+      assert.equal(h.ai.generations, 0);
+      assert.equal(h.ai.tests.length, 0);
+      await h.click('[data-testid="ai-disclosure-continue"]');
+      await h.until(() => h.ai.generations === 1, 'copilot generation started');
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('Copilot settings use the status route and do not generate', async () => {
+    const h = await harness('ready');
+    try {
+      await h.render();
+      await h.openSettings();
+      const before = h.ai.copilotHits;
+      await chooseProvider(h, 'copilot');
+      await h.until(() => /Signed in as GE-N/.test(h.document.querySelector('[data-testid="ai-copilot-status"]')?.textContent ?? ''), 'signed in');
+      assert.ok(h.ai.copilotHits > before);
+      assert.equal(h.ai.generations, 0);
+      assert.equal(h.ai.tests.length, 0);
+      assert.match(h.document.body.textContent ?? '', /No API key needed/);
+      assert.equal(h.document.querySelector('[data-testid="ai-api-key"]'), null);
+      await h.click('[aria-label="Browse models"]');
+      await h.until(() => !!h.document.querySelector('[data-model-id="auto"]'), 'browse lists auto');
+      assert.ok(h.document.querySelector('[data-model-id="claude-sonnet"]'));
+      const putsBefore = h.ai.puts.length;
+      await h.click('[data-testid="ai-save"]');
+      await h.until(() => h.ai.puts.length === putsBefore + 1, 'copilot saved');
+      const put = h.ai.puts.at(-1) as {provider?: string; model?: string; credential?: {action?: string; apiKey?: string}};
+      assert.equal(put.provider, 'copilot');
+      assert.equal(put.model, 'auto');
+      assert.equal(put.credential?.action, 'keep');
+      assert.equal(put.credential?.apiKey, undefined);
+      await h.click('[data-testid="ai-test-connection"]');
+      await h.until(() => h.ai.tests.length === 1, 'copilot tested');
+      assert.equal((h.ai.tests[0] as {provider?: string; apiKey?: string}).provider, 'copilot');
+      assert.equal((h.ai.tests[0] as {apiKey?: string}).apiKey, undefined);
+      assert.equal(h.ai.puts.length, putsBefore + 1);
+      assert.equal(h.ai.generations, 0);
+      h.ai.setCopilotMode('out');
+      await chooseProvider(h, 'openrouter');
+      await chooseProvider(h, 'copilot');
+      await h.until(() => /Not signed in to Copilot/.test(h.document.querySelector('[data-testid="ai-copilot-status"]')?.textContent ?? ''), 'signed out');
+      assert.match(h.document.body.textContent ?? '', /copilot login/);
+      assert.equal(h.document.querySelector('[aria-label="Model"]'), null);
+      assert.equal(h.ai.generations, 0);
+      h.ai.setCopilotMode('missing');
+      await h.click('[data-testid="ai-copilot-check"]');
+      await h.until(() => /isn.t installed/.test(h.document.querySelector('[data-testid="ai-copilot-status"]')?.textContent ?? ''), 'not installed');
+      assert.match(h.document.body.textContent ?? '', /bash scripts\/setup\.sh/);
+      h.ai.setCopilotMode('fail');
+      await h.click('[data-testid="ai-copilot-check"]');
+      await h.until(() => /Couldn.t check Copilot/.test(h.document.body.textContent ?? ''), 'status failed');
+      assert.equal(h.document.querySelector('[data-testid="ai-api-key"]'), null);
+      assert.equal(h.ai.tests.length, 1);
+      assert.equal(h.ai.generations, 0);
+    } finally { await h.cleanup(); }
+  });
+
+  await t.test('Copilot error panels name the provider and keep OpenRouter links off', async () => {
+    const h = await harness('ready');
+    try {
+      h.ai.selectCopilot();
+      await h.render();
+      await h.fill('Ask AI', 'Add a checkout step after Cart');
+      h.ai.failGeneration('NOT_SIGNED_IN', "Copilot isn't signed in.");
+      await h.generate('Add a checkout step after Cart');
+      await h.until(() => /Copilot isn.t signed in/.test(h.document.querySelector('[data-testid="ai-error"]')?.textContent ?? ''), 'signed-out panel');
+      const panel = h.document.querySelector('[data-testid="ai-error"]');
+      assert.ok(panel?.querySelector('.ai-state-title'));
+      assert.match(panel?.querySelector('.ai-state-body')?.textContent ?? '', /copilot login/);
+      assert.ok(panel?.querySelector('.ai-code'));
+      assert.equal(panel?.querySelector('a[href*="openrouter.ai"]'), null);
+      assert.ok(h.document.querySelector('[data-testid="ai-retry"]'));
+      assert.ok(h.document.querySelector('[data-testid="ai-open-settings"]'));
+      h.ai.failGeneration('NOT_SIGNED_IN', "Copilot isn't installed");
+      await h.click('[data-testid="ai-retry"]');
+      await h.until(() => /Copilot isn.t installed/.test(h.document.querySelector('.ai-state-title')?.textContent ?? ''), 'not installed panel');
+      h.ai.failGeneration('POLICY_OFF', 'Copilot is off for this account.');
+      await h.generate('Add a checkout step after Cart');
+      await h.until(() => /Copilot is off for this account/.test(h.document.querySelector('.ai-state-title')?.textContent ?? ''), 'policy panel');
+      assert.equal(h.document.querySelector('[data-testid="ai-retry"]'), null);
+      h.ai.failGeneration('NO_SEAT', 'GE-N has no Copilot license.');
+      await h.generate('Add a checkout step after Cart');
+      await h.until(() => /GE-N has no Copilot license/.test(h.document.querySelector('.ai-state-body')?.textContent ?? ''), 'seat panel');
+      h.ai.failGeneration('MODEL_UNAVAILABLE', 'The model is not available.');
+      await h.generate('Add a checkout step after Cart');
+      await h.until(() => /isn.t on your Copilot plan/.test(h.document.querySelector('.ai-state-body')?.textContent ?? ''), 'model panel');
+      assert.equal(h.document.querySelector('a[href*="openrouter.ai"]'), null);
+    } finally { await h.cleanup(); }
+  });
 });
 
 type StoredVersions = {
@@ -1911,6 +2040,15 @@ function wideCatalog(): CatalogFixture[] {
   models.push({id: 'anthropic/claude-haiku-4.5'});
   models.push({id: 'custom/writer', name: 'House Claude draft'});
   return models;
+}
+
+async function chooseProvider(h: {dom: JSDOM; document: Document}, id: string) {
+  await act(async () => {
+    const select = h.document.querySelector<HTMLSelectElement>('[data-testid="ai-provider"]');
+    assert.ok(select, 'provider dropdown');
+    Object.getOwnPropertyDescriptor(h.dom.window.HTMLSelectElement.prototype, 'value')!.set!.call(select, id);
+    select.dispatchEvent(new h.dom.window.Event('change', {bubbles: true}));
+  });
 }
 
 function catalogIds(document: Document) {
@@ -2074,8 +2212,8 @@ async function harness(mode: Mode, options: HarnessOptions = {}) {
 
 type FakeConfig = {
   settingsRevision: number;
-  selected: 'openrouter' | 'openai-compatible';
-  providers: Record<'openrouter' | 'openai-compatible', {model: string; baseUrl?: string; configured: boolean; keySource?: 'keychain' | 'session'; credentialRevision: number; storageAvailable: boolean}>;
+  selected: 'openrouter' | 'openai-compatible' | 'copilot';
+  providers: Record<'openrouter' | 'openai-compatible', {model: string; baseUrl?: string; configured: boolean; keySource?: 'keychain' | 'session'; credentialRevision: number; storageAvailable: boolean}> & {copilot?: {model: string}};
 };
 
 function unconfiguredConfig(): FakeConfig {
@@ -2090,6 +2228,12 @@ function unconfiguredConfig(): FakeConfig {
 }
 
 function applyPut(config: FakeConfig, body: Record<string, unknown> | undefined) {
+  if (body?.provider === 'copilot') {
+    config.selected = body.selected === 'openai-compatible' || body.selected === 'openrouter' || body.selected === 'copilot' ? body.selected : 'copilot';
+    config.providers.copilot = {model: typeof body.model === 'string' ? body.model : 'auto'};
+    config.settingsRevision += 1;
+    return structuredClone(config);
+  }
   const id = body?.provider === 'openai-compatible' ? 'openai-compatible' : 'openrouter';
   const entry = config.providers[id];
   if (typeof body?.model === 'string') entry.model = body.model;
@@ -2163,6 +2307,9 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
   const counts = {generations: 0, previews: 0, applies: 0, cancels: 0, undos: 0, inflight: 0};
   const calls: string[] = [];
   let failUndo = false;
+  let copilotMode: 'in' | 'out' | 'missing' | 'fail' = 'in';
+  let copilotHits = 0;
+  let scriptedFailure: {code: string; message: string} | undefined;
   return {
     get generations() { return counts.generations; },
     get previews() { return counts.previews; },
@@ -2184,6 +2331,10 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
     holdNextTest() { holdTest = true; },
     holdNextJob() { holdNext = true; },
     rejectNextGeneration() { rejectGeneration = true; },
+    get copilotHits() { return copilotHits; },
+    setCopilotMode(next: 'in' | 'out' | 'missing' | 'fail') { copilotMode = next; },
+    selectCopilot() { config.selected = 'copilot'; config.providers.copilot = {model: 'auto'}; config.settingsRevision = Math.max(config.settingsRevision, 1); },
+    failGeneration(code: string, message: string) { scriptedFailure = {code, message}; },
     releaseTest() { holdTest = false; for (const resolve of testWaiters.splice(0)) resolve(); },
     failNextPut() { failPut = true; },
     release() {
@@ -2198,6 +2349,13 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
     async route(method: string, pathname: string, body?: Record<string, unknown>) {
       const path = pathname.split('?')[0];
       if (method === 'GET' && path === '/api/ai/config') return {status: 200, body: structuredClone(config)};
+      if (method === 'GET' && path === '/api/ai/copilot/status') {
+        copilotHits += 1;
+        if (copilotMode === 'fail') return {status: 500, body: {error: 'Copilot status failed.', code: 'REQUEST_FAILED'}};
+        if (copilotMode === 'missing') return {status: 200, body: {installed: false, signedIn: false, models: []}};
+        if (copilotMode === 'out') return {status: 200, body: {installed: true, signedIn: false, models: []}};
+        return {status: 200, body: {installed: true, signedIn: true, login: 'GE-N', via: 'gh-cli', models: [{id: 'auto', name: 'Auto'}, {id: 'claude-sonnet', name: 'Claude'}]}};
+      }
       if (method === 'GET' && path === '/api/ai/models') {
         modelQueries.push(pathname);
         if (options.failCatalog) return {status: 502, body: {error: 'The model catalog is unavailable.', code: 'PROVIDER_UNAVAILABLE'}};
@@ -2217,6 +2375,14 @@ function createFake(mode: Mode, service: ScenarioService, options: HarnessOption
       if (method === 'POST' && path === '/api/ai/generations') {
         calls.push('generate');
         generationBodies.push(structuredClone(body));
+        if (scriptedFailure) {
+          const failure = scriptedFailure;
+          scriptedFailure = undefined;
+          counts.generations++;
+          const failedJob: Job = {id: crypto.randomUUID(), workspaceId: String(body?.workspaceId), baseRevision: Number(body?.expectedRevision), state: 'failed', phase: 'model', error: {code: failure.code, message: failure.message, retryable: false}};
+          jobs.set(failedJob.id, failedJob);
+          return {status: 202, body: viewOf(failedJob, mode)};
+        }
         if (rejectGeneration) {
           rejectGeneration = false;
           config = {...config, settingsRevision: config.settingsRevision + 1};
