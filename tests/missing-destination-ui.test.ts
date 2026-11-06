@@ -20,13 +20,19 @@ function workspace(){
  return {yaml,canvas:refreshChecks(canvas,yaml)};
 }
 
-async function mount(scenarioMode:boolean,brokenReference=false,running=false){
+async function mount(scenarioMode:boolean,brokenReference=false,running=false,adjust?:(canvas:CanvasGraph)=>void){
  const dom=new JSDOM('<div id="root"></div>');
  const keys=['window','document','HTMLElement','Event','ResizeObserver','IS_REACT_ACT_ENVIRONMENT'];const descriptors=keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
  class ResizeObserver{observe(){}disconnect(){}}
  for(const key of keys)Object.defineProperty(globalThis,key,{value:key==='IS_REACT_ACT_ENVIRONMENT'?true:key==='ResizeObserver'?ResizeObserver:Reflect.get(dom.window,key),configurable:true});
  const {createRoot}=await import('react-dom/client');const {CanvasEditor}=await import('../src/canvas.js');const root=createRoot(dom.window.document.getElementById('root')!);
  const state={...workspace()};
+ if(adjust){
+  const previous=structuredClone(state.canvas);
+  adjust(state.canvas);
+  state.yaml=writeChecks(state.yaml,previous,state.canvas);
+  state.canvas=refreshChecks(state.canvas,state.yaml);
+ }
  if(brokenReference)state.canvas.screens[0].tests.push({id:'stale',label:'Broken reference',role:'assertion',reference:{...reference,index:999,fingerprint:'missing'}});
  function Host(){
   const [graph,setGraph]=useState(state.canvas);const [yaml,setYaml]=useState(state.yaml);
@@ -146,6 +152,41 @@ test('the destination warning uses #8a4b00 on #fff4e5 at 12px or larger',()=>{
  assert.match(rule,/(?:^|;)color:#8a4b00(?:;|$)/);
  assert.match(rule,/background:#fff4e5/);
  assert.ok(Number(rule.match(/font-size:(\d+)px/)?.[1])>=12);
+});
+
+test('a legacy stay row before visit steps keeps one tab stop on the visit step',async()=>{
+ const page=await mount(true,false,false,canvas=>{canvas.paths[0].visits=[{id:'visit-1',operationIds:['gear','home-ready']}];});
+ try{
+  const summaries=[...page.document.querySelectorAll<HTMLButtonElement>('.visit-step-summary')];
+  assert.equal(page.row('gear').querySelector('.visit-step-summary'),null);
+  assert.equal(page.row('gear').querySelector<HTMLSelectElement>('select[aria-label$=" destination"]')!.selectedOptions[0].textContent,'Stays on this screen');
+  assert.equal(page.row('profile').querySelector('.destination-warning p')?.textContent,warning('open Profile'));
+  assert.equal(summaries.filter(item=>item.tabIndex===0).length,1);
+  assert.equal(page.row('home-ready').querySelector<HTMLButtonElement>('.visit-step-summary')!.tabIndex,0);
+ }finally{await page.close();}
+});
+
+test('a focused visit step that becomes a legacy stay row moves the tab stop to the remaining visit step',async()=>{
+ const page=await mount(true,false,false,canvas=>{
+  canvas.edges.push({id:'go',from:'home',to:'settings',actionTestId:'gear',assertionTestId:'settings-ready',responseCondition:'Home → Settings'});
+  canvas.paths[0].edgeIds=['go'];
+  canvas.paths[0].visits=[{id:'visit-1',operationIds:['gear','home-ready']},{id:'visit-2',operationIds:['settings-ready']}];
+ });
+ try{
+  const gear=page.row('gear').querySelector<HTMLButtonElement>('.visit-step-summary')!;
+  assert.equal(gear.tabIndex,0);
+  await act(async()=>gear.click());
+  await page.choose('gear',page.option('gear','Stays on this screen'));
+  const dialog=page.document.querySelector('[role=alertdialog]')!;
+  assert.ok(dialog);
+  await act(async()=>[...dialog.querySelectorAll('button')].find(button=>button.textContent==='Remove link')!.click());
+  assert.equal(page.row('gear').querySelector('.visit-step-summary'),null);
+  assert.equal(page.row('gear').querySelector<HTMLSelectElement>('select[aria-label$=" destination"]')!.selectedOptions[0].textContent,'Stays on this screen');
+  assert.equal(page.row('profile').querySelector('.destination-warning p')?.textContent,warning('open Profile'));
+  const summaries=[...page.document.querySelectorAll<HTMLButtonElement>('.visit-step-summary')];
+  assert.equal(summaries.filter(item=>item.tabIndex===0).length,1);
+  assert.equal(page.row('home-ready').querySelector<HTMLButtonElement>('.visit-step-summary')!.tabIndex,0);
+ }finally{await page.close();}
 });
 
 for(const scenarioMode of [false,true])test(`running preserves legacy warnings while locking destination edits (${scenarioMode?'contextual':'legacy'} canvas)`,async()=>{
