@@ -3,7 +3,7 @@ import {useEffect,useId,useLayoutEffect,useRef,useState} from 'react';
 import {knowledgeClient,knowledgeReaderPath,type FlowStep,type Freshness,type ScenarioDetail} from './knowledge-client.js';
 
 /** Same shape as T1's `useSidePanels()` coordinator. */
-export type SidePanelKind = 'info' | 'versions' | 'nodeDetails';
+export type SidePanelKind = 'info' | 'versions' | 'nodeDetails' | 'settings';
 export type SidePanels = {
   open: SidePanelKind | null;
   openPanel: (kind: SidePanelKind) => void;

@@ -814,13 +814,14 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       }
       const provider = settings.selected;
       const entry = provider === 'copilot' ? undefined : settings.providers[provider];
-      const model = entry?.model?.trim() || '';
-      if (!entry?.configured || !model) {
-        const failure = {code: 'AI_NOT_CONFIGURED' as const, message: 'Add an API key and model in AI settings. Your text is kept here.', retryable: false};
+      const model = provider === 'copilot' ? (settings.providers.copilot?.model?.trim() || 'auto') : (entry?.model?.trim() || '');
+      const keyedReady = !!entry && 'configured' in entry && entry.configured && !!model;
+      if (provider !== 'copilot' && !keyedReady) {
+        const failure = {code: 'AI_NOT_CONFIGURED' as const, message: 'Choose a provider and model in AI settings. Your text is kept here.', retryable: false};
         if (!failRefine(text, failure)) setDraft(current => ({...current, status: 'prompting', prompt: text, refining, error: failure}));
         return;
       }
-      const share = disclosureToken(provider, entry.baseUrl);
+      const share = disclosureToken(provider, entry?.baseUrl);
       if (!readDisclosure().has(share) && !acked.current.has(share)) {
         setDisclosure(share);
         return;
@@ -1390,11 +1391,10 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   const [setupNeeded, setSetupNeeded] = useState(false);
   const count = draft.prompt.length;
   const over = count > PROMPT_CHAR_LIMIT;
-  const rawEntry = control.config?.providers?.[control.provider];
+  const rawEntry = control.provider === 'copilot' ? undefined : control.config?.providers?.[control.provider];
   const entry = rawEntry && 'configured' in rawEntry ? rawEntry : undefined;
-  const configured = !control.config || (!!entry?.configured && !!entry.model?.trim());
+  const configured = !control.config || control.provider === 'copilot' || (!!entry?.configured && !!entry.model?.trim());
   const busy = generating || draft.status === 'applying';
-  const kind = retryKind(draft.error?.code);
   const neutral = draft.error?.code === 'CANCELLED' || draft.error?.code === 'INTERRUPTED' || (!draft.error && !!draft.notice);
 
   useEffect(() => {
@@ -1404,8 +1404,8 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   }, [generating, refining, submitting, draft.status, draft.phase]);
 
   useEffect(() => {
-    if (draft.error && !neutral) setLive(errorCopy(draft.error.code, draft.error.message, draft.model));
-  }, [draft.error, draft.model, neutral]);
+    if (draft.error && !neutral) setLive(aiErrorText(aiErrorView(draft.error.code, draft.error.message, draft.model, control.provider)));
+  }, [draft.error, draft.model, neutral, control.provider]);
 
   useEffect(() => {
     if (control.disclosure || draft.error || draft.notice) setCollapsed(false);
@@ -1454,7 +1454,10 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   const undoRef = useRef<HTMLButtonElement>(null);
   const askRef = useRef<HTMLInputElement>(null);
   const sheetWasOpen = useRef(control.versionsOpen);
-  const copy = draft.error ? errorCopy(draft.error.code, draft.error.message, control.config?.providers?.[control.provider]?.model || draft.model) : draft.notice;
+  const copy = !draft.error ? draft.notice : neutral ? noticeCopy(draft.error.code, draft.error.message) : undefined;
+  const panelError = !neutral && draft.error
+    ? aiErrorView(draft.error.code, draft.error.message, modelOf(control.config, control.provider) || draft.model, control.provider)
+    : setupNeeded && !configured ? aiErrorView('AI_NOT_CONFIGURED', '', undefined, control.provider) : undefined;
   const composerIssues = (draft.diagnostics ?? []).filter(item => item.blocks.includes('apply') || item.severity === 'error');
   const draftOpen = REVIEW.includes(draft.status) && !refining && !!draft.draft;
   const mode = capsuleMode({draftOpen, undoVisible: control.undoVisible, versionCount: control.versionCount});
@@ -1474,7 +1477,7 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   }, [control.versionsOpen, sidePanels.open]);
   const nearLimit = count >= PROMPT_COUNTER_AT;
   const hasIssues = failed && composerIssues.length > 0;
-  const showPanel = !collapsed && (!!control.disclosure || (!generating && (!!copy || hasIssues || nearLimit || (setupNeeded && !configured))));
+  const showPanel = !collapsed && (!!control.disclosure || (!generating && (!!copy || !!panelError || hasIssues || nearLimit || (setupNeeded && !configured))));
   const progressText = refining ? 'Refining…' : PHASE_LABEL[draft.phase ?? 'model'];
   return <>
   <div className="ai-flow" data-testid="ai-flow" data-ai-status={draft.status}>
@@ -1488,23 +1491,14 @@ export function AiFlow({control}: {control: AiDraftControl}) {
         <div className="ai-panel-body">
         {control.disclosure ? <><p className="ai-prompt-preview">{draft.prompt}</p><Disclosure control={control} /></> : <>
           {nearLimit && <p className={over ? 'ai-error' : 'ai-muted'} data-testid="ai-char-count">{over ? (count - PROMPT_CHAR_LIMIT) + ' characters over the limit. Shorten the text to generate. Nothing is trimmed for you.' : count.toLocaleString('en-US') + ' / ' + PROMPT_CHAR_LIMIT.toLocaleString('en-US')}</p>}
-          {setupNeeded && !configured && <p className="ai-error" role="alert" data-testid="ai-error">✕ AI isn’t set up <span className="ai-muted">Add an API key and model in AI settings. Your text is kept here.</span></p>}
-          {copy && <p id={errorId} className={neutral ? 'ai-muted' : 'ai-error'} role={neutral ? 'status' : 'alert'} data-testid={draft.error && !neutral ? 'ai-error' : 'ai-notice'}>{neutral ? '' : '✕ '}{copy}</p>}
+          {copy && <p id={errorId} className="ai-muted" role="status" data-testid="ai-notice">{copy}</p>}
+          {panelError && <AiErrorState id={errorId} view={panelError} onGenerate={() => void control.generate()} onRefine={() => control.refine()} onSettings={target => { control.openPanel(); control.openSettings(target); }} />}
           {failed && !!composerIssues.length && <ol className="ai-issues" data-testid="ai-composer-issues">{composerIssues.map((item, index) => <li key={item.path + item.code + index}><span className="ai-issue-no">{index + 1}</span> {item.message}</li>)}</ol>}
-          {draft.error?.code === 'CREDITS_REQUIRED' && <p><a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">Open OpenRouter account</a></p>}
-          {draft.error?.code === 'AUTH_FAILED' && <p><a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">Open OpenRouter keys</a></p>}
-          <div className="ai-actions">
-            {kind === 'retry' || kind === 'network' ? <button type="button" className="ai-text" data-testid="ai-retry" onClick={() => void control.generate()}>{kind === 'network' ? 'Retry · may send another request' : 'Retry'}</button>
-              : kind === 'settings' || (setupNeeded && !configured) ? <button type="button" className="ai-text" data-testid="ai-open-settings" onClick={event => { control.openPanel(); control.openSettings(event.currentTarget); }}>Open AI settings</button>
-              : kind === 'refine' ? <button type="button" className="ai-text" data-testid="ai-refine" onClick={() => control.refine()}>Refine</button>
-              : kind === 'refresh' ? <button type="button" className="ai-text" data-testid="ai-retry" onClick={() => void control.generate()}>Refresh and generate again</button>
-              : null}
-          </div>
         </>}
         </div>
       </div>
     </section>}
-    {mode === 'draft' ? <AiCapsule control={control} askRef={askRef} /> : mode !== 'idle' && !open ? <HistoryCapsule control={control} mode={mode} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : <div className={'ai-flow-field' + (generating ? ' is-generating' : '')}><Sparkles size={20} /><textarea ref={fieldRef} className="ai-flow-input" data-testid="ai-flow-field" rows={1} aria-label="Ask AI" placeholder="Ask AI" value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={showPanel && copy ? errorId : undefined} onChange={event => { if (event.target.value.length >= PROMPT_COUNTER_AT) setCollapsed(false); control.setPrompt(event.target.value); }} onKeyDown={onFieldKeyDown} />{generating ? <button type="button" className="ai-send is-stop" data-testid="ai-cancel" aria-label="Stop" title="Stop" onClick={() => void control.cancel()}><StopIcon /></button> : draft.prompt.trim() ? <button type="button" className="ai-send" aria-label="Send" title="Send (Enter) · Shift+Enter for a new line" disabled={busy || over || !configured || !!control.disclosure} onClick={() => void control.generate()}><SendIcon /></button> : null}</div>}
+    {mode === 'draft' ? <AiCapsule control={control} askRef={askRef} /> : mode !== 'idle' && !open ? <HistoryCapsule control={control} mode={mode} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : <div className={'ai-flow-field' + (generating ? ' is-generating' : '')}><Sparkles size={20} /><textarea ref={fieldRef} className="ai-flow-input" data-testid="ai-flow-field" rows={1} aria-label="Ask AI" placeholder="Ask AI" value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={showPanel && (copy || panelError) ? errorId : undefined} onChange={event => { if (event.target.value.length >= PROMPT_COUNTER_AT) setCollapsed(false); control.setPrompt(event.target.value); }} onKeyDown={onFieldKeyDown} />{generating ? <button type="button" className="ai-send is-stop" data-testid="ai-cancel" aria-label="Stop" title="Stop" onClick={() => void control.cancel()}><StopIcon /></button> : draft.prompt.trim() ? <button type="button" className="ai-send" aria-label="Send" title="Send (Enter) · Shift+Enter for a new line" disabled={busy || over || !configured || !!control.disclosure} onClick={() => void control.generate()}><SendIcon /></button> : null}</div>}
   </div>
   {control.versionsOpen && !!control.sheetVersions.length && createPortal(<VersionsSheet versions={control.sheetVersions} nowId={control.nowVersionId} selectedId={control.selectedVersionId} onSelect={control.selectVersion} onClose={closeVersions} onKeepCurrent={control.keepCurrent} onRestore={() => { const id = control.selectedVersionId; if (id) void control.restore(id); }} restoreDisabled={!!control.restoreReason} restoreNote={control.restoreReason} restoreError={control.restoreError} />, document.body)}
   </>;
@@ -1573,16 +1567,18 @@ function AiCapsule({control, askRef}: {control: AiDraftControl; askRef: {current
       </div>
     </form>
     {reason && <p id={reasonId} className="ai-reason" data-testid="ai-confirm-reason">{reason}</p>}
-    {draft.error && <p className="ai-error" role="alert" data-testid="ai-capsule-error">{errorCopy(draft.error.code, draft.error.message, draft.model)}</p>}
+    {draft.error && <p className="ai-error" role="alert" data-testid="ai-capsule-error">{aiErrorText(aiErrorView(draft.error.code, draft.error.message, draft.model, control.provider))}</p>}
   </div>;
 }
 
 function Disclosure({control}: {control: AiDraftControl}) {
-  const name = control.provider === 'openrouter' ? 'OpenRouter' : 'the model provider';
+  const sent = control.provider === 'copilot'
+    ? 'Sent to GitHub Copilot'
+    : 'Sent to ' + (control.provider === 'openrouter' ? 'OpenRouter' : 'the model provider') + ' and the model’s provider';
   return <div className="ai-disclosure" data-testid="ai-disclosure">
-    <p>Before your first generation</p>
+    <p className="ai-disclosure-heading">Before your first generation</p>
     <div className="ai-disclosure-cols">
-      <div><p>Sent to {name} and the model’s provider</p><ul><li>Your scenario text</li><li>Screen names, selectors and their metadata</li><li>TnT’s authoring schema</li><li>Script source you include</li></ul></div>
+      <div><p>{sent}</p><ul><li>Your scenario text</li><li>Screen names, selectors and their metadata</li><li>TnT’s authoring schema</li><li>Script source you include</li></ul></div>
       <div><p>Not sent</p><ul><li>Screenshots or recordings</li><li>Runtime input values (names only)</li><li>Saved keys or other credentials</li><li>Other workspace files</li></ul></div>
     </div>
     <div className="ai-actions">
@@ -1592,37 +1588,102 @@ function Disclosure({control}: {control: AiDraftControl}) {
   </div>;
 }
 
-function retryKind(code: string | undefined) {
-  if (code === 'SAVE_FAILED' || code === 'RATE_LIMITED' || code === 'PROVIDER_UNAVAILABLE') return 'retry' as const;
-  if (code === 'NETWORK_ERROR' || code === 'TIMEOUT') return 'network' as const;
-  if (code === 'AI_NOT_CONFIGURED' || code === 'AUTH_FAILED' || code === 'MODEL_UNAVAILABLE') return 'settings' as const;
-  if (code === 'CREDITS_REQUIRED') return 'account' as const;
-  if (code === 'INVALID_AI_OUTPUT' || code === 'AUTHORING_INVALID') return 'refine' as const;
-  if (code === 'SETTINGS_CHANGED' || code === 'WORKSPACE_STALE') return 'refresh' as const;
-  return 'none' as const;
+type AiAction = 'retry' | 'network' | 'try' | 'settings' | 'refine' | 'refresh';
+type AiErrorView = {title: string; body: string; actions: AiAction[]; openRouterKeys?: boolean; openRouterAccount?: boolean};
+
+function modelOf(config: AiDraftControl['config'], provider: AiDraftControl['provider']) {
+  return config?.providers?.[provider]?.model;
 }
 
-function errorCopy(code: string | undefined, message: string, model?: string) {
+function noticeCopy(code: string | undefined, message: string) {
+  if (code === 'CANCELLED') return 'Cancelled. Nothing was changed. Your previous draft is still on the canvas.';
+  if (code === 'INTERRUPTED') return 'Generation stopped because the workbench restarted. Your text is kept.';
+  return message;
+}
+
+function aiErrorView(code: string | undefined, message: string, model: string | undefined, provider: AiDraftControl['provider']): AiErrorView {
+  const shown = model?.trim() || 'This model';
   switch (code) {
-    case 'AI_NOT_CONFIGURED': return 'Not set up. Add an API key in AI settings to generate. Your text is kept here.';
-    case 'AUTH_FAILED': return /expired|revoked/i.test(message) ? 'Key rejected — it may be expired or revoked. Create a new key in your OpenRouter account, then replace it in AI settings.' : 'Key rejected. The provider didn’t accept the saved key. Check or replace it in AI settings; nothing was removed.';
-    case 'CREDITS_REQUIRED': return 'Out of credits. The provider account needs credits for this model. Your text and draft are kept.';
-    case 'MODEL_UNAVAILABLE': return 'Model unavailable. “' + (model || 'This model') + '” isn’t available. TnT won’t switch models for you.';
-    case 'UNSUPPORTED_REQUEST': return 'The provider rejected the request. Shorten the input or pick a model.';
-    case 'RATE_LIMITED': return 'Provider busy. Still unavailable after the automatic retry. Try again in a minute.';
-    case 'PROVIDER_UNAVAILABLE': return 'Provider busy. Still unavailable after the automatic retry. Trying again may send another request.';
+    case 'AI_NOT_CONFIGURED':
+      return {title: 'AI isn’t set up', body: 'Choose a provider and model in AI settings. Your text is kept here.', actions: ['settings']};
+    case 'NOT_SIGNED_IN':
+      if (/isn.?t installed/i.test(message)) return {title: 'Copilot isn’t installed.', body: 'Run bash scripts/setup.sh, then send again.', actions: ['settings']};
+      return {title: 'Copilot isn’t signed in', body: 'Run copilot login in Terminal, then send again. Your text is kept here.', actions: ['try', 'settings']};
+    case 'POLICY_OFF':
+      return {title: 'Copilot is off for this account', body: 'Ask your GitHub admin to allow Copilot CLI. Your text is kept here.', actions: ['settings']};
+    case 'NO_SEAT': {
+      const login = /^(.+?) has no Copilot license/.exec(message)?.[1] || 'This account';
+      return {title: 'No Copilot seat', body: login + ' has no Copilot license. Run copilot login with your company account.', actions: ['try', 'settings']};
+    }
+    case 'MODEL_UNAVAILABLE':
+      return {
+        title: 'Model unavailable',
+        body: provider === 'copilot'
+          ? '“' + shown + '” isn’t on your Copilot plan. TnT won’t switch models for you.'
+          : '“' + shown + '” isn’t available. TnT won’t switch models for you.',
+        actions: ['settings'],
+      };
+    case 'AUTH_FAILED':
+      return {
+        title: 'Key rejected',
+        body: /expired|revoked/i.test(message)
+          ? (provider === 'openrouter'
+            ? 'It may be expired or revoked. Create a new key in your OpenRouter account, then replace it in AI settings.'
+            : 'It may be expired or revoked. Replace it in AI settings.')
+          : 'The provider didn’t accept the saved key. Check or replace it in AI settings; nothing was removed.',
+        actions: ['settings'],
+        openRouterKeys: provider === 'openrouter',
+      };
+    case 'CREDITS_REQUIRED':
+      return {title: 'Out of credits', body: 'The provider account needs credits for this model. Your text and draft are kept.', actions: [], openRouterAccount: provider === 'openrouter'};
+    case 'UNSUPPORTED_REQUEST':
+      return {title: 'The provider rejected the request', body: 'Shorten the input or pick a model.', actions: []};
+    case 'RATE_LIMITED':
+      return {title: 'Provider busy', body: 'Still unavailable after the automatic retry. Try again in a minute.', actions: ['retry']};
+    case 'PROVIDER_UNAVAILABLE':
+      return {title: 'Provider busy', body: 'Still unavailable after the automatic retry. Trying again may send another request.', actions: ['retry']};
     case 'NETWORK_ERROR':
-    case 'TIMEOUT': return 'No response. The connection dropped or 120 s passed. The request may still have been processed.';
+    case 'TIMEOUT':
+      return {title: 'No response', body: 'The connection dropped or 120 s passed. The request may still have been processed.', actions: ['network']};
     case 'INVALID_AI_OUTPUT':
-    case 'AUTHORING_INVALID': return 'Couldn’t build a flow. The reply didn’t fit TnT’s format, even after one repair.';
-    case 'SETTINGS_CHANGED': return 'AI settings changed. Settings changed after you started. Nothing was sent with the old settings.';
-    case 'WORKSPACE_STALE': return 'Workspace changed. Screens changed since this request started, so the preview is out of date.';
-    case 'CANCELLED': return 'Cancelled. Nothing was changed. Your previous draft is still on the canvas.';
-    case 'INTERRUPTED': return 'Generation stopped because the workbench restarted. Your text is kept.';
-    case 'CREDENTIAL_STORAGE_FAILED': return 'Secure storage isn’t available. Your typed key is kept.';
-    case 'SAVE_FAILED': return message;
-    default: return message;
+    case 'AUTHORING_INVALID':
+      return {title: 'Couldn’t build a flow', body: 'The reply didn’t fit TnT’s format, even after one repair.', actions: ['refine']};
+    case 'SETTINGS_CHANGED':
+      return {title: 'AI settings changed', body: 'Settings changed after you started. Nothing was sent with the old settings.', actions: ['refresh']};
+    case 'WORKSPACE_STALE':
+      return {title: 'Workspace changed', body: 'Screens changed since this request started, so the preview is out of date.', actions: ['refresh']};
+    case 'CREDENTIAL_STORAGE_FAILED':
+      return {title: 'Secure storage isn’t available', body: 'Your typed key is kept.', actions: []};
+    case 'SAVE_FAILED':
+      return {title: message, body: '', actions: ['retry']};
+    default:
+      return {title: message || 'Couldn’t generate.', body: '', actions: []};
   }
+}
+
+function aiErrorText(view: AiErrorView) {
+  return view.body ? view.title + '. ' + view.body : view.title;
+}
+
+function ChipText({text}: {text: string}) {
+  const parts = text.split(/(copilot login|bash scripts\/setup\.sh)/g);
+  return <>{parts.map((part, index) => part === 'copilot login' || part === 'bash scripts/setup.sh' ? <code key={index} className="ai-code">{part}</code> : <span key={index}>{part}</span>)}</>;
+}
+
+function AiErrorState({id, view, onGenerate, onRefine, onSettings}: {id: string; view: AiErrorView; onGenerate: () => void; onRefine: () => void; onSettings: (target: HTMLElement) => void}) {
+  return <div className="ai-state" role="alert" data-testid="ai-error" id={id}>
+    <p className="ai-state-title">{view.title}</p>
+    {view.body && <p className="ai-state-body"><ChipText text={view.body} /></p>}
+    {view.openRouterAccount && <p><a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">Open OpenRouter account</a></p>}
+    {view.openRouterKeys && <p><a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">Open OpenRouter keys</a></p>}
+    {!!view.actions.length && <div className="ai-state-actions">
+      {view.actions.map(action => action === 'settings'
+        ? <button type="button" className="ai-text" key={action} data-testid="ai-open-settings" onClick={event => onSettings(event.currentTarget)}>Open AI settings</button>
+        : action === 'refine'
+          ? <button type="button" className="ai-text" key={action} data-testid="ai-refine" onClick={onRefine}>Refine</button>
+          : <button type="button" className="ai-text" key={action} data-testid="ai-retry" onClick={onGenerate}>{action === 'network' ? 'Retry · may send another request' : action === 'refresh' ? 'Refresh and generate again' : action === 'try' ? 'Try again' : 'Retry'}</button>)}
+    </div>}
+  </div>;
 }
 
 function Sparkles({size = 22}: {size?: number}) {
