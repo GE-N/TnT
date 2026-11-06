@@ -18,6 +18,58 @@ import type {GenerationView} from '../server/ai/store.js';
 
 const SECRET = 'sk-test-secret-value';
 
+/** The settings shortcut reads the Node/browser global navigator, not the jsdom window. */
+function stubNavigatorPlatform(platform: string, userAgent: string) {
+  const nav = globalThis.navigator;
+  const previous = {
+    platform: Object.getOwnPropertyDescriptor(nav, 'platform'),
+    userAgent: Object.getOwnPropertyDescriptor(nav, 'userAgent'),
+  };
+  Object.defineProperty(nav, 'platform', {configurable: true, get: () => platform});
+  Object.defineProperty(nav, 'userAgent', {configurable: true, get: () => userAgent});
+  return () => {
+    if (previous.platform) Object.defineProperty(nav, 'platform', previous.platform);
+    else Reflect.deleteProperty(nav, 'platform');
+    if (previous.userAgent) Object.defineProperty(nav, 'userAgent', previous.userAgent);
+    else Reflect.deleteProperty(nav, 'userAgent');
+  };
+}
+
+function assertSettingsSheet(document: Document) {
+  const sheet = document.querySelector<HTMLElement>('[data-testid="ai-settings"]');
+  assert.ok(sheet?.classList.contains('knowledge-sheet'));
+  assert.ok(sheet?.classList.contains('settings-sheet'));
+  assert.equal(sheet?.getAttribute('data-side-sheet'), 'settings');
+  assert.match(sheet?.textContent ?? '', /Settings/);
+  assert.match(sheet?.textContent ?? '', /All workspaces · this Mac only/);
+}
+
+async function expectShortcut(h: Awaited<ReturnType<typeof harness>>, label: string, modifiers: {meta?: boolean; ctrl?: boolean; composing?: boolean}, shouldOpen: boolean) {
+  assert.equal(h.document.querySelector('[data-testid="ai-settings"]'), null, label + ' starts closed');
+  const event = await act(async () => {
+    const pressed = new h.dom.window.KeyboardEvent('keydown', {
+      key: ',',
+      metaKey: !!modifiers.meta,
+      ctrlKey: !!modifiers.ctrl,
+      isComposing: !!modifiers.composing,
+      bubbles: true,
+      cancelable: true,
+    });
+    h.dom.window.dispatchEvent(pressed);
+    return pressed;
+  });
+  if (shouldOpen) {
+    await h.until(() => !!h.document.querySelector('[data-testid="ai-settings"]'), label + ' opened settings');
+    assert.equal(event.defaultPrevented, true, label + ' prevents the browser shortcut');
+    assertSettingsSheet(h.document);
+    await h.click('[data-testid="ai-settings-close"]');
+    await h.until(() => !h.document.querySelector('[data-testid="ai-settings"]'), label + ' closed');
+  } else {
+    assert.equal(h.document.querySelector('[data-testid="ai-settings"]'), null, label + ' left settings closed');
+    assert.equal(event.defaultPrevented, false, label + ' did not claim the shortcut');
+  }
+}
+
 test('AI flow authoring UI', async t => {
   await t.test('prompt, generating, and confirm yield a scenario that edits, saves, and reopens', async () => {
     const h = await harness('ready');
@@ -1763,8 +1815,9 @@ test('AI flow authoring UI', async t => {
     } finally { await counted.cleanup(); }
   });
 
-  await t.test('Settings in the workspace menu and Ctrl+, open the same right sheet', async () => {
+  await t.test('Settings in the workspace menu and the platform shortcut open the same right sheet', async () => {
     const h = await harness('ready');
+    const restoreNavigator = stubNavigatorPlatform('Linux x86_64', 'Node.js/22');
     try {
       await h.render();
       await h.click('[aria-label="Manage workspace"]');
@@ -1775,20 +1828,29 @@ test('AI flow authoring UI', async t => {
       assert.equal(h.document.querySelector('[aria-label="Settings"]'), null);
       await h.click('[data-testid="workspace-settings"]');
       await h.until(() => !!h.document.querySelector('[data-testid="ai-settings"]'), 'menu opened settings');
-      const sheet = h.document.querySelector<HTMLElement>('[data-testid="ai-settings"]');
-      assert.ok(sheet?.classList.contains('knowledge-sheet'));
-      assert.ok(sheet?.classList.contains('settings-sheet'));
-      assert.equal(sheet?.getAttribute('data-side-sheet'), 'settings');
-      assert.match(sheet?.textContent ?? '', /Settings/);
-      assert.match(sheet?.textContent ?? '', /All workspaces · this Mac only/);
+      assertSettingsSheet(h.document);
       assert.equal(h.document.querySelector('.workspace-management-surface'), null);
       await h.click('[data-testid="ai-settings-close"]');
       await h.until(() => !h.document.querySelector('[data-testid="ai-settings"]'), 'settings closed');
-      await act(async () => {
-        h.dom.window.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: ',', ctrlKey: true, bubbles: true, cancelable: true}));
-      });
-      await h.until(() => !!h.document.querySelector('[data-testid="ai-settings"]'), 'shortcut opened settings');
-    } finally { await h.cleanup(); }
+
+      await expectShortcut(h, 'linux ctrl comma', {ctrl: true}, true);
+      await expectShortcut(h, 'linux meta comma', {meta: true}, false);
+      await expectShortcut(h, 'linux ctrl comma while composing', {ctrl: true, composing: true}, false);
+
+      restoreNavigator();
+      stubNavigatorPlatform('MacIntel', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)');
+      await expectShortcut(h, 'mac command comma', {meta: true}, true);
+      await expectShortcut(h, 'mac ctrl comma', {ctrl: true}, false);
+      await expectShortcut(h, 'mac command and ctrl comma', {meta: true, ctrl: true}, false);
+      await expectShortcut(h, 'mac command comma while composing', {meta: true, composing: true}, false);
+      restoreNavigator();
+      stubNavigatorPlatform('', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)');
+      await expectShortcut(h, 'mac user agent command comma', {meta: true}, true);
+      await expectShortcut(h, 'mac user agent ctrl comma', {ctrl: true}, false);
+    } finally {
+      restoreNavigator();
+      await h.cleanup();
+    }
   });
 
   await t.test('a saved Copilot provider is configured without an API key', async () => {
