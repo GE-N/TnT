@@ -432,7 +432,12 @@ test('first-run auto-select runs once from config and connect, and a save wins',
       };
       const racing = harness(race, runtime);
       const pending = racing.ai.get();
-      for (let attempt = 0; attempt < 50 && !hit; attempt += 1) await new Promise(resolve => setImmediate(resolve));
+      // authStatus sets hit before it waits. A fixed turn count can expire while that read is still queued behind the suite.
+      await new Promise<void>((resolve, reject) => {
+        const watch = () => { if (hit) resolve(); else setImmediate(watch); };
+        pending.then(() => { if (!hit) reject(new Error('get() settled before authStatus')); }, reject);
+        watch();
+      });
       assert.equal(hit, true);
       const saved = await racing.ai.put({expectedSettingsRevision: 0, selected: 'openrouter', provider: 'openrouter', model: 'vendor/model', credential: {action: 'keep'}});
       release();

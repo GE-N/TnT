@@ -126,7 +126,7 @@ export function ResultsSheet({token, run, reports, batch, lines, mode, scenarios
     const visitId = run ? failingVisitId(resultModel(run)) ?? '' : '';
     setEnlarged(false); setPicker(false); setOpenVisit(visitId); setSelection(undefined);
   }, [run?.id, mode]);
-  useEffect(() => { sheetRef.current?.focus(); }, []);
+  useEffect(() => { if (!focusLog) sheetRef.current?.focus(); }, []);
   useEffect(() => {
     if (run?.status !== 'running') return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -142,12 +142,12 @@ export function ResultsSheet({token, run, reports, batch, lines, mode, scenarios
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
   }, [scenariosOpen]);
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!focusLog) return;
     const tech = sheetRef.current?.querySelector<HTMLDetailsElement>('[data-testid="results-technical"]');
     const log = sheetRef.current?.querySelector<HTMLDetailsElement>('[data-testid="results-log"]');
     if (tech) tech.open = true;
-    if (log) { log.open = true; log.querySelector('summary')?.focus(); log.scrollIntoView({block: 'nearest'}); }
+    if (log) { log.open = true; log.querySelector('summary')?.focus(); log.scrollIntoView?.({block: 'nearest'}); }
     onFocusLogDone();
   }, [focusLog, run?.id]);
   useEffect(() => {
