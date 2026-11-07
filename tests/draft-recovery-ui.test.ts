@@ -1,4 +1,4 @@
-import {addVisitStep,inspectScreen,openScenarioPanel} from './workspace-ui-helpers.js';
+import {addVisitStep,inspectScreen,openResults,openScenarioPanel,openWorkspaceId} from './workspace-ui-helpers.js';
 import {writeChecks} from '../shared/canvas-authoring.js';
 import type {CanvasGraph} from '../server/canvas.js';
 import {DraftConflict,WorkspaceConflict,WorkspacePayloadTooLarge,createWriteFaults} from '../server/workspace-store.js';
@@ -247,7 +247,7 @@ test('a missing last workspace opens the chooser and no other identity',async()=
   await page.render();
   assert.match(page.document.body.textContent!,/That workspace isn't available anymore/);
   assert.match(page.document.querySelector('[aria-label="Manage workspace"]')!.textContent!,/Untitled workspace/);
-  assert.equal(page.document.querySelector('.artifact-id'),null);
+  assert.equal(openWorkspaceId(page.document),'');
   assert.ok(other.id);
  }finally{await page.close();}
 });
@@ -305,11 +305,9 @@ test('confidential runtime input stays out of the draft file',async()=>{
  const page=await mount();
  try{
   await page.render();await page.click('New scenario');
-  const created=page.document.querySelector('.artifact-id');
   await page.editYaml('appId: com.example.App\n---\n- launchApp\n');
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await page.settle();});
-  assert.ok(created||page.document.querySelector('.artifact-id'));
-  const id=page.document.querySelector('.artifact-id')!.textContent!.replace('Workspace: ','');
+  const id=openWorkspaceId(page.document);assert.ok(id);
   await page.fill('Confidential runtime inputs (optional JSON)','{"PASSWORD":"super-secret-value"}');
   await page.editYaml('appId: com.example.App\n---\n- tapOn: *missing\n');
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));await page.settle();});
@@ -378,8 +376,9 @@ test('switching workspaces clears undo history and the selected report',async()=
   await page.openNamed('Other workspace');
   assert.equal(page.document.body.textContent!.includes('Undo deletion'),false);
   assert.equal([...page.document.querySelectorAll('button')].some(button=>button.textContent==='Undo'),false);
-  assert.equal(page.document.querySelector('nav[aria-label="Scenario reports"] button[aria-pressed="true"]'),null);
-  assert.match(page.document.body.textContent!,/Your scenario result/);
+  await openResults(page.document);
+  assert.equal(page.document.querySelector('[data-testid="results-run-option"]'),null);
+  assert.match(page.document.querySelector('[data-testid="results-empty"]')!.textContent!,/No results yet/);
   assert.ok(second.id);
  }finally{await page.close();}
 });
@@ -401,7 +400,7 @@ test('an imported workspace opens with the first scenario and the default canvas
 test('Saving does not stick after a rejected write, a 409, a switch that cancels the debounce, or an acknowledged invalid draft',async()=>{
  const faults=createWriteFaults();const page=await mount({faults});
  const status=()=>page.document.querySelector('.workspace-save-text')!.textContent!;
- const id=()=>page.document.querySelector('.artifact-id')!.textContent!.replace('Workspace: ','');
+ const id=()=>openWorkspaceId(page.document);
  const wait=async()=>act(async()=>{await new Promise(resolve=>setTimeout(resolve,500));await page.settle();});
  const valid='appId: com.example.App\n---\n- tapOn: Home\n';
  try{
@@ -548,7 +547,7 @@ test('beforeunload fires after a 409',async()=>{
   await page.editYaml('appId: com.example.App\n---\n- tapOn: Home\n');
   await settleWrites(page);
   assert.equal(saveText(page.document),'Saved locally');
-  const id=page.document.querySelector('.artifact-id')!.textContent!.replace('Workspace: ','');
+  const id=openWorkspaceId(page.document);
   const saved=await page.service.workspace(id);
   await page.service.save({...saved,name:'Other editor version'});
   await page.editYaml('appId: com.example.App\n---\n- tapOn: Conflict\n');
@@ -565,7 +564,7 @@ test('beforeunload does not fire for an acknowledged invalid draft',async()=>{
   await page.editYaml('appId: com.example.App\n---\n- tapOn: *missing\n');
   await settleWrites(page);
   assert.equal(saveText(page.document),'Draft kept, not valid yet.');
-  const id=page.document.querySelector('.artifact-id')!.textContent!.replace('Workspace: ','');
+  const id=openWorkspaceId(page.document);
   assert.match(await readFile(join(page.directory,'workspaces',id,'draft.json'),'utf8'),/missing/);
   assert.equal(leaveSite(page),false);
  }finally{await page.close();}

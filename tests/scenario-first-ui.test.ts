@@ -1,4 +1,4 @@
-import {addVisitStep,editVisitField,commitVisitEdits,inspectorCard,inspectorOwner,inspectScreen,openScenarioPanel,workspaceCommand} from './workspace-ui-helpers.js';
+import {addVisitStep,editVisitField,commitVisitEdits,inspectorCard,inspectorOwner,inspectScreen,openResults,openScenarioPanel,workspaceCommand} from './workspace-ui-helpers.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
@@ -41,7 +41,6 @@ test('an offline author creates a draft, adds ordered contextual checks, reopens
  const fill=async(label:string,value:string)=>{await editVisitField(document,label);await fillRaw(label,value);await commitVisitEdits(document);};
  try{
   await render();await click('New scenario');await act(async()=>document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:150,clientY:150})));await click('Rename');await fill('Rename scenario','Home scenario');await act(async()=>document.querySelector('[aria-label="Rename scenario"]')!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));await click('Save workspace');
-  const workspaceId=document.querySelector('.artifact-id')!.textContent!.replace('Workspace: ','');
   await click('Open saved workspace');await openScenarioPanel(document,act);assert.ok([...document.querySelectorAll('button')].some(button=>button.textContent==='Home scenario'));
   await act(async()=>document.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
   assert.ok(![...document.querySelectorAll('legend')].some(node=>node.textContent==='Screen inspector'));
@@ -70,7 +69,10 @@ test('an offline author creates a draft, adds ordered contextual checks, reopens
   await openScenarioPanel(document,act);
   assert.equal([...document.querySelectorAll('button')].find(button=>button.getAttribute('aria-label')==='Run scenario — Simulator not connected')!.disabled,true,'Execution requires a device while authoring remains available');
   await render(deviceId);await click('Run scenario');
-  assert.ok(document.querySelector('.result-tag'),document.body.textContent??'');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
-  assert.match(document.querySelector('.scenario-result')!.textContent!,/Home scenario/);assert.match(document.querySelector('.scenario-result')!.textContent!,/Visible text · Home: passed/);assert.match(document.querySelector('.scenario-result')!.textContent!,/Absent text · Error: passed/);
+  assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
+  await openResults(document);
+  assert.match(document.querySelector('[data-testid="results-title"]')!.textContent!,/Home scenario/);
+  const checks=document.querySelector<HTMLDetailsElement>('[data-testid="results-checks"]')!;checks.open=true;
+  assert.match(checks.textContent!,/Visible text · Home: passed/);assert.match(checks.textContent!,/Absent text · Error: passed/);
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}await rm(directory,{recursive:true,force:true});}
 });

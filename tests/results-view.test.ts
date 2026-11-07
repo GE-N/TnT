@@ -42,6 +42,15 @@ test('failed copy names the screen and one plain cause', () => {
   assert.equal(model.thumbnail, 'screenshot-failure.png');
 });
 
+test('confidential inputs withhold the log and screenshots', () => {
+  const secret = 'FAKE-SECRET-VALUE';
+  const model = resultModel(run({status: 'passed', log: secret, artifacts: ['screenshot-failure.png', 'flow.yaml'], snapshot: {...run({status: 'passed'}).snapshot, runtimeInputPolicy: 'Confidential runtime inputs supplied: values are omitted; raw logs, evaluated metadata, and images are withheld.'}}));
+  assert.equal(model.confidential, true);
+  assert.equal(model.log, '');
+  assert.equal(model.thumbnail, undefined);
+  assert.equal(JSON.stringify(model).includes(secret), false);
+});
+
 test('running has no per-step counts and scrub stays conservative', () => {
   const running = resultModel(run({status: 'running', finishedAt: undefined, canvas: undefined}));
   assert.equal(running.statusText, 'Running…');

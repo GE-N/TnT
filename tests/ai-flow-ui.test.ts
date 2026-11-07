@@ -250,7 +250,7 @@ test('AI flow authoring UI', async t => {
       await h.click('[aria-label="New scenario"]');
       await h.until(() => !!h.document.querySelector('[aria-label="Run scenario"]'), 'runnable scenario');
       await h.click('[aria-label="Run scenario"]');
-      await h.until(() => h.document.querySelector('.result-tag')?.textContent === 'running', 'running');
+      await h.until(() => h.document.querySelector('[data-testid="results-pill"]')?.getAttribute('data-status') === 'running', 'running');
       await h.generate('Pay the electric bill');
       await h.until(() => /run is active/.test(h.reason()), 'run block');
       assert.equal(h.document.querySelector('[data-testid="ai-confirm"]')?.getAttribute('aria-disabled'), 'true');
@@ -1547,7 +1547,7 @@ test('AI flow authoring UI', async t => {
       await h.until(() => h.status() === 'idle', 'dismissed');
       await openScenarioPanel(h.document, act);
       await h.click('[aria-label="Run scenario"]');
-      await h.until(() => h.document.querySelector('.result-tag')?.textContent === 'running', 'running');
+      await h.until(() => h.document.querySelector('[data-testid="results-pill"]')?.getAttribute('data-status') === 'running', 'running');
       if (!h.document.querySelector('[data-testid="ai-versions-sheet"]')) await h.click('[data-testid="ai-versions"]');
       if (!h.document.querySelector('[data-testid="ai-version-restore"]')) {
         await act(async () => { h.document.querySelector('[data-testid="ai-versions-sheet"]')?.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true})); });
@@ -2825,7 +2825,7 @@ test('empty and YAML-only workspaces open on the contextual canvas', async () =>
     root = createRoot(document.getElementById('root')!);
     await render();
     for (let attempt = 0; attempt < 40; attempt++) {
-      if (document.querySelector('.artifact-id')?.textContent?.includes(id)) return;
+      if (document.querySelector('[aria-label="Manage workspace"]')?.getAttribute('data-workspace-id') === id) return;
       await act(async () => { await settle(); });
     }
     assert.fail('workspace ' + id + ' did not load');

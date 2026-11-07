@@ -1,8 +1,7 @@
 import type {Run} from '../server/scenarios.js';
 import type {Batch} from '../server/batches.js';
 import type {CanvasTest} from '../server/canvas.js';
-import {routeVisits, visitScreenId} from '../shared/canvas-authoring.js';
-import {screenNodeSteps} from './canvas-node-steps.js';
+import {canvasTestLabel, routeVisits, visitScreenId} from '../shared/canvas-authoring.js';
 import {evidenceScrubFailed, SCRUB_FAILED_TEXT} from './run-script.js';
 
 export type ResultCheck = {status: string; text: string; cause: string};
@@ -20,8 +19,6 @@ export type ResultModel = {
   thumbnail?: string;
   log: string;
 };
-
-const strip = (text: string) => text.replace(/^\d+\s*·\s*/, '');
 
 export function formatDuration(startedAt?: string, finishedAt?: string, now = Date.now()) {
   if (!startedAt) return '';
@@ -43,7 +40,8 @@ function testsOf(run: Run) {
 }
 
 function confidential(run: Run) {
-  return /confidential inputs/i.test(run.snapshot.runtimeInputPolicy) || /withheld for confidential/i.test(run.error ?? '');
+  const policy = run.snapshot.runtimeInputPolicy ?? '';
+  return /confidential runtime inputs/i.test(policy) || /withheld for confidential/i.test(run.error ?? '') || /withheld because confidential/i.test(run.log ?? '');
 }
 
 function causeFor(test: CanvasTest | undefined) {
@@ -99,7 +97,6 @@ export function resultModel(run: Run, now = Date.now()): ResultModel {
     const screen = graph.screens.find(item => item.id === visit.screenId);
     const own = occurrences.filter(item => item.visitId === visit.id);
     const failedCount = own.filter(item => item.status === 'failed').length;
-    const labels = screen ? screenNodeSteps(graph, path, screen.id).filter(step => step.visit === (run.canvas?.visits ?? []).findIndex(item => item.id === visit.id)).map(step => strip(step.text)) : [];
     const word = visit.status === 'passed' ? 'Passed' : visit.status === 'failed' ? 'Failed' : 'Not run';
     const hint = visit.status === 'failed' ? `${failedCount} of ${own.length} failed` : visit.status === 'passed' ? `${own.length} steps` : 'Not run';
     return {
@@ -108,7 +105,10 @@ export function resultModel(run: Run, now = Date.now()): ResultModel {
       status: visit.status,
       word,
       hint,
-      checks: visit.status === 'failed' ? own.map((item, index) => ({status: item.status, text: labels[index] || tests.get(item.testId)?.label || 'Check', cause: item.status === 'failed' ? causeFor(tests.get(item.testId)) : ''})) : [],
+      checks: own.map(item => {
+        const test = tests.get(item.testId);
+        return {status: item.status, text: test ? canvasTestLabel(test) : item.testId, cause: item.status === 'failed' ? causeFor(test) : ''};
+      }),
     };
   });
   const runningNames = run.status === 'running' && graph && path ? routeVisits(graph, path).map((_, index) => graph.screens.find(screen => screen.id === visitScreenId(graph, path, index))?.title ?? '') : [];

@@ -1147,12 +1147,7 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
  .rr-spin{animation:none}
 }
 
-/* Results sheet. The closed report-tools body stays in the DOM for existing tests and is not shown. */
-.report-tools.results-ready>:not(summary){display:none !important}
-.report-tools.results-ready,.report-tools.results-ready[open]{width:max-content;max-width:min(240px,calc(100vw - 48px));max-height:none;padding:0;overflow:visible}
-.results-ready>summary{list-style:none;display:flex;align-items:center;gap:8px;cursor:pointer}
-.results-ready>summary::-webkit-details-marker{display:none}
-.results-ready .result-tag{position:absolute;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip:rect(0 0 0 0);border:0}
+.rr-pill{position:fixed;z-index:7;right:24px;bottom:24px;display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:12px 16px;border:1px solid var(--border);border-radius:18px;background:var(--surface);box-shadow:var(--shadow);color:#0a63d1;font-size:12px;font-weight:600;cursor:pointer}
 .rr-dot{width:8px;height:8px;border-radius:50%;background:#9aa8bb;flex:none}
 .rr-dot.ok{background:var(--success)}.rr-dot.bad{background:var(--danger)}.rr-dot.run{background:var(--inspector-primary)}.rr-dot.warn{background:var(--warning)}
 .rr-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
@@ -1183,7 +1178,11 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .results-sheet .rr-tech>summary,.results-sheet .rr-tech details>summary{list-style:none;display:flex;align-items:center;gap:6px;min-height:44px;cursor:pointer;color:#5f6368;font-size:12px}
 .results-sheet .rr-tech>summary::-webkit-details-marker,.results-sheet .rr-tech details>summary::-webkit-details-marker{display:none}
 .results-sheet .rr-tech[open]>summary .rr-chev,.results-sheet .rr-tech details[open]>summary .rr-chev{transform:rotate(90deg)}
-.results-sheet .rr-pre{margin:0 0 8px;padding:10px 12px;border-radius:8px;background:var(--subtle);color:#253041;font:11px/16px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto}
+.results-sheet .rr-pre,.results-sheet .rr-evidence pre{margin:0 0 8px;padding:10px 12px;border-radius:8px;background:var(--subtle);color:#253041;font:11px/16px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto}
+.results-sheet .rr-evidence{margin:8px 0 0}
+.results-sheet .rr-evidence h3,.results-sheet .rr-evidence h4{margin:8px 0 4px;font-size:13px;font-weight:600}
+.results-sheet .rr-file{display:flex;align-items:center;width:100%;min-height:44px;margin:0;padding:0 8px;border:0;border-radius:0;background:transparent;box-shadow:none;color:var(--inspector-primary);font-size:12px;text-align:left}
+.results-sheet .rr-file:disabled{color:#9aa8bb;background:transparent}
 .results-sheet .rr-empty{margin:28px 0 0;color:#253041;font-size:13px;font-weight:600}
 .results-sheet .rr-help{margin:4px 0 0;color:#5f6368;font-size:13px;line-height:20px}
 .results-sheet .rr-picks{margin:0 0 8px;padding:0;list-style:none;border:1px solid #e2e5e9;border-radius:10px}

@@ -5,8 +5,7 @@ import {RecoveredFields,WorkspaceDrafts,type DraftReport} from './workspace-draf
 import {ScenarioSidebar} from './scenario-sidebar.js';
 import {ScenarioDetails} from './scenario-details.js';
 import type {Batch} from '../server/batches.js';
-import {canvasTestLabel,operationProblem} from '../shared/canvas-authoring.js';
-import {ExecutedCanvas} from './executed-canvas.js';
+import {operationProblem} from '../shared/canvas-authoring.js';
 import {ScenarioLibrary} from './scenario-library.js';
 import type {ScenarioDefinition} from '../server/scenario-definitions.js';
 import {DefaultActions} from './default-actions.js';
@@ -29,10 +28,9 @@ import { MockSetup } from './mock-setup.js';
 import type { MockPlan } from '../server/mockoon.js';
 import { parseAllDocuments } from 'yaml';
 import {approveScriptTrust,pullScriptTrust,readSourceWorkspace} from './run-script-client.js';
-import {batchReasonLabel,batchSummary,batchWithScriptBlocks,blockDisplayMessage,blocksFor,evidenceScrubFailed,moveScript,newScriptId,orderedScenarioSteps,readScriptRun,recordsFor,reservedPlacements,runHitCap,scenariosForSave,scenarioShowsMockVariables,untrustedCount,type BatchLine} from './run-script.js';
-import type {RunScriptModel} from './run-script-ui.js';
+import {batchWithScriptBlocks,blockDisplayMessage,blocksFor,evidenceScrubFailed,moveScript,newScriptId,orderedScenarioSteps,readScriptRun,recordsFor,reservedPlacements,runHitCap,scenariosForSave,scenarioShowsMockVariables,untrustedCount,type BatchLine} from './run-script.js';
+import {RedactedText, type RunScriptModel} from './run-script-ui.js';
 const SHOW_ADVANCED_MODE=false;
-import {RedactedText} from './run-script-ui.js';
 import type {ScriptRow,ScriptSourceWorkspace,ScriptTrust} from '../server/run-script-contract.js';
 
 function savedScriptIds(workspace:Workspace|undefined){
@@ -95,7 +93,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   const [aiFocus,setAiFocus]=useState(0);
   const [aiSettingsOpen,setAiSettingsOpen]=useState(false);
   const sidePanels=useSidePanels();
-  const resultsPill=useRef<HTMLDetailsElement>(null);
+  const resultsPill=useRef<HTMLButtonElement>(null);
   const [resultsMode,setResultsMode]=useState<'run'|'batch'>('run');
   const [scenariosOpen,setScenariosOpen]=useState(false);
   const [focusLog,setFocusLog]=useState(false);
@@ -677,6 +675,7 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
   async function submit(execute: boolean,targetId=scenarioId) {
     if(submitting||pickerBusy||(execute&&(running||launchBusy)))return;
     if (execute) {
+      setResultsMode('run');
       setRunError('');
       if(trustLoadFailed&&definitions.some(item=>(item.scripts??[]).some(row=>row.source.trim())))return;
       if(!token){setRunError('Connect to the runner before running a scenario.');return;}
@@ -804,29 +803,9 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     </div></details>
       {error && <div role="alert" className="notice error">{error}</div>}
 
-    <details className="report-tools results-ready" ref={resultsPill} onToggle={event=>{event.currentTarget.open=false;}}><summary onClick={event=>{event.preventDefault();if(sidePanels.open==='results'){closePanel('results');}else openPanel('results');}}><span className={'rr-dot '+dotKind(run,batch)} data-testid="results-dot" aria-hidden="true"/>Results<span className="rr-sr">Latest run: {resultsNote||'No results yet'}</span>{run&&<span className={'result-tag '+run.status}>{run.status}</span>}</summary>      {batch&&batch.workspaceId===workspaceId&&<section aria-label="Batch report" aria-live="polite"><h3>Batch · {batch.status}</h3><p>Saved order · separate reports · {batch.snapshot.resetApp?'Declared app reset':'No additional app reset'}</p>{(batchLines??batch.entries).map(entry=>{const summary=batchSummary(entry);return <div key={entry.scenarioId} className={summary.tone==='trust'?'batch-script-untrusted':summary.tone==='failed'?'batch-script-failed':undefined} data-testid={summary.testId}><p>{entry.name} · {summary.statusText}</p>{summary.reason&&<p>{batchReasonLabel(summary)}</p>}{entry.runId&&<button className="confirm" onClick={()=>void openReport(entry.runId!)}>Open report for {entry.name}</button>}</div>;})}</section>}    {reports.some(item=>item.snapshot.workspaceId===workspaceId)&&<nav aria-label="Scenario reports"><p>Reports from this workspace session · selecting a scenario leaves the inspected report open.</p>{reports.filter(item=>item.snapshot.workspaceId===workspaceId).map((item,index)=><button className="confirm" key={item.id} disabled={submitting} aria-pressed={run?.id===item.id} onClick={()=>setRun(item)}>{item.snapshot.scenario?.name??item.snapshot.name} · {item.status} · Run {index+1}</button>)}</nav>}<div className="scenario-result" aria-live="polite">
-      {workspaceId && <details><summary>Workspace diagnostic details</summary><p className="artifact-id">Workspace: {workspaceId}</p></details>}
-      {!run ? <div className="empty-state"><h3>Your scenario result</h3><p>Run a saved flow on the selected simulator to see its real outcome and artifacts.</p></div> : <>
-        {run.snapshot.expectedPath && <div className="expected-path"><span>{run.snapshot.expectedPath.from}</span><span>→</span><span>Expected: {run.snapshot.expectedPath.to} · {run.status}</span></div>}
-        {run.mock && <div className="mock-evidence"><h3>Mock intent: {run.mock.intent.status}</h3><p>{run.mock.intent.method.toUpperCase()} /{run.mock.intent.endpoint} · HTTP {run.mock.intent.httpStatus}</p><p>{run.mock.intent.failureSemantics}</p><h3>Observed requests: {run.mock.evidence.status}</h3><p className="field-hint">{run.mock.evidence.detail}</p>{run.mock.evidence.transactions.map((transaction,index)=><p key={index}>{transaction.method.toUpperCase()} {transaction.path} → {transaction.statusCode} {transaction.proxied?'(forwarded)':'(mocked)'}</p>)}<p>Mock cleanup: {run.mock.cleanup.detail}</p></div>}
-        <div className="label-row"><h3>{run.snapshot.name}</h3><span className={'result-tag ' + run.status}>{run.status}</span></div>
-        {run.error && <div className="notice error"><RedactedText text={run.error}/></div>}
-        <p>Cleanup ({run.status==='running' ? 'pending' : run.cleanup.verified ? 'verified' : 'failed'}): {run.cleanup.detail}</p>
-        {run.automation&&<details open><summary>Setup and default action outcomes</summary><p>Setup: {run.automation.setup.status}</p>{run.automation.actions.map(action=><p key={action.id+':'+action.beforeStep}>{action.name} · before step {action.beforeStep+1}: {action.status} · {action.detail}</p>)}</details>}
-        {run.snapshot.executionYaml&&<details><summary>Derived execution YAML</summary><pre className="execution-yaml">{run.snapshot.executionYaml}</pre></details>}
-        <ExecutedCanvas key={run.id} run={run} onArtifact={name=>void inspect(name)}/>
-        <p className="field-hint">{run.mappingNote}</p>
-        <ol className="step-results">{run.steps.map(step => {const evidence=typeof step.detail==='string'&&step.detail?step.detail:typeof step.actual==='string'?step.actual:'';return <li key={step.id}><code>{step.command}</code><span className={'outcome '+step.status}>{step.status}</span>{evidence&&<span className="step-evidence"><RedactedText text={evidence}/></span>}</li>;})}</ol>
-        {run.expectedFailure && <details open><summary>Failed expected assertion</summary><pre>{JSON.stringify(run.expectedFailure, null, 2)}</pre></details>}
-        <details><summary>Executed snapshot &amp; versions</summary><p className="artifact-id">Run: {run.id}<br />Snapshot: {run.snapshot.id}<br />Maestro: {run.snapshot.toolVersions.maestro} · Node: {run.snapshot.toolVersions.node}</p><pre>{run.snapshot.yaml}</pre>{Object.entries(run.snapshot.flows??{}).map(([name,yaml])=><div key={name}><h4>{name}</h4><pre>{yaml}</pre></div>)}<p>{run.snapshot.scenario&&<>Scenario: {run.snapshot.scenario.name} · Reset app: {run.snapshot.resetApp?'Yes':'No'} · Declared setup: {run.snapshot.scenario.setup?.file??'Ordinary app launch'}</>}</p><p>{run.snapshot.runtimeInputPolicy}</p></details>
-        <details id="run-log" open={run.status !== 'passed'}><summary>Raw runner log</summary><pre>{run.log?<RedactedText text={run.log}/>:'Waiting for Maestro to finish…'}</pre></details>
-        <div className="artifact-list">{run.artifacts.map(name => <button className="text-button" key={name} disabled={submitting || run.status==='running'} onClick={() => void inspect(name)}>{name}</button>)}</div>
-        {artifact && <div className="artifact-view"><p className="artifact-id">{artifact.name}</p>{artifact.image ? <img className="device-screen" src={artifact.image} alt="Captured failure screen" /> : <pre>{artifact.text}</pre>}</div>}
-      </>}
-    </div>
-    </details>
-    {sidePanels.open==='results'&&<ResultsSheet token={token} run={run} reports={reports} batch={batch} lines={batchLines} mode={resultsMode==='batch'&&batch?'batch':'run'} scenariosOpen={scenariosOpen} fallbackTitle={definitions.find(item=>item.id===scenarioId)?.name} canRun={simulatorConnected&&!draftInvalid&&!trustBlocksRun&&!running} running={running} focusLog={focusLog} definitions={definitions.map(item=>({id:item.id,name:item.name}))} onClose={()=>{closePanel('results');resultsPill.current?.querySelector('summary')?.focus();}} onRun={id=>{setResultsMode('run');void submit(true,id);}} onStop={()=>{if(batchRunning)void cancelBatch();else void cancel();}} onOpenRun={id=>{setResultsMode('run');void openReport(id);}} onFocusLogDone={()=>setFocusLog(false)}/>}
-    <p className="rr-sr" role="status" data-testid="results-announcement">{resultsNote}</p>
+    <button type="button" className="rr-pill" ref={resultsPill} data-testid="results-pill" data-status={run?.status??''} aria-label="Results" aria-pressed={sidePanels.open==='results'} onClick={()=>{if(sidePanels.open==='results')closePanel('results');else openPanel('results');}}><span className={'rr-dot '+dotKind(run,batch)} data-testid="results-dot" aria-hidden="true"/>Results<span className="rr-sr"><RedactedText text={resultsNote ? 'Latest run: ' + resultsNote : 'No results yet'}/></span></button>
+    {sidePanels.open==='results'&&<ResultsSheet token={token} run={run} reports={reports} batch={batch} lines={batchLines} mode={resultsMode==='batch'&&batch?'batch':'run'} scenariosOpen={scenariosOpen} fallbackTitle={definitions.find(item=>item.id===scenarioId)?.name} canRun={simulatorConnected&&!draftInvalid&&!trustBlocksRun&&!running} running={running} focusLog={focusLog} showBack={!!batch&&batch.workspaceId===workspaceId&&resultsMode==='run'} artifact={artifact} definitions={definitions.map(item=>({id:item.id,name:item.name}))} onClose={()=>{closePanel('results');resultsPill.current?.focus();}} onRun={id=>{setResultsMode('run');void submit(true,id);}} onStop={()=>{if(batchRunning)void cancelBatch();else void cancel();}} onOpenRun={id=>{setResultsMode('run');void openReport(id);}} onBackToBatch={()=>setResultsMode('batch')} onArtifact={name=>{void inspect(name);}} onFocusLogDone={()=>setFocusLog(false)}/>}
+    <p className="rr-sr" role="status" data-testid="results-announcement"><RedactedText text={resultsNote}/></p>
     {saveProblem&&!conflict&&<div className="notice error" role="alert"><p>{saveProblem}</p><button className="save-retry" onClick={()=>{failedKey.current='';failedDraftKey.current='';setSaveFailed(false);setDraftFailed(false);setRetrySave(value=>value+1);}}>Retry</button></div>}
     {runError&&<div className="run-error-toast" role="alert"><button className="text-button" aria-label="Dismiss run error" onClick={()=>setRunError('')}>×</button><strong>Cannot run scenario</strong><p>{runError}</p></div>}
     </>}

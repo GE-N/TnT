@@ -243,7 +243,7 @@ test('canvas Run scenario uses the selected path and shows blocked runs in a dis
   await click('Dismiss run error');assert.equal(document.querySelector('.run-error-toast'),null);
   await runFromMenu();assert.ok(document.querySelector('.run-error-toast'));
   await act(async()=>{const label=[...document.querySelectorAll('label')].find(node=>node.textContent==='Scenario path')!;const select=document.getElementById(label.htmlFor) as HTMLSelectElement;select.value='route';select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
-  rejectRun=false;await runFromMenu();assert.equal(requests.at(-1)!.pathId,'route');assert.equal(requests.at(-1)!.deviceId,'device');assert.equal(document.querySelector('.run-error-toast'),null);assert.match(document.querySelector('.result-tag')!.textContent!,/passed/);
+  rejectRun=false;await runFromMenu();assert.equal(requests.at(-1)!.pathId,'route');assert.equal(requests.at(-1)!.deviceId,'device');assert.equal(document.querySelector('.run-error-toast'),null);assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
   await render('');await context();assert.deepEqual([...document.querySelectorAll('[role=menu] button')].map(node=>node.textContent),['Add node','View YAML'],'Offline canvas offers Add node and View YAML');assert.equal(document.querySelector('[aria-label="Run scenario"]'),null,'Offline work does not offer an enabled Run scenario control');assert.equal(requests.length,3,'Missing device does not submit a run');
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
