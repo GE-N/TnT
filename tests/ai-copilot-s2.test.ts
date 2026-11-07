@@ -434,8 +434,19 @@ test('first-run auto-select runs once from config and connect, and a save wins',
       const pending = racing.ai.get();
       // authStatus sets hit before it waits. A fixed turn count can expire while that read is still queued behind the suite.
       await new Promise<void>((resolve, reject) => {
-        const watch = () => { if (hit) resolve(); else setImmediate(watch); };
-        pending.then(() => { if (!hit) reject(new Error('get() settled before authStatus')); }, reject);
+        let stopped = false;
+        const finish = (error?: unknown) => {
+          if (stopped) return;
+          stopped = true;
+          if (error) reject(error instanceof Error ? error : new Error(String(error)));
+          else resolve();
+        };
+        const watch = () => {
+          if (stopped) return;
+          if (hit) finish();
+          else setImmediate(watch);
+        };
+        pending.then(() => { if (!hit) finish(new Error('get() settled before authStatus')); }, finish);
         watch();
       });
       assert.equal(hit, true);
