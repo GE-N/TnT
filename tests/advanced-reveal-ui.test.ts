@@ -69,7 +69,7 @@ test('actions that need Advanced reveal it on demand and hide it when closed', a
     root = createRoot(document.getElementById('root')!);
     await render();
     for (let attempt = 0; attempt < 40; attempt++) {
-      if (document.querySelector('.artifact-id')?.textContent?.includes(id)) return;
+      if (document.querySelector('[aria-label="Manage workspace"]')?.getAttribute('data-workspace-id') === id) return;
       await act(async () => { await settle(); });
     }
     assert.fail('workspace ' + id + ' did not load');

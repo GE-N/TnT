@@ -183,7 +183,7 @@ test('failed visit auto-expands with red inline error, no banner or Go to step, 
  const selectedVisit=document.querySelector('[aria-label="Visit 1 · Home operations"]')?.getAttribute('data-visit-id');
  failNext(5);
  await click('Run scenario');
- assert.ok(document.querySelector('.result-tag'),document.querySelector('.run-error-toast')?.textContent??'missing result');
+ assert.ok(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),document.querySelector('.run-error-toast')?.textContent??'missing result');
  await inspectScreen(document,{title:'End'},{number:3});
  const section=document.querySelector('[aria-label="Visit 3 · End operations"]')!;
  assert.equal(section.querySelector('.visit-section-heading')?.getAttribute('aria-expanded'),'true');

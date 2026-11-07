@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Device, LaunchResult } from '../server/runner.js';
 import { Scenarios } from './scenarios.js';
+import { closePanel } from './side-panels.js';
 import { AppPicker } from './app-picker.js';
 
 type Status = { ready: boolean; devices: Device[]; token: string; tool: string; node?: string; error?: string };
@@ -27,6 +28,7 @@ export function App() {
     const toggle=(event:Event)=>{
       const opened=event.target as HTMLDetailsElement;
       if(!workbench?.contains(opened)||!opened.open||opened.hidden||!opened.matches('.device-toolbar,.workspace-advanced,.report-tools'))return;
+      if(opened.matches('.device-toolbar,.workspace-advanced'))closePanel('results');
       workbench.querySelectorAll<HTMLDetailsElement>('.device-toolbar,.workspace-advanced,.report-tools').forEach(panel=>{if(panel!==opened&&!panel.hidden)panel.open=false;});
     };
     document.addEventListener('toggle',toggle,true);

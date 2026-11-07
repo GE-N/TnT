@@ -1,3 +1,4 @@
+import {openResults} from './workspace-ui-helpers.js';
 import {DraftConflict,WorkspaceConflict,WorkspacePayloadTooLarge,createWriteFaults} from '../server/workspace-store.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -98,7 +99,9 @@ test('the downloaded representative package round-trips through library drop wit
   assert.ok(copy);const loaded=await page.service.workspace(copy.id);
   assert.deepEqual(loaded.canvas,source.canvas);assert.deepEqual(loaded.flows,source.flows);
   assert.notEqual(loaded.id,source.id);assert.deepEqual((await page.service.workspace(source.id)).automation,source.automation);
-  assert.equal(page.document.querySelector('[aria-label="Scenario reports"]'),null);
+  await openResults(page.document);
+  assert.equal(page.document.querySelector('[data-testid="results-run-option"]'),null);
+  assert.match(page.document.querySelector('[data-testid="results-empty"]')!.textContent!,/No results yet/);
   await page.click('Manage workspace');await page.click('Rename workspace');await page.fill('Workspace title','Changed imported copy');await page.click('Done');
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,400));await page.settle();});
   assert.equal((await page.service.workspace(source.id)).name,'Representative');
