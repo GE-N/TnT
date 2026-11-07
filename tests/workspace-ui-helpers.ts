@@ -99,6 +99,14 @@ export async function openResults(document:Document){
  assert.ok(document.querySelector('[data-testid="results-sheet"]'),'Results sheet opened');
 }
 
+/** Opens Technical details inside the visible Results sheet. */
+export async function openTechnical(document:Document){
+ await openResults(document);
+ const tech=document.querySelector<HTMLDetailsElement>('[data-testid="results-technical"]');
+ assert.ok(tech,'Technical details');
+ if(!tech.open)await act(async()=>{tech.querySelector('summary')!.click();});
+}
+
 export async function closeResults(document:Document){
  const close=document.querySelector<HTMLButtonElement>('[data-testid="results-sheet"] [aria-label="Close"]');
  if(!close)return;

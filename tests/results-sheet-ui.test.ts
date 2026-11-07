@@ -109,3 +109,44 @@ test('files stay disabled while a run is in progress and batch drill-down can re
     assert.equal(back, 1);
   } finally { await drilled.cleanup(); }
 });
+
+test('the failed sheet opens only the failed step and hides evidence until Technical details is opened', async () => {
+  const base = run({status: 'assertion-failed'});
+  const failed = run({status: 'assertion-failed', canvas: {...base.canvas!, visits: [{id: 'v1', screenId: 'home', status: 'passed', checkIds: ['check']}, {id: 'v2', screenId: 'home', status: 'failed', checkIds: ['check']}], occurrences: [{id: 'o1', visitId: 'v1', testId: 'check', status: 'passed', detail: 'Welcome'}, {id: 'o2', visitId: 'v2', testId: 'check', status: 'failed', detail: 'missing'}]}});
+  const {document, cleanup} = await render({run: failed});
+  try {
+    const steps = () => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="results-step"]')];
+    assert.deepEqual(steps().map(step => step.getAttribute('aria-expanded')), ['false', 'true']);
+    assert.equal((document.querySelector('[data-testid="results-technical"]') as HTMLDetailsElement).open, false);
+    assert.equal(document.querySelector('[aria-label="Execution evidence"]'), null);
+    assert.equal(document.body.textContent!.includes('Expected'), false);
+    assert.ok(document.querySelector('[data-testid="results-step-check"]'));
+    await act(async () => { steps()[1].click(); });
+    assert.equal(steps()[1].getAttribute('aria-expanded'), 'false');
+    assert.equal(document.querySelector('[data-testid="results-step-check"]'), null);
+    await act(async () => { steps()[1].click(); });
+    assert.equal(steps()[1].getAttribute('aria-expanded'), 'true');
+    const tech = document.querySelector<HTMLDetailsElement>('[data-testid="results-technical"]')!;
+    await act(async () => { tech.querySelector('summary')!.click(); });
+    assert.equal(tech.open, true);
+    await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="Inspect visit 2"]')!.click(); });
+    assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!, /Expected/);
+    const log = document.querySelector<HTMLButtonElement>('[data-testid="results-open-log"]')!;
+    await act(async () => { log.click(); });
+    assert.equal((document.querySelector('[data-testid="results-log"]') as HTMLDetailsElement).open, true);
+    assert.equal(document.activeElement, document.querySelector('[data-testid="results-log"] summary'));
+  } finally { await cleanup(); }
+});
+
+test('a tool-error run shows the plain finish state and an enabled Run again', async () => {
+  let ran = 0;
+  const {document, cleanup} = await render({run: run({status: 'tool-error', error: 'Maestro exited 2', log: 'tool fixture'}), onRun: () => { ran += 1; }});
+  try {
+    assert.equal(document.querySelector('[data-testid="results-status"]')!.textContent, "Couldn't finish");
+    const again = document.querySelector<HTMLButtonElement>('[data-testid="results-run-again"]')!;
+    assert.equal(again.disabled, false);
+    assert.equal(again.hidden, false);
+    await act(async () => { again.click(); });
+    assert.equal(ran, 1);
+  } finally { await cleanup(); }
+});
