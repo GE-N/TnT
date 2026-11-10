@@ -7,6 +7,7 @@ import { createRunner, type Execute } from './runner.js';
 import { createApiHandler } from './http.js';
 import { createScenarios } from './scenarios.js';
 import { createAi } from './ai/index.js';
+import { createScenarioCatalog } from './ai/catalog.js';
 import { createMaestro } from './maestro.js';
 import {clearToolStarted,killProcess,lookupProcess,markToolStarted,recordSettledProcess} from './owned-process.js';
 import { sweepUnfinishedRuns } from './run-recovery.js';
@@ -47,7 +48,16 @@ const runner = createRunner({ artifactDirectory, execute, ownershipDirectory: ow
 const scenarios = createScenarios({ root: ownershipRoot, runner, maestro, prepareProcess: prepareProcess('mockoon'), cancelProcess: cancelProcess('mockoon'), noteProcess: noteProcess('mockoon') });
 const knowledge = createKnowledgeService({ root: ownershipRoot, guard: rootOwnership.guard, renderHtml: renderKnowledgeHtml });
 await knowledge.reconcile();
-const ai = createAi({ root: ownershipRoot, authoring: scenarios.authoring, readWorkspace: id => scenarios.workspace(id) });
+const ai = createAi({
+  root: ownershipRoot,
+  authoring: scenarios.authoring,
+  readWorkspace: id => scenarios.workspace(id),
+  readCatalog: createScenarioCatalog({
+    workspace: id => scenarios.workspace(id),
+    detail: id => scenarios.workspaceDetail(id),
+    readContext: (workspaceId, scenarioId) => knowledge.readContext(workspaceId, scenarioId),
+  }),
+});
 await ai.ready;
 const production = process.argv.includes('--production');
 const server = createServer();

@@ -181,3 +181,91 @@ Recovery enqueues rebuilds from source; generated artifacts are disposable.
    always-owned production writer is created by the HTTP fallback.
 4. Tests and `npm run dev` keep working: tests use their own temp roots; the lock is
    released on clean exit and recovered when its owner is provably dead.
+
+## AI update path
+
+This addendum does not change the slice-1 sidecar. `schemaVersion` stays 1.
+`origin` and `skill` are not sidecar fields. They live on the apply receipt only.
+An unapplied or dismissed draft is never written to the sidecar, the published HTML,
+or the LLM index. Saving a draft is a separate apply call; generation only stores
+the draft on the AI job.
+
+### Skills
+
+Two skills ship with the server and are loaded at startup:
+
+- `router@1` from `server/ai/skills/router/v1/prompt.md` and `schema.json`
+- `knowledge-update@1` from `server/ai/skills/knowledge-update/v1/prompt.md` and `schema.json`
+
+Each job that uses a skill records `skill` (`router@1` or `knowledge-update@1`) and
+`skillHash`, the SHA-256 of the raw `prompt.md` bytes immediately followed by the
+raw `schema.json` bytes. A hash-pin test fails if either file changes without a
+new version folder. Request text is data, not instructions.
+
+### Routing
+
+`POST /api/ai/generations` keeps the existing body (`workspaceId`,
+`expectedRevision`, `expectedSettingsRevision`, `prompt`, optional `previousJobId`
+and `answers`). There is no intent or mode field. When a scenario catalog is
+available, the server asks the router skill and infers
+`intent: "flow" | "knowledge" | "mixed" | "unclear"`. Off-schema router output, a
+provider error, or a timeout while routing becomes `unclear` and an ask-back.
+A router failure never becomes a flow draft.
+
+The job phase stays one of the existing phases. Routing uses `context`. There is
+no `routing` phase. Refining a draft skips the router because the kind is already
+known, except when the text says “I meant the flow” or “I meant the details”.
+That misroute runs the router again.
+
+`mixed` produces a flow draft first and stores the original request as `remainder`
+on the job and on `GenerationView`. The knowledge pipeline does not run until a
+later confirmation. There is no combined apply.
+
+A pending or needs-info draft of the other kind in the same workspace answers
+“Finish the current draft first?” with Apply it · Dismiss it, and does not start
+a second draft.
+
+### Jobs
+
+`StoredJob` gains `kind: "flow" | "knowledge"`, optional `knowledgeDraft`,
+`skill`, and `skillHash`. `GenerationView` gains `intent` and, for a knowledge
+draft, `knowledgeDraft` (the six context fields plus `baseContextRevision`).
+The knowledge draft is not a flow `draft` and has no preview. Flow provider
+bytes after the router call stay the flow prompt from contract v1.
+
+The knowledge skill returns the six context fields, at most three questions, and
+`conflicts`. Purpose and Expected outcome may be drafted from the flow. Why
+(`rationale`) is kept only when it is the user’s own words. A purpose, expected
+outcome, or precondition that names a screen or action the steps do not reach
+becomes questions and no draft. “Save as written” then drafts that wording.
+“Update the flow instead” and “The flow” send the same request through the flow
+pipeline.
+
+### Apply and undo
+
+Apply and undo go through the existing sidecar writer (store queue, root guard,
+`saveContext` for the forward write). Publication is scheduled and never awaited.
+Knowledge has no Versions history.
+
+- `POST /api/knowledge/workspaces/:workspaceId/scenarios/:scenarioId/apply`
+  body `{"jobId":"…","expectedContextRevision":1,"idempotencyKey":"…"}`.
+  The context bytes come from the stored knowledge draft, not from the client.
+  The server writes `knowledge/receipts/<receiptId>.json` under the workspace
+  first, holding the previous sidecar bytes (or `null` when there was no file)
+  plus `origin: "ai"` and `skill`. It then `saveContext`. The same idempotency
+  key returns that receipt and does not write the sidecar again. A context
+  revision mismatch is `CONTEXT_REVISION_CONFLICT` and writes neither a receipt
+  nor the sidecar.
+- `POST /api/knowledge/workspaces/:workspaceId/scenarios/:scenarioId/undo`
+  body `{"receiptId":"…","expectedContextRevision":2}`.
+  Restores the receipt’s previous sidecar bytes exactly, including
+  `reviewedAgainstSourceHash`, so a “needs review” context stays “needs review”.
+  A later PUT cannot do that, because `saveContext` records the current source
+  hash. Undo uses the same queue, guard, and atomic write as the sidecar; it
+  does not call `saveContext`, because that would re-review the source.
+
+The client (a later slice) hides Undo after 10 seconds. This server does not.
+It accepts a receipt until pruning. Receipts older than 24 hours
+(`RECEIPT_RETENTION_MS`) may be deleted on the next apply or undo. A pruned
+receipt is `KNOWLEDGE_NOT_FOUND`. Auth, `Cache-Control: no-store`, id decoding,
+and the slice-1 error codes are unchanged.

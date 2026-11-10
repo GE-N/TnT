@@ -59,6 +59,8 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         ensureKnowledge();
         if(!knowledgeService)return json(503,{code:'KNOWLEDGE_UNAVAILABLE',error:'Knowledge service is unavailable.'});
         const context=/^\/api\/knowledge\/workspaces\/([^/]+)\/scenarios\/([^/]+)\/context$/.exec(url.pathname);
+        const apply=/^\/api\/knowledge\/workspaces\/([^/]+)\/scenarios\/([^/]+)\/apply$/.exec(url.pathname);
+        const undo=/^\/api\/knowledge\/workspaces\/([^/]+)\/scenarios\/([^/]+)\/undo$/.exec(url.pathname);
         const status=/^\/api\/knowledge\/workspaces\/([^/]+)\/status$/.exec(url.pathname);
         const decode=(value:string)=>{try{return decodeURIComponent(value);}catch{throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','Invalid identifier encoding.');}};
         if(context){
@@ -70,6 +72,19 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
           return json(405,{code:'INVALID_KNOWLEDGE_INPUT',error:'Use GET or PUT for scenario context.'});
         }
         if(status){if(request.method!=='GET')return json(405,{code:'INVALID_KNOWLEDGE_INPUT',error:'Use GET for knowledge status.'});return json(200,await knowledgeService.status(decode(status[1])));}
+        if(apply||undo){
+          if(request.method!=='POST')return json(405,{code:'INVALID_KNOWLEDGE_INPUT',error:apply?'Use POST to apply a knowledge draft.':'Use POST to undo a knowledge draft.'});
+          let input:unknown;try{input=await readJson(request,64_000);}catch(error){throw new KnowledgeError(error instanceof WorkspacePayloadTooLarge?413:400,error instanceof WorkspacePayloadTooLarge?'KNOWLEDGE_TOO_LARGE':'INVALID_KNOWLEDGE_INPUT',message(error));}
+          if(undo)return json(200,await knowledgeService.undo(decode(undo[1]),decode(undo[2]),input));
+          if(!ai)return json(503,{code:'KNOWLEDGE_UNAVAILABLE',error:'Knowledge service is unavailable.'});
+          const body=input as {jobId?:unknown;expectedContextRevision?:unknown;idempotencyKey?:unknown};
+          if(typeof body.jobId!=='string')throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','Provide the knowledge draft.');
+          let view;try{view=await ai.get(body.jobId);}catch{throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','That knowledge draft was not found.');}
+          const workspace=decode(apply![1]);const scenario=decode(apply![2]);
+          if(view.workspaceId!==workspace||view.scenarioId!==scenario||view.state!=='pending'||view.intent!=='knowledge'||!view.knowledgeDraft)throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','That draft is not waiting to be applied.');
+          const draft=view.knowledgeDraft;
+          return json(200,await knowledgeService.applyDraft(workspace,scenario,{jobId:view.id,expectedContextRevision:body.expectedContextRevision,idempotencyKey:body.idempotencyKey,context:{purpose:draft.purpose,expectedOutcome:draft.expectedOutcome,rationale:draft.rationale,preconditions:draft.preconditions,exceptions:draft.exceptions,scope:draft.scope},skill:view.skill??'',skillHash:view.skillHash??''}));
+        }
         return json(404,{code:'KNOWLEDGE_NOT_FOUND',error:'Knowledge route not found.'});
       }
       const apps = /^\/api\/devices\/([^/]+)\/apps$/.exec(url.pathname);

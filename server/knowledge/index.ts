@@ -8,6 +8,9 @@ import {canonical,sha256,makeDetail,sourceDescriptor} from './projection.js';
 import {minimalHtml} from './artifacts.js';
 import {projectInBackground,artifactsInBackground} from './background.js';
 import {alwaysOwned,contextFields,emptyContext,validateContent,validateSave,workspaceId,scenarioId,scopeId,KnowledgeError,ContextRevisionConflict} from './types.js';
+import {findReceipt,newReceipt,pruneReceipts,readReceipt,validateApplyRequest,validateUndoRequest,writeReceipt,type ApplyDraftRequest,type KnowledgeReceipt} from './receipts.js';
+export type {KnowledgeReceipt,ApplyDraftRequest};
+export {RECEIPT_RETENTION_MS,UNDO_CLIENT_WINDOW_MS} from './receipts.js';
 import type {RootGuard,KnowledgeFaults,IndexingQueue,GenerationInput,ScenarioContext,ScenarioDetail,Pointer,Manifest,FaultStage} from './types.js';
 export * from './types.js';
 export {sourceDescriptor,sourceProjection,deriveFlow} from './projection.js';
@@ -38,6 +41,10 @@ export function createKnowledgeService(options:KnowledgeOptions){
  async function inWorkspace<T>(id:string,operation:(workspace:Workspace,directory:string)=>Promise<T>){
   workspaceId(id);
   try{return await store.withKnowledge(id,operation);}catch(error){if(isMissing(error))throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','Saved workspace or scenario not found.');throw error;}
+ }
+ async function readSidecarBytes(directory:string,scenario:string){
+  try{const folder=await safeDirectory(directory,['knowledge','scenarios'],guard);return await readSafe(folder,scenario+'.json');}
+  catch(error){if(isMissing(error))return null;throw error;}
  }
  async function readContextFile(directory:string,id:string,scenario:string):Promise<ScenarioContext>{
   try{
@@ -152,25 +159,56 @@ export function createKnowledgeService(options:KnowledgeOptions){
  }
  const unsubscribe=subscribeWorkspaceChanges(root,id=>schedule(id,true));
  const interval=options.reconcileIntervalMs===0?undefined:setInterval(()=>{if(!closed)void service.reconcile().catch(()=>{});},options.reconcileIntervalMs??30000);interval?.unref();
+ async function commitContext(id:string,scenario:string,input:unknown,apply?:ApplyDraftRequest){
+  workspaceId(id);scenarioId(scenario);const value=validateSave(input);let saved=false;let receipt:KnowledgeReceipt|undefined;let replayed=false;
+  while(!saved){
+   const captured=await rawCapture(id);const definition=captured.workspace.scenarios?.find(item=>item.id===scenario);if(!definition)throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','Saved workspace or scenario not found.');
+   const reviewedHash=sourceDescriptor(captured.workspace,definition).sourceHash;
+   saved=await inWorkspace(id,async(workspace,directory)=>{
+    if(workspace.metadata?.revision!==captured.workspace.metadata?.revision)return false;
+    if(!workspace.scenarios?.some(item=>item.id===scenario))throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','Saved workspace or scenario not found.');
+    if(apply)await pruneReceipts(directory,Date.parse(now()),guard);
+    const previousBytes=await readSidecarBytes(directory,scenario);
+    if(apply){
+     const existing=await findReceipt(directory,id,scenario,apply.idempotencyKey,guard);
+     if(existing){receipt=existing;if(previousBytes!==existing.previousSidecar){replayed=true;return true;}}
+    }
+    const current=await readContextFile(directory,id,scenario);if(current.contextRevision!==value.expectedContextRevision)throw new ContextRevisionConflict(current);
+    if(apply&&!receipt){receipt=newReceipt({...apply,workspaceId:id,scenarioId:scenario,createdAt:now(),previousSidecar:previousBytes});await writeReceipt(directory,receipt,guard);}
+    if(current.reviewedAgainstSourceHash===reviewedHash&&contextFields.every(field=>current[field]===value.context[field]))return true;
+    if(!Number.isSafeInteger(current.contextRevision+1))throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','Context revision limit exceeded.');
+    const next:ScenarioContext={schemaVersion:1,workspaceId:id,scenarioId:scenario,contextRevision:current.contextRevision+1,updatedAt:now(),...value.context,reviewedAgainstSourceHash:reviewedHash};
+    guard.assertOwned();const folder=await safeDirectory(directory,['knowledge','scenarios'],guard,true);contextEpochs.set(root+':'+id,epoch(id)+1);await atomicWrite(folder,scenario+'.json',JSON.stringify(next,null,2)+'\n',guard);return true;
+   });
+  }
+  if(!replayed){errors.delete(id);schedule(id,true);}
+  const data=await decorated(id);return {detail:data.scenarios.find(item=>item.scenarioId===scenario)!,receipt};
+ }
  const service={
   async readContext(id:string,scenario:string){
    workspaceId(id);scenarioId(scenario);const data=await decorated(id);const detail=data.scenarios.find(item=>item.scenarioId===scenario);if(!detail)throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','Saved workspace or scenario not found.');
    if(!data.fresh&&!scheduled.has(id))schedule(id);return detail;
   },
-  async saveContext(id:string,scenario:string,input:unknown){
-   workspaceId(id);scenarioId(scenario);const value=validateSave(input);let saved=false;
-   // Projection is outside the store queue; recheck its source revision at commit.
-   while(!saved){
-    const captured=await rawCapture(id);const definition=captured.workspace.scenarios?.find(item=>item.id===scenario);if(!definition)throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','Saved workspace or scenario not found.');
-    const reviewedHash=sourceDescriptor(captured.workspace,definition).sourceHash;
-    saved=await inWorkspace(id,async(workspace,directory)=>{
+  saveContext(id:string,scenario:string,input:unknown){return commitContext(id,scenario,input).then(saved=>saved.detail);},
+  async applyDraft(id:string,scenario:string,input:unknown){
+   const request=validateApplyRequest(input);const saved=await commitContext(id,scenario,{expectedContextRevision:request.expectedContextRevision,context:request.context},request);
+   if(!saved.receipt)throw new KnowledgeError(503,'KNOWLEDGE_UNAVAILABLE','Knowledge receipt was not written.');
+   return {detail:saved.detail,receipt:saved.receipt};
+  },
+  async undo(id:string,scenario:string,input:unknown){
+   workspaceId(id);scenarioId(scenario);const request=validateUndoRequest(input);let restored=false;
+   while(!restored){
+    const captured=await rawCapture(id);if(!captured.workspace.scenarios?.some(item=>item.id===scenario))throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','Saved workspace or scenario not found.');
+    restored=await inWorkspace(id,async(workspace,directory)=>{
      if(workspace.metadata?.revision!==captured.workspace.metadata?.revision)return false;
      if(!workspace.scenarios?.some(item=>item.id===scenario))throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','Saved workspace or scenario not found.');
-     const current=await readContextFile(directory,id,scenario);if(current.contextRevision!==value.expectedContextRevision)throw new ContextRevisionConflict(current);
-     if(current.reviewedAgainstSourceHash===reviewedHash&&contextFields.every(field=>current[field]===value.context[field]))return true;
-     if(!Number.isSafeInteger(current.contextRevision+1))throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','Context revision limit exceeded.');
-     const next:ScenarioContext={schemaVersion:1,workspaceId:id,scenarioId:scenario,contextRevision:current.contextRevision+1,updatedAt:now(),...value.context,reviewedAgainstSourceHash:reviewedHash};
-     guard.assertOwned();const folder=await safeDirectory(directory,['knowledge','scenarios'],guard,true);contextEpochs.set(root+':'+id,epoch(id)+1);await atomicWrite(folder,scenario+'.json',JSON.stringify(next,null,2)+'\n',guard);return true;
+     await pruneReceipts(directory,Date.parse(now()),guard);
+     const receipt=await readReceipt(directory,id,scenario,request.receiptId,guard);if(!receipt)throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','That undo receipt is not available.');
+     const current=await readContextFile(directory,id,scenario);if(current.contextRevision!==request.expectedContextRevision)throw new ContextRevisionConflict(current);
+     guard.assertOwned();const folder=await safeDirectory(directory,['knowledge','scenarios'],guard,true);contextEpochs.set(root+':'+id,epoch(id)+1);
+     if(receipt.previousSidecar===null)await rm(join(folder,scenario+'.json'),{force:true});
+     else await atomicWrite(folder,scenario+'.json',receipt.previousSidecar,guard);
+     return true;
     });
    }
    errors.delete(id);schedule(id,true);
