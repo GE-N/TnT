@@ -4,8 +4,8 @@ import {test} from 'node:test';
 import {JSDOM} from 'jsdom';
 import {act,createElement,useState,type ReactNode} from 'react';
 import type {CanvasGraph} from '../server/canvas.js';
-import {knowledgeClient,KnowledgeRequestError,knowledgeReaderPath,type Freshness,type ScenarioDetail} from '../src/knowledge-client.js';
-import {flowStepText,KNOWLEDGE_BELOW_SCENARIOS_GAP,KNOWLEDGE_SHEET_TOP,knowledgeSheetTop,type SidePanelKind,type SidePanels} from '../src/knowledge-sheet.js';
+import {knowledgeClient,knowledgeFailureSentence,KnowledgeRequestError,knowledgeReaderPath,type Freshness,type ScenarioContext,type ScenarioDetail} from '../src/knowledge-client.js';
+import {flowStepText,KNOWLEDGE_BELOW_SCENARIOS_GAP,KNOWLEDGE_SHEET_TOP,knowledgeFieldDrafted,knowledgeSheetTop,type KnowledgeDraftOffer,type SidePanelKind,type SidePanels} from '../src/knowledge-sheet.js';
 
 const workspaceId = '11111111-1111-4111-8111-111111111111';
 const css = readFileSync(new URL('../src/knowledge.css', import.meta.url), 'utf8');
@@ -299,5 +299,117 @@ test('sequence bar mount keeps the Scenarios trigger last and a node closes info
     assert.equal(dismissed, 2);
     assert.equal(window.document.querySelector('.floating-inspector'), null);
     assert.ok(window.document.querySelector('[data-testid="knowledge-sheet"]'));
+  });
+});
+
+test('knowledge client applies and undoes without a save method, and hides error codes', async () => {
+  const calls: {url: string; method: string; body?: unknown}[] = [];
+  const fetchImpl: typeof fetch = async (url, init) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    calls.push({url: String(url), method: init?.method ?? 'GET', body});
+    if (String(url).endsWith('/apply') && body?.expectedContextRevision === 9) {
+      return new Response(JSON.stringify({code: 'CONTEXT_REVISION_CONFLICT', error: 'Context was changed in another editor.', currentContextRevision: 4, context: detail('up-to-date').context}), {status: 409});
+    }
+    if (String(url).endsWith('/apply')) return new Response(JSON.stringify({detail: detail('updating'), receipt: {receiptId: 'receipt-1'}}), {status: 200});
+    if (String(url).endsWith('/undo')) return new Response(JSON.stringify(detail('up-to-date')), {status: 200});
+    if (String(url).includes('/scenarios/down/')) return new Response(JSON.stringify({code: 'KNOWLEDGE_UNAVAILABLE', error: 'Knowledge service is unavailable.'}), {status: 503});
+    return new Response('nope', {status: 500});
+  };
+  const client = knowledgeClient('session-token', fetchImpl);
+  assert.equal('saveContext' in client, false);
+  const applied = await client.apply(workspaceId, 'main', {jobId: '11111111-1111-4111-8111-111111111111', expectedContextRevision: 2, idempotencyKey: 'idem-key-1'});
+  assert.equal(applied.receipt.receiptId, 'receipt-1');
+  assert.equal(calls[0].method, 'POST');
+  assert.deepEqual(calls[0].body, {jobId: '11111111-1111-4111-8111-111111111111', expectedContextRevision: 2, idempotencyKey: 'idem-key-1'});
+  const undone = await client.undo(workspaceId, 'main', {receiptId: 'receipt-1', expectedContextRevision: 3});
+  assert.equal(undone.context.purpose, 'Open the coordinator directory from Home.');
+  await assert.rejects(() => client.apply(workspaceId, 'main', {jobId: '11111111-1111-4111-8111-111111111111', expectedContextRevision: 9, idempotencyKey: 'idem-key-1'}), (error: unknown) => {
+    assert.ok(error instanceof KnowledgeRequestError);
+    assert.equal(error.code, 'CONTEXT_REVISION_CONFLICT');
+    assert.equal(error.currentContextRevision, 4);
+    assert.equal(error.context?.contextRevision, 2);
+    assert.equal(knowledgeFailureSentence(error.code), 'These details changed somewhere else. Nothing was applied.');
+    assert.equal(knowledgeFailureSentence(error.code)?.includes('CONTEXT_REVISION_CONFLICT'), false);
+    return true;
+  });
+  await assert.rejects(() => client.readContext(workspaceId, 'down'), (error: unknown) => {
+    assert.ok(error instanceof KnowledgeRequestError);
+    assert.equal(knowledgeFailureSentence(error.code), 'Scenario details aren\'t available right now. Nothing was changed.');
+    return true;
+  });
+  assert.equal(knowledgeFieldDrafted('purpose', 'Old', 'New'), true);
+  assert.equal(knowledgeFieldDrafted('expectedOutcome', 'Same', 'Same'), false);
+  assert.equal(knowledgeFieldDrafted('rationale', 'Old', 'New'), false);
+  assert.equal(knowledgeFieldDrafted('preconditions', 'Old', 'New'), false);
+});
+
+function offer(over: Partial<ScenarioContext> = {}): KnowledgeDraftOffer {
+  const context = detail('up-to-date').context;
+  return {
+    jobId: '22222222-2222-4222-8222-222222222222',
+    scenarioId: 'main',
+    draft: {
+      purpose: 'Let a guest buy with no account.',
+      expectedOutcome: 'The shopper reaches Cart.',
+      rationale: context.rationale,
+      preconditions: context.preconditions,
+      exceptions: context.exceptions,
+      scope: context.scope,
+      baseContextRevision: context.contextRevision,
+      ...over,
+    },
+  };
+}
+
+test('a knowledge draft tints only changed purpose and outcome, auto-opens, and stays closed', async () => {
+  await withDom(async (window, root) => {
+    installFetch(detail('up-to-date', {title: 'Guest checkout'}));
+    const {KnowledgeScenarioControl} = await import('../src/knowledge-sheet.js');
+    const {resetSidePanels} = await import('../src/side-panels.js');
+    resetSidePanels();
+    function Host({draft, openVersions = false}: {draft?: KnowledgeDraftOffer | null; openVersions?: boolean}) {
+      const [panel, setPanel] = useState<SidePanelKind | null>(openVersions ? 'versions' : null);
+      const panels: SidePanels = {
+        open: panel,
+        openPanel(kind) { setPanel(kind); },
+        closePanel(kind) { setPanel(current => current === kind ? null : current); },
+      };
+      return createElement('div', null,
+        panel === 'versions' ? createElement('div', {'data-testid': 'versions-sheet'}) : null,
+        panel === 'results' ? createElement('div', {'data-testid': 'results-sheet'}) : null,
+        createElement(KnowledgeScenarioControl, {token: 'tok', workspaceId, scenarioId: 'main', scenarioName: 'Guest checkout', panels, offer: draft}),
+      );
+    }
+    await act(async () => { root.render(createElement(Host, {draft: offer(), openVersions: true})); });
+    await act(async () => { await Promise.resolve(); });
+    const sheet = window.document.querySelector<HTMLElement>('[data-testid="knowledge-sheet"]')!;
+    assert.ok(sheet, 'draft auto-opens the info sheet');
+    assert.equal(window.document.querySelector('[data-testid="versions-sheet"]'), null);
+    assert.equal(window.document.querySelector('[data-testid="results-sheet"]'), null);
+    const info = window.document.querySelector<HTMLButtonElement>('[data-testid="knowledge-info-button"]')!;
+    assert.equal(info.querySelectorAll('svg').length, 1);
+    assert.equal(info.textContent?.trim(), '');
+    assert.equal(info.querySelector('[data-badge]'), null);
+    assert.equal(sheet.querySelector('[data-testid="knowledge-purpose"]')!.textContent, 'Let a guest buy with no account.');
+    assert.equal(sheet.querySelector('[data-testid="knowledge-outcome"]')!.textContent, 'The shopper reaches Cart.');
+    assert.ok(sheet.querySelector('[data-testid="knowledge-field-purpose"]')!.classList.contains('is-draft'));
+    assert.ok(sheet.querySelector('[data-testid="knowledge-field-outcome"]')!.classList.contains('is-draft'));
+    assert.equal(sheet.querySelector('[data-testid="knowledge-section-why"]')!.getAttribute('aria-expanded'), 'false');
+    assert.equal(sheet.querySelector('[data-testid="knowledge-section-why"]')!.closest('.is-draft'), null);
+    assert.equal([...sheet.querySelectorAll('button')].some(button => /Apply|Undo|Discard/.test(button.textContent ?? '')), false);
+    const purpose = sheet.querySelector<HTMLElement>('[data-testid="knowledge-purpose"]')!;
+    const label = sheet.querySelector<HTMLElement>('[data-testid="knowledge-section-why"] .knowledge-section-label')!;
+    assert.equal(purpose.offsetLeft, label.offsetLeft);
+    await act(async () => { sheet.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click(); });
+    assert.equal(window.document.querySelector('[data-testid="knowledge-sheet"]'), null);
+    await act(async () => { root.render(createElement(Host, {draft: offer()})); });
+    assert.equal(window.document.querySelector('[data-testid="knowledge-sheet"]'), null, 'closing the sheet keeps it closed');
+    await act(async () => { window.document.querySelector<HTMLButtonElement>('[data-testid="knowledge-info-button"]')!.click(); });
+    await act(async () => { await Promise.resolve(); });
+    const reopened = window.document.querySelector<HTMLElement>('[data-testid="knowledge-sheet"]')!;
+    assert.ok(reopened.querySelector('[data-testid="knowledge-field-purpose"]')!.classList.contains('is-draft'));
+    await act(async () => { reopened.querySelector<HTMLButtonElement>('[data-testid="knowledge-section-why"]')!.click(); });
+    assert.match(reopened.querySelector('[data-testid="knowledge-section-body"]')!.textContent ?? '', /Help users find the responsible contact/);
+    assert.equal(reopened.querySelector('[data-testid="knowledge-section-why"]')!.closest('.is-draft'), null);
   });
 });

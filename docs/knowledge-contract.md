@@ -264,8 +264,35 @@ Knowledge has no Versions history.
   hash. Undo uses the same queue, guard, and atomic write as the sidecar; it
   does not call `saveContext`, because that would re-review the source.
 
-The client (a later slice) hides Undo after 10 seconds. This server does not.
+The client hides Undo after 10 seconds (`UNDO_CLIENT_WINDOW_MS`). This server does not.
 It accepts a receipt until pruning. Receipts older than 24 hours
 (`RECEIPT_RETENTION_MS`) may be deleted on the next apply or undo. A pruned
 receipt is `KNOWLEDGE_NOT_FOUND`. Auth, `Cache-Control: no-store`, id decoding,
 and the slice-1 error codes are unchanged.
+
+### Client review
+
+The workbench reviews a knowledge draft in the existing info sheet and the existing
+Ask AI capsule. Nothing here adds a mode, a second field, or a Versions entry.
+
+- While the request is running, the Ask AI field keeps the prompt, animates the
+  spark, and shows Stop. It does not show a heading or the words “Generating…”.
+- When a knowledge draft arrives, the info sheet opens. Purpose and Expected
+  outcome that differ from the saved context are tinted `rgba(10,132,255,.08)`
+  with a 2px accent in the sheet gutter, so the text column does not move.
+  Why stays collapsed and is never tinted. ✓ Apply and ✕ stay on the Ask AI
+  capsule.
+- If the sheet is closed while the draft is pending, it stays closed. No other
+  right-hand panel opens, and the info button gains no badge. Apply remains.
+- An ask-back uses the existing question UI. It can be dismissed and has no Apply.
+  The sheet is unchanged.
+- A mixed request stays a flow draft. The info sheet does not open. After that
+  flow is applied, the capsule asks “Update the purpose too?” with Update details
+  and Skip, beside the flow’s 10 second Undo. Update details sends the stored
+  remainder through the same generation endpoint. Skip leaves the flow as applied.
+- Knowledge Apply clears the tint, shows Updating and then the saved freshness,
+  and offers Undo on the capsule for 10 seconds. It does not write a Versions row.
+- `KNOWLEDGE_UNAVAILABLE` shows “Scenario details aren't available right now.
+  Nothing was changed.” `CONTEXT_REVISION_CONFLICT` shows “These details changed
+  somewhere else. Nothing was applied.” The codes are not shown. Apply waits
+  until the sheet has reloaded the server copy, then sends that revision.

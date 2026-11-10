@@ -1077,6 +1077,7 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
  .ai-spinner{border-top-color:var(--ai-button)}
  .ai-flow-field.is-generating .ai-spark{animation:ai-spark-fade 2.4s ease-in-out infinite;transform:none;filter:none;color:#0a63d1}
 }
+.ai-knowledge-note{margin:8px 0 0;color:#d93025;font-size:13px;line-height:20px;text-align:center}
 .ai-hint{margin:0 0 8px;color:var(--ai-muted);font-size:12px}
 .ai-ask{margin:0;color:var(--ai-text);font-weight:600}
 .ai-chip-wrap{margin-top:8px}
