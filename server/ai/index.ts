@@ -1,5 +1,8 @@
+import {createScenarioCatalog} from './catalog.js';
 import {createAiConfig, type AiPublicConfig, type AiTestResult, type CopilotStatus, type SecretStore} from './config.js';
 import {createJobs, realScheduler, type Scheduler, type Timeouts} from './job.js';
+import type {ScenarioCatalog} from './router.js';
+import {loadBundledSkills} from './skills.js';
 import type {AiModelInfo, ProviderId} from './probe.js';
 import type {CopilotRuntime} from './providers/copilot-runtime.js';
 import type {FlowModelProvider} from './providers/types.js';
@@ -7,6 +10,7 @@ import {createJobStore, type GenerationView} from './store.js';
 import type {Preview} from '../authoring/types.js';
 
 export type {GenerationView};
+export {createScenarioCatalog};
 
 export type AiService = {
   ready: Promise<void>;
@@ -35,6 +39,7 @@ export function createAi(deps: {
   scheduler?: Scheduler;
   timeouts?: Partial<Timeouts>;
   copilotRuntime?: CopilotRuntime;
+  readCatalog?: (workspaceId: string) => Promise<ScenarioCatalog>;
 }): AiService {
   const now = deps.now ?? (() => new Date());
   const log = deps.log ?? ((line: string) => { console.info(line); });
@@ -45,6 +50,8 @@ export function createAi(deps: {
     store: createJobStore(deps.root),
     now, log, scheduler: deps.scheduler ?? realScheduler(), timeouts: deps.timeouts,
     settingsRevision: () => config.settingsRevision(),
+    readCatalog: deps.readCatalog,
+    skills: loadBundledSkills(),
     resolveProvider: () => deps.provider
       ? Promise.resolve({provider: deps.provider, model: deps.provider.id, providerId: deps.provider.id})
       : config.connect(),

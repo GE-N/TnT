@@ -11,7 +11,10 @@ import {assertUserPrompt, assembleCall, packPrompt, schemaAttachment, type Promp
 import {assertAnswers, modelDraftSchema, sanitizeQuestions, splitModelDraft, type ClarifyingAnswer, type ClarifyingQuestion} from './questions.js';
 import {MAX_REPAIR_ROUNDS, repairDecision, repairNote} from './repair.js';
 import {abortError, isAbortError, MAX_UPSTREAM_POSTS, ProviderRequestError, RESPONSE_BYTE_LIMIT, type FlowModelProvider, type Msg, type UpstreamBudget, type Usage} from './providers/types.js';
-import {createJobStore, generationView, jobExpiry, type GenerationView, type StoredJob} from './store.js';
+import {planAnswer, knowledgeUserMessage, proposeKnowledge} from './knowledge-update.js';
+import {finishDraftQuestion, misroute, namedOtherScenario, otherScenarioQuestion, routerUserMessage, settleRouter, unclearQuestion, type RouterIntent, type ScenarioCatalog} from './router.js';
+import {loadBundledSkills, type Skill} from './skills.js';
+import {createJobStore, generationView, jobExpiry, type GenerationView, type KnowledgeDraft, type StoredJob} from './store.js';
 
 export const SUBMISSION_DEADLINE_MS = 120_000;
 export const MAX_PROVIDER_RETRIES = 1;
@@ -206,7 +209,10 @@ export function createJobs(deps: {
   timeouts?: Partial<Timeouts>;
   resolveProvider: () => Promise<ResolvedModel>;
   settingsRevision: () => Promise<number>;
+  readCatalog?: (workspaceId: string) => Promise<ScenarioCatalog>;
+  skills?: {router: Skill; knowledgeUpdate: Skill};
 }) {
+  const skills = deps.skills ?? loadBundledSkills();
   const scheduler = deps.scheduler ?? realScheduler();
   const timeouts: Timeouts = {deadlineMs: SUBMISSION_DEADLINE_MS, ...deps.timeouts};
   const memory = new Map<string, StoredJob>();
@@ -255,7 +261,7 @@ export function createJobs(deps: {
     return job;
   }
 
-  async function oneCall(job: StoredJob, resolved: ResolvedModel, system: string, messages: Msg[], parent: AbortSignal, budget: UpstreamBudget) {
+  async function oneCall(job: StoredJob, resolved: ResolvedModel, system: string, messages: Msg[], parent: AbortSignal, budget: UpstreamBudget, schema: object = MODEL_SCHEMA) {
     if (job.state !== 'running') return 'stopped' as const;
     const call = new AbortController();
     const onParent = () => call.abort();
@@ -267,7 +273,7 @@ export function createJobs(deps: {
     let upstreamProvider: string | undefined;
     const started = scheduler.now();
     try {
-      for await (const event of resolved.provider.generate({system, messages, schema: MODEL_SCHEMA, maxOutputTokens: MAX_OUTPUT_TOKENS, signal: call.signal, budget})) {
+      for await (const event of resolved.provider.generate({system, messages, schema, maxOutputTokens: MAX_OUTPUT_TOKENS, signal: call.signal, budget})) {
         if (job.state !== 'running') return 'stopped' as const;
         if (event.delta) text += event.delta;
         if (Buffer.byteLength(text) > RESPONSE_BYTE_LIMIT) throw new ProviderRequestError({code: 'PROVIDER_REJECTED', message: 'The model output was too large.', retryable: false, outputTooLarge: true});
@@ -299,12 +305,12 @@ export function createJobs(deps: {
     return {text};
   }
 
-  async function callWithRetries(job: StoredJob, resolved: ResolvedModel, system: string, messages: Msg[], parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number) {
+  async function callWithRetries(job: StoredJob, resolved: ResolvedModel, system: string, messages: Msg[], parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number, schema: object = MODEL_SCHEMA) {
     let retried = false;
     for (;;) {
       if (job.state !== 'running') return 'stopped' as const;
       try {
-        return await oneCall(job, resolved, system, messages, parent, budget);
+        return await oneCall(job, resolved, system, messages, parent, budget, schema);
       } catch (error) {
         if (job.state !== 'running' || isAbortError(error)) return 'stopped' as const;
         const providerError = asProviderError(error);
@@ -424,20 +430,253 @@ export function createJobs(deps: {
     }
   }
 
-  async function run(job: StoredJob, resolved: ResolvedModel, prompt: string, draft: unknown, answers?: ClarifyingAnswer[]) {
+  function ask(job: StoredJob, intent: RouterIntent, question: ClarifyingQuestion) {
+    if (job.state !== 'running') return;
+    job.state = 'needsInfo';
+    job.phase = 'context';
+    job.intent = intent;
+    job.questions = [{...question, options: [...question.options]}];
+    delete job.draft;
+    delete job.knowledgeDraft;
+    delete job.preview;
+    delete job.previewId;
+    delete job.previewExpiresAt;
+    delete job.error;
+    release(job);
+  }
+
+  function otherPending(workspaceId: string, kind: 'flow' | 'knowledge', except: string) {
+    for (const candidate of memory.values()) {
+      if (candidate.id === except || candidate.workspaceId !== workspaceId) continue;
+      if (candidate.state !== 'pending' && candidate.state !== 'needsInfo') continue;
+      const candidateKind = candidate.kind ?? (candidate.draft !== undefined ? 'flow' as const : undefined);
+      if (candidateKind && candidateKind !== kind) return candidate;
+    }
+  }
+
+  function acceptKnowledge(job: StoredJob, draft: KnowledgeDraft, scenarioId?: string) {
+    if (job.state !== 'running') return;
+    delete job.questions;
+    delete job.conflict;
+    delete job.error;
+    delete job.draft;
+    job.kind = 'knowledge';
+    job.intent = 'knowledge';
+    job.knowledgeDraft = draft;
+    job.state = 'pending';
+    job.phase = 'validating';
+    job.skill = skills.knowledgeUpdate.id;
+    job.skillHash = skills.knowledgeUpdate.hash;
+    if (scenarioId) job.scenarioId = scenarioId;
+    release(job);
+  }
+
+  async function routeWithProvider(job: StoredJob, resolved: ResolvedModel, prompt: string, catalog: ScenarioCatalog, pendingKind: 'flow' | 'knowledge' | undefined, parent: AbortSignal) {
+    job.phase = 'context';
+    job.skill = skills.router.id;
+    job.skillHash = skills.router.hash;
+    const messages: Msg[] = [{role: 'user', content: routerUserMessage({
+      request: prompt,
+      pendingKind,
+      scenarioId: catalog.current?.id,
+      scenarioTitle: catalog.current?.title,
+      visitTitles: catalog.current?.visitTitles ?? [],
+      otherScenarios: catalog.scenarios.filter(item => item.id !== catalog.current?.id),
+    })}];
+    let used = false;
+    const budget = {remaining: () => used ? 0 : 1, tryConsume() { if (used) return false; used = true; return true; }};
+    const call = new AbortController();
+    const onParent = () => call.abort();
+    if (parent.aborted) call.abort();
+    else parent.addEventListener('abort', onParent, {once: true});
+    let text = '';
+    try {
+      for await (const event of resolved.provider.generate({system: skills.router.prompt, messages, schema: skills.router.schema, maxOutputTokens: 1_024, signal: call.signal, budget})) {
+        if (job.state !== 'running') return 'stopped' as const;
+        if (event.delta) text += event.delta;
+        if (event.done?.text) text = event.done.text;
+      }
+    } catch (error) {
+      if (job.state !== 'running' || isAbortError(error)) return 'stopped' as const;
+      return {intent: 'unclear' as const};
+    } finally {
+      parent.removeEventListener('abort', onParent);
+    }
+    if (job.state !== 'running') return 'stopped' as const;
+    return settleRouter({ok: true, text}, skills.router);
+  }
+
+  async function executeKnowledge(job: StoredJob, resolved: ResolvedModel, prompt: string, catalog: ScenarioCatalog, parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number, base?: {context: NonNullable<ScenarioCatalog['current']>['context']; contextRevision: number}) {
+    const current = catalog.current;
+    if (!current) {
+      job.requestText = prompt;
+      ask(job, 'unclear', unclearQuestion());
+      return;
+    }
+    const context = {...(base?.context ?? current.context)};
+    const contextRevision = base?.contextRevision ?? current.contextRevision;
+    job.kind = 'knowledge';
+    job.intent = 'knowledge';
+    job.phase = 'context';
+    job.skill = skills.knowledgeUpdate.id;
+    job.skillHash = skills.knowledgeUpdate.hash;
+    job.scenarioId = current.id;
+    job.requestText = prompt;
+    job.baseContext = context;
+    job.contextRevision = contextRevision;
+    await deps.authoring.context({workspaceId: job.workspaceId, expectedRevision: job.baseRevision});
+    if (job.state !== 'running') return;
+    job.phase = 'model';
+    const user = knowledgeUserMessage({request: prompt, current: {...current, context, contextRevision}});
+    const result = await callWithRetries(job, resolved, skills.knowledgeUpdate.prompt, [{role: 'user', content: user}], parent, budget, deadlineAt, skills.knowledgeUpdate.schema);
+    if (result === 'stopped' || job.state !== 'running') return;
+    job.phase = 'validating';
+    const proposed = proposeKnowledge({prompt, modelText: result.text, skill: skills.knowledgeUpdate, current: {...current, context, contextRevision}});
+    if (!proposed.ok) {
+      fail(job, 'INVALID_AI_OUTPUT', 'The model did not return a knowledge draft.', false);
+      return;
+    }
+    if ('ask' in proposed.proposal) {
+      if (proposed.proposal.conflict) job.conflict = proposed.proposal.conflict;
+      else delete job.conflict;
+      job.baseContext = proposed.proposal.baseContext;
+      job.contextRevision = proposed.proposal.contextRevision;
+      job.kind = 'knowledge';
+      ask(job, 'knowledge', proposed.proposal.ask);
+      job.kind = 'knowledge';
+      job.scenarioId = current.id;
+      return;
+    }
+    acceptKnowledge(job, proposed.proposal.draft, current.id);
+  }
+
+  async function run(job: StoredJob, resolved: ResolvedModel, request: {prompt: string; answers?: ClarifyingAnswer[]}, draft: unknown, previous?: StoredJob) {
     const controller = new AbortController();
     runtimes.set(job.id, controller);
     const started = scheduler.now();
     const deadlineAt = started + timeouts.deadlineMs;
     const budget = submissionBudget(deadlineAt, () => scheduler.now());
+    let pipeline = !deps.readCatalog;
     const releaseRemoval = resolved.bindRemoval?.(() => {
       if (fail(job, 'AI_NOT_CONFIGURED', 'The API key was removed.', false)) controller.abort();
     });
     const cancelJob = scheduler.schedule(timeouts.deadlineMs, () => {
+      if (!pipeline) { controller.abort(); return; }
       if (fail(job, 'TIMEOUT', 'The generation timed out.', true)) controller.abort();
     });
-    try { await execute(job, resolved, prompt, draft, answers, controller.signal, budget, deadlineAt); }
-    catch (error) {
+    const beginPipeline = () => {
+      pipeline = true;
+      if (controller.signal.aborted && job.state === 'running') {
+        fail(job, 'TIMEOUT', 'The generation timed out.', true);
+        return false;
+      }
+      return job.state === 'running';
+    };
+    try {
+      let catalog: ScenarioCatalog | undefined;
+      if (deps.readCatalog) {
+        try { catalog = await deps.readCatalog(job.workspaceId); }
+        catch {
+          if (job.state === 'running') fail(job, 'KNOWLEDGE_UNAVAILABLE', 'The scenario details could not be read.', true);
+          return;
+        }
+      }
+      if (job.state !== 'running') return;
+      const answering = !!previous && !!request.answers?.length && previous.draft === undefined && (!!previous.questions?.length || !!previous.conflict);
+      if (answering && previous) {
+        const answer = request.answers?.[0]?.answer ?? '';
+        const requestText = previous.requestText || request.prompt;
+        const base = previous.baseContext ?? catalog?.current?.context;
+        const contextRevision = previous.contextRevision ?? catalog?.current?.contextRevision ?? 0;
+        const plan = base ? planAnswer({answer, requestText, base, contextRevision, conflict: previous.conflict}) : {kind: 'keep' as const};
+        if (plan.kind === 'dismiss') {
+          for (const candidate of memory.values()) {
+            if (candidate.id === job.id || candidate.workspaceId !== job.workspaceId) continue;
+            if (candidate.state !== 'pending' && candidate.state !== 'needsInfo') continue;
+            if (!candidate.kind && candidate.draft === undefined && !candidate.knowledgeDraft) continue;
+            candidate.state = 'cancelled';
+            delete candidate.knowledgeDraft;
+            delete candidate.error;
+            release(candidate);
+          }
+          job.state = 'cancelled';
+          delete job.error;
+          release(job);
+          return;
+        }
+        if (plan.kind === 'draft') {
+          acceptKnowledge(job, plan.draft, previous.scenarioId ?? catalog?.current?.id);
+          return;
+        }
+        if (plan.kind === 'flow') {
+          if (!beginPipeline()) return;
+          job.intent = 'flow';
+          job.kind = 'flow';
+          job.skill = skills.router.id;
+          job.skillHash = skills.router.hash;
+          if (previous.scenarioId ?? catalog?.current?.id) job.scenarioId = previous.scenarioId ?? catalog?.current?.id;
+          await execute(job, resolved, plan.prompt, undefined, undefined, controller.signal, budget, deadlineAt);
+          return;
+        }
+        if (plan.kind === 'knowledge' && catalog) {
+          if (!beginPipeline()) return;
+          await executeKnowledge(job, resolved, plan.prompt, catalog, controller.signal, budget, deadlineAt, base ? {context: base, contextRevision} : undefined);
+          return;
+        }
+        ask(job, previous.intent === 'knowledge' ? 'knowledge' : 'unclear', previous.questions?.[0] ?? unclearQuestion());
+        return;
+      }
+      if (previous?.knowledgeDraft && catalog?.current && !misroute(request.prompt)) {
+        if (!beginPipeline()) return;
+        const {baseContextRevision, ...context} = previous.knowledgeDraft;
+        await executeKnowledge(job, resolved, request.prompt, catalog, controller.signal, budget, deadlineAt, {context, contextRevision: baseContextRevision});
+        return;
+      }
+      if (deps.readCatalog && catalog && (!previous || !!misroute(request.prompt))) {
+        job.requestText = request.prompt;
+        if (catalog.current) {
+          job.scenarioId = catalog.current.id;
+          job.baseContext = {...catalog.current.context};
+          job.contextRevision = catalog.current.contextRevision;
+        }
+        const other = namedOtherScenario(request.prompt, catalog);
+        if (other && catalog.current && !misroute(request.prompt)) {
+          job.skill = skills.router.id;
+          job.skillHash = skills.router.hash;
+          ask(job, 'unclear', otherScenarioQuestion(catalog.current.title, other.title));
+          return;
+        }
+        const pendingKind = previous?.kind ?? (previous?.knowledgeDraft ? 'knowledge' as const : previous?.draft !== undefined ? 'flow' as const : undefined);
+        const routed = await routeWithProvider(job, resolved, request.prompt, catalog, pendingKind, controller.signal);
+        if (job.state !== 'running') return;
+        if (routed === 'stopped' || routed.intent === 'unclear') {
+          ask(job, 'unclear', unclearQuestion());
+          return;
+        }
+        const nextKind = routed.intent === 'knowledge' ? 'knowledge' as const : 'flow' as const;
+        if (!previous && otherPending(job.workspaceId, nextKind, job.id)) {
+          ask(job, 'unclear', finishDraftQuestion());
+          return;
+        }
+        if (routed.intent === 'knowledge') {
+          if (!beginPipeline()) return;
+          await executeKnowledge(job, resolved, request.prompt, catalog, controller.signal, budget, deadlineAt);
+          return;
+        }
+        job.intent = routed.intent;
+        job.kind = 'flow';
+        job.skill = skills.router.id;
+        job.skillHash = skills.router.hash;
+        if (routed.intent === 'mixed') job.remainder = request.prompt;
+        if (!beginPipeline()) return;
+        await execute(job, resolved, request.prompt, undefined, request.answers, controller.signal, budget, deadlineAt);
+        const finished = job.state as StoredJob['state'];
+        if (job.intent === 'mixed' && finished !== 'pending' && finished !== 'needsInfo') delete job.remainder;
+        return;
+      }
+      if (!beginPipeline()) return;
+      await execute(job, resolved, request.prompt, draft, request.answers, controller.signal, budget, deadlineAt);
+    } catch (error) {
       if (job.state === 'running') {
         if (error instanceof AuthoringHttpError) {
           const stale = error.status === 409 && (error.code === 'REVISION_CONFLICT' || error.code === 'CONTEXT_CHANGED');
@@ -475,11 +714,17 @@ export function createJobs(deps: {
       }
       if (active.has(request.workspaceId)) throw new AiHttpError(409, 'GENERATION_BUSY', 'A generation is already running for this workspace.');
       let draft: unknown;
+      let previous: StoredJob | undefined;
       if (request.previousJobId) {
-        const previous = await load(request.previousJobId);
+        previous = await load(request.previousJobId);
         if (previous.workspaceId !== request.workspaceId) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Refine against a generation from this workspace.');
-        if (previous.draft === undefined) throw new AiHttpError(409, 'INVALID_ENVELOPE', 'That generation has no draft to refine.');
-        draft = previous.draft;
+        const answering = !!request.answers?.length && previous.draft === undefined && (!!previous.questions?.length || !!previous.conflict);
+        const reroute = !!deps.readCatalog && !!misroute(request.prompt);
+        const knowledgeTurn = !!previous.knowledgeDraft && !!deps.readCatalog;
+        if (!answering && !reroute && !knowledgeTurn) {
+          if (previous.draft === undefined) throw new AiHttpError(409, 'INVALID_ENVELOPE', 'That generation has no draft to refine.');
+          draft = previous.draft;
+        }
       }
       const now = deps.now();
       const job: StoredJob = {
@@ -498,7 +743,7 @@ export function createJobs(deps: {
         }
         throw error;
       }
-      const promise = run(job, resolved, request.prompt, draft, request.answers).catch(() => { if (job.state === 'running') fail(job, 'PROVIDER_UNAVAILABLE', 'Generation failed.', true); });
+      const promise = run(job, resolved, request, draft, previous).catch(() => { if (job.state === 'running') fail(job, 'PROVIDER_UNAVAILABLE', 'Generation failed.', true); });
       runs.set(job.id, promise);
       void promise.finally(() => { if (runs.get(job.id) === promise) runs.delete(job.id); });
       return generationView(job, deps.now().getTime());

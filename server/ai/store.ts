@@ -2,7 +2,13 @@ import {randomUUID} from 'node:crypto';
 import {chmod, mkdir, open, readdir, readFile, rename, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {JOURNAL_TTL_MS, type Preview} from '../authoring/types.js';
+import {contextFields, type ContextContent} from '../knowledge/types.js';
 import {sanitizeQuestions, type ClarifyingQuestion} from './questions.js';
+
+export type AiIntent = 'flow' | 'knowledge' | 'mixed' | 'unclear';
+export type JobKind = 'flow' | 'knowledge';
+export type KnowledgeDraft = ContextContent & {baseContextRevision: number};
+export type KnowledgeConflictNote = {field: typeof contextFields[number]; written: string; lastVisit?: string};
 
 export type GenerationPhase = 'context' | 'model' | 'validating' | 'repairing' | 'previewing';
 export type GenerationState = 'running' | 'pending' | 'needsInfo' | 'failed' | 'cancelled';
@@ -33,6 +39,19 @@ export type StoredJob = {
   contextTrimmed?: boolean;
   /** Sanitized clarifying questions. Present only when the job is needsInfo and the model asked something usable. */
   questions?: ClarifyingQuestion[];
+  kind?: JobKind;
+  intent?: AiIntent;
+  knowledgeDraft?: KnowledgeDraft;
+  skill?: string;
+  skillHash?: string;
+  /** Original request kept after a mixed flow draft, for the later knowledge confirmation. */
+  remainder?: string;
+  /** Server-only copy of the request. Omitted from GenerationView. */
+  requestText?: string;
+  scenarioId?: string;
+  contextRevision?: number;
+  baseContext?: ContextContent;
+  conflict?: KnowledgeConflictNote;
 };
 export type GenerationView = {
   id: string;
@@ -55,12 +74,24 @@ export type GenerationView = {
   upstreamProvider?: string;
   contextTrimmed?: boolean;
   questions?: ClarifyingQuestion[];
+  intent?: AiIntent;
+  kind?: JobKind;
+  knowledgeDraft?: KnowledgeDraft;
+  skill?: string;
+  skillHash?: string;
+  scenarioId?: string;
+  /** Present when intent is mixed, so a later slice can ask to update the details. */
+  remainder?: string;
 };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const STATES = new Set<GenerationState>(['running', 'pending', 'needsInfo', 'failed', 'cancelled']);
 const PHASES = new Set<GenerationPhase>(['context', 'model', 'validating', 'repairing', 'previewing']);
-const FIELDS = ['id', 'workspaceId', 'baseRevision', 'state', 'phase', 'provenance', 'contractVersion', 'createdAt', 'expiresAt', 'draft', 'previewId', 'preview', 'previewExpiresAt', 'error', 'inputTokens', 'outputTokens', 'cost', 'model', 'upstreamProvider', 'contextTrimmed', 'questions'] as const;
+const FIELDS = ['id', 'workspaceId', 'baseRevision', 'state', 'phase', 'provenance', 'contractVersion', 'createdAt', 'expiresAt', 'draft', 'previewId', 'preview', 'previewExpiresAt', 'error', 'inputTokens', 'outputTokens', 'cost', 'model', 'upstreamProvider', 'contextTrimmed', 'questions', 'kind', 'intent', 'knowledgeDraft', 'skill', 'skillHash', 'remainder', 'requestText', 'scenarioId', 'contextRevision', 'baseContext', 'conflict'] as const;
+const INTENTS = new Set<AiIntent>(['flow', 'knowledge', 'mixed', 'unclear']);
+const SCENARIO_ID = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+const SKILL_ID = /^[a-z][a-z0-9-]*@[1-9][0-9]{0,2}$/;
+const SKILL_HASH = /^[a-f0-9]{64}$/;
 
 export function jobExpiry(now: Date) {
   return new Date(now.getTime() + JOURNAL_TTL_MS).toISOString();
@@ -84,6 +115,42 @@ function shortText(value: unknown) {
   return typeof value === 'string' && value.length > 0 && value.length <= 200 && !/[\u0000-\u001F\u007F]/.test(value) ? value : undefined;
 }
 
+function promptText(value: unknown) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 4000 && !value.includes('\0') ? value : undefined;
+}
+
+function boundedContext(value: unknown): ContextContent | undefined {
+  const item = record(value);
+  if (!item || Object.keys(item).length !== contextFields.length || contextFields.some(field => !(field in item))) return;
+  const context = {} as ContextContent;
+  for (const field of contextFields) {
+    const text = item[field];
+    if (typeof text !== 'string' || text.includes('\0') || Buffer.byteLength(text) > 16000) return;
+    context[field] = text;
+  }
+  return context;
+}
+
+function knowledgeDraftOf(value: unknown): KnowledgeDraft | undefined {
+  const item = record(value);
+  if (!item || Object.keys(item).length !== contextFields.length + 1) return;
+  if (typeof item.baseContextRevision !== 'number' || !Number.isSafeInteger(item.baseContextRevision) || item.baseContextRevision < 0) return;
+  const context = boundedContext(Object.fromEntries(contextFields.map(field => [field, item[field]])));
+  if (!context) return;
+  return {...context, baseContextRevision: item.baseContextRevision};
+}
+
+function conflictOf(value: unknown): KnowledgeConflictNote | undefined {
+  const item = record(value);
+  if (!item || typeof item.field !== 'string' || !contextFields.includes(item.field as typeof contextFields[number])) return;
+  if (typeof item.written !== 'string' || item.written.includes('\0') || Buffer.byteLength(item.written) > 16000) return;
+  const keys = ['field', 'written', ...(item.lastVisit === undefined ? [] : ['lastVisit'])];
+  if (Object.keys(item).some(key => !keys.includes(key))) return;
+  const lastVisit = item.lastVisit === undefined ? undefined : shortText(item.lastVisit);
+  if (item.lastVisit !== undefined && !lastVisit) return;
+  return {field: item.field as typeof contextFields[number], written: item.written, ...(lastVisit ? {lastVisit} : {})};
+}
+
 /** Copies the retention record and drops anything that is not a job field, including a key. */
 export function sanitizeJob(value: unknown): StoredJob | undefined {
   const item = record(value);
@@ -103,6 +170,17 @@ export function sanitizeJob(value: unknown): StoredJob | undefined {
   const model = shortText(item.model);
   const upstreamProvider = shortText(item.upstreamProvider);
   const questions = sanitizeQuestions(item.questions);
+  const kind = item.kind === 'flow' || item.kind === 'knowledge' ? item.kind : undefined;
+  const intent = typeof item.intent === 'string' && INTENTS.has(item.intent as AiIntent) ? item.intent as AiIntent : undefined;
+  const knowledgeDraft = knowledgeDraftOf(item.knowledgeDraft);
+  const skill = typeof item.skill === 'string' && SKILL_ID.test(item.skill) ? item.skill : undefined;
+  const skillHash = typeof item.skillHash === 'string' && SKILL_HASH.test(item.skillHash) ? item.skillHash : undefined;
+  const remainder = promptText(item.remainder);
+  const requestText = promptText(item.requestText);
+  const scenarioId = typeof item.scenarioId === 'string' && SCENARIO_ID.test(item.scenarioId) ? item.scenarioId : undefined;
+  const contextRevision = typeof item.contextRevision === 'number' && Number.isSafeInteger(item.contextRevision) && item.contextRevision >= 0 ? item.contextRevision : undefined;
+  const baseContext = boundedContext(item.baseContext);
+  const conflict = conflictOf(item.conflict);
   return {
     id: item.id,
     workspaceId: item.workspaceId,
@@ -125,6 +203,17 @@ export function sanitizeJob(value: unknown): StoredJob | undefined {
     ...(upstreamProvider ? {upstreamProvider} : {}),
     ...(item.contextTrimmed === true ? {contextTrimmed: true} : {}),
     ...(questions.length ? {questions} : {}),
+    ...(kind ? {kind} : {}),
+    ...(intent ? {intent} : {}),
+    ...(knowledgeDraft ? {knowledgeDraft} : {}),
+    ...(skill ? {skill} : {}),
+    ...(skillHash ? {skillHash} : {}),
+    ...(remainder ? {remainder} : {}),
+    ...(requestText ? {requestText} : {}),
+    ...(scenarioId ? {scenarioId} : {}),
+    ...(contextRevision !== undefined ? {contextRevision} : {}),
+    ...(baseContext ? {baseContext} : {}),
+    ...(conflict ? {conflict} : {}),
   };
 }
 
@@ -214,5 +303,12 @@ export function generationView(job: StoredJob, now: number): GenerationView {
     ...(job.upstreamProvider ? {upstreamProvider: job.upstreamProvider} : {}),
     ...(job.contextTrimmed ? {contextTrimmed: true} : {}),
     ...(job.questions?.length ? {questions: job.questions.map(question => ({...question, options: [...question.options]}))} : {}),
+    ...(job.intent ? {intent: job.intent} : {}),
+    ...(job.kind ? {kind: job.kind} : {}),
+    ...(job.state === 'pending' && job.knowledgeDraft ? {knowledgeDraft: {...job.knowledgeDraft}} : {}),
+    ...(job.skill ? {skill: job.skill} : {}),
+    ...(job.skillHash ? {skillHash: job.skillHash} : {}),
+    ...(job.scenarioId ? {scenarioId: job.scenarioId} : {}),
+    ...(job.intent === 'mixed' && job.remainder ? {remainder: job.remainder} : {}),
   };
 }
