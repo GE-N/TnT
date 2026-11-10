@@ -85,3 +85,30 @@ export async function showLegacyCanvasControls(document:Document,act:(callback:(
  assert.ok(button,'Show legacy canvas controls');
  await act(async()=>{button.click();});
 }
+
+export function openWorkspaceId(document:Document){
+ return document.querySelector('[aria-label="Manage workspace"]')?.getAttribute('data-workspace-id')??'';
+}
+
+/** Opens the visible Results sheet. Repeated calls leave it open. */
+export async function openResults(document:Document){
+ if(document.querySelector('[data-testid="results-sheet"]'))return;
+ const pill=document.querySelector<HTMLButtonElement>('[data-testid="results-pill"]');
+ assert.ok(pill,'Results control is visible');
+ await act(async()=>{pill.click();});
+ assert.ok(document.querySelector('[data-testid="results-sheet"]'),'Results sheet opened');
+}
+
+/** Opens Technical details inside the visible Results sheet. */
+export async function openTechnical(document:Document){
+ await openResults(document);
+ const tech=document.querySelector<HTMLDetailsElement>('[data-testid="results-technical"]');
+ assert.ok(tech,'Technical details');
+ if(!tech.open)await act(async()=>{tech.querySelector('summary')!.click();});
+}
+
+export async function closeResults(document:Document){
+ const close=document.querySelector<HTMLButtonElement>('[data-testid="results-sheet"] [aria-label="Close"]');
+ if(!close)return;
+ await act(async()=>{close.click();});
+}

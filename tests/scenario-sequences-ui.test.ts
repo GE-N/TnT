@@ -1,4 +1,4 @@
-import {addVisitStep,editVisitField,commitVisitEdits,inspected,inspectorCard,inspectorOwner,inspectScreen,openScenarioPanel,workspaceCommand} from './workspace-ui-helpers.js';
+import {addVisitStep,closeResults,editVisitField,commitVisitEdits,inspected,inspectorCard,inspectorOwner,inspectScreen,openResults,openScenarioPanel,openTechnical,workspaceCommand} from './workspace-ui-helpers.js';
 import {openStepMenuItem} from './step-menu.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -79,30 +79,33 @@ test('three finite scenarios reuse four nodes, choose branches explicitly, save/
   await click('Journey '+(index+1));
   const strip=document.querySelector('[aria-label="Scenario sequence"]')!;assert.equal(strip.querySelector('[aria-pressed="true"]'),null,'Switching clears the previous scenario occurrence');assert.equal(strip.textContent,route.map((id,i)=>(i+1)+' · '+id).join(''));
   await click('Visit 3 · '+route[2]);assert.equal(strip.querySelector('[aria-pressed="true"]')!.getAttribute('aria-label'),'Visit 3 · '+route[2]);assert.equal(document.querySelector('.selected-screen')!.getAttribute('data-screen-id'),route[2]);
-  await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
-  const results=[...document.querySelectorAll('[aria-label="Visit execution details"] summary')].map(node=>node.textContent);assert.deepEqual(results,route.map((id,i)=>'Visit '+(i+1)+' · '+id+' · passed'));
+  await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
+  await openResults(document);const results=[...document.querySelectorAll('[data-testid="results-step"]')].map(node=>node.querySelector('.rr-name')!.textContent+' · '+node.getAttribute('data-status'));assert.deepEqual(results,route.map(id=>id+' · passed'));
  }
  assert.deepEqual((await saved()).canvas!.paths,workspace.canvas!.paths,'Selecting/running never changes a scenario sequence');
+ await openResults(document);await act(async()=>document.querySelector<HTMLButtonElement>('[data-testid="results-run-picker"]')!.click());
  const reportButtons=[...document.querySelectorAll<HTMLButtonElement>('[aria-label="Scenario reports"] button')];
  assert.equal(reportButtons.length,3,'All three independent reports remain inspectable');
  await click('Journey 1');
- assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Journey 3','Sidebar selection preserves the inspected report');
- await act(async()=>reportButtons[0].click());
- assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Journey 1');
- assert.equal(document.querySelectorAll('[aria-label="Visit execution details"] summary').length,5);
+ assert.equal(document.querySelector('[data-testid="results-title"]')!.textContent,'Journey 3','Sidebar selection preserves the inspected report');
+ await click('Run 1');
+ assert.equal(document.querySelector('[data-testid="results-title"]')!.textContent,'Journey 1');
+ assert.equal(document.querySelectorAll('[data-testid="results-step"]').length,5);
  await fill('Scenario name','Renamed Journey');await click('Save workspace');
- assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Journey 1','Authoring edits cannot rename historical evidence');
+ assert.equal(document.querySelector('[data-testid="results-title"]')!.textContent,'Journey 1','Authoring edits cannot rename historical evidence');
  await fill('Scenario name','Journey 1');
- await click('Journey 1');failNext(7);await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'assertion-failed');
- const failedVisits=[...document.querySelectorAll('[aria-label="Visit execution details"] summary')].map(node=>node.textContent);
- assert.equal(failedVisits.length,5);assert.match(failedVisits[1]!,/passed/);assert.match(failedVisits[3]!,/failed/);assert.ok(!failedVisits.at(-1)!.endsWith('passed'),'A check failure stops the finite route');
- await click('Inspect visit 4');
+ await click('Journey 1');failNext(7);await click('Run scenario');assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'assertion-failed');
+ await openResults(document);const failedVisits=[...document.querySelectorAll('[data-testid="results-step"]')].map(node=>node.getAttribute('data-status')??'');
+ assert.equal(failedVisits.length,5);assert.equal(failedVisits[1],'passed');assert.equal(failedVisits[3],'failed');assert.notEqual(failedVisits.at(-1),'passed','A check failure stops the finite route');
+ assert.equal((document.querySelector('[data-testid="results-technical"]') as HTMLDetailsElement).open,false,'Technical details starts collapsed');
+ assert.equal(document.querySelector('[aria-label="Execution evidence"]'),null,'Evidence stays out of the primary sheet');
+ await openTechnical(document);await click('Inspect visit 4');
  const evidence=document.querySelector('[aria-label="Execution evidence"]');assert.ok(evidence,'Selecting a visit opens its evidence inspector');
  assert.match(evidence.textContent!,/Expected/);assert.match(evidence.textContent!,/Screen 2/);assert.match(evidence.textContent!,/FAILED/);assert.match(evidence.textContent!,/Screenshot evidence unavailable/);assert.match(evidence.textContent!,/Simulator boundary fixture/);
  await click('Inspect transition 4');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/skipped/);
  await selectedCommand('Duplicate');await fill('Scenario name','Return copy');await click('Save workspace');const duplicated=await saved();
  const original=workspace.canvas!.paths[0];const copy=duplicated.canvas!.paths.at(-1)!;assert.deepEqual(copy.edgeIds,original.edgeIds);assert.ok(copy.visits!.every(visit=>!original.visits!.some(item=>item.id===visit.id)));assert.equal(Reflect.get(copy,'finished'),true);
- await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+ await click('Run scenario');assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
 
 }));
 
@@ -120,7 +123,7 @@ test('action destinations support connection reuse and contextual ordered action
  await fill('Connection name '+edge.id,'First choice');await click('New scenario');await click('Use 1 as scenario start');await act(async()=>document.querySelector('[aria-label="Screen 4"]')!.dispatchEvent(new document.defaultView!.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:120,clientY:120})));await click('Add 4 to scenario sequence');assert.equal(document.querySelector('[role="alert"]'),null);
  await click('Finish sequence');await click('Save workspace');
  assert.deepEqual((await saved()).canvas!.paths.at(-1)!.edgeIds,[edge.id]);
- await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+ await click('Run scenario');assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
  assert.ok(!document.querySelector('.workspace-canvas select[aria-label="Next transition"]'));
  assert.ok(!document.querySelector('.workspace-canvas select[aria-label="Source screen"]'));
 }));
@@ -139,10 +142,10 @@ test('a new blank check stays local, exposes its inline error and blocks executi
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
  const run=document.querySelector<HTMLButtonElement>('[aria-label^="Run scenario"]')!;
  assert.ok(run.disabled);assert.equal(run.getAttribute('aria-label'),'Run scenario — Draft kept, not valid yet');
- const input=document.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;assert.equal(input.getAttribute('aria-invalid'),'true');assert.match(input.closest('.visit-step')!.textContent!,/Enter text|selector/);assert.equal(document.querySelector('.result-tag'),null);
+ const input=document.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;assert.equal(input.getAttribute('aria-invalid'),'true');assert.match(input.closest('.visit-step')!.textContent!,/Enter text|selector/);assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'');
  await fill('Check 1 selector','Home');
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,50));});
- await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+ await click('Run scenario');assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
 },true));
 
 test('choosing action destinations creates connections and an action-only Home Details Back journey runs without mandatory checks',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
@@ -156,9 +159,9 @@ test('choosing action destinations creates connections and an action-only Home D
  assert.equal(inspectorCard(document)!.querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')?.value,'Back');
  await click('Save workspace');const backWorkspace=await saved();assert.equal(backWorkspace.canvas!.screens[1].tests[0].back,true);assert.deepEqual(backWorkspace.canvas!.screens[1].tests[0].backSelector,{target:'text',match:'exact',value:'Back'});assert.match(backWorkspace.yaml,/tapOn:[\s\S]*\^Back\$/);
  await inspectScreen(document,{title:'Details'});await editVisitField(document,'Action 1 selector');await act(async()=>{const selector=inspectorCard(document)!.querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!;Object.getOwnPropertyDescriptor(document.defaultView!.HTMLInputElement.prototype,'value')!.set!.call(selector,'Go back');selector.dispatchEvent(new document.defaultView!.Event('input',{bubbles:true}));});await commitVisitEdits(document);await click('Save workspace');const customized=await saved();assert.equal(customized.canvas!.screens[1].tests[0].back,true);assert.equal(customized.canvas!.screens[1].tests[0].backSelector!.value,'Go back');assert.match(customized.yaml,/\^Go back\$/);
- await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','tapOn','tapOn']);
+ await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');await openResults(document);assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','tapOn','tapOn']);await closeResults(document);
  await click('Add check to Details');await fill('Check 1 selector','Details');await click('Add check to Home');await fill('Check 1 selector','Home');
- await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+ await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
 },true));
 
 
@@ -169,8 +172,8 @@ test('actions and checks share one reorderable node list and execute in that ord
  assert.equal(document.querySelector<HTMLSelectElement>('[aria-label="Action 1 destination"]')!.value,'2');
  await click('Add check to Home');await fill('Check 1 selector','Ready');await act(async()=>{const item=openStepMenuItem(document,'Move check 1 down');assert.equal(item!.disabled,true,'Last step cannot move down');});
  await click('Save workspace');const graph=(await saved()).canvas!;assert.equal(graph.screens[0].tests[0].tap?.value,'Focus field');assert.equal(graph.screens[0].tests[1].check?.value,'Ready');
- await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','tapOn','assertVisible']);
- await click('Move check 1 up');await click('Run scenario');assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','assertVisible','tapOn']);
+ await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);await openResults(document);assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','tapOn','assertVisible']);await closeResults(document);
+ await inspectScreen(document,{title:'Home'});await click('Move check 1 up');await click('Run scenario');await openResults(document);assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','assertVisible','tapOn']);
 },true));
 
 
@@ -180,7 +183,7 @@ test('editing one grouped action destination preserves the other action and its 
  await click('Add action to Home');await fill('Action 2 selector','Details');await editVisitField(document,'Action 2 destination');await act(async()=>{const field=document.querySelector<HTMLSelectElement>('[aria-label="Action 2 destination"]')!;field.value='2';field.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await commitVisitEdits(document);await click('Save workspace');const initial=(await saved()).canvas!;const edge=initial.edges[0];
  await destination('1');await click('Save workspace');const changed=(await saved()).canvas!;assert.equal(changed.edges.find(item=>item.id===edge.id)!.to,'2');assert.deepEqual(changed.edges.find(item=>item.id===edge.id)!.actionTestIds,[edge.actionTestIds![0]]);assert.equal(changed.edges.find(item=>item.actionTestId===edge.actionTestIds![1])!.to,'1');assert.deepEqual(changed.paths[0].edgeIds,[changed.edges.find(item=>item.actionTestId===edge.actionTestIds![1])!.id]);
  await destination('2');await destination('');assert.ok(document.querySelector('[role="alertdialog"]'));assert.match(document.querySelector('[role="alertdialog"]')!.textContent!,/Remove the link to/);await click('Remove link');await click('Save workspace');const cleared=(await saved()).canvas!;assert.equal(cleared.edges.length,1);assert.deepEqual(cleared.edges[0].actionTestIds,[edge.actionTestIds![0]]);assert.deepEqual(cleared.paths[0].visits!.map(visit=>visit.id),initial.paths[0].visits!.slice(0,1).map(visit=>visit.id));
- await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Details');await editVisitField(document,'Action 1 destination');await act(async()=>{const select=document.querySelector<HTMLSelectElement>('[aria-label="Action 1 destination"]')!;select.value='2';select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await commitVisitEdits(document);await click('Save workspace');assert.deepEqual((await saved()).canvas!.paths.at(-1)!.edgeIds,[edge.id]);await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+ await click('New scenario');await click('Use Home as scenario start');await click('Add action to Home');await fill('Action 1 selector','Details');await editVisitField(document,'Action 1 destination');await act(async()=>{const select=document.querySelector<HTMLSelectElement>('[aria-label="Action 1 destination"]')!;select.value='2';select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await commitVisitEdits(document);await click('Save workspace');assert.deepEqual((await saved()).canvas!.paths.at(-1)!.edgeIds,[edge.id]);await click('Run scenario');assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
 },true));
 
 
@@ -198,10 +201,10 @@ test('node visit sections isolate the return check and follow the selected scena
  await addVisitStep(document,'Add check to Home',section);
  await act(async()=>{const input=section.querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!;Object.getOwnPropertyDescriptor(document.defaultView!.HTMLInputElement.prototype,'value')!.set!.call(input,'Returned Home');input.dispatchEvent(new document.defaultView!.Event('input',{bubbles:true}));});await commitVisitEdits(document);
  assert.equal((await inspected(document,'Home',1)).querySelector('[aria-label="Visit 1 · Home operations"] [aria-label="Check 1 selector"]'),null);
- await click('Save workspace');await click('Open saved workspace');await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','tapOn','tapOn','assertVisible']);assert.equal(document.querySelector('[aria-label="Executed screen canvas"]'),null,'Reports do not create a second canvas');await click('Inspect visit 3');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/Returned Home/);
+ await click('Save workspace');await click('Open saved workspace');await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');await openResults(document);assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','tapOn','tapOn','assertVisible']);assert.equal(document.querySelector('[aria-label="Executed screen canvas"]'),null,'Reports do not create a second canvas');await openTechnical(document);await click('Inspect visit 3');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/Returned Home/);
  await click('New scenario');await fill('Scenario name','Home only');await click('Use Home as scenario start');assert.equal((await inspectScreen(document,{title:'Home'})).querySelectorAll('.canvas-visit-section').length,1);assert.ok(!(await inspected(document,'Home')).querySelector('[aria-label="Visit 3 · Home operations"]'),'Return visit must be removed');assert.equal((await inspectScreen(document,{title:'Details'})).querySelectorAll('.canvas-visit-section').length,0);
- await click('Add check to Home');await fill('Check 1 selector','Initial Home');await click('Save workspace');await click('Open saved workspace');await click('Home only');await click('Run scenario');assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','assertVisible']);
- await click('Return journey');assert.equal((await inspectScreen(document,{title:'Home'})).querySelectorAll('.canvas-visit-section').length,2);assert.equal((await inspectScreen(document,{title:'Home'},{number:3})).querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!.value,'Returned Home');await click('Run scenario');assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','tapOn','tapOn','assertVisible']);
+ await click('Add check to Home');await fill('Check 1 selector','Initial Home');await click('Save workspace');await click('Open saved workspace');await click('Home only');await click('Run scenario');await openResults(document);assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','assertVisible']);
+ await click('Return journey');assert.equal((await inspectScreen(document,{title:'Home'})).querySelectorAll('.canvas-visit-section').length,2);assert.equal((await inspectScreen(document,{title:'Home'},{number:3})).querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!.value,'Returned Home');await click('Run scenario');await openResults(document);assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','tapOn','tapOn','assertVisible']);
 },true));
 
 test('editing, ordering and deleting visit steps keeps another visit and a duplicated scenario independent',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
@@ -212,9 +215,9 @@ test('editing, ordering and deleting visit steps keeps another visit and a dupli
  await click('New scenario');await fill('Scenario name','Original visits');await click('Use 1 as scenario start');await click('Append connection 1 → 2');await click('Append connection 2 → 1');await scopedClick(3,'Add check to 1');await scopedFill(3,'Check 1 selector','Returned original');assert.equal((await openSection(1)).querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!.value,'Screen 1');
  await click('Save workspace');const original=(await saved()).canvas!.paths[0];
  await selectedCommand('Duplicate');await fill('Scenario name','Independent copy');await scopedFill(1,'Check 1 selector','Copy initial');await scopedFill(1,'Action 1 selector','Copy details');await scopedFill(3,'Check 1 selector','Copy returned');await scopedClick(1,'Move check 1 down');await scopedClick(3,'Delete check 1');assert.equal(document.querySelector('[role="alertdialog"]'),null);
- await click('Save workspace');await click('Open saved workspace');await click('Independent copy');await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','tapOn','assertVisible','tapOn']);assert.equal((await openSection(3)).querySelector('[aria-label="Check 1 selector"]'),null);
- await click('Original visits');assert.equal((await openSection(1)).querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!.value,'Screen 1');assert.equal((await openSection(1)).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go 2');assert.equal((await openSection(3)).querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!.value,'Returned original');await click('Run scenario');assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','assertVisible','tapOn','tapOn','assertVisible']);assert.deepEqual((await saved()).canvas!.paths[0],original);
- await scopedClick(3,'Add action to 1');await scopedFill(3,'Action 1 selector','Go 2');await openSection(3);await editVisitField(document,'Action 1 destination');await act(async()=>{const select=section(3).querySelector<HTMLSelectElement>('[aria-label="Action 1 destination"]')!;select.value='2';select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await commitVisitEdits(document);await click('Save workspace');const extended=await saved();const end=extended.canvas!.paths[0].visits!.at(-2)!;const operations=end.operationIds!.flatMap(id=>extended.canvas!.screens[0].tests.filter(test=>test.id===id));assert.deepEqual(operations.filter(test=>test.tap).map(test=>test.tap!.value),['Go 2']);await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+ await click('Save workspace');await click('Open saved workspace');await click('Independent copy');await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);await openResults(document);assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','tapOn','assertVisible','tapOn']);assert.equal((await openSection(3)).querySelector('[aria-label="Check 1 selector"]'),null);
+ await click('Original visits');assert.equal((await openSection(1)).querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!.value,'Screen 1');assert.equal((await openSection(1)).querySelector<HTMLInputElement>('[aria-label="Action 1 selector"]')!.value,'Go 2');assert.equal((await openSection(3)).querySelector<HTMLInputElement>('[aria-label="Check 1 selector"]')!.value,'Returned original');await click('Run scenario');await openResults(document);assert.deepEqual([...document.querySelectorAll('.step-results code')].map(node=>node.textContent),['launchApp','assertVisible','tapOn','tapOn','assertVisible']);assert.deepEqual((await saved()).canvas!.paths[0],original);
+ await scopedClick(3,'Add action to 1');await scopedFill(3,'Action 1 selector','Go 2');await openSection(3);await editVisitField(document,'Action 1 destination');await act(async()=>{const select=section(3).querySelector<HTMLSelectElement>('[aria-label="Action 1 destination"]')!;select.value='2';select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await commitVisitEdits(document);await click('Save workspace');const extended=await saved();const end=extended.canvas!.paths[0].visits!.at(-2)!;const operations=end.operationIds!.flatMap(id=>extended.canvas!.screens[0].tests.filter(test=>test.id===id));assert.deepEqual(operations.filter(test=>test.tap).map(test=>test.tap!.value),['Go 2']);await click('Run scenario');assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
  await click('New scenario');await fill('Scenario name','Fresh journey');await click('Use 1 as scenario start');await click('Append connection 1 → 2');await click('Save workspace');const fresh=await saved();const start=fresh.canvas!.paths.at(-1)!.visits![0];assert.deepEqual(start.operationIds!.flatMap(id=>fresh.canvas!.screens[0].tests.filter(test=>test.id===id&&test.tap).map(test=>test.tap!.value)),['Go 2']);
 }));
 
@@ -224,14 +227,14 @@ test('two visits can save more than thirty total node steps while keeping their 
   await inspectScreen(document,{title:'1'},{number});await addVisitStep(document,'Add check to 1',document.querySelector('[aria-label="Visit '+number+' · 1 operations"]')!);
   await inspectScreen(document,{title:'1'},{number});await act(async()=>{const input=[...document.querySelectorAll<HTMLInputElement>('[aria-label="Visit '+number+' · 1 operations"] input[aria-label^="Check "][aria-label$=" selector"]')].at(-1)!;Object.getOwnPropertyDescriptor(document.defaultView!.HTMLInputElement.prototype,'value')!.set!.call(input,'Visit '+number+' value '+index);input.dispatchEvent(new document.defaultView!.Event('input',{bubbles:true}));});await commitVisitEdits(document);
  }
- await click('Save workspace');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.ok((await saved()).canvas!.screens[0].tests.length>30);await click('Open saved workspace');assert.equal((await inspected(document,'1',1)).querySelectorAll('[aria-label="Visit 1 · 1 operations"] input[aria-label^="Check "][aria-label$=" selector"]').length,17);assert.equal((await inspected(document,'1',3)).querySelectorAll('[aria-label="Visit 3 · 1 operations"] input[aria-label^="Check "][aria-label$=" selector"]').length,16);await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+ await click('Save workspace');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.ok((await saved()).canvas!.screens[0].tests.length>30);await click('Open saved workspace');assert.equal((await inspected(document,'1',1)).querySelectorAll('[aria-label="Visit 1 · 1 operations"] input[aria-label^="Check "][aria-label$=" selector"]').length,17);assert.equal((await inspected(document,'1',3)).querySelectorAll('[aria-label="Visit 3 · 1 operations"] input[aria-label^="Check "][aria-label$=" selector"]').length,16);await click('Run scenario');assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
 }));
 
 test('changing a copied visit destination updates its route and keeps displaced checks available for explicit repair',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
  await click('New scenario');await fill('Scenario name','Original destination');await click('Use 1 as scenario start');await click('Append connection 1 → 2');await click('Add check to 2');await inspectScreen(document,{title:'2'},{number:2});await inspectScreen(document,{title:'2'},{number:2});await act(async()=>{const input=document.querySelector<HTMLInputElement>('[aria-label="Visit 2 · 2 operations"] [aria-label="Check 1 selector"]')!;Object.getOwnPropertyDescriptor(document.defaultView!.HTMLInputElement.prototype,'value')!.set!.call(input,'Screen 2');input.dispatchEvent(new document.defaultView!.Event('input',{bubbles:true}));});await click('Save workspace');const original=(await saved()).canvas!.paths[0];
  await selectedCommand('Duplicate');await fill('Scenario name','Changed destination');await inspectScreen(document,{title:'1'},{number:1});await inspectScreen(document,{title:'1'},{number:1});await editVisitField(document,'Action 1 destination');await act(async()=>{const select=document.querySelector<HTMLSelectElement>('[aria-label="Visit 1 · 1 operations"] [aria-label="Action 1 destination"]')!;select.value='4';select.dispatchEvent(new document.defaultView!.Event('change',{bubbles:true}));});await commitVisitEdits(document);await fill('Action 1 selector','Go 4');
- assert.equal((await inspectScreen(document,{title:'4'})).querySelectorAll('.canvas-visit-section').length,1);assert.match((await inspected(document,'4')).querySelector('[aria-label="Visit 2 · 4 operations"]')!.textContent!,/previous destination/);await click('Run scenario');assert.match(document.querySelector('.run-error-toast')!.textContent!,/missing actions or checks/);await click('Remove from this visit');await click('Save workspace');await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.deepEqual((await saved()).canvas!.paths[0],original);
- await click('Original destination');assert.equal((await inspected(document,'2',2)).querySelector<HTMLInputElement>('[aria-label="Visit 2 · 2 operations"] [aria-label="Check 1 selector"]')!.value,'Screen 2');await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+ assert.equal((await inspectScreen(document,{title:'4'})).querySelectorAll('.canvas-visit-section').length,1);assert.match((await inspected(document,'4')).querySelector('[aria-label="Visit 2 · 4 operations"]')!.textContent!,/previous destination/);await click('Run scenario');assert.match(document.querySelector('.run-error-toast')!.textContent!,/missing actions or checks/);await click('Remove from this visit');await click('Save workspace');await click('Run scenario');assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');assert.deepEqual((await saved()).canvas!.paths[0],original);
+ await click('Original destination');assert.equal((await inspected(document,'2',2)).querySelector<HTMLInputElement>('[aria-label="Visit 2 · 2 operations"] [aria-label="Check 1 selector"]')!.value,'Screen 2');await click('Run scenario');assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
 }));
 
 
@@ -248,7 +251,7 @@ test('linked actions and reusable checks expose their executed YAML expectations
  const canvas:CanvasGraph={screens:[{id:'home',title:'Home',x:0,y:0,tests:[{id:'linked-action',label:'Linked Settings',role:'action',reference:catalog.references[1]}]},{id:'settings',title:'Settings',x:400,y:0,tests:[{id:'linked-check',label:'Reusable Settings',role:'assertion',reference:catalog.references[2]}]}],edges:[{id:'settings-edge',from:'home',to:'settings',actionTestId:'linked-action',assertionTestId:'linked-check',responseCondition:'Open Settings'}],paths:[{id:'linked-route',scenarioId:'linked-scenario',name:'Linked route',screenId:'home',edgeIds:['settings-edge']}]};
  await service.save({...workspace,yaml,flows,canvas,scenarios:[{id:'linked-scenario',name:'Linked scenario',authoring:'canvas' as const,steps:catalog.references.filter(ref=>ref.kind==='step').map(ref=>({kind:'step' as const,file:'flow.yaml',index:ref.index,fingerprint:ref.fingerprint})),pathId:'linked-route',inputs:{},parameters:{},enabledHandlerIds:[]}]});await click('Open saved workspace');
  await click('Linked scenario');
- await click('Run scenario');await click('Inspect visit 1');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/Linked Settings/);
+ await click('Run scenario');await openTechnical(document);await click('Inspect visit 1');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/Linked Settings/);
  const expected=document.querySelector('[aria-label="Execution evidence"] pre')!.textContent!;assert.match(expected,/tapOn/);assert.match(expected,/Linked Settings/);
  await click('Inspect visit 2');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/Settings content/);
 }));
@@ -259,21 +262,24 @@ test('Run all shows independent batch outcomes and opens reports without changin
   await click('New scenario');await fill('Scenario name','Batch journey '+index);await click('Use 1 as scenario start');await click('Save workspace');
  }
  await click('Run all');
- const batch=document.querySelector('[aria-label="Batch report"]')!;
- assert.match(batch.textContent!,/completed/);assert.match(batch.textContent!,/Batch journey 1 · passed/);assert.match(batch.textContent!,/Batch journey 2 · passed/);assert.match(batch.textContent!,/Batch journey 3 · passed/);
+ await openResults(document);const batch=document.querySelector('[aria-label="Batch report"]')!;
+ assert.equal(batch.getAttribute('data-status'),'completed');assert.match(batch.textContent!,/Batch journey 1 · passed/);assert.match(batch.textContent!,/Batch journey 2 · passed/);assert.match(batch.textContent!,/Batch journey 3 · passed/);
+ await act(async()=>document.querySelector<HTMLButtonElement>('[data-testid="results-run-picker"]')!.click());
  assert.equal(document.querySelectorAll('[aria-label="Scenario reports"] button').length,3);
- await click('Open report for Batch journey 1');assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Batch journey 1');
+ await click('Open report for Batch journey 1');assert.equal(document.querySelector('[data-testid="results-title"]')!.textContent,'Batch journey 1');
  assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!.textContent,'Batch journey 3');
  await fill('Scenario name','Later edit');await click('Save workspace');
- assert.match(batch.textContent!,/Batch journey 3/);assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Batch journey 1');
+ assert.equal(document.querySelector('[data-testid="results-title"]')!.textContent,'Batch journey 1');
+ await click('Back to batch');assert.match(document.querySelector('[aria-label="Batch report"]')!.textContent!,/Batch journey 3/);
 }));
 
 
 test('batch sidebar labels invalid drafts and still executes valid scenarios',()=>journey(async({document,click,fill})=>{
  await click('New scenario');await fill('Scenario name','Invalid draft');await click('Save workspace');
  await click('New scenario');await fill('Scenario name','Valid home');await click('Use 1 as scenario start');await click('Run all');
- const report=document.querySelector('[aria-label="Batch report"]')!;
+ await openResults(document);const report=document.querySelector('[aria-label="Batch report"]')!;
  assert.match(report.textContent!,/Invalid draft · not-run/);assert.match(report.textContent!,/nonempty.*path/);assert.match(report.textContent!,/Valid home · passed/);
+ await act(async()=>document.querySelector<HTMLButtonElement>('[data-testid="results-run-picker"]')!.click());
  assert.equal(document.querySelectorAll('[aria-label="Scenario reports"] button').length,1);
 }));
 
@@ -281,10 +287,10 @@ test('batch sidebar shows running and queued states and cancels the remaining qu
  for(let index=1;index<=2;index++){await click('New scenario');await fill('Scenario name','Queued '+index);await click('Use 1 as scenario start');await click('Save workspace');}
  holdNext();await click('Run all');
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,1100));});
- const report=document.querySelector('[aria-label="Batch report"]')!;
+ await openResults(document);const report=document.querySelector('[aria-label="Batch report"]')!;
  assert.match(report.textContent!,/Queued 1 · running/);assert.match(report.textContent!,/Queued 2 · queued/);
  await click('Stop scenario');assert.match(report.textContent!,/Batch · cancelled/);assert.match(report.textContent!,/Queued 1 · cancelled/);assert.match(report.textContent!,/Queued 2 · not-run/);assert.equal(calls(),1);
- await click('Open report for Queued 1');assert.equal(document.querySelector('.result-tag')!.textContent,'cancelled');
+ await click('Open report for Queued 1');assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'cancelled');
 }));
 
 
@@ -293,11 +299,11 @@ test('row run targets an unselected scenario and search leaves saved order and b
  await click('Save workspace');const before=await saved();
  await fill('Search scenarios','Case 1');
  assert.equal(document.querySelectorAll('[aria-label="Scenario list"] .scenario-select').length,4);
- await click('Run Case 1');assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Case 1');
- await click('Clear search');await click('Actions for Case 2');await click('Run scenario');assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Case 2');
+ await click('Run Case 1');await openResults(document);assert.equal(document.querySelector('[data-testid="results-title"]')!.textContent,'Case 1');
+ await click('Clear search');await click('Actions for Case 2');await click('Run scenario');assert.equal(document.querySelector('[data-testid="results-title"]')!.textContent,'Case 2');
  assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!.textContent,'Case 12');
  await fill('Search scenarios','Case 1');await click('Run all');
- assert.deepEqual([...document.querySelectorAll('[aria-label="Batch report"] button')].map(button=>button.textContent),before.scenarios!.map(item=>'Open report for '+item.name));
+ await openResults(document);assert.deepEqual([...document.querySelectorAll('[aria-label="Batch report"] button')].map(button=>button.getAttribute('aria-label')),before.scenarios!.map(item=>'Open report for '+item.name));
  assert.deepEqual((await saved()).scenarios,before.scenarios);
  await fill('Search scenarios','missing');assert.match(document.querySelector('[aria-label="Scenario list"]')!.textContent!,/No scenarios match/);
 }));
@@ -315,7 +321,7 @@ test('row rename commits or cancels without changing identity, sequence or histo
  await click('Save workspace');const after=await saved();
  assert.deepEqual(after.scenarios,[{...before.scenarios![0],name:'Updated name'}]);
  assert.deepEqual(after.canvas!.paths,[{...before.canvas!.paths[0],name:'Updated name'}]);
- assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Original name');
+ await openResults(document);assert.equal(document.querySelector('[data-testid="results-title"]')!.textContent,'Original name');
  await click('Open saved workspace');await openScenarioPanel(document,act);assert.equal(document.querySelector('[aria-label="Scenario list"] [aria-current="true"]')!.textContent,'Updated name');
 }));
 
@@ -329,7 +335,7 @@ test('deleting an unselected row and undo restores saved references without over
  await click('Undo');await click('Save workspace');const restored=await saved();
  assert.deepEqual(restored.scenarios,before.scenarios);
  assert.deepEqual(restored.canvas!.paths,before.canvas!.paths);
- assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Original');
+ await openResults(document);assert.equal(document.querySelector('[data-testid="results-title"]')!.textContent,'Original');
  await fill('Scenario name','Later edit');assert.equal(document.querySelector('.scenario-undo'),null);
  await click('Save workspace');const edited=await saved();
  assert.deepEqual(edited.scenarios,[before.scenarios![0],{...before.scenarios![1],name:'Later edit'}]);
@@ -376,8 +382,8 @@ test('authors can create, duplicate, restore and run more than twenty scenarios 
  await selectedCommand('Delete');await click('Undo');await click('New scenario');await fill('Scenario name','Later draft');await click('Save workspace');
  const restored=await saved();assert.equal(restored.scenarios!.length,23);assert.equal(restored.canvas!.paths.length,23);assert.deepEqual(restored.canvas!.screens[0].tests[0].scenarioIds,workspace.canvas!.screens[0].tests[0].scenarioIds);
  await click('Open saved workspace');await click('Run all');
- const batch=document.querySelector('[aria-label="Batch report"]')!;assert.match(batch.textContent!,/Later draft · not-run/);
- assert.deepEqual([...batch.querySelectorAll('button')].map(button=>button.textContent),restored.scenarios!.slice(0,-1).map(item=>'Open report for '+item.name));
+ await openResults(document);const batch=document.querySelector('[aria-label="Batch report"]')!;assert.match(batch.textContent!,/Later draft · not-run/);
+ assert.deepEqual([...batch.querySelectorAll('button')].map(button=>button.getAttribute('aria-label')),restored.scenarios!.slice(0,-1).map(item=>'Open report for '+item.name));
  const create=document.querySelector('[aria-label="Scenarios"] button[aria-label="New scenario"]')!;assert.equal(create.textContent,'New');
  assert.equal(document.querySelector('[aria-label="Scenarios"] button[aria-label^="Actions for "]'),null);
 }));
@@ -414,9 +420,9 @@ test('authors persist two skips, run ten searched cases in saved order, and rest
  assert.deepEqual((await saved()).canvas!.screens,before.canvas!.screens);
  await fill('Search scenarios','Skip case 1');await click('Run all');
  assert.equal(counts(),'10 included · 2 skipped');
- assert.deepEqual([...document.querySelectorAll('[aria-label="Batch report"] button')].map(button=>button.textContent),['Skip case 1','Skip case 2','Skip case 4','Skip case 5','Skip case 6','Skip case 7','Skip case 8','Skip case 9','Skip case 11','Skip case 12'].map(name=>'Open report for '+name));
+ await openResults(document);assert.deepEqual([...document.querySelectorAll('[aria-label="Batch report"] button')].map(button=>button.getAttribute('aria-label')),['Skip case 1','Skip case 2','Skip case 4','Skip case 5','Skip case 6','Skip case 7','Skip case 8','Skip case 9','Skip case 11','Skip case 12'].map(name=>'Open report for '+name));
  assert.equal(calls(),10);
- await click('Clear search');await click('Run Renamed skip');assert.equal(document.querySelector('.scenario-result h3')!.textContent,'Renamed skip');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');assert.equal(calls(),11);
+ await click('Clear search');await click('Run Renamed skip');await openResults(document);assert.equal(document.querySelector('[data-testid="results-title"]')!.textContent,'Renamed skip');assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');assert.equal(calls(),11);
  await click('Actions for Renamed skip');await click('Skip in Run All');assert.equal(counts(),'11 included · 1 skipped');
  await click('Actions for Renamed skip');await click('Skip in Run All');await click('Actions for Renamed skip');await click('Duplicate');await openScenarioPanel(document,act);await click('Save workspace');
  assert.equal((await saved()).scenarios!.at(-1)!.skipInRunAll,true);assert.equal(counts(),'10 included · 3 skipped');
@@ -425,7 +431,7 @@ test('authors persist two skips, run ten searched cases in saved order, and rest
  const runAll=[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Run all')!;assert.equal(runAll.disabled,true);
  await act(async()=>runAll.click());assert.equal(calls(),11);
  await click('Save workspace');await click('Open saved workspace');await openScenarioPanel(document,act);assert.equal(counts(),'0 included · 13 skipped');
- await click('Run Renamed skip');assert.equal(calls(),12);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+ await click('Run Renamed skip');assert.equal(calls(),12);assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
 }));
 
 test('deleting a return action immediately removes its destination visit and Undo restores it',()=>journey(async({document,click,fill,saved})=>{
@@ -439,7 +445,7 @@ test('deleting a return action immediately removes its destination visit and Und
  assert.ok(!(await inspected(document,'Home')).querySelector('[aria-label="Visit 3 · Home operations"]'),'Return visit must be removed');
  await click('Undo canvas deletion');assert.ok((await inspected(document,'Home')).querySelector('[aria-label="Visit 3 · Home operations"]'));
  await inspectScreen(document,{title:'Details'});await act(async()=>{const item=openStepMenuItem(document,'Delete action 1',inspectorCard(document)!);assert.ok(item);item.click();});assert.equal(document.querySelector('[role="alertdialog"]'),null);
- await click('Save workspace');assert.equal((await saved()).canvas!.paths[0].visits!.length,2);await click('Open saved workspace');assert.ok(!(await inspected(document,'Home')).querySelector('[aria-label="Visit 3 · Home operations"]'));await click('Run scenario');assert.equal(document.querySelector('.result-tag')!.textContent,'passed');
+ await click('Save workspace');assert.equal((await saved()).canvas!.paths[0].visits!.length,2);await click('Open saved workspace');assert.ok(!(await inspected(document,'Home')).querySelector('[aria-label="Visit 3 · Home operations"]'));await click('Run scenario');assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
 },true));
 
 for(const mode of ['destination','node'] as const)test(mode+' cleanup preserves shared scenario steps and Undo history',()=>journey(async({document,selectedCommand,click,fill,saved})=>{
@@ -452,7 +458,7 @@ for(const mode of ['destination','node'] as const)test(mode+' cleanup preserves 
  await remove();if(mode==='node'){assert.ok(document.querySelector('[role="alertdialog"]'));await click('Cancel deletion');}else{assert.ok(document.querySelector('[role="alertdialog"]'));assert.match(document.querySelector('[role="alertdialog"]')!.textContent||'',/Remove the link to/);await click('Cancel');}await click('Save workspace');assert.deepEqual((await saved()).canvas,before);
  await remove();if(mode==='node')await click('Delete anyway');else{assert.ok(document.querySelector('[role="alertdialog"]'));await click('Remove link');}assert.ok(!(await inspected(document,'Home')).querySelector('[aria-label="Visit 3 · Home operations"]'));await click('Save workspace');const after=(await saved()).canvas!;
  assert.equal(after.paths[1].visits!.length,mode==='node'?1:2);
- if(mode!=='node'){assert.deepEqual(after.paths[0],before.paths[0]);assert.equal(after.screens.length,2);await click('Original');assert.ok((await inspected(document,'Home')).querySelector('[aria-label="Visit 3 · Home operations"]'));await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('.result-tag')!.textContent,'passed');}
+ if(mode!=='node'){assert.deepEqual(after.paths[0],before.paths[0]);assert.equal(after.screens.length,2);await click('Original');assert.ok((await inspected(document,'Home')).querySelector('[aria-label="Visit 3 · Home operations"]'));await click('Run scenario');assert.equal(document.querySelector('.run-error-toast')?.textContent,undefined);assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');}
  else{assert.equal(after.paths[0].visits!.length,1);assert.ok(!after.screens.some(screen=>screen.title==='Details'));assert.equal(after.edges.length,0);}
 },true));
 
