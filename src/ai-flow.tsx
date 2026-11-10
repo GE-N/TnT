@@ -6,6 +6,8 @@ import type {Workspace} from '../server/scenarios.js';
 import type {DraftOverlay} from './canvas.js';
 import type {DraftPositions} from './draft-placement.js';
 import {AI_POLL_MS, ANSWER_CHAR_LIMIT, AiFlowRequestError, createAiFlowClient, PROMPT_CHAR_LIMIT, PROMPT_COUNTER_AT, type AiPublicConfig, type ApplyResponse, type GenerationPhase, type GenerationView, type ProviderId} from './ai-flow-client.js';
+import {knowledgeClient, knowledgeFailureSentence, KnowledgeRequestError, type ScenarioContext} from './knowledge-client.js';
+import type {KnowledgeDraftOffer} from './knowledge-sheet.js';
 import {subscribeAiConfig} from './ai-settings.js';
 import {VersionsSheet} from './ai-versions-sheet.js';
 import {closePanel as closeSidePanel, openPanel as openSidePanel, useSidePanels} from './side-panels.js';
@@ -43,6 +45,15 @@ export type AiDraft = {
   restoreStatus?: AiDraftStatus;
   /** Canvas coordinates for pending create-screens. Survives reload with the draft. Apply sends them as placements. */
   positions?: DraftPositions;
+  /** Server-inferred intent. Knowledge review uses this instead of a flow preview. */
+  intent?: GenerationView['intent'];
+  kind?: GenerationView['kind'];
+  knowledgeDraft?: GenerationView['knowledgeDraft'];
+  scenarioId?: string;
+  /** Original mixed request, kept so Apply can ask to update the details. */
+  remainder?: string;
+  /** Apply waits until the info sheet has reloaded the server copy. */
+  knowledgeHeld?: boolean;
   /**
    * Placements sent with the current client preview.
    * `null` means that preview omitted the field. Absent means the preview was not recorded here.
@@ -351,24 +362,78 @@ function overlayRenders(draft: FlowDraft | undefined, canvas: CanvasGraph | unde
   return overlay.nodes.length > 0 || overlay.existing.length > 0;
 }
 
+function isAskBack(view: GenerationView) {
+  if (view.state !== 'needsInfo' || !view.questions?.length) return false;
+  if (isFlowDraft(view.draft) || view.preview) return false;
+  return view.intent === 'knowledge' || view.intent === 'unclear' || view.intent === 'mixed' || view.kind === 'knowledge';
+}
+
+function knowledgeReady(view: GenerationView) {
+  return view.state === 'pending' && !!view.knowledgeDraft && (view.intent === 'knowledge' || view.kind === 'knowledge');
+}
+
+function withIntent(next: AiDraft, view: GenerationView): AiDraft {
+  return {
+    ...next,
+    ...(view.intent ? {intent: view.intent} : {}),
+    ...(view.kind ? {kind: view.kind} : {}),
+    ...(view.scenarioId ? {scenarioId: view.scenarioId} : {}),
+    remainder: view.intent === 'mixed' ? view.remainder : undefined,
+  };
+}
+
 /**
  * A review status closes the composer only when the canvas can draw the draft.
  * needsInfo with a non-applicable, non-rendering preview (INVALID_DRAFT) and
  * failed AUTHORING_INVALID / INVALID_AI_OUTPUT stay in the composer with the prompt.
+ * A knowledge draft and an ask-back with no flow draft stay in the capsule instead.
  */
 function presentResult(current: AiDraft, view: GenerationView, revision: number, canvas: CanvasGraph | undefined): AiDraft {
+  if (knowledgeReady(view)) {
+    const base = fromView({...current, baseRevision: undefined}, view, revision);
+    return {
+      ...withIntent(base, view),
+      status: 'pending',
+      knowledgeDraft: view.knowledgeDraft,
+      draft: undefined,
+      previewId: undefined,
+      applicable: undefined,
+      questions: undefined,
+      error: undefined,
+      phase: undefined,
+      knowledgeHeld: false,
+      baseRevision: undefined,
+    };
+  }
+  if (isAskBack(view)) {
+    const base = fromView({...current, baseRevision: undefined}, view, revision);
+    return {
+      ...withIntent(base, view),
+      status: 'needsInfo',
+      knowledgeDraft: undefined,
+      draft: undefined,
+      previewId: undefined,
+      applicable: undefined,
+      questions: view.questions,
+      error: undefined,
+      phase: undefined,
+      knowledgeHeld: false,
+      baseRevision: undefined,
+    };
+  }
   const base = fromView(current, view, revision);
   const diagnostics = base.diagnostics?.length ? base.diagnostics : diagnosticsOn(view);
-  const next = diagnostics.length ? {...base, diagnostics} : base;
-  if (view.state === 'running' || view.state === 'cancelled') return next;
-  if (view.state === 'failed') return {...next, status: 'failed'};
+  const next = withIntent(diagnostics.length ? {...base, diagnostics} : base, view);
+  if (view.state === 'running' || view.state === 'cancelled') return {...next, knowledgeDraft: undefined};
+  if (view.state === 'failed') return {...next, status: 'failed', knowledgeDraft: undefined};
   if (next.status !== 'pending' && next.status !== 'needsInfo' && next.status !== 'stale') return next;
-  if (overlayRenders(next.draft, canvas)) return next;
+  if (overlayRenders(next.draft, canvas)) return {...next, knowledgeDraft: undefined};
   const blocking = (next.diagnostics ?? []).some(item => item.blocks.includes('apply') || item.severity === 'error');
-  if (!blocking && next.applicable !== false && view.state !== 'needsInfo') return next;
+  if (!blocking && next.applicable !== false && view.state !== 'needsInfo') return {...next, knowledgeDraft: undefined};
   return {
     ...next,
     status: 'failed',
+    knowledgeDraft: undefined,
     error: next.error ?? {code: 'AUTHORING_INVALID', message: 'The reply didn’t fit TnT’s format, even after one repair.', retryable: false},
   };
 }
@@ -405,6 +470,7 @@ function writeDisclosure(id: string) {
 
 export function useAiDraft(input: Callbacks & {token: string; workspaceId: string; revision: number; running: boolean; canvas: CanvasGraph | undefined; scenarios: {id: string; authoring?: string; pathId?: string}[]; contentKey: string; loadRevision: number; onOpenSettings?: (returnTo?: HTMLElement) => void}) {
   const client = useMemo(() => createAiFlowClient(input.token), [input.token]);
+  const knowledge = useMemo(() => knowledgeClient(input.token), [input.token]);
   const callbacks = useRef<Callbacks>(input);
   callbacks.current = input;
   const [draft, setDraft] = useState<AiDraft>(emptyDraft);
@@ -412,10 +478,15 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const [submitting, setSubmitting] = useState(false);
   const [provenanceId, setProvenanceId] = useState('');
   const [provenanceName, setProvenanceName] = useState('');
-  const [undoOffer, setUndoOffer] = useState<{receiptId: string; revision: number; workspaceId: string; pops?: number}>();
+  const [undoOffer, setUndoOffer] = useState<{receiptId: string; revision: number; workspaceId: string; pops?: number; knowledge?: {scenarioId: string; contextRevision: number}}>();
   const undoOfferRef = useRef(undoOffer);
   undoOfferRef.current = undoOffer;
   const [undoVisible, setUndoVisible] = useState(false);
+  const [mixedFollowUp, setMixedFollowUp] = useState('');
+  const [knowledgeNotice, setKnowledgeNotice] = useState('');
+  const [knowledgePulse, setKnowledgePulse] = useState(0);
+  const [knowledgeFreshness, setKnowledgeFreshness] = useState<'updating' | null>(null);
+  const [knowledgeServerContext, setKnowledgeServerContext] = useState<ScenarioContext | null>(null);
   const [versionState, setVersionState] = useState<AiVersionsState>({format: 1, flows: {}});
   const versionStateRef = useRef(versionState);
   versionStateRef.current = versionState;
@@ -482,8 +553,9 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   }, [draft.jobId, draft.prompt, draft.previewId, draft.baseRevision, draft.status, draft.workspaceId, input.workspaceId, positionKey]);
 
   useEffect(() => {
-    if (reviewing && showOverlay) setOpen(false);
-  }, [reviewing, showOverlay]);
+    const askBack = draft.status === 'needsInfo' && !!draft.questions?.length && !draft.draft;
+    if (reviewing && (showOverlay || !!draft.knowledgeDraft || askBack)) setOpen(false);
+  }, [reviewing, showOverlay, draft.knowledgeDraft, draft.status, draft.questions, draft.draft]);
 
   useEffect(() => {
     if ((draft.status !== 'pending' && draft.status !== 'needsInfo') || draft.refining) return;
@@ -709,7 +781,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
    */
   function failRefine(text: string, error?: AiDraft['error'], notice?: string) {
     const current = draftRef.current;
-    if (!current.refining || !current.draft || !current.restoreStatus || !REVIEW.includes(current.restoreStatus)) return false;
+    const canRestore = !!current.draft || !!current.knowledgeDraft || !!current.questions?.length;
+    if (!current.refining || !canRestore || !current.restoreStatus || !REVIEW.includes(current.restoreStatus)) return false;
     pendingAnswers.current = undefined;
     const jobId = current.previousJobId ?? current.jobId;
     const draft = current.draft;
@@ -717,9 +790,9 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     const workspaceId = current.workspaceId || input.workspaceId;
     jobGuard.current = jobId;
     const target = ownSaveRevision.current ?? revisionRef.current;
-    const mismatch = current.baseRevision !== target;
+    const mismatch = !!draft && current.baseRevision !== target;
     setOpen(false);
-    if (!mismatch || !workspaceId || !jobId) {
+    if (!mismatch || !workspaceId || !jobId || !draft) {
       if (ownSaveRevision.current === target) ownSaveRevision.current = undefined;
       setDraft({
         ...current,
@@ -792,6 +865,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     const text = prompt.trim();
     if (!text || text.length > PROMPT_CHAR_LIMIT || submitting || opLock.current) return;
     closeVersions();
+    setMixedFollowUp('');
+    setKnowledgeNotice('');
     opLock.current = true;
     const refining = !!draftRef.current.refining;
     const previousJobId = refining ? (draftRef.current.previousJobId ?? draftRef.current.jobId) : undefined;
@@ -864,6 +939,10 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
           ...(refining && restoreStatus ? {restoreStatus} : {restoreStatus: undefined}),
           draft: refining ? current.draft : undefined,
           questions: refining ? current.questions : undefined,
+          knowledgeDraft: refining ? current.knowledgeDraft : undefined,
+          intent: refining ? current.intent : undefined,
+          remainder: refining ? current.remainder : undefined,
+          knowledgeHeld: refining ? current.knowledgeHeld : false,
           error: started.error,
           notice: undefined,
         }));
@@ -1004,7 +1083,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   function beginRefine(text: string, answers?: {key: string; answer: string}[]) {
     const current = draftRef.current;
     const workspaceId = current.workspaceId || input.workspaceId;
-    if (!current.draft || !current.jobId || !workspaceId || !REVIEW.includes(current.status)) return;
+    const knowledgeTurn = !current.draft && (!!current.knowledgeDraft || !!current.questions?.length);
+    if ((!current.draft && !knowledgeTurn) || !current.jobId || !workspaceId || !REVIEW.includes(current.status)) return;
     pendingAnswers.current = answers?.length ? answers : undefined;
     const next: AiDraft = {
       ...current,
@@ -1035,8 +1115,72 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     beginRefine(text, [{key, answer: text}]);
   }
 
+  async function confirmKnowledge() {
+    const current = draftRef.current;
+    const draft = current.knowledgeDraft;
+    const scenarioId = current.scenarioId;
+    if (!draft || !current.jobId || !scenarioId || !input.workspaceId || current.knowledgeHeld || current.status === 'applying') return;
+    if (input.running) return;
+    const workspaceId = input.workspaceId;
+    setKnowledgeNotice('');
+    setDraft(existing => ({...existing, status: 'applying', error: undefined}));
+    let key = idempotency.current.get('knowledge:' + current.jobId);
+    if (!key) { key = crypto.randomUUID(); idempotency.current.set('knowledge:' + current.jobId, key); }
+    try {
+      const applied = await knowledge.apply(workspaceId, scenarioId, {
+        jobId: current.jobId,
+        expectedContextRevision: draft.baseContextRevision,
+        idempotencyKey: key,
+      });
+      if (draftRef.current.jobId !== current.jobId) return;
+      jobGuard.current = undefined;
+      memory.current.delete(workspaceId);
+      clearPersisted();
+      setDraft(emptyDraft());
+      setOpen(false);
+      setKnowledgeFreshness('updating');
+      setKnowledgePulse(value => value + 1);
+      const revision = applied.detail?.context?.contextRevision;
+      if (applied.receipt?.receiptId && typeof revision === 'number') {
+        setUndoOffer({
+          receiptId: applied.receipt.receiptId,
+          revision: revisionRef.current,
+          workspaceId,
+          knowledge: {scenarioId, contextRevision: revision},
+        });
+      }
+    } catch (error) {
+      if (draftRef.current.jobId !== current.jobId) return;
+      const code = error instanceof KnowledgeRequestError ? error.code : undefined;
+      const sentence = knowledgeFailureSentence(code) ?? 'Scenario details aren\'t available right now. Nothing was changed.';
+      if (code === 'CONTEXT_REVISION_CONFLICT' && error instanceof KnowledgeRequestError && error.context && error.currentContextRevision !== undefined) {
+        const revision = error.currentContextRevision;
+        setDraft(existing => ({
+          ...existing,
+          status: 'pending',
+          knowledgeHeld: true,
+          knowledgeDraft: existing.knowledgeDraft ? {...existing.knowledgeDraft, baseContextRevision: revision} : existing.knowledgeDraft,
+        }));
+        setKnowledgeNotice(sentence);
+        setKnowledgeServerContext(error.context);
+        return;
+      }
+      setDraft(existing => ({...existing, status: 'pending'}));
+      setKnowledgeNotice(sentence);
+    }
+  }
+
+  function acknowledgeKnowledgeServer() {
+    setKnowledgeServerContext(null);
+    setDraft(current => current.knowledgeHeld ? {...current, knowledgeHeld: false} : current);
+  }
+
   async function confirm() {
     const current = draftRef.current;
+    if (current.knowledgeDraft && !current.draft) {
+      await confirmKnowledge();
+      return;
+    }
     if (restoreLock.current || confirmReason(current, input.running) || !current.previewId || current.baseRevision === undefined || !input.workspaceId) return;
     const workspaceId = input.workspaceId;
     let previewId = current.previewId;
@@ -1124,6 +1268,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
       setDraft(emptyDraft());
       setOpen(false);
       setProvenanceId(applied.scenarioId);
+      if (current.intent === 'mixed' && current.remainder) setMixedFollowUp(current.remainder);
       if (applied.receiptId) setUndoOffer({receiptId: applied.receiptId, revision: applied.revision, workspaceId: applied.workspaceId});
     } catch (error) {
       setDraft(existing => ({...existing, status: 'failed', error: errorOf(error, 'The workspace could not be reloaded after confirm.')}));
@@ -1131,7 +1276,25 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   }
 
   async function undoApply() {
-    if (!undoOfferRef.current) return;
+    const offer = undoOfferRef.current;
+    if (!offer) return;
+    if (offer.knowledge) {
+      try {
+        await knowledge.undo(offer.workspaceId, offer.knowledge.scenarioId, {
+          receiptId: offer.receiptId,
+          expectedContextRevision: offer.knowledge.contextRevision,
+        });
+        setUndoOffer(undefined);
+        setUndoVisible(false);
+        setKnowledgeNotice('');
+        setKnowledgeFreshness('updating');
+        setKnowledgePulse(value => value + 1);
+      } catch (error) {
+        const code = error instanceof KnowledgeRequestError ? error.code : undefined;
+        setKnowledgeNotice(knowledgeFailureSentence(code) ?? 'Scenario details aren\'t available right now. Nothing was changed.');
+      }
+      return;
+    }
     await restoreUndo(false);
   }
 
@@ -1168,6 +1331,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     pendingAnswers.current = undefined;
     memory.current.delete(input.workspaceId);
     clearPersisted();
+    setKnowledgeNotice('');
+    setKnowledgeServerContext(null);
     setDraft(emptyDraft());
     setOpen(false);
     if (id && stillRunning) {
@@ -1359,6 +1524,17 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     setPrompt: (prompt: string) => setDraft(current => ({...current, prompt})),
     openPanel, closePanel, generate, refresh, ask, answer, confirm, undoApply, cancel, discard, refine,
     placeDraft, moveDraft,
+    knowledgeOffer: draft.knowledgeDraft && draft.jobId && draft.scenarioId && (draft.status === 'pending' || draft.status === 'applying')
+      ? {jobId: draft.jobId, scenarioId: draft.scenarioId, draft: draft.knowledgeDraft} satisfies KnowledgeDraftOffer
+      : undefined,
+    knowledgePulse, knowledgeFreshness, knowledgeServerContext, acknowledgeKnowledgeServer, knowledgeNotice,
+    mixedFollowUp,
+    updateDetails() {
+      const text = mixedFollowUp.trim();
+      setMixedFollowUp('');
+      if (text) void generate(text);
+    },
+    skipDetails() { setMixedFollowUp(''); },
     openSettings: (returnTo?: HTMLElement) => openSettingsRef.current?.(returnTo),
     versionsOpen, versionPreview, versionCount: listed.length,
     sheetVersions: [...listed].reverse(), nowVersionId: nowVersion?.id, selectedVersionId: selectedVersion?.id,
@@ -1369,6 +1545,12 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
 }
 
 export function confirmReason(draft: AiDraft, running: boolean) {
+  if (draft.questions?.length && !draft.draft && !draft.knowledgeDraft) return undefined;
+  if (draft.knowledgeDraft && !draft.draft) {
+    if (draft.status === 'applying') return 'Apply is unavailable while the draft is being added.';
+    if (running) return 'Apply is unavailable while a run is active.';
+    return undefined;
+  }
   if (!REVIEW.includes(draft.status) && draft.status !== 'failed') return undefined;
   if (draft.status === 'applying') return 'Apply is unavailable while the draft is being added.';
   if (running) return 'Apply is unavailable while a run is active.';
@@ -1459,7 +1641,9 @@ export function AiFlow({control}: {control: AiDraftControl}) {
     ? aiErrorView(draft.error.code, draft.error.message, modelOf(control.config, control.provider) || draft.model, control.provider)
     : setupNeeded && !configured ? aiErrorView('AI_NOT_CONFIGURED', '', undefined, control.provider) : undefined;
   const composerIssues = (draft.diagnostics ?? []).filter(item => item.blocks.includes('apply') || item.severity === 'error');
-  const draftOpen = REVIEW.includes(draft.status) && !refining && !!draft.draft;
+  const knowledgeOpen = !!draft.knowledgeDraft && (draft.status === 'pending' || draft.status === 'applying');
+  const askOpen = draft.status === 'needsInfo' && !!draft.questions?.length && !draft.draft && !refining;
+  const draftOpen = (REVIEW.includes(draft.status) && !refining && !!draft.draft) || knowledgeOpen || askOpen;
   const mode = capsuleMode({draftOpen, undoVisible: control.undoVisible, versionCount: control.versionCount});
   function focusCapsule() {
     const target = versionsRef.current ?? undoRef.current ?? askRef.current ?? fieldRef.current;
@@ -1484,7 +1668,7 @@ export function AiFlow({control}: {control: AiDraftControl}) {
     <p className="sr-only" aria-live="polite" data-testid="ai-live">{live}</p>
     {generating && <div className="sr-only" role="progressbar" aria-valuetext={progressText} aria-label={refining ? 'Refining draft' : 'Generating flow'} />}
     {draft.status === 'stale' && <p className="ai-muted">The workspace changed since this draft was prepared. <button type="button" className="ai-text" data-testid="ai-refresh" onClick={() => void control.refresh()}>Refresh</button></p>}
-    {provenanceId && <p className="ai-provenance" data-testid="ai-provenance">Applied as “{provenanceName || 'this flow'}” · not run yet</p>}
+    {provenanceId && !control.mixedFollowUp && <p className="ai-provenance" data-testid="ai-provenance">Applied as “{provenanceName || 'this flow'}” · not run yet</p>}
     {showPanel && <section className={'ai-panel' + (failed && !neutral ? ' is-error' : '') + (over ? ' is-over' : '')} aria-label={refining ? 'Refine draft' : 'AI flow'} aria-busy={busy || undefined} onKeyDown={onPanelKeyDown} onMouseDown={event => { const target = event.target instanceof Element ? event.target : null; if (target?.closest('a')) return; event.preventDefault(); }}>
       <div className="ai-panel-bar">
         <button type="button" className="ai-text" aria-label="Close" onClick={() => { if (generating) return; control.closePanel(); collapsePanel(); }}>✕</button>
@@ -1498,7 +1682,8 @@ export function AiFlow({control}: {control: AiDraftControl}) {
         </div>
       </div>
     </section>}
-    {mode === 'draft' ? <AiCapsule control={control} askRef={askRef} /> : mode !== 'idle' && !open ? <HistoryCapsule control={control} mode={mode} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : <div className={'ai-flow-field' + (generating ? ' is-generating' : '')}><Sparkles size={20} /><textarea ref={fieldRef} className="ai-flow-input" data-testid="ai-flow-field" rows={1} aria-label="Ask AI" placeholder="Ask AI" value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={showPanel && (copy || panelError) ? errorId : undefined} onChange={event => { if (event.target.value.length >= PROMPT_COUNTER_AT) setCollapsed(false); control.setPrompt(event.target.value); }} onKeyDown={onFieldKeyDown} />{generating ? <button type="button" className="ai-send is-stop" data-testid="ai-cancel" aria-label="Stop" title="Stop" onClick={() => void control.cancel()}><StopIcon /></button> : draft.prompt.trim() ? <button type="button" className="ai-send" aria-label="Send" title="Send (Enter) · Shift+Enter for a new line" disabled={busy || over || !configured || !!control.disclosure} onClick={() => void control.generate()}><SendIcon /></button> : null}</div>}
+    {mode === 'draft' ? <AiCapsule control={control} askRef={askRef} /> : control.mixedFollowUp && !generating && !open ? <FollowUpCapsule control={control} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : mode !== 'idle' && !open ? <HistoryCapsule control={control} mode={mode} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : <div className={'ai-flow-field' + (generating ? ' is-generating' : '')}><Sparkles size={20} /><textarea ref={fieldRef} className="ai-flow-input" data-testid="ai-flow-field" rows={1} aria-label="Ask AI" placeholder="Ask AI" value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={showPanel && (copy || panelError) ? errorId : undefined} onChange={event => { if (event.target.value.length >= PROMPT_COUNTER_AT) setCollapsed(false); control.setPrompt(event.target.value); }} onKeyDown={onFieldKeyDown} />{generating ? <button type="button" className="ai-send is-stop" data-testid="ai-cancel" aria-label="Stop" title="Stop" onClick={() => void control.cancel()}><StopIcon /></button> : draft.prompt.trim() ? <button type="button" className="ai-send" aria-label="Send" title="Send (Enter) · Shift+Enter for a new line" disabled={busy || over || !configured || !!control.disclosure} onClick={() => void control.generate()}><SendIcon /></button> : null}</div>}
+    {!!control.knowledgeNotice && <p className="ai-knowledge-note" role="alert" data-testid="ai-knowledge-note">{control.knowledgeNotice}</p>}
   </div>
   {control.versionsOpen && !!control.sheetVersions.length && createPortal(<VersionsSheet versions={control.sheetVersions} nowId={control.nowVersionId} selectedId={control.selectedVersionId} onSelect={control.selectVersion} onClose={closeVersions} onKeepCurrent={control.keepCurrent} onRestore={() => { const id = control.selectedVersionId; if (id) void control.restore(id); }} restoreDisabled={!!control.restoreReason} restoreNote={control.restoreReason} restoreError={control.restoreError} />, document.body)}
   </>;
@@ -1536,11 +1721,13 @@ function AiCapsule({control, askRef}: {control: AiDraftControl; askRef: {current
   const reasonId = useId();
   const focused = useRef('');
   const questions = (draft.questions ?? []).slice(0, 5);
+  const showApply = !!draft.draft || !!draft.knowledgeDraft;
+  const focusKey = draft.previewId || (draft.knowledgeDraft ? draft.jobId : '');
   useEffect(() => {
-    if (!draft.previewId || focused.current === draft.previewId) return;
-    focused.current = draft.previewId;
+    if (!focusKey || focused.current === focusKey) return;
+    focused.current = focusKey;
     applyRef.current?.focus();
-  }, [draft.previewId]);
+  }, [focusKey]);
   function submit() {
     const next = text.trim();
     if (!next) return;
@@ -1562,12 +1749,41 @@ function AiCapsule({control, askRef}: {control: AiDraftControl; askRef: {current
       <div className="ai-capsule-row">
         <Sparkles />
         <input ref={askRef} className="ai-capsule-input" aria-label="Ask AI" placeholder="Ask AI" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
-        <button type="button" ref={applyRef} className="ai-capsule-apply" data-testid="ai-confirm" aria-disabled={reason ? true : undefined} aria-describedby={reason ? reasonId : undefined} onClick={() => { if (!reason) void control.confirm(); }}>✓ Apply</button>
+        {showApply && <button type="button" ref={applyRef} className="ai-capsule-apply" data-testid="ai-confirm" aria-disabled={reason ? true : undefined} aria-describedby={reason ? reasonId : undefined} onClick={() => { if (!reason && !draft.knowledgeHeld) void control.confirm(); }}>✓ Apply</button>}
         <button type="button" className="ai-capsule-dismiss" data-testid="ai-discard" aria-label="Dismiss draft" onClick={() => void control.discard()}>✕</button>
       </div>
     </form>
     {reason && <p id={reasonId} className="ai-reason" data-testid="ai-confirm-reason">{reason}</p>}
     {draft.error && <p className="ai-error" role="alert" data-testid="ai-capsule-error">{aiErrorText(aiErrorView(draft.error.code, draft.error.message, draft.model, control.provider))}</p>}
+  </div>;
+}
+
+function FollowUpCapsule({control, versionsRef, undoRef, askRef}: {control: AiDraftControl; versionsRef: {current: HTMLButtonElement | null}; undoRef: {current: HTMLButtonElement | null}; askRef: {current: HTMLInputElement | null}}) {
+  const [text, setText] = useState('');
+  function submit() {
+    const next = text.trim();
+    if (!next || next.length > PROMPT_CHAR_LIMIT) return;
+    setText('');
+    void control.generate(next);
+  }
+  return <div className="ai-capsule-wrap ai-flow-field">
+    <form className="ai-capsule has-questions" data-testid="ai-capsule" onSubmit={event => { event.preventDefault(); submit(); }}>
+      <div className="ai-questions" data-testid="ai-questions">
+        <div className="ai-question" data-testid="ai-question" data-question-key="mixed-details">
+          <p className="ai-question-text">Update the purpose too?</p>
+          <div className="ai-question-options">
+            <button type="button" className="ai-question-option" data-testid="ai-question-option" onClick={() => control.updateDetails()}>Update details</button>
+            <button type="button" className="ai-question-option" data-testid="ai-question-option" onClick={() => control.skipDetails()}>Skip</button>
+          </div>
+        </div>
+      </div>
+      <div className="ai-capsule-row">
+        <Sparkles />
+        <input ref={askRef} className="ai-capsule-input" aria-label="Ask AI" placeholder="Ask AI" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
+        {control.undoVisible && <button type="button" ref={undoRef} className="ai-capsule-undo" data-testid="ai-undo" onClick={() => void control.undoApply()}>↶ Undo</button>}
+        {!control.undoVisible && <VersionsControl control={control} buttonRef={versionsRef} />}
+      </div>
+    </form>
   </div>;
 }
 
