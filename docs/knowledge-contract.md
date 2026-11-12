@@ -265,6 +265,8 @@ Knowledge has no Versions history.
   does not call `saveContext`, because that would re-review the source.
 
 The client hides Undo after 10 seconds (`UNDO_CLIENT_WINDOW_MS`). This server does not.
+
+A confirmed flow diagram is not a seventh context field. It is `<scenarioId>.diagram.json` beside the sidecar (Mermaid plus the path list, no image bytes). Diagram apply writes a receipt with the same fields as a knowledge receipt plus `previousDiagram` (`null` when there was no file) and `skill: "diagram@1"`. Knowledge receipts stay the old shape. Undo of a diagram receipt restores the previous diagram file as well as the previous sidecar bytes. `GET .../context` does not include the diagram. `GET .../diagram` returns it only when asked. The info sheet does not grow a diagram block.
 It accepts a receipt until pruning. Receipts older than 24 hours
 (`RECEIPT_RETENTION_MS`) may be deleted on the next apply or undo. A pruned
 receipt is `KNOWLEDGE_NOT_FOUND`. Auth, `Cache-Control: no-store`, id decoding,

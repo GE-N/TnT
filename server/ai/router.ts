@@ -4,7 +4,7 @@ import type {ClarifyingQuestion} from './questions.js';
 import {parseModelObject} from './model-json.js';
 import type {Skill} from './skills.js';
 
-export type RouterIntent = 'flow' | 'knowledge' | 'mixed' | 'unclear';
+export type RouterIntent = 'flow' | 'knowledge' | 'mixed' | 'unclear' | 'diagram';
 
 export type ScenarioCatalog = {
   scenarios: {id: string; title: string}[];

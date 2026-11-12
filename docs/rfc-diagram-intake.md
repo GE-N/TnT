@@ -1,16 +1,28 @@
 # Diagram intake
 
-Status: design only. This note does not authorize a product change.
+Status: decisions locked 2026-11-12. The backend slice is in progress on this branch. No client UI in that slice.
 
-Baseline: `main` at `1e9acce` (PR #104). Official docs below were read on 2026-11-12. No Copilot, Claude, or OpenAI call was made.
+Baseline for the research below: `main` at `1e9acce` (PR #104). Official docs were read on 2026-11-12. No live Copilot, Claude, or OpenAI call was made.
 
 The user gives a picture of a flow instead of typing the steps. The model reads it, asks until the sequences are clear, and turns it into Mermaid. The user confirms that Mermaid. TnT stores it as knowledge and can create scenarios from it.
+
+## Decisions (2026-11-12)
+
+These close the questions in section 5.
+
+1. **Option C.** Mermaid is the shared intermediate for an uploaded image and for pasted Mermaid.
+2. After the diagram is saved, ask whether to create a scenario. Then author **only the path the user names**. Do not offer every branch.
+3. Only a clean exported PNG or JPEG. Whiteboard photos are not a supported input. Any other format gets one plain error: "This file isn't a PNG or JPEG export." The server checks magic bytes. It does not try to tell a JPEG photo from a JPEG export; the UI must not offer a camera or a photo library.
+4. Sending that diagram image to the selected provider is allowed. Screenshots and recordings stay on the not-sent list. The first-run disclosure has to say a diagram image is sent. That copy change is part of the UI slice, not the backend slice.
+5. After Apply, the diagram is stored only. No block in the info sheet. It is returned only when something asks for it (`GET .../diagram`).
+
+The stored file is `<scenarioId>.diagram.json` next to the scenario sidecar: the confirmed Mermaid and its paths. The original image is not kept after the draft. Why is unchanged by a diagram apply. Undo uses the existing knowledge receipt (the client still hides Undo after 10 seconds; the server does not enforce that window) and restores the previous diagram bytes.
 
 ## 1. What we can reuse
 
 **Ask AI.** One field, bottom center, labeled “Ask AI” (`src/ai-flow.tsx`). It is text only: no paste, drop, or file handler. Send posts `prompt`, and optionally `previousJobId` and `answers`. Any other field is `Unknown generation field` (`server/ai/job.ts`). An empty prompt is `PROMPT_REQUIRED`. The cap is 4,000 characters (`server/ai/prompt.ts`). A running request keeps the text and offers Stop. A finished draft is reviewed on the same capsule with Apply, X, and Undo. Questions use the existing ask-back card (`data-testid="ai-questions"`): a short question, two or three options, and the field still takes typed text. An ask-back can be dismissed and has no Apply (`docs/knowledge-contract.md`, Client review).
 
-The first-run disclosure says screenshots and recordings are not sent (`Disclosure` in `src/ai-flow.tsx`). An uploaded diagram breaks that promise. The copy has to change before any image leaves the machine.
+The first-run disclosure says screenshots and recordings are not sent (`Disclosure` in `src/ai-flow.tsx`). Decision 4 allows a diagram image to be sent and leaves screenshots and recordings unsent. The disclosure sentence itself changes in the UI slice.
 
 **Router.** `POST /api/ai/generations` has no mode. `router@1` (`server/ai/skills/router/v1/prompt.md`, `server/ai/router.ts`) returns `flow`, `knowledge`, `mixed`, or `unclear`. A provider error, a timeout, or a bad body becomes `unclear`, never a flow. `unclear` asks “Change the flow, or update the scenario details?” `mixed` drafts the flow first and keeps the original words as `remainder`. Knowledge waits for “Update the purpose too?” There is no combined apply. A pending draft of the other kind asks “Finish the current draft first?”
 
@@ -24,12 +36,14 @@ The router only sees text (`routerUserMessage`). The offline helper `classifyInt
 
 No provider in this repo can. `Msg` is `{role, content: string}` (`server/ai/providers/types.ts`). `generate` has no image argument. The AI log stores tokens and outcome, not the prompt (`server/ai/log.ts`).
 
-| What the product has | Image in our code today? | What official docs say it would take |
-| --- | --- | --- |
-| Copilot SDK (it embeds the CLI) | No. `session.send({prompt})` only | `attachments` on `send`. Below. |
-| Claude Code `claude -p` | Not a provider | A new provider. Below. |
-| OpenAI-compatible | No. String `content` on `chat/completions` | Image parts on that same API. Below. |
-| OpenRouter (same adapter) | No | Its current image docs use a different endpoint. Below. |
+At `1e9acce` none of these sent an image. The backend slice now sends one for Copilot (blob attachment, and only when that model reports vision) and for OpenAI-compatible (`image_url` parts, capped at 2 MB of image bytes). OpenRouter and `claude -p` still return "This model can't read images." Copilot `auto` does too, because vision is not known up front.
+
+| Provider | At `1e9acce` | What the docs require | This slice |
+| --- | --- | --- | --- |
+| Copilot SDK (embeds CLI 1.0.105) | `session.send({prompt})` only | `attachments` on `send`; `capabilities.supports.vision` | Blob attachment. No vision, or `auto`: plain error. |
+| Claude Code `claude -p` | Not a provider | No `--image` flag. Path-in-prompt for `-p` is unproven | Plain error. Still unwired. |
+| OpenAI-compatible | String `content` | `image_url` content parts | Sent, within the 2 MB cap. Not the 128 KiB text budget. |
+| OpenRouter (same adapter) | String `content` | Documented on `/api/v1/responses`, not the chat body we send | Plain error. Unproven. |
 
 **Copilot.** `package.json` pins `@github/copilot-sdk` 1.0.28. That package names CLI 1.0.105. TnT does not spawn `copilot` itself. `createSdkCopilotRuntime` sends `{prompt}` only (`server/ai/providers/copilot-runtime.ts`). The session sets `availableTools: []`, so a path written into the prompt cannot be opened. SDK 1.0.28 `MessageOptions.attachments` already allows `type: "file"` (absolute path) or `type: "blob"` (base64 plus `mimeType`). GitHub’s image-input page documents both, auto-resize, and `capabilities.supports.vision`. If the image still does not fit, the runtime skips it and does not send it. Our model list keeps only id, name, and enabled, so we never read that flag. **Unknown:** whether a skip is an error or silent. **Unknown:** whether model `auto` can be checked for vision before the image is sent.
 
@@ -43,7 +57,7 @@ If the selected model cannot see, stop with a plain error. Do not switch models.
 
 ## 2. Proposed flow
 
-The upload uses the existing Ask AI field: attach, paste, or drop. One PNG or JPEG, plus an optional caption in the same field. Pasted Mermaid is ordinary text in that field. No second field and no mode.
+The upload uses the existing Ask AI field: attach, paste, or drop. One PNG or JPEG export, plus an optional caption in the same field. Pasted Mermaid is ordinary text in that field. No second field and no mode. Whiteboard photos are out of scope.
 
 An image, or a message that is a Mermaid flowchart, is data on the same generation. It does not get “Change the flow, or update the scenario details?” A caption that clearly asks for something else still uses the existing ask-back. An image and a Mermaid block together ask which is the source. A pending draft still has to be applied or dismissed first.
 
@@ -53,9 +67,9 @@ A new skill, next to `router@1` and `knowledge-update@1`, reads the image once. 
 
 Mermaid is the reading the user confirms. The picture is the evidence. Later scenarios are built from the graph, not from a second look at the pixels. Show the Mermaid source as soon as the backend can return it. Draw it only after a UI preview, so branches can be compared with the picture. V1 accepts a flowchart. Anything else comes back as a question.
 
-Apply and X stay on the capsule. Apply writes a sibling file next to the scenario sidecar, not a seventh context field and not `scope` or `exceptions`. The file holds the confirmed Mermaid and the original image. A later knowledge index may add a text section for the Mermaid. The image is not copied into the HTML reader. Purpose and expected outcome change only through today’s `proposeKnowledge` rules. Why changes only when the user wrote it. One receipt stores the previous Mermaid and, if the sidecar changed, the previous sidecar. Undo (10 seconds, same as knowledge) restores both. The diagram gets no Versions row.
+Apply and X stay on the capsule. Apply writes `<scenarioId>.diagram.json` next to the sidecar, not a seventh context field and not `scope` or `exceptions`. The file holds the confirmed Mermaid and the path list. It does not hold the image, and it is not copied into the HTML reader or the info sheet. A diagram apply does not change the six context fields, so Why stays as the user left it. The receipt records the previous diagram bytes (null when there was no file) and the previous sidecar bytes. Undo restores both. The diagram gets no Versions row. The client hides Undo after 10 seconds; this server does not add a second timer.
 
-Scenarios are a second confirmation, the same shape as “Update the purpose too?” The capsule asks whether to create them. Each chosen path is one existing flow draft, with its own Apply, X, Undo, and flow version. Happy, alternate, and error paths are separate scenarios, because one draft cannot hold a branch. Offer one path at a time. If the diagram does not mark the happy path, ask. Do not author every branch in one click.
+Scenarios are a second confirmation. The only options are “Yes” and “Not now”. Yes asks the user to name one path. The options on that question are “The path I named” and “Not now”. Branch titles are not offered. The named path becomes one existing flow draft, with its own Apply, X, Undo, and flow version. Other branches are not authored.
 
 A model that cannot see never receives the image. The error says this model can’t read images, and that the user can paste Mermaid or pick a model that can. The file stays local.
 
@@ -67,7 +81,7 @@ A model that cannot see never receives the image. The error says this model can�
 
 **C. Mermaid first, including a paste.** The image and a pasted graph share one confirm step and one attachment. Scenario creation is the follow-up in section 2, one path per draft. A provider without vision still works. Tests do not need a live vision model.
 
-**Recommendation: C.** It keeps one field and no modes, and it reuses ask-back, Apply, X, and the 10-second Undo. A is the first slice of C, stopping before the scenario question. B can be the same follow-up later. It should not be the first ship.
+**Decision: C.** Locked on 2026-11-12. It keeps one field and no modes, and it reuses ask-back, Apply, X, and the 10-second Undo. The scenario step asks first and then authors one named path.
 
 ## 4. Slices, risks, tests
 
@@ -79,7 +93,7 @@ Backend first. No UI build until the owner has seen a UI preview.
 4. Apply and undo for the attachment. A purpose change is allowed only when today’s knowledge rules allow it. The image stays out of the knowledge HTML. Dismiss deletes the temp file.
 5. A pure function that lists start-to-end paths, and one flow preview per chosen path. Still no UI.
 
-Then a static preview: the chip on Ask AI, the ask-back card, the Mermaid confirm with Apply and X, the disclosure line that an image is sent, and “Create scenarios?” Build the field, the drawing, and any info-sheet block only after that preview is accepted.
+Then a static preview, and only then any UI. The preview has to show: the chip on Ask AI for one PNG or JPEG (and the one error for anything else, including a photo the user tried to drop), the ask-back card while the diagram is unclear, the Mermaid confirm with Apply and X, the disclosure line that this diagram image is sent while screenshots and recordings are not, “Create a scenario from this diagram?” with only Yes and Not now, and “Name the one path to author” without a list of branches. After Apply there is no diagram block in the info sheet.
 
 Risks:
 
@@ -93,8 +107,4 @@ Tests use the fake provider and the fake Copilot runtime only. Cover an empty ca
 
 ## 5. Open questions
 
-1. After the user confirms the diagram, should the first Apply save only the diagram, and ask before creating any scenario?
-2. Should we author only the path the user picks, or keep offering the other branches until they say stop?
-3. Are whiteboard photos in scope, or only a clean PNG or JPEG export?
-4. Is it acceptable to send that image to the selected provider? Today the first-run note says screenshots are not sent.
-5. After Apply, should the diagram show as a short block in the info sheet, or only as stored text until someone asks?
+None. The five questions from the first draft are decided in the section at the top.

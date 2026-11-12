@@ -1,3 +1,4 @@
+import {CANT_READ_IMAGES} from '../errors.js';
 import {RESPONSE_BYTE_LIMIT, ProviderRequestError, type FlowModelProvider, type Msg, type Usage} from './types.js';
 import {COPILOT_NOT_INSTALLED, type CopilotErrorKind, type CopilotRuntime} from './copilot-runtime.js';
 
@@ -36,12 +37,18 @@ export function createCopilotSdkProvider(options: {runtime: CopilotRuntime; mode
     },
     async *generate(req) {
       if (req.budget && !req.budget.tryConsume()) throw new ProviderRequestError({code: 'PROVIDER_REJECTED', message: 'The generation request budget is exhausted.', retryable: false, reason: 'budget'});
+      const image = req.messages.find(message => message.image)?.image;
+      if (image) {
+        const listed = await options.runtime.models();
+        const known = listed.find(item => item.id === requested);
+        if (requested === 'auto' || known?.vision !== true) throw new ProviderRequestError({code: 'PROVIDER_REJECTED', message: CANT_READ_IMAGES, retryable: false, embeddedCode: 'no-vision'});
+      }
       const prompt = flattenCopilotMessages(req.messages);
       let bytes = 0;
       let text = '';
       const chunks: string[] = [];
       let usage: {model: string; inputTokens: number; outputTokens: number; nanoAiu?: number} | undefined;
-      for await (const event of options.runtime.run({system: req.system, prompt, model: requested, signal: req.signal})) {
+      for await (const event of options.runtime.run({system: req.system, prompt, model: requested, signal: req.signal, ...(image ? {image} : {})})) {
         if (event.type === 'delta') {
           bytes += Buffer.byteLength(event.text);
           if (bytes > RESPONSE_BYTE_LIMIT) throw outputTooLarge();

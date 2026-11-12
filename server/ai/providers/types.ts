@@ -1,6 +1,6 @@
 export type Usage = {inputTokens?: number; outputTokens?: number; cost?: number};
 
-export type Msg = {role: 'user' | 'assistant'; content: string};
+export type Msg = {role: 'user' | 'assistant'; content: string; image?: {mimeType: 'image/png' | 'image/jpeg'; data: string}};
 
 export type ProviderErrorCode = 'PROVIDER_AUTH' | 'PROVIDER_CONFIG' | 'PROVIDER_REJECTED' | 'PROVIDER_UNAVAILABLE' | 'PROVIDER_TIMEOUT';
 
@@ -30,6 +30,8 @@ export interface FlowModelProvider {
   id: string;
   /** True when generate() sends `schema` as response_format json_schema. Otherwise the job puts the schema in the instructions. */
   sendsJsonSchema?: boolean;
+  /** False when this provider must not be given an image. Copilot decides per model inside generate(). */
+  readsImages?: boolean;
   generate(req: {
     system: string;
     messages: Msg[];

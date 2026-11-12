@@ -6,12 +6,14 @@ export type FakeResult =
   | {kind: 'delay'; ms: number; text: string}
   | {kind: 'gate'; text: string; onEnter?: () => void; open: Promise<void>};
 
-export function createFakeProvider(handle: (input: {call: number; system: string; messages: {role: string; content: string}[]}) => FakeResult | Promise<FakeResult>): FlowModelProvider {
+export function createFakeProvider(handle: (input: {call: number; system: string; messages: {role: string; content: string; image?: {mimeType: string; data: string}}[]}) => FakeResult | Promise<FakeResult>, options?: {readsImages?: boolean}): FlowModelProvider {
   let call = 0;
   return {
     id: 'fake',
+    readsImages: options?.readsImages !== false,
     async check() { return {ok: true, model: 'fake'}; },
     async *generate(req) {
+      if (req.messages.some(message => message.image) && options?.readsImages === false) throw new ProviderRequestError({code: 'PROVIDER_REJECTED', message: "This model can't read images.", retryable: false, embeddedCode: 'no-vision'});
       if (req.budget && !req.budget.tryConsume()) throw new ProviderRequestError({code: 'PROVIDER_REJECTED', message: 'The generation request budget is exhausted.', retryable: false, reason: 'budget'});
       const result = await handle({call: ++call, system: req.system, messages: req.messages});
       if (result.kind === 'fail') throw result.error;

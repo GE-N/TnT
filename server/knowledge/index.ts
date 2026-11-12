@@ -8,7 +8,8 @@ import {canonical,sha256,makeDetail,sourceDescriptor} from './projection.js';
 import {minimalHtml} from './artifacts.js';
 import {projectInBackground,artifactsInBackground} from './background.js';
 import {alwaysOwned,contextFields,emptyContext,validateContent,validateSave,workspaceId,scenarioId,scopeId,KnowledgeError,ContextRevisionConflict} from './types.js';
-import {findReceipt,newReceipt,pruneReceipts,readReceipt,validateApplyRequest,validateUndoRequest,writeReceipt,type ApplyDraftRequest,type KnowledgeReceipt} from './receipts.js';
+import {findReceipt,newDiagramReceipt,newReceipt,pruneReceipts,readReceipt,validateApplyRequest,validateUndoRequest,writeReceipt,type ApplyDraftRequest,type KnowledgeReceipt} from './receipts.js';
+import {diagramFile,parseDiagram,parseStoredDiagram,CREATE_SCENARIO_PROMPT,type StoredDiagram} from '../ai/diagram.js';
 export type {KnowledgeReceipt,ApplyDraftRequest};
 export {RECEIPT_RETENTION_MS,UNDO_CLIENT_WINDOW_MS} from './receipts.js';
 import type {RootGuard,KnowledgeFaults,IndexingQueue,GenerationInput,ScenarioContext,ScenarioDetail,Pointer,Manifest,FaultStage} from './types.js';
@@ -44,6 +45,10 @@ export function createKnowledgeService(options:KnowledgeOptions){
  }
  async function readSidecarBytes(directory:string,scenario:string){
   try{const folder=await safeDirectory(directory,['knowledge','scenarios'],guard);return await readSafe(folder,scenario+'.json');}
+  catch(error){if(isMissing(error))return null;throw error;}
+ }
+ async function readDiagramBytes(directory:string,scenario:string){
+  try{const folder=await safeDirectory(directory,['knowledge','scenarios'],guard);return await readSafe(folder,scenario+'.diagram.json');}
   catch(error){if(isMissing(error))return null;throw error;}
  }
  async function readContextFile(directory:string,id:string,scenario:string):Promise<ScenarioContext>{
@@ -195,6 +200,52 @@ export function createKnowledgeService(options:KnowledgeOptions){
    if(!saved.receipt)throw new KnowledgeError(503,'KNOWLEDGE_UNAVAILABLE','Knowledge receipt was not written.');
    return {detail:saved.detail,receipt:saved.receipt};
   },
+  async readDiagram(id:string,scenario:string):Promise<StoredDiagram|null>{
+   workspaceId(id);scenarioId(scenario);
+   const captured=await rawCapture(id);
+   if(!captured.workspace.scenarios?.some(item=>item.id===scenario))throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','Saved workspace or scenario not found.');
+   const text=await readDiagramBytes(captured.directory,scenario);
+   if(!text)return null;
+   const stored=parseStoredDiagram(text,id,scenario);
+   if(!stored)throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','The saved diagram could not be read.');
+   return stored;
+  },
+  async applyDiagram(id:string,scenario:string,input:unknown){
+   workspaceId(id);scenarioId(scenario);
+   const body=input&&typeof input==='object'&&!Array.isArray(input)?input as Record<string,unknown>:undefined;
+   if(!body||typeof body.jobId!=='string'||typeof body.idempotencyKey!=='string'||typeof body.mermaid!=='string'||typeof body.skillHash!=='string'||!/^[a-f0-9]{64}$/.test(body.skillHash)||!Number.isSafeInteger(body.expectedContextRevision)||(body.expectedContextRevision as number)<0)throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','Provide the diagram draft.');
+   if(body.skill!=='diagram@1')throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','That draft has no diagram skill.');
+   if(!/^[A-Za-z0-9][A-Za-z0-9_-]{7,199}$/.test(body.idempotencyKey as string))throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','Provide an idempotency key.');
+   const graph=parseDiagram(body.mermaid);
+   if(!graph.ok)throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','That draft is not a flowchart.');
+   let saved=false;let receipt:KnowledgeReceipt|undefined;
+   while(!saved){
+    const captured=await rawCapture(id);
+    if(!captured.workspace.scenarios?.some(item=>item.id===scenario))throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','Saved workspace or scenario not found.');
+    saved=await inWorkspace(id,async(workspace,directory)=>{
+     if(workspace.metadata?.revision!==captured.workspace.metadata?.revision)return false;
+     if(!workspace.scenarios?.some(item=>item.id===scenario))throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','Saved workspace or scenario not found.');
+     const current=await readContextFile(directory,id,scenario);
+     if(current.contextRevision!==body.expectedContextRevision)throw new ContextRevisionConflict(current);
+     await pruneReceipts(directory,Date.parse(now()),guard);
+     const existing=await findReceipt(directory,id,scenario,body.idempotencyKey as string,guard);
+     if(existing){receipt=existing;return true;}
+     const previousSidecar=await readSidecarBytes(directory,scenario);
+     const previousDiagram=await readDiagramBytes(directory,scenario);
+     receipt=newDiagramReceipt({workspaceId:id,scenarioId:scenario,jobId:body.jobId as string,idempotencyKey:body.idempotencyKey as string,createdAt:now(),skillHash:body.skillHash as string,previousSidecar,previousDiagram});
+     await writeReceipt(directory,receipt,guard);
+     const folder=await safeDirectory(directory,['knowledge','scenarios'],guard,true);
+     guard.assertOwned();
+     await atomicWrite(folder,scenario+'.diagram.json',diagramFile({workspaceId:id,scenarioId:scenario,mermaid:graph.mermaid,paths:graph.paths,updatedAt:now()}),guard);
+     return true;
+    });
+   }
+   if(!receipt)throw new KnowledgeError(503,'KNOWLEDGE_UNAVAILABLE','Knowledge receipt was not written.');
+   const data=await decorated(id);
+   const detail=data.scenarios.find(item=>item.scenarioId===scenario);
+   if(!detail)throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','Saved workspace or scenario not found.');
+   return {detail,receipt,followUp:{key:'create-scenario',text:CREATE_SCENARIO_PROMPT,options:['Yes','Not now'] as const}};
+  },
   async undo(id:string,scenario:string,input:unknown){
    workspaceId(id);scenarioId(scenario);const request=validateUndoRequest(input);let restored=false;
    while(!restored){
@@ -208,6 +259,10 @@ export function createKnowledgeService(options:KnowledgeOptions){
      guard.assertOwned();const folder=await safeDirectory(directory,['knowledge','scenarios'],guard,true);contextEpochs.set(root+':'+id,epoch(id)+1);
      if(receipt.previousSidecar===null)await rm(join(folder,scenario+'.json'),{force:true});
      else await atomicWrite(folder,scenario+'.json',receipt.previousSidecar,guard);
+     if('previousDiagram' in receipt){
+      if(receipt.previousDiagram===null)await rm(join(folder,scenario+'.diagram.json'),{force:true});
+      else if(receipt.previousDiagram)await atomicWrite(folder,scenario+'.diagram.json',receipt.previousDiagram,guard);
+     }
      return true;
     });
    }

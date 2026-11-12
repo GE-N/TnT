@@ -57,6 +57,7 @@ const ai = createAi({
     detail: id => scenarios.workspaceDetail(id),
     readContext: (workspaceId, scenarioId) => knowledge.readContext(workspaceId, scenarioId),
   }),
+  readDiagram: (workspaceId, scenarioId) => knowledge.readDiagram(workspaceId, scenarioId),
 });
 await ai.ready;
 const production = process.argv.includes('--production');
