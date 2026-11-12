@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createAi} from '../server/ai/index.js';
 import {CANT_READ_IMAGES} from '../server/ai/errors.js';
-import {CREATE_SCENARIO_PROMPT, DIAGRAM_IMAGE_BYTE_LIMIT, IMAGE_TOO_LARGE, NOT_A_PNG_OR_JPEG, decodeDiagramImage, parseDiagram} from '../server/ai/diagram.js';
+import {CREATE_SCENARIO_PROMPT, DIAGRAM_IMAGE_BYTE_LIMIT, IMAGE_TOO_LARGE, NOT_A_PNG_OR_JPEG, decodeDiagramImage, nextDiagramTurn, parseDiagram, resolveNamedPath, type StoredDiagram} from '../server/ai/diagram.js';
 import {createFakeProvider, type FakeResult} from '../server/ai/providers/fake.js';
 import {createCopilotSdkProvider} from '../server/ai/providers/copilot-sdk.js';
 import {copilotSendBody, createFakeCopilotRuntime} from '../server/ai/providers/copilot-runtime.js';
@@ -52,6 +52,134 @@ test('a flowchart lists one path per branch and rejects other diagram kinds', ()
   assert.deepEqual(parsed.paths.map(path => path.labels), [['Home', 'Paid?', 'Done'], ['Home', 'Paid?', 'Error']]);
   assert.equal(parseDiagram('sequenceDiagram\n  A->>B: Hi').ok, false);
   assert.equal(parseDiagram('```mermaid\n' + FLOW + '\n```').ok, true);
+});
+
+const checkoutPaths = [
+  {id: 'path-1', title: 'Checkout', labels: ['Checkout']},
+  {id: 'path-2', title: 'Checkout with coupon', labels: ['Checkout with coupon']},
+];
+
+function savedDiagram(paths: StoredDiagram['paths']): StoredDiagram {
+  return {schemaVersion: 1, workspaceId: '11111111-1111-4111-8111-111111111111', scenarioId: 'guest', mermaid: 'flowchart LR\n  A[Checkout] --> B[Done]', paths, updatedAt: '2026-11-12T00:00:00.000Z'};
+}
+
+function nameTurn(answer: string, paths = checkoutPaths) {
+  return nextDiagramTurn({
+    prompt: answer, hasImage: false, answers: [{key: 'which-path', answer}], scenarioId: 'guest', saved: savedDiagram(paths),
+    previous: {stage: 'ask-path', round: 1, caption: '', pending: false},
+  });
+}
+
+test('a typed path name matches exactly, fuzzily, or asks instead of guessing', () => {
+  assert.equal(resolveNamedPath(checkoutPaths, 'Checkout').kind, 'one');
+  assert.equal(resolveNamedPath(checkoutPaths, '  CHECKOUT  ').kind === 'one' && resolveNamedPath(checkoutPaths, '  CHECKOUT  ').kind === 'one', true);
+  const cased = resolveNamedPath(checkoutPaths, 'checkout');
+  assert.equal(cased.kind, 'one');
+  if (cased.kind === 'one') assert.equal(cased.path.id, 'path-1');
+  const punctuated = resolveNamedPath(checkoutPaths, 'Checkout!');
+  assert.equal(punctuated.kind, 'one');
+  if (punctuated.kind === 'one') assert.equal(punctuated.path.id, 'path-1');
+
+  const misspelled = resolveNamedPath(checkoutPaths, 'chekout');
+  assert.equal(misspelled.kind, 'one');
+  if (misspelled.kind === 'one') assert.equal(misspelled.path.id, 'path-1');
+  const partial = resolveNamedPath(checkoutPaths, 'coupon');
+  assert.equal(partial.kind, 'one');
+  if (partial.kind === 'one') assert.equal(partial.path.id, 'path-2');
+
+  const ambiguous = nameTurn('check');
+  assert.equal(ambiguous.kind, 'ask');
+  if (ambiguous.kind !== 'ask') return;
+  assert.match(ambiguous.question.text, /^Did you mean: Checkout, Checkout with coupon\?$/);
+  assert.deepEqual(ambiguous.question.options, ['Checkout', 'Checkout with coupon', 'Not now']);
+  assert.equal(ambiguous.question.options.filter(option => option !== 'Not now').length, 2);
+
+  const none = nameTurn('zzzzzz');
+  assert.equal(none.kind, 'ask');
+  if (none.kind !== 'ask') return;
+  assert.match(none.question.text, /Did you mean: Checkout, Checkout with coupon\?/);
+  assert.equal(none.question.options.includes('Not now'), true);
+  assert.notEqual(none.kind, 'flow');
+
+  const thai = [
+    {id: 'path-1', title: 'ตะกร้า → ชำระเงิน', labels: ['ตะกร้า', 'ชำระเงิน']},
+    {id: 'path-2', title: 'ตะกร้า → ยกเลิก', labels: ['ตะกร้า', 'ยกเลิก']},
+  ];
+  const thaiOne = resolveNamedPath(thai, 'ชำระเงิน');
+  assert.equal(thaiOne.kind, 'one');
+  if (thaiOne.kind === 'one') assert.equal(thaiOne.path.id, 'path-1');
+  const thaiAsk = nameTurn('ตะกร้า', thai);
+  assert.equal(thaiAsk.kind, 'ask');
+  if (thaiAsk.kind === 'ask') assert.match(thaiAsk.question.text, /ชำระเงิน/);
+  assert.match(thaiAsk.kind === 'ask' ? thaiAsk.question.text : '', /ยกเลิก/);
+
+  const picked = nameTurn('Checkout with coupon');
+  assert.equal(picked.kind, 'flow');
+  if (picked.kind === 'flow') {
+    assert.equal(picked.path.id, 'path-2');
+    assert.equal(picked.path.title.includes('coupon'), true);
+    assert.equal(checkoutPaths.filter(path => path.id === picked.path.id).length, 1);
+  }
+});
+
+test('a close path name authors that path only, and an unclear name asks back', async () => {
+  const f = await authoringFixture();
+  const workspace = await f.service.save({
+    id: f.workspace.id, name: f.workspace.name, yaml: f.workspace.yaml, flows: {}, canvas: {screens: [], edges: [], paths: []},
+    scenarios: [{id: 'guest', name: 'Guest checkout', steps: [], inputs: {}, parameters: {}, enabledHandlerIds: []}],
+    expectedRevision: f.workspace.metadata!.revision,
+  });
+  const knowledge = createKnowledgeService({root: f.root, queue: {enqueue() {}}, reconcileIntervalMs: 0});
+  const seen: {system: string; content: string}[] = [];
+  const ai = createAi({
+    root: f.root, authoring: f.service.authoring, readWorkspace: id => f.service.workspace(id), env: {}, secrets: memorySecrets(), log: () => {},
+    readCatalog: async () => catalog(),
+    readDiagram: (workspaceId, scenarioId) => knowledge.readDiagram(workspaceId, scenarioId),
+    provider: createFakeProvider(({system, messages}) => {
+      seen.push({system, content: messages.map(message => message.content).join('\n')});
+      if (system.startsWith('You read')) return {kind: 'ok', text: JSON.stringify({mermaid: FLOW, questions: []})};
+      if (system.startsWith('You author')) return {kind: 'ok', text: JSON.stringify(exampleDraft)};
+      return {kind: 'ok', text: JSON.stringify({intent: 'flow'})};
+    }),
+  });
+  try {
+    const ready = await settle(ai, (await ai.start({workspaceId: workspace.id, expectedRevision: workspace.metadata!.revision, prompt: FLOW})).id);
+    await knowledge.saveContext(workspace.id, 'guest', {expectedContextRevision: 0, context: {purpose: 'Keep purpose', expectedOutcome: 'Keep outcome', rationale: 'Keep why', preconditions: '', exceptions: '', scope: ''}});
+    const before = await knowledge.readContext(workspace.id, 'guest');
+    await knowledge.applyDiagram(workspace.id, 'guest', {
+      jobId: ready.id, expectedContextRevision: before.context.contextRevision, idempotencyKey: 'diagram-apply-fuzzy', mermaid: ready.diagramDraft!.mermaid, skill: 'diagram@1', skillHash: ready.skillHash,
+    });
+    const ask = await settle(ai, (await ai.start({workspaceId: workspace.id, expectedRevision: workspace.metadata!.revision, prompt: CREATE_SCENARIO_PROMPT})).id);
+    const named = await settle(ai, (await ai.start({workspaceId: workspace.id, expectedRevision: workspace.metadata!.revision, prompt: 'Yes', previousJobId: ask.id, answers: [{key: 'create-scenario', answer: 'Yes'}]})).id);
+    const callsBefore = seen.length;
+    const unclear = await settle(ai, (await ai.start({
+      workspaceId: workspace.id, expectedRevision: workspace.metadata!.revision, prompt: 'home', previousJobId: named.id,
+      answers: [{key: 'which-path', answer: 'home'}],
+    })).id);
+    assert.equal(unclear.state, 'needsInfo');
+    assert.match(unclear.questions?.[0]?.text ?? '', /Did you mean:/);
+    assert.match(unclear.questions?.[0]?.text ?? '', /Done/);
+    assert.match(unclear.questions?.[0]?.text ?? '', /Error/);
+    assert.equal(unclear.questions?.[0]?.options.includes('Not now'), true);
+    assert.equal(unclear.draft, undefined);
+    assert.equal(seen.length, callsBefore);
+    const authored = await settle(ai, (await ai.start({
+      workspaceId: workspace.id, expectedRevision: workspace.metadata!.revision, prompt: 'error', previousJobId: unclear.id,
+      answers: [{key: 'which-path', answer: 'error'}],
+    })).id);
+    assert.equal(authored.state, 'pending');
+    assert.equal(authored.kind, 'flow');
+    const flowCall = seen.filter(item => item.system.startsWith('You author')).at(-1);
+    assert.ok(flowCall);
+    assert.equal(flowCall.content.includes('Error'), true);
+    assert.equal(flowCall.content.includes('Done'), false);
+    const why = await knowledge.readContext(workspace.id, 'guest');
+    assert.equal(why.context.rationale, 'Keep why');
+  } finally {
+    await ai.idle();
+    knowledge.close();
+    await f.cleanup();
+  }
 });
 
 test('only a PNG or JPEG export is accepted', () => {

@@ -225,6 +225,95 @@ export function matchPath(paths: DiagramPath[], answer: string) {
   return paths.find(path => path.id === text || path.title === text || path.labels.join(' → ') === text || path.labels.join(' -> ') === text);
 }
 
+export type PathResolution = {kind: 'one'; path: DiagramPath} | {kind: 'ask'; paths: DiagramPath[]};
+
+/** Letters and digits, Thai included. Punctuation, arrows, and spacing do not count. */
+function foldPathName(value: string) {
+  return value.normalize('NFKC').toLowerCase().replace(/[\p{P}\p{S}\s]+/gu, '');
+}
+
+function pathNames(path: DiagramPath) {
+  return [path.id, path.title, path.labels.join(' → '), path.labels.join(' -> '), path.labels.join(' '), ...path.labels];
+}
+
+function editDistance(left: string, right: string) {
+  const a = Array.from(left);
+  const b = Array.from(right);
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let previous = Array.from({length: b.length + 1}, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      row[j] = Math.min(previous[j]! + 1, row[j - 1]! + 1, previous[j - 1]! + cost);
+    }
+    previous = row;
+  }
+  return previous[b.length] ?? a.length;
+}
+
+/**
+ * One confident path, or the paths the user might mean.
+ * A unique exact, normalized, or substantial partial match is confident.
+ * Close spelling is confident only when one path is clearly nearer than the rest.
+ * Anything else is an ask, including no match. This does not call a model.
+ */
+export function resolveNamedPath(paths: DiagramPath[], answer: string): PathResolution {
+  const query = answer.trim();
+  if (!query || query === 'The path I named' || query === 'Not now') return {kind: 'ask', paths};
+  const exact = paths.filter(path => path.id === query || path.title === query || path.labels.join(' → ') === query || path.labels.join(' -> ') === query || path.labels.join(' ') === query);
+  if (exact.length === 1) return {kind: 'one', path: exact[0]!};
+  if (exact.length > 1) return {kind: 'ask', paths: exact};
+  const folded = foldPathName(query);
+  if (!folded) return {kind: 'ask', paths};
+  const same = paths.filter(path => pathNames(path).some(name => foldPathName(name) === folded));
+  if (same.length === 1) return {kind: 'one', path: same[0]!};
+  if (same.length > 1) return {kind: 'ask', paths: same};
+  const minimum = /[a-z0-9]/i.test(query) ? 3 : 2;
+  if (Array.from(folded).length >= minimum) {
+    const partial = paths.filter(path => pathNames(path).some(name => {
+      const foldedName = foldPathName(name);
+      return foldedName.length >= minimum && (foldedName.includes(folded) || folded.includes(foldedName));
+    }));
+    if (partial.length === 1) return {kind: 'one', path: partial[0]!};
+    if (partial.length > 1) return {kind: 'ask', paths: partial};
+  }
+  const allowance = Math.max(1, Math.floor(Array.from(folded).length * 0.34));
+  const ranked = paths.map(path => {
+    const distance = Math.min(...pathNames(path).map(name => editDistance(folded, foldPathName(name))));
+    return {path, distance};
+  }).sort((left, right) => left.distance - right.distance || left.path.id.localeCompare(right.path.id));
+  const best = ranked[0];
+  const runner = ranked[1];
+  if (best && best.distance <= allowance && (!runner || runner.distance - best.distance >= 2)) return {kind: 'one', path: best.path};
+  const plausible = ranked.filter(item => item.distance <= allowance).map(item => item.path);
+  return {kind: 'ask', paths: plausible.length ? plausible : paths};
+}
+
+function didYouMean(names: string[]) {
+  const prefix = 'Did you mean: ';
+  const kept: string[] = [];
+  for (const name of names) {
+    const body = kept.length ? `${kept.join(', ')}, ${name}` : name;
+    if (`${prefix}${body}?`.length > 200) break;
+    kept.push(name);
+  }
+  if (!kept.length) {
+    const clipped = names[0]?.slice(0, 180).trim();
+    return clipped ? `Did you mean: ${clipped}?` : 'Name the one path to author.';
+  }
+  return `Did you mean: ${kept.join(', ')}?`;
+}
+
+/** Candidates the user can tap, plus Not now. Names that do not fit a button stay in the question text. */
+export function pathClarifyQuestion(paths: DiagramPath[]): ClarifyingQuestion {
+  const names = [...new Set(paths.map(path => path.title.trim()).filter(Boolean))];
+  const buttons = names.filter(name => name.length <= 80 && name !== 'Not now').slice(0, 2);
+  const options = buttons.length ? [...buttons, 'Not now'] : ['The path I named', 'Not now'];
+  return {key: 'which-path', text: didYouMean(names), options};
+}
+
 export function pathPrompt(path: DiagramPath) {
   return [
     'Author one scenario for this confirmed path only. Do not add steps from any other branch.',
@@ -305,12 +394,12 @@ export function nextDiagramTurn(input: {
   if (previous.stage === 'ask-path') {
     if (answer === 'Not now') return {kind: 'cancel'};
     if (!input.saved) return {kind: 'fail', code: 'DIAGRAM_NOT_SAVED', message: 'Save the diagram first.'};
-    const path = matchPath(input.saved.paths, input.authorPath || (answer === 'The path I named' ? '' : answer));
-    if (!path) {
-      if (previous.miss) return {kind: 'fail', code: 'DIAGRAM_PATH', message: 'Name the one path to author.'};
-      return {kind: 'ask', question: PATH_QUESTION, stage: 'ask-path', miss: true};
-    }
-    return {kind: 'flow', path};
+    const chosen = input.authorPath ? input.saved.paths.find(path => path.id === input.authorPath) : undefined;
+    if (chosen) return {kind: 'flow', path: chosen};
+    const named = answer === 'The path I named' ? '' : answer;
+    const resolved = resolveNamedPath(input.saved.paths, named);
+    if (resolved.kind === 'one') return {kind: 'flow', path: resolved.path};
+    return {kind: 'ask', question: pathClarifyQuestion(resolved.paths), stage: 'ask-path'};
   }
   if (previous.round >= DIAGRAM_QUESTION_ROUNDS) {
     const pending = previous.questions?.map(question => question.text).filter(Boolean).join(' ') || 'the diagram is still unclear';

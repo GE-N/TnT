@@ -455,6 +455,83 @@ test('a model that cannot read images keeps the chip and the prompt', async () =
   });
 });
 
+test('an unclear path name asks back in the Ask AI capsule and one pick is sent', async () => {
+  await withDom(async window => {
+    const bodies: Record<string, unknown>[] = [];
+    let jobCount = 0;
+    const config = {
+      settingsRevision: 1, selected: 'copilot',
+      providers: {
+        openrouter: {model: 'vendor/model', configured: true, credentialRevision: 1, storageAvailable: true},
+        'openai-compatible': {model: '', configured: false, credentialRevision: 0, storageAvailable: true},
+        copilot: {model: 'gpt-4.1'},
+      },
+    };
+    const workspace = {id: workspaceId, name: 'Shop', metadata: {revision: 3}, canvas: {screens: [], edges: [], paths: []}, scenarios: [{id: 'guest', name: 'Checkout'}], view: {format: 1}};
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(String(input), 'http://127.0.0.1:4317/');
+      const method = init?.method ?? 'GET';
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+      if (url.pathname === '/api/ai/config') return Response.json(config);
+      if (method === 'POST' && url.pathname === '/api/workspaces') return Response.json(workspace);
+      if (method === 'POST' && url.pathname === '/api/workspaces/' + workspaceId + '/view') return Response.json({ok: true});
+      if (method === 'POST' && url.pathname === '/api/ai/generations') {
+        bodies.push(body ?? {});
+        jobCount += 1;
+        const id = jobCount === 1 ? 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' : 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+        const view = jobCount === 1
+          ? {id, workspaceId, state: 'needsInfo', phase: 'context', provenance: 'ai', contractVersion: 1, expiresAt: new Date(Date.now() + 60_000).toISOString(), intent: 'diagram', kind: 'diagram', scenarioId: 'guest', questions: [{key: 'which-path', text: 'Did you mean: Checkout, Checkout with coupon?', options: ['Checkout', 'Checkout with coupon', 'Not now']}]}
+          : {id, workspaceId, state: 'running', phase: 'model', provenance: 'ai', contractVersion: 1, expiresAt: new Date(Date.now() + 60_000).toISOString()};
+        return Response.json(jobCount === 1 ? {...view, state: 'running', phase: 'model', questions: undefined} : view, {status: 202});
+      }
+      const job = /^\/api\/ai\/generations\/([^/]+)$/.exec(url.pathname);
+      if (job) {
+        if (job[1].startsWith('cccccccc')) return Response.json({id: job[1], workspaceId, state: 'needsInfo', phase: 'context', provenance: 'ai', contractVersion: 1, expiresAt: new Date(Date.now() + 60_000).toISOString(), intent: 'diagram', kind: 'diagram', scenarioId: 'guest', questions: [{key: 'which-path', text: 'Did you mean: Checkout, Checkout with coupon?', options: ['Checkout', 'Checkout with coupon', 'Not now']}]});
+        return Response.json({id: job[1], workspaceId, state: 'running', phase: 'model', provenance: 'ai', contractVersion: 1, expiresAt: new Date(Date.now() + 60_000).toISOString()});
+      }
+      return Response.json({error: 'nope'}, {status: 404});
+    };
+    const {AiFlow, useAiDraft} = await import('../src/ai-flow.js');
+    function Host() {
+      const ai = useAiDraft({
+        token: 'tok', workspaceId, revision: 3, running: false, canvas: undefined, scenarios: [{id: 'guest'}], contentKey: 'guest', loadRevision: 1,
+        readView: () => ({format: 1}), save: async () => workspace as never, loadWorkspace: () => {}, selectScenario: () => {},
+        rememberView: () => {}, fetchWorkspace: async () => workspace as never, saveWorkspaceView: async () => ({}),
+      });
+      return createElement(AiFlow, {control: ai});
+    }
+    const root = (await import('react-dom/client')).createRoot(window.document.getElementById('root')!);
+    await act(async () => { root.render(createElement(Host)); });
+    const until = async (read: () => boolean, label: string) => {
+      for (let attempt = 0; attempt < 40; attempt++) {
+        if (read()) return;
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)); });
+      }
+      assert.fail(label + ' — ' + (window.document.body.textContent ?? '').slice(0, 300));
+    };
+    await until(() => !!window.document.querySelector('[data-testid="ai-flow-field"]'), 'field');
+    const field = window.document.querySelector<HTMLTextAreaElement>('[data-testid="ai-flow-field"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'check');
+      field.dispatchEvent(new Event('input', {bubbles: true}));
+      field.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+    });
+    await until(() => !!window.document.querySelector('[data-testid="ai-disclosure-continue"]') || !!window.document.querySelector('[data-testid="ai-question"]'), 'disclosure or question');
+    const disclose = window.document.querySelector<HTMLButtonElement>('[data-testid="ai-disclosure-continue"]');
+    if (disclose) await act(async () => { disclose.click(); });
+    await until(() => window.document.querySelector('[data-testid="ai-question"]')?.textContent?.includes('Did you mean: Checkout, Checkout with coupon?') === true, 'ask-back');
+    assert.deepEqual([...window.document.querySelectorAll('[data-testid="ai-question-option"]')].map(node => node.textContent), ['Checkout', 'Checkout with coupon', 'Not now']);
+    assert.equal(window.document.querySelector('[data-testid="ai-confirm"]'), null);
+    assert.equal(window.document.querySelectorAll('[aria-label="Ask AI"]').length, 1);
+    await act(async () => { [...window.document.querySelectorAll('button')].find(button => button.textContent === 'Checkout')!.click(); });
+    await until(() => bodies.length >= 2, 'one path chosen');
+    const chosen = bodies[1] as {answers?: {answer: string}[]; authorPath?: string};
+    assert.deepEqual(chosen.answers, [{key: 'which-path', answer: 'Checkout'}]);
+    assert.equal(JSON.stringify(chosen).includes('Checkout with coupon'), false);
+    await act(async () => { root.unmount(); });
+  });
+});
+
 async function withDom(body: (window: Window) => Promise<void>) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', {url: 'http://127.0.0.1:4317/'});
   const window = dom.window;
