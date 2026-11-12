@@ -45,6 +45,10 @@ export type GenerationRequest = {
   previousJobId?: string;
   /** Refines the current draft. The server requires previousJobId when this is set. */
   answers?: ClarifyingAnswer[];
+  /** One PNG or JPEG export, on the first message only. */
+  image?: {mimeType: 'image/png' | 'image/jpeg'; data: string};
+  /** Saved path id when the user named one branch to author. */
+  authorPath?: string;
 };
 export type ContextRequest = {workspaceId: string; expectedRevision: number; screenIds?: string[]};
 export type AuthoringContext = {contextId: string; workspaceId: string; revision: number; expiresAt: string};

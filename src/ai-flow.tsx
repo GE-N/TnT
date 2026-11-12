@@ -1,5 +1,5 @@
 import {createPortal, flushSync} from 'react-dom';
-import {useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent} from 'react';
+import {useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent} from 'react';
 import type {CanvasGraph} from '../server/canvas.js';
 import type {Diagnostic, DraftOperation, DraftTarget, FlowDraft} from '../server/authoring/types.js';
 import type {Workspace} from '../server/scenarios.js';
@@ -8,6 +8,8 @@ import type {DraftPositions} from './draft-placement.js';
 import {AI_POLL_MS, ANSWER_CHAR_LIMIT, AiFlowRequestError, createAiFlowClient, PROMPT_CHAR_LIMIT, PROMPT_COUNTER_AT, type AiPublicConfig, type ApplyResponse, type GenerationPhase, type GenerationView, type ProviderId} from './ai-flow-client.js';
 import {knowledgeClient, knowledgeFailureSentence, KnowledgeRequestError, type ScenarioContext} from './knowledge-client.js';
 import type {KnowledgeDraftOffer} from './knowledge-sheet.js';
+import {DiagramCard} from './diagram-preview.js';
+import {attachmentFromBytes, CANT_READ_IMAGES, CREATE_SCENARIO_PROMPT, plainDiagramError, type DiagramAttachment} from './diagram-intake.js';
 import {subscribeAiConfig} from './ai-settings.js';
 import {VersionsSheet} from './ai-versions-sheet.js';
 import {closePanel as closeSidePanel, openPanel as openSidePanel, useSidePanels} from './side-panels.js';
@@ -64,6 +66,14 @@ export type AiDraft = {
    * `null` means that preview omitted the field. Absent means the preview was not recorded here.
    */
   previewedReplaceId?: string | null;
+  /** PNG or JPEG held on the Ask AI field. Not written into the workspace view. */
+  attachment?: DiagramAttachment;
+  /** Plain sentence for a bad file or a model that cannot see. The chip stays only for the vision error. */
+  attachmentError?: string;
+  /** Confirmed reading. Apply stores it. It is not a flow draft and not a knowledge field. */
+  diagramDraft?: GenerationView['diagramDraft'];
+  /** Background follow-up. The field stays on Undo instead of Stop. */
+  quiet?: boolean;
 };
 
 export type PersistedAiDraft = {jobId: string; prompt: string; previewId?: string; baseRevision?: number; positions?: DraftPositions};
@@ -365,7 +375,12 @@ function overlayRenders(draft: FlowDraft | undefined, canvas: CanvasGraph | unde
 function isAskBack(view: GenerationView) {
   if (view.state !== 'needsInfo' || !view.questions?.length) return false;
   if (isFlowDraft(view.draft) || view.preview) return false;
+  if (view.intent === 'diagram' || view.kind === 'diagram') return !view.diagramDraft;
   return view.intent === 'knowledge' || view.intent === 'unclear' || view.intent === 'mixed' || view.kind === 'knowledge';
+}
+
+function diagramReady(view: GenerationView) {
+  return view.state === 'pending' && !!view.diagramDraft && (view.intent === 'diagram' || view.kind === 'diagram');
 }
 
 function knowledgeReady(view: GenerationView) {
@@ -389,6 +404,26 @@ function withIntent(next: AiDraft, view: GenerationView): AiDraft {
  * A knowledge draft and an ask-back with no flow draft stay in the capsule instead.
  */
 function presentResult(current: AiDraft, view: GenerationView, revision: number, canvas: CanvasGraph | undefined): AiDraft {
+  if (diagramReady(view)) {
+    const base = fromView({...current, baseRevision: undefined}, view, revision);
+    return {
+      ...withIntent(base, view),
+      status: 'pending',
+      diagramDraft: view.diagramDraft,
+      draft: undefined,
+      knowledgeDraft: undefined,
+      questions: undefined,
+      previewId: undefined,
+      applicable: undefined,
+      error: undefined,
+      phase: undefined,
+      attachment: undefined,
+      attachmentError: undefined,
+      quiet: undefined,
+      knowledgeHeld: false,
+      baseRevision: undefined,
+    };
+  }
   if (knowledgeReady(view)) {
     const base = fromView({...current, baseRevision: undefined}, view, revision);
     return {
@@ -417,6 +452,10 @@ function presentResult(current: AiDraft, view: GenerationView, revision: number,
       questions: view.questions,
       error: undefined,
       phase: undefined,
+      attachment: undefined,
+      attachmentError: undefined,
+      diagramDraft: undefined,
+      quiet: undefined,
       knowledgeHeld: false,
       baseRevision: undefined,
     };
@@ -425,9 +464,14 @@ function presentResult(current: AiDraft, view: GenerationView, revision: number,
   const diagnostics = base.diagnostics?.length ? base.diagnostics : diagnosticsOn(view);
   const next = withIntent(diagnostics.length ? {...base, diagnostics} : base, view);
   if (view.state === 'running' || view.state === 'cancelled') return {...next, knowledgeDraft: undefined};
-  if (view.state === 'failed') return {...next, status: 'failed', knowledgeDraft: undefined};
+  if (view.state === 'failed') {
+    const line = plainDiagramError(view.error?.code, view.error?.message ?? '');
+    if (line === CANT_READ_IMAGES) return {...next, status: 'failed', knowledgeDraft: undefined, attachmentError: line, quiet: undefined};
+    if (line) return {...next, status: 'prompting', knowledgeDraft: undefined, attachment: undefined, attachmentError: line, error: undefined, quiet: undefined};
+    return {...next, status: 'failed', knowledgeDraft: undefined, quiet: undefined};
+  }
   if (next.status !== 'pending' && next.status !== 'needsInfo' && next.status !== 'stale') return next;
-  if (overlayRenders(next.draft, canvas)) return {...next, knowledgeDraft: undefined};
+  if (overlayRenders(next.draft, canvas)) return {...next, knowledgeDraft: undefined, diagramDraft: undefined};
   const blocking = (next.diagnostics ?? []).some(item => item.blocks.includes('apply') || item.severity === 'error');
   if (!blocking && next.applicable !== false && view.state !== 'needsInfo') return {...next, knowledgeDraft: undefined};
   return {
@@ -521,6 +565,10 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const memory = useRef(new Map<string, AiDraft>());
   const workspaceRef = useRef(input.workspaceId);
   const pendingAnswers = useRef<{key: string; answer: string}[] | undefined>(undefined);
+  const pendingAuthorPath = useRef<string | undefined>(undefined);
+  const diagramPaths = useRef<{id: string; title: string; labels: string[]}[]>([]);
+  /** Bumped to drop a scheduled "create a scenario?" ask. */
+  const scenarioAsk = useRef(0);
   /** Revision written by the current refine's own save. That bump must not mark the kept draft stale. */
   const ownSaveRevision = useRef<number | undefined>(undefined);
   /** Server preview id we already tried to re-preview with drawn positions. Stops a failed sync from looping. */
@@ -554,8 +602,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
 
   useEffect(() => {
     const askBack = draft.status === 'needsInfo' && !!draft.questions?.length && !draft.draft;
-    if (reviewing && (showOverlay || !!draft.knowledgeDraft || askBack)) setOpen(false);
-  }, [reviewing, showOverlay, draft.knowledgeDraft, draft.status, draft.questions, draft.draft]);
+    if (reviewing && (showOverlay || !!draft.knowledgeDraft || askBack || !!draft.diagramDraft)) setOpen(false);
+  }, [reviewing, showOverlay, draft.knowledgeDraft, draft.diagramDraft, draft.status, draft.questions, draft.draft]);
 
   useEffect(() => {
     if ((draft.status !== 'pending' && draft.status !== 'needsInfo') || draft.refining) return;
@@ -595,13 +643,14 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         failRefine(draftRef.current.prompt, view.error ?? {code: 'REQUEST_FAILED', message: 'Couldn’t generate.', retryable: false});
         return;
       }
+      if (view.diagramDraft?.paths) diagramPaths.current = view.diagramDraft.paths.map(path => ({id: path.id, title: path.title, labels: [...path.labels]}));
       setDraft(current => {
         if (current.jobId !== id) return current;
         if (current.status !== 'generating' && current.status !== 'stale') return current;
         const next = presentResult(current, view, revisionRef.current, canvasRef.current);
         if (view.state !== 'running') {
           if (next.baseRevision === revisionRef.current) ownSaveRevision.current = undefined;
-          return {...next, refining: false, restoreStatus: undefined, previousJobId: undefined};
+          return {...next, refining: false, restoreStatus: undefined, previousJobId: undefined, quiet: undefined};
         }
         return next;
       });
@@ -676,6 +725,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
           await repreview(view.draft, revision, currentId, false);
           return;
         }
+        if (view.diagramDraft?.paths) diagramPaths.current = view.diagramDraft.paths.map(path => ({id: path.id, title: path.title, labels: [...path.labels]}));
         setDraft(current => current.jobId === stored.jobId ? presentResult({...current, prompt: stored.prompt, workspaceId: currentId}, view, revision, canvasRef.current) : current);
       } catch (error) {
         if (cancelled || hydrateToken.current !== token || jobGuard.current !== stored.jobId) return;
@@ -861,9 +911,12 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     }
   }
 
-  async function generate(prompt = draftRef.current.prompt) {
+  async function generate(prompt = draftRef.current.prompt, options?: {quiet?: boolean}) {
+    const quiet = options?.quiet === true;
     const text = prompt.trim();
-    if (!text || text.length > PROMPT_CHAR_LIMIT || submitting || opLock.current) return;
+    const attached = draftRef.current.refining ? undefined : draftRef.current.attachment;
+    if ((!text && !attached) || text.length > PROMPT_CHAR_LIMIT || submitting || opLock.current) return;
+    if (!quiet) scenarioAsk.current += 1;
     closeVersions();
     setMixedFollowUp('');
     setKnowledgeNotice('');
@@ -872,10 +925,21 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     const previousJobId = refining ? (draftRef.current.previousJobId ?? draftRef.current.jobId) : undefined;
     const restoreStatus = refining ? draftRef.current.restoreStatus : undefined;
     const answers = refining ? pendingAnswers.current : undefined;
-    setSubmitting(true);
-    setOpen(true);
-    setDisclosure(null);
-    setDraft(current => ({...current, status: refining ? current.status : 'prompting', prompt: text, error: undefined, notice: undefined}));
+    const authorPath = refining ? pendingAuthorPath.current : undefined;
+    if (!quiet) {
+      setSubmitting(true);
+      setOpen(true);
+      setDisclosure(null);
+    }
+    setDraft(current => ({
+      ...current,
+      status: quiet ? 'generating' : (refining ? current.status : 'prompting'),
+      quiet: quiet || undefined,
+      prompt: quiet ? current.prompt : text,
+      error: undefined,
+      notice: undefined,
+      attachmentError: undefined,
+    }));
     try {
       let settings: AiPublicConfig;
       try {
@@ -896,9 +960,12 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         if (!failRefine(text, failure)) setDraft(current => ({...current, status: 'prompting', prompt: text, refining, error: failure}));
         return;
       }
-      const share = disclosureToken(provider, entry?.baseUrl);
-      if (!readDisclosure().has(share) && !acked.current.has(share)) {
+      const baseShare = disclosureToken(provider, entry?.baseUrl);
+      const share = baseShare + (attached ? '\nimage' : '');
+      if (!refining && !readDisclosure().has(share) && !acked.current.has(share)) {
+        setOpen(true);
         setDisclosure(share);
+        setDraft(current => ({...current, status: 'prompting', quiet: undefined, prompt: text}));
         return;
       }
       let saved: Workspace | undefined;
@@ -923,13 +990,17 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
           prompt: text,
           ...(previousJobId ? {previousJobId} : {}),
           ...(answers?.length ? {answers} : {}),
+          ...(attached ? {image: {mimeType: attached.mimeType, data: attached.data}} : {}),
+          ...(authorPath ? {authorPath} : {}),
         });
         pendingAnswers.current = undefined;
+        pendingAuthorPath.current = undefined;
         jobGuard.current = started.id;
         setDraft(current => ({
           ...current,
           status: 'generating',
-          prompt: text,
+          quiet: quiet || undefined,
+          prompt: quiet ? current.prompt : text,
           jobId: started.id,
           workspaceId: saved?.id,
           ...(refining ? {} : {baseRevision}),
@@ -943,13 +1014,19 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
           intent: refining ? current.intent : undefined,
           remainder: refining ? current.remainder : undefined,
           knowledgeHeld: refining ? current.knowledgeHeld : false,
+          diagramDraft: refining ? current.diagramDraft : undefined,
           error: started.error,
           notice: undefined,
         }));
       } catch (error) {
         jobGuard.current = undefined;
         const failure = errorOf(error, 'Couldn’t generate.');
-        if (!failRefine(text, failure)) setDraft(current => ({...current, status: 'failed', prompt: text, draft: current.draft, error: failure}));
+        const line = plainDiagramError(failure.code, failure.message);
+        if (line && line !== CANT_READ_IMAGES) {
+          if (!failRefine(text)) setDraft(current => ({...current, status: 'prompting', prompt: text, attachment: undefined, attachmentError: line, error: undefined, quiet: undefined}));
+          return;
+        }
+        if (!failRefine(text, failure)) setDraft(current => ({...current, status: 'failed', prompt: text, draft: current.draft, error: failure, attachmentError: line, quiet: undefined}));
       }
     } finally {
       opLock.current = false;
@@ -961,6 +1038,11 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     if (!disclosure) return;
     writeDisclosure(disclosure);
     acked.current.add(disclosure);
+    const base = disclosure.endsWith('\nimage') ? disclosure.slice(0, -'\nimage'.length) : '';
+    if (base) {
+      writeDisclosure(base);
+      acked.current.add(base);
+    }
     setDisclosure(null);
     void generate(draftRef.current.prompt);
   }
@@ -1112,6 +1194,9 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     const text = value.trim();
     if (!text || text.length > ANSWER_CHAR_LIMIT) return;
     if (!draftRef.current.questions?.some(item => item.key === key)) return;
+    const named = text === 'The path I named' ? '' : text;
+    const path = named ? diagramPaths.current.find(item => item.id === named || item.title === named || item.labels.join(' → ') === named || item.labels.join(' -> ') === named) : undefined;
+    pendingAuthorPath.current = path?.id;
     beginRefine(text, [{key, answer: text}]);
   }
 
@@ -1175,8 +1260,70 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     setDraft(current => current.knowledgeHeld ? {...current, knowledgeHeld: false} : current);
   }
 
+  function rememberPaths(paths: {id: string; title: string; labels: string[]}[]) {
+    diagramPaths.current = paths.map(path => ({id: path.id, title: path.title, labels: [...path.labels]}));
+  }
+
+  function scheduleScenarioAsk() {
+    const token = ++scenarioAsk.current;
+    setTimeout(() => {
+      if (scenarioAsk.current !== token) return;
+      const current = draftRef.current;
+      if (current.jobId || current.prompt.trim() || current.draft || current.diagramDraft || current.questions?.length) return;
+      void generate(CREATE_SCENARIO_PROMPT, {quiet: true});
+    }, 400);
+  }
+
+  async function confirmDiagram() {
+    const current = draftRef.current;
+    const graph = current.diagramDraft;
+    const scenarioId = current.scenarioId;
+    if (!graph || !current.jobId || !scenarioId || !input.workspaceId || current.status === 'applying') return;
+    if (input.running) return;
+    const workspaceId = input.workspaceId;
+    const jobId = current.jobId;
+    setDraft(existing => ({...existing, status: 'applying', error: undefined}));
+    let key = idempotency.current.get('diagram:' + jobId);
+    if (!key) { key = crypto.randomUUID(); idempotency.current.set('diagram:' + jobId, key); }
+    try {
+      const detail = await knowledge.readContext(workspaceId, scenarioId);
+      const applied = await knowledge.applyDiagram(workspaceId, scenarioId, {
+        jobId,
+        expectedContextRevision: detail.context.contextRevision,
+        idempotencyKey: key,
+      });
+      if (draftRef.current.jobId !== jobId) return;
+      rememberPaths(graph.paths);
+      jobGuard.current = undefined;
+      memory.current.delete(workspaceId);
+      clearPersisted();
+      setDraft(emptyDraft());
+      setOpen(false);
+      setKnowledgePulse(value => value + 1);
+      const revision = applied.detail?.context?.contextRevision;
+      if (applied.receipt?.receiptId && typeof revision === 'number') {
+        setUndoOffer({
+          receiptId: applied.receipt.receiptId,
+          revision: revisionRef.current,
+          workspaceId,
+          knowledge: {scenarioId, contextRevision: revision},
+        });
+      }
+      scheduleScenarioAsk();
+    } catch (error) {
+      if (draftRef.current.jobId !== jobId) return;
+      const code = error instanceof KnowledgeRequestError ? error.code : undefined;
+      setDraft(existing => ({...existing, status: 'pending'}));
+      setKnowledgeNotice(knowledgeFailureSentence(code) ?? 'Scenario details aren\'t available right now. Nothing was changed.');
+    }
+  }
+
   async function confirm() {
     const current = draftRef.current;
+    if (current.diagramDraft && !current.draft) {
+      await confirmDiagram();
+      return;
+    }
     if (current.knowledgeDraft && !current.draft) {
       await confirmKnowledge();
       return;
@@ -1276,6 +1423,14 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   }
 
   async function undoApply() {
+    scenarioAsk.current += 1;
+    const quietJob = draftRef.current.quiet ? draftRef.current.jobId : undefined;
+    if (quietJob) {
+      jobGuard.current = undefined;
+      setDraft(emptyDraft());
+      setOpen(false);
+      void client.cancelGeneration(quietJob);
+    }
     const offer = undoOfferRef.current;
     if (!offer) return;
     if (offer.knowledge) {
@@ -1314,8 +1469,9 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     }
     jobGuard.current = undefined;
     pendingAnswers.current = undefined;
+    pendingAuthorPath.current = undefined;
     clearPersisted();
-    setDraft({...emptyDraft(prompt), status: 'prompting', notice: 'Cancelled. Nothing was changed.'});
+    setDraft({...emptyDraft(prompt), status: 'prompting', notice: 'Cancelled. Nothing was changed.', attachment: current.attachment});
     setOpen(true);
     if (id && inflight) {
       try { await client.cancelGeneration(id); }
@@ -1329,6 +1485,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     const stillRunning = current.status === 'generating' || (current.status === 'stale' && !!current.phase);
     jobGuard.current = undefined;
     pendingAnswers.current = undefined;
+    pendingAuthorPath.current = undefined;
+    scenarioAsk.current += 1;
     memory.current.delete(input.workspaceId);
     clearPersisted();
     setKnowledgeNotice('');
@@ -1522,6 +1680,9 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     config, provider,
     disclosure, continueDisclosure, dismissDisclosure,
     setPrompt: (prompt: string) => setDraft(current => ({...current, prompt})),
+    setAttachment: (attachment: DiagramAttachment) => setDraft(current => ({...current, attachment, attachmentError: undefined, status: current.status === 'idle' ? 'prompting' : current.status})),
+    rejectAttachment: (message: string) => setDraft(current => ({...current, attachment: undefined, attachmentError: message, error: undefined, status: current.status === 'idle' ? 'prompting' : current.status})),
+    clearAttachment: () => setDraft(current => ({...current, attachment: undefined, attachmentError: current.attachmentError === CANT_READ_IMAGES ? undefined : current.attachmentError})),
     openPanel, closePanel, generate, refresh, ask, answer, confirm, undoApply, cancel, discard, refine,
     placeDraft, moveDraft,
     knowledgeOffer: draft.knowledgeDraft && draft.jobId && draft.scenarioId && (draft.status === 'pending' || draft.status === 'applying')
@@ -1545,7 +1706,13 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
 }
 
 export function confirmReason(draft: AiDraft, running: boolean) {
-  if (draft.questions?.length && !draft.draft && !draft.knowledgeDraft) return undefined;
+  if (draft.questions?.length && !draft.draft && !draft.knowledgeDraft && !draft.diagramDraft) return undefined;
+  if (draft.diagramDraft && !draft.draft) {
+    if (draft.status === 'applying') return 'Apply is unavailable while the draft is being added.';
+    if (running) return 'Apply is unavailable while a run is active.';
+    if (!draft.jobId || !draft.scenarioId) return 'Apply is unavailable until a draft is ready.';
+    return undefined;
+  }
   if (draft.knowledgeDraft && !draft.draft) {
     if (draft.status === 'applying') return 'Apply is unavailable while the draft is being added.';
     if (running) return 'Apply is unavailable while a run is active.';
@@ -1563,14 +1730,17 @@ export type AiDraftControl = ReturnType<typeof useAiDraft>;
 
 export function AiFlow({control}: {control: AiDraftControl}) {
   const {draft, open, submitting, provenanceId, provenanceName} = control;
-  const generating = draft.status === 'generating' || submitting;
+  const generating = (draft.status === 'generating' || submitting) && !draft.quiet;
   const failed = draft.status === 'failed';
   const refining = !!draft.refining;
   const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const dragDepth = useRef(0);
   const errorId = useId();
   const [live, setLive] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const [setupNeeded, setSetupNeeded] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const count = draft.prompt.length;
   const over = count > PROMPT_CHAR_LIMIT;
   const rawEntry = control.provider === 'copilot' ? undefined : control.config?.providers?.[control.provider];
@@ -1627,7 +1797,7 @@ export function AiFlow({control}: {control: AiDraftControl}) {
     if (event.key === 'Escape') { onPanelKeyDown(event); return; }
     if (event.key !== 'Enter' || event.shiftKey || control.disclosure) return;
     event.preventDefault();
-    if (!draft.prompt.trim() || busy || over) return;
+    if ((!draft.prompt.trim() && !draft.attachment) || busy || over) return;
     if (!configured) { setSetupNeeded(true); setCollapsed(false); return; }
     void control.generate();
   }
@@ -1637,13 +1807,15 @@ export function AiFlow({control}: {control: AiDraftControl}) {
   const askRef = useRef<HTMLInputElement>(null);
   const sheetWasOpen = useRef(control.versionsOpen);
   const copy = !draft.error ? draft.notice : neutral ? noticeCopy(draft.error.code, draft.error.message) : undefined;
-  const panelError = !neutral && draft.error
+  const diagramLine = draft.attachmentError || (draft.error ? plainDiagramError(draft.error.code, draft.error.message) : undefined);
+  const panelError = diagramLine ? undefined : !neutral && draft.error
     ? aiErrorView(draft.error.code, draft.error.message, modelOf(control.config, control.provider) || draft.model, control.provider)
     : setupNeeded && !configured ? aiErrorView('AI_NOT_CONFIGURED', '', undefined, control.provider) : undefined;
   const composerIssues = (draft.diagnostics ?? []).filter(item => item.blocks.includes('apply') || item.severity === 'error');
   const knowledgeOpen = !!draft.knowledgeDraft && (draft.status === 'pending' || draft.status === 'applying');
+  const diagramOpen = !!draft.diagramDraft && (draft.status === 'pending' || draft.status === 'applying') && !refining;
   const askOpen = draft.status === 'needsInfo' && !!draft.questions?.length && !draft.draft && !refining;
-  const draftOpen = (REVIEW.includes(draft.status) && !refining && !!draft.draft) || knowledgeOpen || askOpen;
+  const draftOpen = (REVIEW.includes(draft.status) && !refining && !!draft.draft) || knowledgeOpen || askOpen || diagramOpen;
   const mode = capsuleMode({draftOpen, undoVisible: control.undoVisible, versionCount: control.versionCount});
   function focusCapsule() {
     const target = versionsRef.current ?? undoRef.current ?? askRef.current ?? fieldRef.current;
@@ -1673,7 +1845,7 @@ export function AiFlow({control}: {control: AiDraftControl}) {
       <div className="ai-panel-bar">
         <button type="button" className="ai-text" aria-label="Close" onClick={() => { if (generating) return; control.closePanel(); collapsePanel(); }}>✕</button>
         <div className="ai-panel-body">
-        {control.disclosure ? <><p className="ai-prompt-preview">{draft.prompt}</p><Disclosure control={control} /></> : <>
+        {control.disclosure ? <><p className="ai-prompt-preview">{draft.prompt}</p><Disclosure control={control} diagram={control.disclosure.includes('\nimage')} /></> : <>
           {nearLimit && <p className={over ? 'ai-error' : 'ai-muted'} data-testid="ai-char-count">{over ? (count - PROMPT_CHAR_LIMIT) + ' characters over the limit. Shorten the text to generate. Nothing is trimmed for you.' : count.toLocaleString('en-US') + ' / ' + PROMPT_CHAR_LIMIT.toLocaleString('en-US')}</p>}
           {copy && <p id={errorId} className="ai-muted" role="status" data-testid="ai-notice">{copy}</p>}
           {panelError && <AiErrorState id={errorId} view={panelError} onGenerate={() => void control.generate()} onRefine={() => control.refine()} onSettings={target => { control.openPanel(); control.openSettings(target); }} />}
@@ -1682,11 +1854,86 @@ export function AiFlow({control}: {control: AiDraftControl}) {
         </div>
       </div>
     </section>}
-    {mode === 'draft' ? <AiCapsule control={control} askRef={askRef} /> : control.mixedFollowUp && !generating && !open ? <FollowUpCapsule control={control} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : mode !== 'idle' && !open ? <HistoryCapsule control={control} mode={mode} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : <div className={'ai-flow-field' + (generating ? ' is-generating' : '')}><Sparkles size={20} /><textarea ref={fieldRef} className="ai-flow-input" data-testid="ai-flow-field" rows={1} aria-label="Ask AI" placeholder="Ask AI" value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={showPanel && (copy || panelError) ? errorId : undefined} onChange={event => { if (event.target.value.length >= PROMPT_COUNTER_AT) setCollapsed(false); control.setPrompt(event.target.value); }} onKeyDown={onFieldKeyDown} />{generating ? <button type="button" className="ai-send is-stop" data-testid="ai-cancel" aria-label="Stop" title="Stop" onClick={() => void control.cancel()}><StopIcon /></button> : draft.prompt.trim() ? <button type="button" className="ai-send" aria-label="Send" title="Send (Enter) · Shift+Enter for a new line" disabled={busy || over || !configured || !!control.disclosure} onClick={() => void control.generate()}><SendIcon /></button> : null}</div>}
+    {diagramLine && <p className="ai-diagram-error" role="alert" data-testid="ai-diagram-error">{diagramLine}</p>}
+    {diagramOpen && draft.diagramDraft && <DiagramCard mermaid={draft.diagramDraft.mermaid} />}
+    {mode === 'draft' ? <AiCapsule control={control} askRef={askRef} /> : control.mixedFollowUp && !generating && !open ? <FollowUpCapsule control={control} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : mode !== 'idle' && !open ? <HistoryCapsule control={control} mode={mode} versionsRef={versionsRef} undoRef={undoRef} askRef={askRef} /> : <DiagramComposer control={control} fieldRef={fieldRef} fileRef={fileRef} dragDepth={dragDepth} dragOver={dragOver} setDragOver={setDragOver} generating={generating} busy={busy} over={over} configured={configured} failed={failed} neutral={neutral} errorId={errorId} showDescribed={!!(showPanel && (copy || panelError))} onKeyDown={onFieldKeyDown} onPrompt={value => { if (value.length >= PROMPT_COUNTER_AT) setCollapsed(false); control.setPrompt(value); }} />}
     {!!control.knowledgeNotice && <p className="ai-knowledge-note" role="alert" data-testid="ai-knowledge-note">{control.knowledgeNotice}</p>}
   </div>
   {control.versionsOpen && !!control.sheetVersions.length && createPortal(<VersionsSheet versions={control.sheetVersions} nowId={control.nowVersionId} selectedId={control.selectedVersionId} onSelect={control.selectVersion} onClose={closeVersions} onKeepCurrent={control.keepCurrent} onRestore={() => { const id = control.selectedVersionId; if (id) void control.restore(id); }} restoreDisabled={!!control.restoreReason} restoreNote={control.restoreReason} restoreError={control.restoreError} />, document.body)}
   </>;
+}
+
+function DiagramComposer({control, fieldRef, fileRef, dragDepth, dragOver, setDragOver, generating, busy, over, configured, failed, neutral, errorId, showDescribed, onKeyDown, onPrompt}: {
+  control: AiDraftControl;
+  fieldRef: {current: HTMLTextAreaElement | null};
+  fileRef: {current: HTMLInputElement | null};
+  dragDepth: {current: number};
+  dragOver: boolean;
+  setDragOver: (value: boolean) => void;
+  generating: boolean;
+  busy: boolean;
+  over: boolean;
+  configured: boolean;
+  failed: boolean;
+  neutral: boolean;
+  errorId: string;
+  showDescribed: boolean;
+  onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onPrompt: (value: string) => void;
+}) {
+  const {draft} = control;
+  async function takeFile(file: File, fallbackName?: string) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const result = attachmentFromBytes(fallbackName || file.name, file.type, bytes);
+    if ('error' in result) control.rejectAttachment(result.error);
+    else control.setAttachment(result);
+  }
+  function onDragEnter(event: DragEvent) {
+    if (![...event.dataTransfer.types].includes('Files')) return;
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDragOver(true);
+  }
+  function onDragOver(event: DragEvent) {
+    if (![...event.dataTransfer.types].includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }
+  function onDragLeave() {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragOver(false);
+  }
+  function onDrop(event: DragEvent) {
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDragOver(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) void takeFile(file);
+  }
+  function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const items = [...(event.clipboardData?.items ?? [])];
+    const image = items.find(item => item.type === 'image/png' || item.type === 'image/jpeg');
+    const file = image?.getAsFile() ?? [...(event.clipboardData?.files ?? [])].find(item => item.type === 'image/png' || item.type === 'image/jpeg');
+    if (!file) return;
+    event.preventDefault();
+    const name = file.name && file.name !== 'image.png' ? file.name : (file.type === 'image/jpeg' ? 'Pasted image.jpg' : 'Pasted image.png');
+    void takeFile(file, name);
+  }
+  const canSend = !!draft.prompt.trim() || !!draft.attachment;
+  return <div className={'ai-composer' + (draft.attachment ? ' has-file' : '')} onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+    {draft.attachment && <div className="ai-file-chip" data-testid="ai-diagram-chip">
+      <FileIcon />
+      <span className="ai-file-name">{draft.attachment.name}</span>
+      <button type="button" className="ai-file-remove" data-testid="ai-diagram-remove" aria-label="Remove file" onClick={() => control.clearAttachment()}>✕</button>
+    </div>}
+    <div className={'ai-flow-field' + (generating ? ' is-generating' : '') + (dragOver ? ' is-drop' : '')}>
+      <Sparkles size={20} />
+      <textarea ref={fieldRef} className="ai-flow-input" data-testid="ai-flow-field" rows={1} aria-label="Ask AI" placeholder={dragOver ? 'Drop a PNG or JPEG' : 'Ask AI'} value={draft.prompt} readOnly={generating} aria-invalid={over || (failed && !neutral) || undefined} aria-describedby={showDescribed ? errorId : undefined} onChange={event => onPrompt(event.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} />
+      {!generating && <button type="button" className="ai-clip" data-testid="ai-clip" aria-label="Attach a PNG or JPEG" title="Attach a PNG or JPEG" onClick={() => fileRef.current?.click()}><PaperclipIcon /></button>}
+      {generating ? <button type="button" className="ai-send is-stop" data-testid="ai-cancel" aria-label="Stop" title="Stop" onClick={() => void control.cancel()}><StopIcon /></button> : canSend ? <button type="button" className="ai-send" aria-label="Send" title="Send (Enter) · Shift+Enter for a new line" disabled={busy || over || !configured || !!control.disclosure} onClick={() => void control.generate()}><SendIcon /></button> : null}
+      <input ref={fileRef} className="ai-file-input" data-testid="ai-diagram-file" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" tabIndex={-1} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void takeFile(file); }} />
+    </div>
+  </div>;
 }
 
 function VersionsControl({control, buttonRef}: {control: AiDraftControl; buttonRef: {current: HTMLButtonElement | null}}) {
@@ -1721,8 +1968,9 @@ function AiCapsule({control, askRef}: {control: AiDraftControl; askRef: {current
   const reasonId = useId();
   const focused = useRef('');
   const questions = (draft.questions ?? []).slice(0, 5);
-  const showApply = !!draft.draft || !!draft.knowledgeDraft;
-  const focusKey = draft.previewId || (draft.knowledgeDraft ? draft.jobId : '');
+  const showApply = !!draft.draft || !!draft.knowledgeDraft || !!draft.diagramDraft;
+  const focusKey = draft.previewId || ((draft.knowledgeDraft || draft.diagramDraft) ? draft.jobId : '');
+  const diagramAsk = !draft.draft && !draft.knowledgeDraft && !draft.diagramDraft && questions.length > 0 && (draft.intent === 'diagram' || draft.kind === 'diagram');
   useEffect(() => {
     if (!focusKey || focused.current === focusKey) return;
     focused.current = focusKey;
@@ -1736,13 +1984,43 @@ function AiCapsule({control, askRef}: {control: AiDraftControl; askRef: {current
     if (question && next.length <= ANSWER_CHAR_LIMIT) control.answer(question.key, next);
     else control.ask(next);
   }
+  function choose(key: string, option: string) {
+    if (key === 'which-path' && option === 'The path I named') {
+      const named = text.trim();
+      if (named && named.length <= ANSWER_CHAR_LIMIT) {
+        setText('');
+        control.answer(key, named);
+        return;
+      }
+    }
+    control.answer(key, option);
+  }
+  if (diagramAsk) {
+    const dismiss = questions.some(question => question.key !== 'create-scenario' && question.key !== 'which-path');
+    return <div className="ai-diagram-ask" data-testid="ai-diagram-ask">
+      <div className="ai-questions" data-testid="ai-questions">
+        {questions.map(question => <div key={question.key} className="ai-question" data-testid="ai-question" data-question-key={question.key}>
+          <p className="ai-question-text">{question.text}</p>
+          <div className="ai-question-options">
+            {question.options.slice(0, 3).map((option, index) => <button type="button" key={question.key + ':' + index} className="ai-question-option" data-testid="ai-question-option" data-question-key={question.key} onClick={() => choose(question.key, option)}>{option}</button>)}
+          </div>
+        </div>)}
+      </div>
+      <div className="ai-flow-field">
+        <Sparkles size={20} />
+        <input ref={askRef} className="ai-flow-input" aria-label="Ask AI" placeholder="Ask AI" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key !== 'Enter') return; event.preventDefault(); submit(); }} />
+        {control.undoVisible && <button type="button" className="ai-capsule-undo" data-testid="ai-undo" onClick={() => void control.undoApply()}>↶ Undo</button>}
+        {dismiss && <button type="button" className="ai-capsule-dismiss" data-testid="ai-discard" aria-label="Dismiss draft" onClick={() => void control.discard()}>✕</button>}
+      </div>
+    </div>;
+  }
   return <div className="ai-capsule-wrap ai-flow-field">
     <form className={'ai-capsule' + (questions.length ? ' has-questions' : '')} data-testid="ai-capsule" onSubmit={event => { event.preventDefault(); submit(); }}>
       {!!questions.length && <div className="ai-questions" data-testid="ai-questions">
         {questions.map(question => <div key={question.key} className="ai-question" data-testid="ai-question" data-question-key={question.key}>
           <p className="ai-question-text">{question.text}</p>
           <div className="ai-question-options">
-            {question.options.slice(0, 3).map((option, index) => <button type="button" key={question.key + ':' + index} className="ai-question-option" data-testid="ai-question-option" data-question-key={question.key} onClick={() => control.answer(question.key, option)}>{option}</button>)}
+            {question.options.slice(0, 3).map((option, index) => <button type="button" key={question.key + ':' + index} className="ai-question-option" data-testid="ai-question-option" data-question-key={question.key} onClick={() => choose(question.key, option)}>{option}</button>)}
           </div>
         </div>)}
       </div>}
@@ -1787,12 +2065,13 @@ function FollowUpCapsule({control, versionsRef, undoRef, askRef}: {control: AiDr
   </div>;
 }
 
-function Disclosure({control}: {control: AiDraftControl}) {
+function Disclosure({control, diagram}: {control: AiDraftControl; diagram: boolean}) {
   const sent = control.provider === 'copilot'
     ? 'Sent to GitHub Copilot'
     : 'Sent to ' + (control.provider === 'openrouter' ? 'OpenRouter' : 'the model provider') + ' and the model’s provider';
   return <div className="ai-disclosure" data-testid="ai-disclosure">
     <p className="ai-disclosure-heading">Before your first generation</p>
+    {diagram && <p className="ai-disclosure-diagram" data-testid="ai-disclosure-diagram">This diagram image is sent to the selected AI provider. Screenshots and recordings are not.</p>}
     <div className="ai-disclosure-cols">
       <div><p>{sent}</p><ul><li>Your scenario text</li><li>Screen names, selectors and their metadata</li><li>TnT’s authoring schema</li><li>Script source you include</li></ul></div>
       <div><p>Not sent</p><ul><li>Screenshots or recordings</li><li>Runtime input values (names only)</li><li>Saved keys or other credentials</li><li>Other workspace files</li></ul></div>
@@ -1900,6 +2179,14 @@ function AiErrorState({id, view, onGenerate, onRefine, onSettings}: {id: string;
           : <button type="button" className="ai-text" key={action} data-testid="ai-retry" onClick={onGenerate}>{action === 'network' ? 'Retry · may send another request' : action === 'refresh' ? 'Refresh and generate again' : action === 'try' ? 'Try again' : 'Retry'}</button>)}
     </div>}
   </div>;
+}
+
+function PaperclipIcon() {
+  return <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M8 12.5l6.2-6.2a3 3 0 0 1 4.2 4.2l-7.4 7.5a4.2 4.2 0 0 1-6-6l6.6-6.6"/></svg>;
+}
+
+function FileIcon() {
+  return <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="#0a63d1" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.3"/><path d="M4 15l4.2-3.2a1 1 0 0 1 1.2 0L14 15l2-1.6a1 1 0 0 1 1.3 0L20 15"/></svg>;
 }
 
 function Sparkles({size = 22}: {size?: number}) {

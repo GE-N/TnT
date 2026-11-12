@@ -59,6 +59,7 @@ export type WorkspaceKnowledgeStatus = {
 export type KnowledgeReceiptRef = {receiptId: string};
 export type KnowledgeApplyResult = {detail: ScenarioDetail; receipt: KnowledgeReceiptRef};
 export type KnowledgeApplyBody = {jobId: string; expectedContextRevision: number; idempotencyKey: string};
+export type DiagramApplyResult = KnowledgeApplyResult & {followUp: {key: string; text: string; options: readonly string[]}};
 export type KnowledgeUndoBody = {receiptId: string; expectedContextRevision: number};
 
 export class KnowledgeRequestError extends Error {
@@ -124,6 +125,9 @@ export function knowledgeClient(token: string, fetchImpl: typeof fetch = fetch) 
     },
     apply(workspaceId: string, scenarioId: string, body: KnowledgeApplyBody) {
       return send(`/api/knowledge/workspaces/${encodeURIComponent(workspaceId)}/scenarios/${encodeURIComponent(scenarioId)}/apply`, {method: 'POST', body}) as Promise<KnowledgeApplyResult>;
+    },
+    applyDiagram(workspaceId: string, scenarioId: string, body: KnowledgeApplyBody) {
+      return send(`/api/knowledge/workspaces/${encodeURIComponent(workspaceId)}/scenarios/${encodeURIComponent(scenarioId)}/diagram`, {method: 'POST', body}) as Promise<DiagramApplyResult>;
     },
     undo(workspaceId: string, scenarioId: string, body: KnowledgeUndoBody) {
       return send(`/api/knowledge/workspaces/${encodeURIComponent(workspaceId)}/scenarios/${encodeURIComponent(scenarioId)}/undo`, {method: 'POST', body}) as Promise<ScenarioDetail>;
