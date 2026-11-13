@@ -23,7 +23,7 @@ function placeMenu(trigger:HTMLElement,menu:HTMLElement){
   menu.style.left=left+'px';
 }
 
-export function StepActionsMenu({label,title,className,items}:{label:string;title?:string;className?:string;items:StepMenuItem[]}){
+export function StepActionsMenu({label,title,className,items,triggerTabIndex,onTriggerKeyDown}:{label:string;title?:string;className?:string;items:StepMenuItem[];triggerTabIndex?:number;onTriggerKeyDown?:(event:ReactKeyboardEvent<HTMLButtonElement>)=>void}){
   const id=useId();
   const triggerRef=useRef<HTMLButtonElement>(null);
   const menuRef=useRef<HTMLDivElement>(null);
@@ -71,7 +71,7 @@ export function StepActionsMenu({label,title,className,items}:{label:string;titl
     buttons[next]?.focus({preventScroll:true});
   }
   return <div className={'visit-step-actions'+(className?' '+className:'')}>
-    <button ref={triggerRef} type="button" className="step-actions-trigger" aria-label={label} title={title} aria-haspopup="menu" aria-expanded={open} onClick={()=>{if(keyed.current){keyed.current=false;return;}toggle();}} onKeyDown={event=>{if(event.key!=='Enter'&&event.key!==' ')return;event.preventDefault();event.stopPropagation();keyed.current=true;toggle();queueMicrotask(()=>{keyed.current=false;});}}>⋯</button>
+    <button ref={triggerRef} type="button" className="step-actions-trigger" aria-label={label} title={title} aria-haspopup="menu" aria-expanded={open} tabIndex={triggerTabIndex} onClick={()=>{if(keyed.current){keyed.current=false;return;}toggle();}} onKeyDown={event=>{onTriggerKeyDown?.(event);if(event.defaultPrevented)return;if(event.key!=='Enter'&&event.key!==' ')return;event.preventDefault();event.stopPropagation();keyed.current=true;toggle();queueMicrotask(()=>{keyed.current=false;});}}>⋯</button>
     {open&&createPortal(<div ref={menuRef} role="menu" aria-label={label} className="step-actions-menu" onKeyDown={onMenuKey} onMouseDown={event=>event.preventDefault()}>{items.map(item=><button type="button" role="menuitem" key={item.ariaLabel} className={item.className} aria-label={item.ariaLabel} disabled={item.disabled||undefined} tabIndex={-1} onClick={()=>{close(false);item.onSelect();}}>{item.label}</button>)}</div>,document.body)}
   </div>;
 }
