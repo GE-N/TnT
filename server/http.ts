@@ -58,11 +58,28 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
       if(url.pathname.startsWith('/api/knowledge/')){
         ensureKnowledge();
         if(!knowledgeService)return json(503,{code:'KNOWLEDGE_UNAVAILABLE',error:'Knowledge service is unavailable.'});
+        const diagram=/^\/api\/knowledge\/workspaces\/([^/]+)\/scenarios\/([^/]+)\/diagram$/.exec(url.pathname);
         const context=/^\/api\/knowledge\/workspaces\/([^/]+)\/scenarios\/([^/]+)\/context$/.exec(url.pathname);
         const apply=/^\/api\/knowledge\/workspaces\/([^/]+)\/scenarios\/([^/]+)\/apply$/.exec(url.pathname);
         const undo=/^\/api\/knowledge\/workspaces\/([^/]+)\/scenarios\/([^/]+)\/undo$/.exec(url.pathname);
         const status=/^\/api\/knowledge\/workspaces\/([^/]+)\/status$/.exec(url.pathname);
         const decode=(value:string)=>{try{return decodeURIComponent(value);}catch{throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','Invalid identifier encoding.');}};
+        if(diagram){
+          const workspace=decode(diagram[1]);const scenario=decode(diagram[2]);
+          if(request.method==='GET'){
+            const stored=await knowledgeService.readDiagram(workspace,scenario);
+            if(!stored)return json(404,{code:'KNOWLEDGE_NOT_FOUND',error:'This scenario has no saved diagram.'});
+            return json(200,{mermaid:stored.mermaid,paths:stored.paths,updatedAt:stored.updatedAt});
+          }
+          if(request.method!=='POST')return json(405,{code:'INVALID_KNOWLEDGE_INPUT',error:'Use GET or POST for a scenario diagram.'});
+          let input:unknown;try{input=await readJson(request,64_000);}catch(error){throw new KnowledgeError(error instanceof WorkspacePayloadTooLarge?413:400,error instanceof WorkspacePayloadTooLarge?'KNOWLEDGE_TOO_LARGE':'INVALID_KNOWLEDGE_INPUT',message(error));}
+          if(!ai)return json(503,{code:'KNOWLEDGE_UNAVAILABLE',error:'Knowledge service is unavailable.'});
+          const body=input as {jobId?:unknown;expectedContextRevision?:unknown;idempotencyKey?:unknown};
+          if(typeof body.jobId!=='string')throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','Provide the diagram draft.');
+          let view;try{view=await ai.get(body.jobId);}catch{throw new KnowledgeError(404,'KNOWLEDGE_NOT_FOUND','That diagram draft was not found.');}
+          if(view.workspaceId!==workspace||view.scenarioId!==scenario||view.state!=='pending'||view.intent!=='diagram'||!view.diagramDraft)throw new KnowledgeError(400,'INVALID_KNOWLEDGE_INPUT','That draft is not waiting to be applied.');
+          return json(200,await knowledgeService.applyDiagram(workspace,scenario,{jobId:view.id,expectedContextRevision:body.expectedContextRevision,idempotencyKey:body.idempotencyKey,mermaid:view.diagramDraft.mermaid,skill:'diagram@1',skillHash:view.skillHash??''}));
+        }
         if(context){
           if(request.method==='GET')return json(200,await knowledgeService.readContext(decode(context[1]),decode(context[2])));
           if(request.method==='PUT'){
@@ -190,7 +207,7 @@ export function createApiHandler(runner: ReturnType<typeof createRunner>, artifa
         if (request.method === 'PUT' && url.pathname === '/api/ai/config') return json(200, await ai.putConfig(await readJson(request)));
         if (request.method === 'POST' && url.pathname === '/api/ai/config/test') return json(200, await ai.testConnection(await readJson(request)));
         if (request.method === 'GET' && url.pathname === '/api/ai/models') return json(200, await ai.listModels(url.searchParams.get('provider')));
-        if (request.method === 'POST' && url.pathname === '/api/ai/generations') return json(202, await ai.start(await readJson(request)));
+        if (request.method === 'POST' && url.pathname === '/api/ai/generations') return json(202, await ai.start(await readJson(request, 4_000_000)));
         const generation = /^\/api\/ai\/generations\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(cancel))?$/.exec(url.pathname);
         if (generation) {
           if (request.method === 'GET' && !generation[2]) return json(200, await ai.get(generation[1]));

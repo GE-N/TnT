@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 
-export type SkillName = 'router' | 'knowledge-update';
+export type SkillName = 'router' | 'knowledge-update' | 'diagram';
 
 export type Skill = {
   id: string;
@@ -32,5 +32,5 @@ export function loadSkill(name: SkillName, version = 1): Skill {
 }
 
 export function loadBundledSkills() {
-  return {router: loadSkill('router'), knowledgeUpdate: loadSkill('knowledge-update')};
+  return {router: loadSkill('router'), knowledgeUpdate: loadSkill('knowledge-update'), diagram: loadSkill('diagram')};
 }

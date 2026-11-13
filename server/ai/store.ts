@@ -3,10 +3,12 @@ import {chmod, mkdir, open, readdir, readFile, rename, rm} from 'node:fs/promise
 import {join} from 'node:path';
 import {JOURNAL_TTL_MS, type Preview} from '../authoring/types.js';
 import {contextFields, type ContextContent} from '../knowledge/types.js';
+import type {DiagramPath, DiagramStage} from './diagram.js';
 import {sanitizeQuestions, type ClarifyingQuestion} from './questions.js';
 
-export type AiIntent = 'flow' | 'knowledge' | 'mixed' | 'unclear';
-export type JobKind = 'flow' | 'knowledge';
+export type AiIntent = 'flow' | 'knowledge' | 'mixed' | 'unclear' | 'diagram';
+export type JobKind = 'flow' | 'knowledge' | 'diagram';
+export type DiagramDraft = {mermaid: string; paths: DiagramPath[]};
 export type KnowledgeDraft = ContextContent & {baseContextRevision: number};
 export type KnowledgeConflictNote = {field: typeof contextFields[number]; written: string; lastVisit?: string};
 
@@ -52,6 +54,13 @@ export type StoredJob = {
   contextRevision?: number;
   baseContext?: ContextContent;
   conflict?: KnowledgeConflictNote;
+  diagramDraft?: DiagramDraft;
+  diagramSource?: 'image' | 'mermaid';
+  diagramRound?: number;
+  diagramStage?: DiagramStage;
+  /** Pasted Mermaid, kept for a later reading. Not shown on the generation view. */
+  diagramText?: string;
+  diagramMiss?: boolean;
 };
 export type GenerationView = {
   id: string;
@@ -82,13 +91,14 @@ export type GenerationView = {
   scenarioId?: string;
   /** Present when intent is mixed, so a later slice can ask to update the details. */
   remainder?: string;
+  diagramDraft?: DiagramDraft;
 };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const STATES = new Set<GenerationState>(['running', 'pending', 'needsInfo', 'failed', 'cancelled']);
 const PHASES = new Set<GenerationPhase>(['context', 'model', 'validating', 'repairing', 'previewing']);
-const FIELDS = ['id', 'workspaceId', 'baseRevision', 'state', 'phase', 'provenance', 'contractVersion', 'createdAt', 'expiresAt', 'draft', 'previewId', 'preview', 'previewExpiresAt', 'error', 'inputTokens', 'outputTokens', 'cost', 'model', 'upstreamProvider', 'contextTrimmed', 'questions', 'kind', 'intent', 'knowledgeDraft', 'skill', 'skillHash', 'remainder', 'requestText', 'scenarioId', 'contextRevision', 'baseContext', 'conflict'] as const;
-const INTENTS = new Set<AiIntent>(['flow', 'knowledge', 'mixed', 'unclear']);
+const FIELDS = ['id', 'workspaceId', 'baseRevision', 'state', 'phase', 'provenance', 'contractVersion', 'createdAt', 'expiresAt', 'draft', 'previewId', 'preview', 'previewExpiresAt', 'error', 'inputTokens', 'outputTokens', 'cost', 'model', 'upstreamProvider', 'contextTrimmed', 'questions', 'kind', 'intent', 'knowledgeDraft', 'skill', 'skillHash', 'remainder', 'requestText', 'scenarioId', 'contextRevision', 'baseContext', 'conflict', 'diagramDraft', 'diagramSource', 'diagramRound', 'diagramStage', 'diagramText', 'diagramMiss'] as const;
+const INTENTS = new Set<AiIntent>(['flow', 'knowledge', 'mixed', 'unclear', 'diagram']);
 const SCENARIO_ID = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const SKILL_ID = /^[a-z][a-z0-9-]*@[1-9][0-9]{0,2}$/;
 const SKILL_HASH = /^[a-f0-9]{64}$/;
@@ -170,7 +180,7 @@ export function sanitizeJob(value: unknown): StoredJob | undefined {
   const model = shortText(item.model);
   const upstreamProvider = shortText(item.upstreamProvider);
   const questions = sanitizeQuestions(item.questions);
-  const kind = item.kind === 'flow' || item.kind === 'knowledge' ? item.kind : undefined;
+  const kind = item.kind === 'flow' || item.kind === 'knowledge' || item.kind === 'diagram' ? item.kind : undefined;
   const intent = typeof item.intent === 'string' && INTENTS.has(item.intent as AiIntent) ? item.intent as AiIntent : undefined;
   const knowledgeDraft = knowledgeDraftOf(item.knowledgeDraft);
   const skill = typeof item.skill === 'string' && SKILL_ID.test(item.skill) ? item.skill : undefined;
@@ -181,6 +191,11 @@ export function sanitizeJob(value: unknown): StoredJob | undefined {
   const contextRevision = typeof item.contextRevision === 'number' && Number.isSafeInteger(item.contextRevision) && item.contextRevision >= 0 ? item.contextRevision : undefined;
   const baseContext = boundedContext(item.baseContext);
   const conflict = conflictOf(item.conflict);
+  const diagramDraft = diagramDraftOf(item.diagramDraft);
+  const diagramSource = item.diagramSource === 'image' || item.diagramSource === 'mermaid' ? item.diagramSource : undefined;
+  const diagramRound = typeof item.diagramRound === 'number' && Number.isSafeInteger(item.diagramRound) && item.diagramRound >= 0 && item.diagramRound <= 20 ? item.diagramRound : undefined;
+  const diagramStage = item.diagramStage === 'intake' || item.diagramStage === 'ask-create' || item.diagramStage === 'ask-path' ? item.diagramStage : undefined;
+  const diagramText = typeof item.diagramText === 'string' && item.diagramText.length > 0 && item.diagramText.length <= 16_000 && !item.diagramText.includes('\0') ? item.diagramText : undefined;
   return {
     id: item.id,
     workspaceId: item.workspaceId,
@@ -214,7 +229,27 @@ export function sanitizeJob(value: unknown): StoredJob | undefined {
     ...(contextRevision !== undefined ? {contextRevision} : {}),
     ...(baseContext ? {baseContext} : {}),
     ...(conflict ? {conflict} : {}),
+    ...(diagramDraft ? {diagramDraft} : {}),
+    ...(diagramSource ? {diagramSource} : {}),
+    ...(diagramRound !== undefined ? {diagramRound} : {}),
+    ...(diagramStage ? {diagramStage} : {}),
+    ...(diagramText ? {diagramText} : {}),
+    ...(item.diagramMiss === true ? {diagramMiss: true} : {}),
   };
+}
+
+function diagramDraftOf(value: unknown): DiagramDraft | undefined {
+  const item = record(value);
+  if (!item || typeof item.mermaid !== 'string' || item.mermaid.length > 16_000 || !Array.isArray(item.paths) || item.paths.length < 1 || item.paths.length > 12) return;
+  const paths: DiagramDraft['paths'] = [];
+  for (const path of item.paths) {
+    const row = record(path);
+    if (!row || typeof row.id !== 'string' || typeof row.title !== 'string' || !Array.isArray(row.labels)) return;
+    const labels = row.labels.filter((label): label is string => typeof label === 'string' && label.length > 0 && label.length <= 200);
+    if (!labels.length || labels.length !== row.labels.length) return;
+    paths.push({id: row.id, title: row.title, labels});
+  }
+  return {mermaid: item.mermaid, paths};
 }
 
 export function createJobStore(root: string) {
@@ -310,5 +345,6 @@ export function generationView(job: StoredJob, now: number): GenerationView {
     ...(job.skillHash ? {skillHash: job.skillHash} : {}),
     ...(job.scenarioId ? {scenarioId: job.scenarioId} : {}),
     ...(job.intent === 'mixed' && job.remainder ? {remainder: job.remainder} : {}),
+    ...(job.state === 'pending' && job.diagramDraft ? {diagramDraft: {mermaid: job.diagramDraft.mermaid, paths: job.diagramDraft.paths.map(path => ({...path, labels: [...path.labels]}))}} : {}),
   };
 }

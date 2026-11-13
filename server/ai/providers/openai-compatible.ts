@@ -1,7 +1,8 @@
-import {redactSecrets} from '../errors.js';
+import {CANT_READ_IMAGES, redactSecrets} from '../errors.js';
+import {DIAGRAM_IMAGE_BYTE_LIMIT} from '../diagram.js';
 import {appendSchemaInstruction} from '../prompt.js';
 import {OPENROUTER_BASE_URL} from '../probe.js';
-import {MAX_UPSTREAM_POSTS, ProviderRequestError, RESPONSE_BYTE_LIMIT, type FlowModelProvider, type ModelDone, type UpstreamBudget, type Usage} from './types.js';
+import {MAX_UPSTREAM_POSTS, ProviderRequestError, RESPONSE_BYTE_LIMIT, type FlowModelProvider, type ModelDone, type Msg, type UpstreamBudget, type Usage} from './types.js';
 
 const SCHEMA_NAME = 'flow_draft';
 const OPENROUTER_REFERER = 'http://localhost';
@@ -144,9 +145,25 @@ function jsonSchemaFormat(schema: object) {
   return {type: 'json_schema', json_schema: {name: SCHEMA_NAME, strict: true, schema}};
 }
 
-function withSchemaInstructions(messages: {role: string; content: string}[], schema: object) {
+export function openAiMessageContent(message: Msg): string | {type: string; text?: string; image_url?: {url: string}}[] {
+  if (!message.image) return message.content;
+  const bytes = Buffer.from(message.image.data, 'base64');
+  if (!bytes.length || bytes.length > DIAGRAM_IMAGE_BYTE_LIMIT) {
+    throw new ProviderRequestError({code: 'PROVIDER_REJECTED', message: 'This image is too large.', retryable: false});
+  }
+  return [
+    {type: 'text', text: message.content},
+    {type: 'image_url', image_url: {url: `data:${message.image.mimeType};base64,${message.image.data}`}},
+  ];
+}
+
+function noVision() {
+  return new ProviderRequestError({code: 'PROVIDER_REJECTED', message: CANT_READ_IMAGES, retryable: false, embeddedCode: 'no-vision'});
+}
+
+function withSchemaInstructions(messages: {role: string; content: string | ReturnType<typeof openAiMessageContent>}[], schema: object) {
   const first = messages[0];
-  if (!first || first.role !== 'system') return messages;
+  if (!first || first.role !== 'system' || typeof first.content !== 'string') return messages;
   return [{role: first.role, content: appendSchemaInstruction(first.content, schema)}, ...messages.slice(1)];
 }
 
@@ -213,6 +230,7 @@ export function createOpenAiCompatibleProvider(options: {
   return {
     id: openRouter ? 'openrouter' : 'openai-compatible',
     sendsJsonSchema: openRouter ? options.structuredOutput === true : true,
+    readsImages: openRouter ? false : true,
     async check() {
       let response: Response;
       try {
@@ -236,7 +254,8 @@ export function createOpenAiCompatibleProvider(options: {
       return found ? {ok: true, model: options.model} : {ok: false, error: 'Unknown model.'};
     },
     async *generate(req) {
-      const messages = [{role: 'system', content: req.system}, ...req.messages.map(message => ({role: message.role, content: message.content}))];
+      if (req.messages.some(message => message.image) && openRouter) throw noVision();
+      const messages = [{role: 'system', content: req.system}, ...req.messages.map(message => ({role: message.role, content: openAiMessageContent(message)}))];
       let body: Record<string, unknown> = {
         model: options.model,
         messages,

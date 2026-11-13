@@ -5,6 +5,7 @@ import {parseAllDocuments} from 'yaml';
 import {AuthoringHttpError} from '../authoring/errors.js';
 import {assertUniqueMembers, requireRevision, requireWorkspaceId} from '../authoring/schema.js';
 import {CONTRACT_VERSION, type Preview} from '../authoring/types.js';
+import {decodeDiagramImage, diagramUserMessage, isMermaidFlow, nextDiagramTurn, pathPrompt, proposeDiagram, type DiagramImage, type StoredDiagram} from './diagram.js';
 import {AiHttpError, canAutoRetry, mapProviderFailure} from './errors.js';
 import {formatAiLog, type AiLogEvent} from './log.js';
 import {assertUserPrompt, assembleCall, packPrompt, schemaAttachment, type PromptContext} from './prompt.js';
@@ -145,7 +146,7 @@ function parseModelDraft(text: string): {ok: true; value: unknown} | {ok: false;
 function requestOf(input: unknown) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Provide a generation request.');
   const body = input as Record<string, unknown>;
-  if (Object.keys(body).some(key => !['workspaceId', 'expectedRevision', 'expectedSettingsRevision', 'prompt', 'previousJobId', 'answers'].includes(key))) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Unknown generation field.');
+  if (Object.keys(body).some(key => !['workspaceId', 'expectedRevision', 'expectedSettingsRevision', 'prompt', 'previousJobId', 'answers', 'image', 'authorPath'].includes(key))) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Unknown generation field.');
   let expectedSettingsRevision: number | undefined;
   if (body.expectedSettingsRevision !== undefined) {
     if (!Number.isInteger(body.expectedSettingsRevision) || (body.expectedSettingsRevision as number) < 0) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Provide the settings revision.');
@@ -158,14 +159,34 @@ function requestOf(input: unknown) {
   }
   const answers = body.answers === undefined ? undefined : assertAnswers(body.answers);
   if (answers?.length && !previousJobId) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Answer a question by refining the current generation.');
+  const image = body.image === undefined ? undefined : decodeDiagramImage(body.image);
+  if (image && previousJobId) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Attach the image to the first message.');
+  let authorPath: string | undefined;
+  if (body.authorPath !== undefined) {
+    if (typeof body.authorPath !== 'string' || !/^path-[1-9][0-9]{0,2}$/.test(body.authorPath)) throw new AiHttpError(400, 'INVALID_ENVELOPE', 'Name one saved path.');
+    authorPath = body.authorPath;
+  }
+  const prompt = image && (body.prompt === undefined || body.prompt === '') ? '' : assertDiagramPrompt(body.prompt);
   return {
     workspaceId: requireWorkspaceId(body.workspaceId),
     expectedRevision: requireRevision(body.expectedRevision),
-    prompt: assertUserPrompt(body.prompt),
+    prompt,
     expectedSettingsRevision,
     previousJobId,
     ...(answers?.length ? {answers} : {}),
+    ...(image ? {image} : {}),
+    ...(authorPath ? {authorPath} : {}),
   };
+}
+
+function assertDiagramPrompt(value: unknown) {
+  if (typeof value === 'string' && isLongMermaid(value)) return value.trim();
+  return assertUserPrompt(value);
+}
+
+function isLongMermaid(value: string) {
+  const text = value.trim();
+  return text.length <= 16_000 && !text.includes('\0') && /^(?:```(?:mermaid)?\s*)?(?:flowchart|graph)\s+(?:TD|TB|BT|LR|RL)\b/i.test(text);
 }
 
 function submissionBudget(deadlineAt: number, now: () => number): UpstreamBudget & {used(): number} {
@@ -210,12 +231,14 @@ export function createJobs(deps: {
   resolveProvider: () => Promise<ResolvedModel>;
   settingsRevision: () => Promise<number>;
   readCatalog?: (workspaceId: string) => Promise<ScenarioCatalog>;
-  skills?: {router: Skill; knowledgeUpdate: Skill};
+  readDiagram?: (workspaceId: string, scenarioId: string) => Promise<StoredDiagram | null>;
+  skills?: {router: Skill; knowledgeUpdate: Skill; diagram: Skill};
 }) {
   const skills = deps.skills ?? loadBundledSkills();
   const scheduler = deps.scheduler ?? realScheduler();
   const timeouts: Timeouts = {deadlineMs: SUBMISSION_DEADLINE_MS, ...deps.timeouts};
   const memory = new Map<string, StoredJob>();
+  const images = new Map<string, DiagramImage>();
   const active = new Map<string, string>();
   const runtimes = new Map<string, AbortController>();
   const runs = new Map<string, Promise<void>>();
@@ -438,6 +461,7 @@ export function createJobs(deps: {
     job.questions = [{...question, options: [...question.options]}];
     delete job.draft;
     delete job.knowledgeDraft;
+    delete job.diagramDraft;
     delete job.preview;
     delete job.previewId;
     delete job.previewExpiresAt;
@@ -445,7 +469,7 @@ export function createJobs(deps: {
     release(job);
   }
 
-  function otherPending(workspaceId: string, kind: 'flow' | 'knowledge', except: string) {
+  function otherPending(workspaceId: string, kind: 'flow' | 'knowledge' | 'diagram', except: string) {
     for (const candidate of memory.values()) {
       if (candidate.id === except || candidate.workspaceId !== workspaceId) continue;
       if (candidate.state !== 'pending' && candidate.state !== 'needsInfo') continue;
@@ -550,7 +574,154 @@ export function createJobs(deps: {
     acceptKnowledge(job, proposed.proposal.draft, current.id);
   }
 
-  async function run(job: StoredJob, resolved: ResolvedModel, request: {prompt: string; answers?: ClarifyingAnswer[]}, draft: unknown, previous?: StoredJob) {
+  function rememberDiagram(job: StoredJob, previous: StoredJob | undefined, source: 'image' | 'mermaid') {
+    job.kind = 'diagram';
+    job.intent = 'diagram';
+    job.diagramSource = source;
+    job.diagramStage = 'intake';
+    job.skill = skills.diagram.id;
+    job.skillHash = skills.diagram.hash;
+    job.diagramRound = (previous?.diagramRound ?? 0) + 1;
+    if (previous?.diagramText) job.diagramText = previous.diagramText;
+    if (previous?.requestText) job.requestText = previous.requestText;
+    if (!images.has(job.id) && previous && images.has(previous.id)) images.set(job.id, images.get(previous.id)!);
+  }
+
+  async function executeDiagram(job: StoredJob, resolved: ResolvedModel, source: 'image' | 'mermaid', caption: string, mermaid: string | undefined, answers: ClarifyingAnswer[] | undefined, note: string | undefined, parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number) {
+    if (source === 'image' && resolved.provider.readsImages === false) {
+      fail(job, 'MODEL_CANT_READ_IMAGES', "This model can't read images.", false);
+      return;
+    }
+    const image = source === 'image' ? images.get(job.id) : undefined;
+    if (source === 'image' && !image) {
+      fail(job, 'DIAGRAM_IMAGE_MISSING', 'The diagram image is no longer available. Attach it again.', false);
+      return;
+    }
+    job.phase = 'model';
+    const user = diagramUserMessage({caption, mermaid, answers, note});
+    const message: Msg = {role: 'user', content: user, ...(image ? {image} : {})};
+    const result = await callWithRetries(job, resolved, skills.diagram.prompt, [message], parent, budget, deadlineAt, skills.diagram.schema);
+    if (result === 'stopped' || job.state !== 'running') return;
+    job.phase = 'validating';
+    const proposed = proposeDiagram(result.text, skills.diagram);
+    if (!proposed.ok) {
+      fail(job, 'INVALID_AI_OUTPUT', 'The model did not return a diagram.', false);
+      return;
+    }
+    if (proposed.questions.length) {
+      job.questions = proposed.questions;
+      job.state = 'needsInfo';
+      job.phase = 'context';
+      delete job.diagramDraft;
+      delete job.error;
+      release(job);
+      return;
+    }
+    if (!proposed.graph) {
+      fail(job, 'INVALID_AI_OUTPUT', 'The model did not return a diagram.', false);
+      return;
+    }
+    delete job.questions;
+    delete job.error;
+    delete job.draft;
+    job.diagramDraft = proposed.graph;
+    job.state = 'pending';
+    job.phase = 'validating';
+    release(job);
+  }
+
+  async function handleDiagram(job: StoredJob, resolved: ResolvedModel, request: {prompt: string; answers?: ClarifyingAnswer[]; image?: DiagramImage; authorPath?: string}, previous: StoredJob | undefined, catalog: ScenarioCatalog | undefined, parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number, beginPipeline: () => boolean) {
+    const scenarioId = catalog?.current?.id;
+    let saved: StoredDiagram | null = null;
+    if (scenarioId && deps.readDiagram) {
+      try { saved = await deps.readDiagram(job.workspaceId, scenarioId); }
+      catch { saved = null; }
+    }
+    if (job.state !== 'running') return true;
+    const turn = nextDiagramTurn({
+      prompt: request.prompt,
+      hasImage: !!request.image || !!images.get(job.id) || !!(previous && images.has(previous.id)),
+      authorPath: request.authorPath,
+      answers: request.answers,
+      scenarioId,
+      saved,
+      ...(previous && (previous.kind === 'diagram' || previous.intent === 'diagram' || previous.diagramDraft || previous.diagramStage) ? {previous: {
+        stage: previous.diagramStage,
+        round: previous.diagramRound ?? 0,
+        source: previous.diagramSource,
+        caption: previous.requestText ?? '',
+        questions: previous.questions,
+        pending: previous.state === 'pending' && !!previous.diagramDraft,
+        miss: previous.diagramMiss,
+      }} : {}),
+    });
+    if (turn.kind === 'router') return false;
+    if (scenarioId) job.scenarioId = scenarioId;
+    if (turn.kind === 'cancel') {
+      job.state = 'cancelled';
+      delete job.error;
+      release(job);
+      return true;
+    }
+    if (turn.kind === 'fail') {
+      fail(job, turn.code, turn.message, false);
+      return true;
+    }
+    if (turn.kind === 'ask') {
+      ask(job, 'diagram', turn.question);
+      job.kind = 'diagram';
+      job.diagramStage = turn.stage;
+      if (turn.miss) job.diagramMiss = true;
+      if (previous?.diagramText) job.diagramText = previous.diagramText;
+      else if (isMermaidFlow(request.prompt)) job.diagramText = request.prompt.trim();
+      if (previous?.diagramSource) job.diagramSource = previous.diagramSource;
+      if (previous?.requestText) job.requestText = previous.requestText;
+      else if (request.prompt) job.requestText = request.prompt.slice(0, 4000);
+      if (previous && images.has(previous.id)) images.set(job.id, images.get(previous.id)!);
+      job.scenarioId = scenarioId;
+      return true;
+    }
+    if (turn.kind === 'knowledge') {
+      if (!catalog?.current) {
+        fail(job, 'DIAGRAM_NO_SCENARIO', 'Open a scenario before reading a diagram.', false);
+        return true;
+      }
+      if (!beginPipeline()) return true;
+      await executeKnowledge(job, resolved, turn.prompt, catalog, parent, budget, deadlineAt);
+      return true;
+    }
+    if (turn.kind === 'flow') {
+      const blocker = otherPending(job.workspaceId, 'flow', job.id);
+      if (blocker && blocker.kind !== 'diagram') {
+        ask(job, 'unclear', finishDraftQuestion());
+        return true;
+      }
+      job.intent = 'flow';
+      job.kind = 'flow';
+      job.skill = skills.router.id;
+      job.skillHash = skills.router.hash;
+      delete job.diagramDraft;
+      if (!beginPipeline()) return true;
+      await execute(job, resolved, pathPrompt(turn.path), undefined, undefined, parent, budget, deadlineAt);
+      return true;
+    }
+    if (otherPending(job.workspaceId, 'diagram', job.id)) {
+      ask(job, 'unclear', finishDraftQuestion());
+      return true;
+    }
+    const source = turn.source;
+    const caption = request.prompt || previous?.requestText || '';
+    const mermaid = source === 'mermaid' && (isLongMermaid(request.prompt) || isMermaidFlow(request.prompt)) ? request.prompt : previous?.diagramText;
+    rememberDiagram(job, previous, source);
+    if (source === 'mermaid' && request.prompt && (isLongMermaid(request.prompt) || isMermaidFlow(request.prompt))) job.diagramText = request.prompt.trim();
+    else if (previous?.diagramText) job.diagramText = previous.diagramText;
+    if (caption) job.requestText = caption.slice(0, 4000);
+    if (!beginPipeline()) return true;
+    await executeDiagram(job, resolved, source, caption, mermaid, turn.answers, turn.note, parent, budget, deadlineAt);
+    return true;
+  }
+
+  async function run(job: StoredJob, resolved: ResolvedModel, request: {prompt: string; answers?: ClarifyingAnswer[]; image?: DiagramImage; authorPath?: string}, draft: unknown, previous?: StoredJob) {
     const controller = new AbortController();
     runtimes.set(job.id, controller);
     const started = scheduler.now();
@@ -582,6 +753,9 @@ export function createJobs(deps: {
         }
       }
       if (job.state !== 'running') return;
+      if (request.image) images.set(job.id, request.image);
+      else if (previous && images.has(previous.id)) images.set(job.id, images.get(previous.id)!);
+      if (await handleDiagram(job, resolved, request, previous, catalog, controller.signal, budget, deadlineAt, beginPipeline)) return;
       const answering = !!previous && !!request.answers?.length && previous.draft === undefined && (!!previous.questions?.length || !!previous.conflict);
       if (answering && previous) {
         const answer = request.answers?.[0]?.answer ?? '';
@@ -646,7 +820,7 @@ export function createJobs(deps: {
           ask(job, 'unclear', otherScenarioQuestion(catalog.current.title, other.title));
           return;
         }
-        const pendingKind = previous?.kind ?? (previous?.knowledgeDraft ? 'knowledge' as const : previous?.draft !== undefined ? 'flow' as const : undefined);
+        const pendingKind = previous?.kind === 'flow' || previous?.kind === 'knowledge' ? previous.kind : previous?.knowledgeDraft ? 'knowledge' as const : previous?.draft !== undefined ? 'flow' as const : undefined;
         const routed = await routeWithProvider(job, resolved, request.prompt, catalog, pendingKind, controller.signal);
         if (job.state !== 'running') return;
         if (routed === 'stopped' || routed.intent === 'unclear') {
@@ -721,7 +895,8 @@ export function createJobs(deps: {
         const answering = !!request.answers?.length && previous.draft === undefined && (!!previous.questions?.length || !!previous.conflict);
         const reroute = !!deps.readCatalog && !!misroute(request.prompt);
         const knowledgeTurn = !!previous.knowledgeDraft && !!deps.readCatalog;
-        if (!answering && !reroute && !knowledgeTurn) {
+        const diagramTurn = previous.kind === 'diagram' || previous.intent === 'diagram' || previous.diagramDraft !== undefined || previous.diagramStage !== undefined;
+        if (!answering && !reroute && !knowledgeTurn && !diagramTurn) {
           if (previous.draft === undefined) throw new AiHttpError(409, 'INVALID_ENVELOPE', 'That generation has no draft to refine.');
           draft = previous.draft;
         }
@@ -733,6 +908,7 @@ export function createJobs(deps: {
       };
       active.set(job.workspaceId, job.id);
       memory.set(job.id, job);
+      if (request.image) images.set(job.id, request.image);
       let resolved: ResolvedModel;
       try { resolved = await deps.resolveProvider(); }
       catch (error) {

@@ -22,6 +22,8 @@ export class AiHttpError extends Error {
   }
 }
 
+export const CANT_READ_IMAGES = "This model can't read images.";
+
 export type AppFailure = {code: string; message: string; retryable: boolean};
 
 function numericEmbedded(code: number | string | undefined) {
@@ -32,6 +34,7 @@ function numericEmbedded(code: number | string | undefined) {
 
 /** Maps a provider failure onto an app code. Internal provider codes stay off the API. */
 export function mapProviderFailure(error: ProviderRequestError): AppFailure {
+  if (error.embeddedCode === 'no-vision') return {code: 'MODEL_CANT_READ_IMAGES', message: CANT_READ_IMAGES, retryable: false};
   if (error.outputTooLarge) return {code: 'INVALID_AI_OUTPUT', message: 'The model output was too large.', retryable: false};
   if (error.embeddedCode === 'not-signed-in') return {code: 'NOT_SIGNED_IN', message: error.message, retryable: false};
   if (error.embeddedCode === 'policy-off') return {code: 'POLICY_OFF', message: error.message, retryable: false};

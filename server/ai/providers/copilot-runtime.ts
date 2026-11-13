@@ -12,7 +12,7 @@ export type CopilotAuth = {
   message?: string;
 };
 
-export type CopilotModel = {id: string; name: string; enabled: boolean};
+export type CopilotModel = {id: string; name: string; enabled: boolean; vision?: boolean};
 
 export type CopilotRunEvent =
   | {type: 'delta'; text: string}
@@ -20,10 +20,21 @@ export type CopilotRunEvent =
   | {type: 'error'; kind: CopilotErrorKind; message: string}
   | {type: 'done'; text: string};
 
+export type CopilotImage = {mimeType: string; data: string};
+
+/** Blob attachment the SDK 1.0.28 session.send accepts. The prompt stays text. */
+export function copilotSendBody(input: {prompt: string; image?: CopilotImage}) {
+  if (!input.image) return {prompt: input.prompt};
+  return {
+    prompt: input.prompt,
+    attachments: [{type: 'blob' as const, data: input.image.data, mimeType: input.image.mimeType, displayName: input.image.mimeType === 'image/jpeg' ? 'diagram.jpg' : 'diagram.png'}],
+  };
+}
+
 export type CopilotRuntime = {
   authStatus(): Promise<CopilotAuth>;
   models(): Promise<CopilotModel[]>;
-  run(input: {system: string; prompt: string; model: string; signal: AbortSignal}): AsyncIterable<CopilotRunEvent>;
+  run(input: {system: string; prompt: string; model: string; signal: AbortSignal; image?: CopilotImage}): AsyncIterable<CopilotRunEvent>;
 };
 
 export const COPILOT_NOT_INSTALLED = "Copilot isn't installed";
@@ -66,10 +77,10 @@ export function classifyCopilotFailure(input: {message?: string; statusCode?: nu
 }
 
 type SdkAuth = {isAuthenticated?: boolean; authType?: string; login?: string; statusMessage?: string};
-type SdkModel = {id?: string; name?: string; policy?: {state?: string}};
+type SdkModel = {id?: string; name?: string; policy?: {state?: string}; capabilities?: {supports?: {vision?: boolean}}};
 type SdkSession = {
   on(handler: (event: unknown) => void): void;
-  send(options: {prompt: string}): Promise<unknown>;
+  send(options: {prompt: string; attachments?: {type: 'blob'; data: string; mimeType: string; displayName?: string}[]}): Promise<unknown>;
   abort(): Promise<void>;
   disconnect(): Promise<void>;
 };
@@ -286,7 +297,8 @@ export function createSdkCopilotRuntime(options: {
       const listed = await current.listModels();
       return listed.flatMap(item => {
         if (!item || typeof item.id !== 'string' || !item.id || item.policy?.state === 'disabled') return [];
-        return [{id: item.id, name: typeof item.name === 'string' && item.name ? item.name : item.id, enabled: true}];
+        const vision = item.capabilities?.supports?.vision === true;
+        return [{id: item.id, name: typeof item.name === 'string' && item.name ? item.name : item.id, enabled: true, ...(vision ? {vision: true} : {})}];
       });
     },
     async *run(input) {
@@ -323,7 +335,7 @@ export function createSdkCopilotRuntime(options: {
       if (input.signal.aborted) onAbort();
       else input.signal.addEventListener('abort', onAbort, {once: true});
       try {
-        if (!input.signal.aborted) await session.send({prompt: input.prompt});
+        if (!input.signal.aborted) await session.send(copilotSendBody({prompt: input.prompt, image: input.image}));
         while (!finished || queue.length) {
           if (input.signal.aborted && !queue.length) break;
           if (queue.length) { yield queue.shift()!; continue; }
@@ -362,6 +374,7 @@ export type FakeCopilotScript =
 
 export type FakeCopilotRuntime = CopilotRuntime & {
   prompts: {system: string; prompt: string; model: string}[];
+  images: CopilotImage[];
   /** True while a hang script has not been aborted. */
   leaked: boolean;
 };
@@ -375,15 +388,18 @@ const SCRIPT_ERRORS: Record<string, {kind: CopilotErrorKind; message: string}> =
 
 export function createFakeCopilotRuntime(script: FakeCopilotScript | ((call: number, input: {system: string; prompt: string; model: string}) => FakeCopilotScript), auth: CopilotAuth = {signedIn: true, login: 'octocat', via: 'gh-cli'}, models: CopilotModel[] = [{id: 'auto', name: 'Auto', enabled: true}]): FakeCopilotRuntime {
   const prompts: FakeCopilotRuntime['prompts'] = [];
+  const images: CopilotImage[] = [];
   let call = 0;
   const runtime: FakeCopilotRuntime = {
     prompts,
+    images,
     leaked: false,
     async authStatus() { return auth; },
     async models() { return models; },
     async *run(input) {
       call += 1;
       prompts.push({system: input.system, prompt: input.prompt, model: input.model});
+      if (input.image) images.push(input.image);
       const step = typeof script === 'function' ? script(call, {system: input.system, prompt: input.prompt, model: input.model}) : script;
       if (input.signal.aborted) return;
       if (step === 'hang') {

@@ -466,6 +466,7 @@ test('the shared client stops after 10 idle minutes', async t => {
 test('a token in a session error is not returned or logged', async () => {
   const leaking = {
     prompts: [],
+    images: [],
     leaked: false,
     async authStatus() { return {signedIn: true, login: 'octocat', via: 'gh-cli' as const}; },
     async models() { return []; },
