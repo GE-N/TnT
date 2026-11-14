@@ -250,10 +250,14 @@ test('402, an embedded 402, a 200 error, and a mid-stream error each post once',
 
 test('a timeout aborts the one in-flight post', async () => {
   let posts = 0;
+  let release: () => void = () => {};
+  const posted = new Promise<void>(resolve => { release = resolve; });
+  const controller = new AbortController();
   const provider = createOpenAiCompatibleProvider({
     baseUrl: 'https://api.example.com/v1', model: 'gpt-test', apiKey: 'sk-SUPER',
     fetch: (_url, init) => {
       posts += 1;
+      release();
       return new Promise((_resolve, reject) => {
         const abort = () => {
           const error = new Error('The operation was aborted.');
@@ -265,8 +269,11 @@ test('a timeout aborts the one in-flight post', async () => {
       });
     },
   });
-  await assert.rejects(async () => {
-    for await (const _event of provider.generate({...modelRequest(), signal: AbortSignal.timeout(40)})) void _event;
-  }, (error: unknown) => error instanceof Error && error.name === 'AbortError');
+  const pending = (async () => {
+    for await (const _event of provider.generate({...modelRequest(), signal: controller.signal})) void _event;
+  })();
+  await posted;
+  controller.abort();
+  await assert.rejects(pending, (error: unknown) => error instanceof Error && error.name === 'AbortError');
   assert.equal(posts, 1);
 });

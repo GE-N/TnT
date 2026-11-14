@@ -4,6 +4,7 @@ import {test,describe} from 'node:test';
 import {JSDOM} from 'jsdom';
 import {act,createElement} from 'react';
 import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {parseAllDocuments} from 'yaml';
@@ -26,7 +27,7 @@ async function journey(work:(ui:{
  setToken:(token:string)=>Promise<void>;
  settle:()=>Promise<void>;
 })=>Promise<void>){
- const directory=await mkdtemp(join(tmpdir(),'tnt-run-states-'));
+ const directory=await mkdtemp(join(tmpdir(),`tnt-run-states-${process.pid}-${randomUUID()}-`));
  let fail=false;let failIndex=3;let hold=false;let returnRunning=false;let releaseHold:(()=>void)|undefined;let token='test';
  let holdCapture=false;let releaseCapture:(value:Response)=>void=()=>{};
  const service=createScenarios({root:directory,runner:createRunner({artifactDirectory:directory,execute:async(_file,args)=>({stdout:args.includes('list')?JSON.stringify({devices:{iOS:[{udid:deviceId,name:'iPhone',state:'Booted',isAvailable:true}]}}):'/app',stderr:''})}),maestro:{version:async()=>'2.11.0',run:async({directory:dir,flow,signal})=>{
@@ -133,7 +134,8 @@ async function journey(work:(ui:{
   await act(async()=>root.unmount());
   dom.window.close();
   for(const[key,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}
-  await rm(directory,{recursive:true,force:true});
+  await Promise.allSettled(pending.splice(0));
+  await rm(directory,{recursive:true,force:true,maxRetries:5,retryDelay:20});
  }
 }
 
