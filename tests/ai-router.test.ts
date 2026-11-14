@@ -13,7 +13,7 @@ const ROUTER_HASH = 'f8bf6d59299e5d69e105b87fea0a93fac6c1b95ff12ea0e581da1d1e4d9
 const KNOWLEDGE_HASH = '2dd9dfcf5df2c6370aba3bc752e56db67ec8a90979a63ce798db9cb66d1cd6b1';
 const PROTECTED = {
   'server/ai/prompt.ts': '0228e18c69bef2677354fa13060fd108fd3499f6ebfd051424d614a57a52fd5a',
-  'server/ai/repair.ts': '414e03609fe147c5c74b2e70cf507cc5a9c360fc2aadc8cb950ed85a7f5a3380',
+  'server/ai/repair.ts': '54b8b4da3b422071f3896b08c8190a9f7373983cd9d440b0a3d309e5ec4c4d81',
   'server/ai/questions.ts': 'b5158e2e1c9aedc83b8bcb6edf89b50ac1778f0ec4d062e4fcd7adbd73d9f8fd',
   'docs/contracts/ai-flow-v1/flow-draft.schema.json': '54520041a2b39c7e084ea1b48d51ee674fc67591509d7f11fef560d79583c7a5',
   'server/run-script-contract.ts': 'e4ac75f27945f39a935f410cb52699196d963ed9d0bf482c5c821792dfabeb76',

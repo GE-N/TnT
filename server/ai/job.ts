@@ -6,12 +6,12 @@ import {AuthoringHttpError} from '../authoring/errors.js';
 import {assertUniqueMembers, requireRevision, requireWorkspaceId} from '../authoring/schema.js';
 import {CONTRACT_VERSION, type Preview} from '../authoring/types.js';
 import {decodeDiagramImage, diagramUserMessage, isMermaidFlow, nextDiagramTurn, pathPrompt, proposeDiagram, type DiagramImage, type StoredDiagram} from './diagram.js';
-import {AiHttpError, canAutoRetry, mapProviderFailure} from './errors.js';
+import {AiHttpError, CANT_READ_IMAGES, canAutoRetry, mapProviderFailure} from './errors.js';
 import {formatAiLog, type AiLogEvent} from './log.js';
 import {assertUserPrompt, assembleCall, packPrompt, schemaAttachment, type PromptContext} from './prompt.js';
 import {assertAnswers, modelDraftSchema, sanitizeQuestions, splitModelDraft, type ClarifyingAnswer, type ClarifyingQuestion} from './questions.js';
 import {MAX_REPAIR_ROUNDS, repairDecision, repairNote} from './repair.js';
-import {abortError, isAbortError, MAX_UPSTREAM_POSTS, ProviderRequestError, RESPONSE_BYTE_LIMIT, type FlowModelProvider, type Msg, type UpstreamBudget, type Usage} from './providers/types.js';
+import {abortError, isAbortError, MAX_ATTEMPT_POSTS, MAX_REPAIR_POSTS, MAX_UPSTREAM_POSTS, ProviderRequestError, RESPONSE_BYTE_LIMIT, type FlowModelProvider, type Msg, type UpstreamBudget, type Usage} from './providers/types.js';
 import {planAnswer, knowledgeUserMessage, proposeKnowledge} from './knowledge-update.js';
 import {finishDraftQuestion, misroute, namedOtherScenario, otherScenarioQuestion, routerUserMessage, settleRouter, unclearQuestion, type RouterIntent, type ScenarioCatalog} from './router.js';
 import {loadBundledSkills, type Skill} from './skills.js';
@@ -20,7 +20,7 @@ import {createJobStore, generationView, jobExpiry, type GenerationView, type Kno
 export const SUBMISSION_DEADLINE_MS = 120_000;
 export const MAX_PROVIDER_RETRIES = 1;
 export const MAX_OUTPUT_TOKENS = 8_192;
-export {MAX_UPSTREAM_POSTS, RESPONSE_BYTE_LIMIT};
+export {MAX_ATTEMPT_POSTS, MAX_REPAIR_POSTS, MAX_UPSTREAM_POSTS, RESPONSE_BYTE_LIMIT};
 
 const FLOW_SCHEMA = JSON.parse(readFileSync(fileURLToPath(new URL('../../docs/contracts/ai-flow-v1/flow-draft.schema.json', import.meta.url)), 'utf8')) as object;
 /** Contract schema plus clarifying questions. Sent to the model only; stripped before preview. */
@@ -189,17 +189,28 @@ function isLongMermaid(value: string) {
   return text.length <= 16_000 && !text.includes('\0') && /^(?:```(?:mermaid)?\s*)?(?:flowchart|graph)\s+(?:TD|TB|BT|LR|RL)\b/i.test(text);
 }
 
-function submissionBudget(deadlineAt: number, now: () => number): UpstreamBudget & {used(): number} {
-  let used = 0;
+function submissionBudget(deadlineAt: number, now: () => number): UpstreamBudget & {used(): number; beginRepair(): void} {
+  let attemptUsed = 0;
+  let repairUsed = 0;
+  let phase: 'attempt' | 'repair' = 'attempt';
+  const total = () => attemptUsed + repairUsed;
   return {
-    used: () => used,
+    used: () => total(),
+    beginRepair() { phase = 'repair'; },
     remaining() {
       if (now() >= deadlineAt) return 0;
-      return Math.max(0, MAX_UPSTREAM_POSTS - used);
+      const phaseLeft = phase === 'repair' ? MAX_REPAIR_POSTS - repairUsed : MAX_ATTEMPT_POSTS - attemptUsed;
+      return Math.max(0, Math.min(phaseLeft, MAX_UPSTREAM_POSTS - total()));
     },
     tryConsume() {
-      if (now() >= deadlineAt || used >= MAX_UPSTREAM_POSTS) return false;
-      used += 1;
+      if (now() >= deadlineAt || total() >= MAX_UPSTREAM_POSTS) return false;
+      if (phase === 'repair') {
+        if (repairUsed >= MAX_REPAIR_POSTS) return false;
+        repairUsed += 1;
+      } else {
+        if (attemptUsed >= MAX_ATTEMPT_POSTS) return false;
+        attemptUsed += 1;
+      }
       return true;
     },
   };
@@ -403,6 +414,7 @@ export function createJobs(deps: {
     let note = '';
     let pendingQuestions: ClarifyingQuestion[] | undefined;
     while (job.state === 'running') {
+      if (round > 0) budget.beginRepair();
       job.phase = round === 0 ? 'model' : 'repairing';
       const assembled = assembleCall({
         system: packed.system,
@@ -423,6 +435,7 @@ export function createJobs(deps: {
       job.phase = 'validating';
       const parsed = parseModelDraft(result.text);
       if (!parsed.ok) {
+        if (parsed.code !== 'OUTPUT_TOO_LARGE' && round < MAX_REPAIR_ROUNDS) budget.beginRepair();
         if (parsed.code === 'OUTPUT_TOO_LARGE' || round >= MAX_REPAIR_ROUNDS || budget.remaining() < 1) {
           fail(job, 'INVALID_AI_OUTPUT', parsed.code === 'OUTPUT_TOO_LARGE' ? 'The model output was too large.' : 'The model did not return a flow draft.', false);
           return;
@@ -438,15 +451,18 @@ export function createJobs(deps: {
       if (job.state !== 'running') return;
       job.draft = split.draft;
       const decision = repairDecision(preview.diagnostics);
-      if (decision === 'repair' && round < MAX_REPAIR_ROUNDS && budget.remaining() >= 1) {
-        const repairAssembled = assembleCall({system: packed.system, user: packed.user, previous: result.text, repair: repairNote(preview.diagnostics), extraBytes: schemaReserve});
-        if (!repairAssembled.fits) {
-          applyOutcome(job, preview, pendingQuestions);
-          return;
+      if (decision === 'repair' && round < MAX_REPAIR_ROUNDS) {
+        budget.beginRepair();
+        if (budget.remaining() >= 1) {
+          const repairAssembled = assembleCall({system: packed.system, user: packed.user, previous: result.text, repair: repairNote(preview.diagnostics), extraBytes: schemaReserve});
+          if (!repairAssembled.fits) {
+            applyOutcome(job, preview, pendingQuestions);
+            return;
+          }
+          note = repairNote(preview.diagnostics);
+          round++;
+          continue;
         }
-        note = repairNote(preview.diagnostics);
-        round++;
-        continue;
       }
       applyOutcome(job, preview, pendingQuestions);
       return;
@@ -589,7 +605,7 @@ export function createJobs(deps: {
 
   async function executeDiagram(job: StoredJob, resolved: ResolvedModel, source: 'image' | 'mermaid', caption: string, mermaid: string | undefined, answers: ClarifyingAnswer[] | undefined, note: string | undefined, parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number) {
     if (source === 'image' && resolved.provider.readsImages === false) {
-      fail(job, 'MODEL_CANT_READ_IMAGES', "This model can't read images.", false);
+      fail(job, 'MODEL_CANT_READ_IMAGES', CANT_READ_IMAGES, false);
       return;
     }
     const image = source === 'image' ? images.get(job.id) : undefined;

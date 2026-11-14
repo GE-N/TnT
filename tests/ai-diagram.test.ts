@@ -191,7 +191,7 @@ test('only a PNG or JPEG export is accepted', () => {
   assert.throws(() => decodeDiagramImage({mimeType: 'image/png', data: huge.toString('base64')}), (error: unknown) => (error as {message?: string}).message === IMAGE_TOO_LARGE);
 });
 
-test('OpenAI sends image parts and an unproven provider refuses before the network', async () => {
+test('a vision model sends image parts and a text-only model refuses before the network', async () => {
   const image = {mimeType: 'image/png' as const, data: PNG};
   const parts = openAiMessageContent({role: 'user', content: 'Read this', image});
   assert.ok(Array.isArray(parts));
@@ -199,13 +199,27 @@ test('OpenAI sends image parts and an unproven provider refuses before the netwo
   assert.equal(parts[0]?.type, 'text');
   assert.equal(parts[1]?.type, 'image_url');
   assert.equal(parts[1]?.image_url?.url.startsWith('data:image/png;base64,'), true);
-  let called = false;
+  const seen: {messages?: {content?: unknown}[]}[] = [];
   const openRouter = createOpenAiCompatibleProvider({
-    baseUrl: 'https://openrouter.ai/api/v1', model: 'vendor/model', apiKey: 'secret', preset: 'openrouter',
+    baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o', apiKey: 'secret', preset: 'openrouter',
+    fetch: async (_url, init) => {
+      seen.push(JSON.parse(String(init?.body)) as {messages?: {content?: unknown}[]});
+      return new Response(JSON.stringify({choices: [{message: {content: '{}'}, finish_reason: 'stop'}]}), {status: 200, headers: {'content-type': 'application/json'}});
+    },
+  });
+  for await (const event of openRouter.generate({system: 'sys', messages: [{role: 'user', content: 'Read this', image}], schema: {}, maxOutputTokens: 20, signal: AbortSignal.timeout(1000)})) {
+    void event;
+  }
+  const content = seen[0]?.messages?.at(-1)?.content;
+  assert.ok(Array.isArray(content));
+  assert.equal((content as {type?: string}[])[1]?.type, 'image_url');
+  let called = false;
+  const blind = createOpenAiCompatibleProvider({
+    baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-3.5-turbo', apiKey: 'secret', preset: 'openrouter',
     fetch: async () => { called = true; throw new Error('network'); },
   });
   await assert.rejects(async () => {
-    for await (const event of openRouter.generate({system: 'sys', messages: [{role: 'user', content: 'Read this', image}], schema: {}, maxOutputTokens: 20, signal: AbortSignal.timeout(1000)})) {
+    for await (const event of blind.generate({system: 'sys', messages: [{role: 'user', content: 'Read this', image}], schema: {}, maxOutputTokens: 20, signal: AbortSignal.timeout(1000)})) {
       void event;
     }
   }, (error: unknown) => (error as {message?: string}).message === CANT_READ_IMAGES);

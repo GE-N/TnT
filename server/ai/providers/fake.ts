@@ -1,3 +1,4 @@
+import {CANT_READ_IMAGES} from '../errors.js';
 import {ProviderRequestError, type FlowModelProvider, type Usage} from './types.js';
 
 export type FakeResult =
@@ -13,7 +14,7 @@ export function createFakeProvider(handle: (input: {call: number; system: string
     readsImages: options?.readsImages !== false,
     async check() { return {ok: true, model: 'fake'}; },
     async *generate(req) {
-      if (req.messages.some(message => message.image) && options?.readsImages === false) throw new ProviderRequestError({code: 'PROVIDER_REJECTED', message: "This model can't read images.", retryable: false, embeddedCode: 'no-vision'});
+      if (req.messages.some(message => message.image) && options?.readsImages === false) throw new ProviderRequestError({code: 'PROVIDER_REJECTED', message: CANT_READ_IMAGES, retryable: false, embeddedCode: 'no-vision'});
       if (req.budget && !req.budget.tryConsume()) throw new ProviderRequestError({code: 'PROVIDER_REJECTED', message: 'The generation request budget is exhausted.', retryable: false, reason: 'budget'});
       const result = await handle({call: ++call, system: req.system, messages: req.messages});
       if (result.kind === 'fail') throw result.error;

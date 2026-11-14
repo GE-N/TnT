@@ -22,7 +22,7 @@ export class AiHttpError extends Error {
   }
 }
 
-export const CANT_READ_IMAGES = "This model can't read images.";
+export const CANT_READ_IMAGES = "This model can't read images. Pick a vision model, or switch provider in Settings.";
 
 export type AppFailure = {code: string; message: string; retryable: boolean};
 

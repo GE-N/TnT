@@ -1,0 +1,6 @@
+[
+  {"name": "auth", "status": 401, "body": {"type": "error", "error": {"type": "authentication_error", "message": "invalid x-api-key"}}, "code": "PROVIDER_AUTH", "retryable": false},
+  {"name": "vision", "status": 400, "body": {"type": "error", "error": {"type": "invalid_request_error", "message": "This model does not support images"}}, "code": "PROVIDER_REJECTED", "retryable": false, "embeddedCode": "no-vision"},
+  {"name": "rate", "status": 429, "body": {"type": "error", "error": {"type": "rate_limit_error", "message": "rate limited"}}, "code": "PROVIDER_UNAVAILABLE", "retryable": true},
+  {"name": "overloaded", "status": 529, "body": {"type": "error", "error": {"type": "overloaded_error", "message": "overloaded"}}, "code": "PROVIDER_UNAVAILABLE", "retryable": true}
+]
