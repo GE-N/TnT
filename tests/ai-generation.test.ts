@@ -625,18 +625,36 @@ function completionResponse(content: string, extra: Record<string, unknown> = {}
   return new Response(JSON.stringify({choices: [{message: {content}, finish_reason: 'stop'}], ...extra}), {status, headers: {'content-type': 'application/json', ...headers}});
 }
 
-async function adapterJob(preset: 'openrouter' | 'openai-compatible', handler: (post: number, init: RequestInit | undefined) => Promise<Response> | Response, options: {deadlineMs?: number} = {}) {
+async function adapterJob(preset: 'openrouter' | 'openai-compatible', handler: (post: number, init: RequestInit | undefined) => Promise<Response> | Response, options: {deadlineMs?: number; fireDeadlineWhenPosted?: boolean} = {}) {
   const posts: {url: string; headers: Headers; body: Record<string, unknown>}[] = [];
   const logs: string[] = [];
   const f = await authoringFixture();
+  let releaseDeadline: () => void = () => {};
+  const posted = new Promise<void>(resolve => { releaseDeadline = resolve; });
   const fetchImpl: typeof fetch = async (url, init) => {
     const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
     posts.push({url: String(url), headers: new Headers(init?.headers), body});
+    if (options.fireDeadlineWhenPosted) releaseDeadline();
     return handler(posts.length, init);
   };
   const ai = createAi({
     root: f.root, authoring: f.service.authoring, readWorkspace: id => f.service.workspace(id), env: {}, secrets: memorySecrets(), log: line => logs.push(line),
     timeouts: options.deadlineMs ? {deadlineMs: options.deadlineMs} : undefined,
+    scheduler: options.fireDeadlineWhenPosted ? {
+      now: () => Date.now(),
+      delay(ms, signal) {
+        return new Promise((resolve, reject) => {
+          if (signal?.aborted) { reject(abortError()); return; }
+          const timer = setTimeout(() => resolve(), ms);
+          signal?.addEventListener('abort', () => { clearTimeout(timer); reject(abortError()); }, {once: true});
+        });
+      },
+      schedule(_ms, fn) {
+        const waiting = posted.then(fn);
+        void waiting;
+        return () => { releaseDeadline = () => {}; };
+      },
+    } : undefined,
     provider: createOpenAiCompatibleProvider({
       baseUrl: 'https://api.example.com/v1', model: preset === 'openrouter' ? 'vendor/model' : 'gpt-test', apiKey: 'sk-TEST-KEY', fetch: fetchImpl, preset,
     }),
@@ -765,7 +783,7 @@ test('a mid-stream error, a timeout, HTTP 402, and a 200 error body each make on
     };
     if (init?.signal?.aborted) { abort(); return; }
     init?.signal?.addEventListener('abort', abort, {once: true});
-  }), {deadlineMs: 40});
+  }), {deadlineMs: 40, fireDeadlineWhenPosted: true});
   const credits = await adapterJob('openrouter', () => new Response(JSON.stringify({error: {message: 'pay sk-TEST-KEY'}}), {status: 402, headers: {'content-type': 'application/json'}}));
   const embedded = await adapterJob('openrouter', () => new Response(JSON.stringify({error: {code: 402, message: 'pay sk-TEST-KEY'}}), {status: 200, headers: {'content-type': 'application/json'}}));
   const overloaded = await adapterJob('openrouter', () => new Response(JSON.stringify({error: {message: '<html>sk-TEST-KEY</html>', code: 'overloaded'}}), {status: 200, headers: {'content-type': 'application/json'}}));
