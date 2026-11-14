@@ -16,6 +16,29 @@ const skip = <svg className="rr-i skip" viewBox="0 0 16 16" width="16" height="1
 const spin = <span className="rr-spin" aria-hidden="true"/>;
 const chev = <svg className="rr-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 
+function plainInline(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+  if (value == null) return 'Not captured for this step';
+  if (Array.isArray(value)) return value.map(item => plainInline(item)).join(', ');
+  if (typeof value === 'object') return Object.entries(value as Record<string, unknown>).map(([key, item]) => `${key}: ${plainInline(item)}`).join(', ');
+  return String(value);
+}
+
+/** Strings stay as written. Simple values are readable. Objects are short key: value lines. */
+function plainEvidence(value: unknown): string {
+  if (value == null || value === '') return 'Not captured for this step';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+  if (Array.isArray(value)) {
+    if (!value.length) return 'Not captured for this step';
+    return value.map(item => plainInline(item)).join('\n');
+  }
+  if (typeof value === 'object') {
+    const lines = Object.entries(value as Record<string, unknown>).map(([key, item]) => `${key}: ${plainInline(item)}`);
+    return lines.length ? lines.join('\n') : 'Not captured for this step';
+  }
+  return String(value);
+}
+
 function mark(status: string) {
   if (status === 'passed') return ok;
   if (status === 'failed' || status === 'assertion-failed' || status === 'path-failed' || status === 'script-error') return bad;
@@ -60,12 +83,12 @@ function RunEvidence({run, selection, busy, withhold, onArtifact}: {run: Run; se
       return <article key={item.id}>
         <h4><RedactedText text={(test ? canvasTestLabel(test) : item.testId) + ' · ' + item.status}/></h4>
         <strong>Expected</strong>
-        <pre><RedactedText text={JSON.stringify(expected ?? 'Expected conditions unavailable', null, 2)}/></pre>
+        <pre><RedactedText text={plainEvidence(expected)}/></pre>
         {flow && <><strong>Referenced authored flow · <RedactedText text={file ?? ''}/></strong><pre><RedactedText text={flow}/></pre></>}
         <strong>Actual result</strong>
         <p><RedactedText text={confidential ? 'Evaluated result withheld for confidential inputs.' : item.detail}/></p>
-        <pre><RedactedText text={confidential ? 'Evaluated command evidence withheld for confidential inputs.' : step?.actual ? JSON.stringify(step.actual, null, 2) : 'Evaluated command evidence unavailable or withheld.'}/></pre>
-        {screenshots.length ? screenshots.map(name => <button type="button" className="rr-file" key={name} disabled={busy} onClick={() => onArtifact?.(name)}>Inspect screenshot · <RedactedText text={name}/></button>) : <p>Screenshot evidence unavailable or withheld for this occurrence.</p>}
+        <pre><RedactedText text={confidential ? 'Evaluated command evidence withheld for confidential inputs.' : plainEvidence(step?.actual)}/></pre>
+        {screenshots.length ? screenshots.map(name => <button type="button" className="rr-file" key={name} disabled={busy} onClick={() => onArtifact?.(name)}>Inspect screenshot · <RedactedText text={name}/></button>) : <p>No screenshot for this step.</p>}
         {files.map(name => <button type="button" className="rr-file" key={name} disabled={busy} onClick={() => onArtifact?.(name)}>Inspect evidence · <RedactedText text={name}/></button>)}
       </article>;
     })}
