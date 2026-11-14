@@ -1,6 +1,6 @@
 import type {Diagnostic} from '../authoring/types.js';
 
-/** One repair call per submission. It counts against the two-post budget. */
+/** One repair round per submission. Its posts come from MAX_REPAIR_POSTS, not the attempt budget. */
 export const MAX_REPAIR_ROUNDS = 1;
 
 /** Facts the user must supply. Another model round cannot discover them. */

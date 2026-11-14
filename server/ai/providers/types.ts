@@ -7,8 +7,22 @@ export type ProviderErrorCode = 'PROVIDER_AUTH' | 'PROVIDER_CONFIG' | 'PROVIDER_
 /** Why a provider failure must not be posted again. The job maps these at the API boundary. */
 export type ProviderFailureReason = 'network' | 'embedded' | 'budget';
 
-/** One submission may make this many upstream POSTs, including fallbacks, retries, and repair. */
-export const MAX_UPSTREAM_POSTS = 2;
+/**
+ * Upstream POST budget for one submission.
+ *
+ * MAX_ATTEMPT_POSTS is 2. That covers the first model call plus one provider
+ * fallback (json_schema or stream_options) or one automatic retry. Fallbacks
+ * and retries share this number.
+ *
+ * MAX_REPAIR_POSTS is 2. JSON repair has this budget of its own, so a fallback
+ * on the first call does not spend it. A repair call may use one fallback.
+ *
+ * MAX_UPSTREAM_POSTS is 4. That is the hard ceiling: attempt posts plus repair
+ * posts never exceed it.
+ */
+export const MAX_ATTEMPT_POSTS = 2;
+export const MAX_REPAIR_POSTS = 2;
+export const MAX_UPSTREAM_POSTS = MAX_ATTEMPT_POSTS + MAX_REPAIR_POSTS;
 export const RESPONSE_BYTE_LIMIT = 256 * 1024;
 
 export type UpstreamBudget = {

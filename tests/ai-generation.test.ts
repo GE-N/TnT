@@ -5,7 +5,7 @@ import {readFile, stat, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {test} from 'node:test';
 import {createAi} from '../server/ai/index.js';
-import {MAX_OUTPUT_TOKENS, MAX_PROVIDER_RETRIES, MAX_UPSTREAM_POSTS, RESPONSE_BYTE_LIMIT, SUBMISSION_DEADLINE_MS} from '../server/ai/job.js';
+import {MAX_ATTEMPT_POSTS, MAX_OUTPUT_TOKENS, MAX_PROVIDER_RETRIES, MAX_REPAIR_POSTS, MAX_UPSTREAM_POSTS, RESPONSE_BYTE_LIMIT, SUBMISSION_DEADLINE_MS} from '../server/ai/job.js';
 import {PROMPT_CHAR_LIMIT, REQUEST_BYTE_LIMIT, USER_PROMPT_CHAR_LIMIT, packPrompt, schemaAttachment} from '../server/ai/prompt.js';
 import {createFakeCopilotRuntime} from '../server/ai/providers/copilot-runtime.js';
 import {createFakeProvider, type FakeResult} from '../server/ai/providers/fake.js';
@@ -73,7 +73,9 @@ async function settle<T extends {state: string}>(ai: {get(id: string): Promise<T
 
 test('generation limits match the provider budget', () => {
   assert.equal(SUBMISSION_DEADLINE_MS, 120_000);
-  assert.equal(MAX_UPSTREAM_POSTS, 2);
+  assert.equal(MAX_ATTEMPT_POSTS, 2);
+  assert.equal(MAX_REPAIR_POSTS, 2);
+  assert.equal(MAX_UPSTREAM_POSTS, 4);
   assert.equal(MAX_PROVIDER_RETRIES, 1);
   assert.equal(MAX_REPAIR_ROUNDS, 1);
   assert.equal(MAX_OUTPUT_TOKENS, 8_192);
@@ -704,27 +706,28 @@ test('the generic OpenAI-compatible provider still generates', async () => {
   } finally { await g.cleanup(); }
 });
 
-test('json_schema fallback plus a needed repair stays at two posts', async () => {
+test('a json_schema fallback does not spend the repair budget', async () => {
   const bad = structuredClone(exampleDraft) as {visits: {operations: {destination?: {visitKey?: string}}[]}[]};
   bad.visits[0].operations[1].destination!.visitKey = 'missingVisit';
   const g = await adapterJob('openai-compatible', post => {
-    if (post === 1) return new Response(JSON.stringify({error: {message: 'json_schema response_format is not supported'}}), {status: 400, headers: {'content-type': 'application/json'}});
+    if (post === 1 || post === 3) return new Response(JSON.stringify({error: {message: 'json_schema response_format is not supported'}}), {status: 400, headers: {'content-type': 'application/json'}});
     if (post === 2) return completionResponse(JSON.stringify(bad));
+    if (post === 4) return completionResponse(JSON.stringify(exampleDraft));
     throw new Error(`unexpected post ${post}`);
   });
   try {
     const job = await settle(g.ai, (await g.ai.start(inputOf(g.f.workspace))).id);
-    assert.equal(g.posts.length, 2);
+    assert.equal(g.posts.length, 4);
     assert.equal((g.posts[1].body.response_format as {type?: string}).type, 'json_object');
+    assert.equal((g.posts[3].body.response_format as {type?: string}).type, 'json_object');
     const compact = JSON.stringify(modelDraftSchema(JSON.parse(readFileSync(new URL('../docs/contracts/ai-flow-v1/flow-draft.schema.json', import.meta.url), 'utf8'))));
     const systemOf = (body: Record<string, unknown>) => (body.messages as {content: string}[])[0].content;
     assert.equal(systemOf(g.posts[0].body).includes(compact), false);
     assert.equal(systemOf(g.posts[1].body).includes(compact), true);
-    assert.equal(job.state, 'failed');
-    assert.equal(job.error?.code, 'AUTHORING_INVALID');
-    assert.equal(job.error?.retryable, false);
-    assert.equal(job.preview?.applicable, false);
-    assert.ok(job.draft);
+    assert.equal(systemOf(g.posts[2].body).includes(compact), false);
+    assert.equal(systemOf(g.posts[3].body).includes(compact), true);
+    assert.equal(job.state, 'pending');
+    assert.equal(job.preview?.applicable, true);
   } finally { await g.cleanup(); }
 });
 

@@ -1,0 +1,6 @@
+[
+  {"name": "auth", "status": 401, "body": {"error": {"message": "bad key sk-SECRET"}}, "code": "PROVIDER_AUTH", "retryable": false, "appCode": "AUTH_FAILED"},
+  {"name": "credits", "status": 402, "body": {"error": {"message": "pay sk-SECRET"}}, "code": "PROVIDER_REJECTED", "retryable": false, "appCode": "CREDITS_REQUIRED"},
+  {"name": "rate", "status": 429, "body": {"error": {"message": "slow"}}, "code": "PROVIDER_UNAVAILABLE", "retryable": true, "appCode": "RATE_LIMITED"},
+  {"name": "vision", "status": 400, "body": {"error": {"message": "This model does not support images"}}, "code": "PROVIDER_REJECTED", "retryable": false, "appCode": "MODEL_CANT_READ_IMAGES", "embeddedCode": "no-vision"}
+]
