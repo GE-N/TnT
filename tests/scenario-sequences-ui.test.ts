@@ -101,7 +101,7 @@ test('three finite scenarios reuse four nodes, choose branches explicitly, save/
  assert.equal(document.querySelector('[aria-label="Execution evidence"]'),null,'Evidence stays out of the primary sheet');
  await openTechnical(document);await click('Inspect visit 4');
  const evidence=document.querySelector('[aria-label="Execution evidence"]');assert.ok(evidence,'Selecting a visit opens its evidence inspector');
- assert.match(evidence.textContent!,/Expected/);assert.match(evidence.textContent!,/Screen 2/);assert.match(evidence.textContent!,/FAILED/);assert.match(evidence.textContent!,/Screenshot evidence unavailable/);assert.match(evidence.textContent!,/Simulator boundary fixture/);
+ assert.match(evidence.textContent!,/Expected/);assert.match(evidence.textContent!,/Screen 2/);assert.match(evidence.textContent!,/FAILED/);assert.match(evidence.textContent!,/No screenshot for this step/);assert.match(evidence.textContent!,/Simulator boundary fixture/);
  await click('Inspect transition 4');assert.match(document.querySelector('[aria-label="Execution evidence"]')!.textContent!,/skipped/);
  await selectedCommand('Duplicate');await fill('Scenario name','Return copy');await click('Save workspace');const duplicated=await saved();
  const original=workspace.canvas!.paths[0];const copy=duplicated.canvas!.paths.at(-1)!;assert.deepEqual(copy.edgeIds,original.edgeIds);assert.ok(copy.visits!.every(visit=>!original.visits!.some(item=>item.id===visit.id)));assert.equal(Reflect.get(copy,'finished'),true);

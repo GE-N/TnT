@@ -110,6 +110,60 @@ test('files stay disabled while a run is in progress and batch drill-down can re
   } finally { await drilled.cleanup(); }
 });
 
+test('technical details say expected and actual in plain language', async () => {
+  const base = run({status: 'assertion-failed'});
+  const objectRun = run({
+    status: 'assertion-failed',
+    snapshot: {...base.snapshot, yaml: 'appId: example\n---\n- assertVisible:\n    text: Welcome\n'},
+    steps: [{id: 's1', command: 'assertVisible', status: 'failed', actual: {found: false, waitedMs: 0}}],
+    canvas: {...base.canvas!, visits: [{id: 'v1', screenId: 'home', status: 'failed', checkIds: ['check']}], occurrences: [{id: 'o1', visitId: 'v1', testId: 'check', stepId: 's1', status: 'failed', detail: 'missing'}]},
+  });
+  const opened = await render({run: objectRun});
+  try {
+    const tech = opened.document.querySelector<HTMLDetailsElement>('[data-testid="results-technical"]')!;
+    await act(async () => { tech.querySelector('summary')!.click(); });
+    await act(async () => { opened.document.querySelector<HTMLButtonElement>('[aria-label="Inspect visit 1"]')!.click(); });
+    const evidence = opened.document.querySelector('[aria-label="Execution evidence"]')!.textContent!;
+    assert.match(evidence, /assertVisible: text: Welcome/);
+    assert.match(evidence, /found: false/);
+    assert.match(evidence, /waitedMs: 0/);
+    assert.equal(evidence.includes('"assertVisible"'), false);
+    assert.equal(evidence.includes('"found"'), false);
+  } finally { await opened.cleanup(); }
+
+  const missing = run({
+    status: 'assertion-failed',
+    steps: [{id: 's1', command: 'assertVisible', status: 'failed'}],
+    canvas: {...base.canvas!, visits: [{id: 'v1', screenId: 'home', status: 'failed', checkIds: ['check']}], occurrences: [{id: 'o1', visitId: 'v1', testId: 'check', stepId: 's1', status: 'failed', detail: 'missing'}]},
+  });
+  const withheld = await render({run: missing});
+  try {
+    const tech = withheld.document.querySelector<HTMLDetailsElement>('[data-testid="results-technical"]')!;
+    await act(async () => { tech.querySelector('summary')!.click(); });
+    await act(async () => { withheld.document.querySelector<HTMLButtonElement>('[aria-label="Inspect visit 1"]')!.click(); });
+    const evidence = withheld.document.querySelector('[aria-label="Execution evidence"]')!.textContent!;
+    assert.match(evidence, /Not captured for this step/);
+    assert.equal(evidence.includes('unavailable or withheld'), false);
+    assert.match(evidence, /launchApp/);
+    assert.equal(evidence.includes('"launchApp"'), false);
+  } finally { await withheld.cleanup(); }
+
+  const words = run({
+    status: 'assertion-failed',
+    steps: [{id: 's1', command: 'assertVisible', status: 'failed', actual: 'Welcome was absent'}],
+    canvas: {...base.canvas!, visits: [{id: 'v1', screenId: 'home', status: 'failed', checkIds: ['check']}], occurrences: [{id: 'o1', visitId: 'v1', testId: 'check', stepId: 's1', status: 'failed', detail: 'missing'}]},
+  });
+  const text = await render({run: words});
+  try {
+    const tech = text.document.querySelector<HTMLDetailsElement>('[data-testid="results-technical"]')!;
+    await act(async () => { tech.querySelector('summary')!.click(); });
+    await act(async () => { text.document.querySelector<HTMLButtonElement>('[aria-label="Inspect visit 1"]')!.click(); });
+    const evidence = text.document.querySelector('[aria-label="Execution evidence"]')!.textContent!;
+    assert.match(evidence, /Welcome was absent/);
+    assert.equal(evidence.includes('"Welcome was absent"'), false);
+  } finally { await text.cleanup(); }
+});
+
 test('the failed sheet opens only the failed step and hides evidence until Technical details is opened', async () => {
   const base = run({status: 'assertion-failed'});
   const failed = run({status: 'assertion-failed', canvas: {...base.canvas!, visits: [{id: 'v1', screenId: 'home', status: 'passed', checkIds: ['check']}, {id: 'v2', screenId: 'home', status: 'failed', checkIds: ['check']}], occurrences: [{id: 'o1', visitId: 'v1', testId: 'check', status: 'passed', detail: 'Welcome'}, {id: 'o2', visitId: 'v2', testId: 'check', status: 'failed', detail: 'missing'}]}});
