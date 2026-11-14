@@ -105,12 +105,38 @@ function isPrivateHost(hostname: string) {
   return false;
 }
 
-export function assertCloudBaseUrl(value: string) {
+/** Comma-separated hostnames, or https URLs whose host is taken. http entries are ignored. Default is empty, so private hosts stay blocked. */
+export const BASE_URL_ALLOWLIST_ENV = 'TNT_AI_BASE_URL_ALLOWLIST';
+
+export function cloudBaseUrlAllowlist(env: NodeJS.ProcessEnv = process.env) {
+  const raw = env[BASE_URL_ALLOWLIST_ENV];
+  if (typeof raw !== 'string') return [];
+  const hosts: string[] = [];
+  for (const part of raw.split(',')) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    if (trimmed.includes('://')) {
+      let parsed: URL;
+      try { parsed = new URL(trimmed); }
+      catch { continue; }
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password) continue;
+      hosts.push(parsed.hostname.toLowerCase());
+      continue;
+    }
+    const host = trimmed.toLowerCase().replace(/^\[|\]$/g, '');
+    if (!host || /[\s/?#@:]/.test(host) || host.includes('..')) continue;
+    hosts.push(host);
+  }
+  return hosts;
+}
+
+export function assertCloudBaseUrl(value: string, allowlist: readonly string[] = []) {
   let url: URL;
   try { url = new URL(value); }
   catch { throw new AiHttpError(400, 'INVALID_CONFIG', 'Provide an https cloud base URL.'); }
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new AiHttpError(400, 'INVALID_CONFIG', 'Provide an https cloud base URL.');
-  if (isPrivateHost(url.hostname)) throw new AiHttpError(400, 'INVALID_CONFIG', 'Local endpoints are not available. Use an https cloud base URL.');
+  const allowed = allowlist.some(host => host.toLowerCase() === url.hostname.toLowerCase());
+  if (!allowed && isPrivateHost(url.hostname)) throw new AiHttpError(400, 'INVALID_CONFIG', 'Local endpoints are not available. Use an https cloud base URL.');
   return url.toString().replace(/\/$/, '');
 }
 
@@ -165,7 +191,7 @@ function parseCredential(value: unknown): CredentialAction {
   throw new AiHttpError(400, 'INVALID_CONFIG', 'Choose keep, replace, or remove for the API key.');
 }
 
-function parsePut(input: unknown): PutBody {
+function parsePut(input: unknown, allowlist: readonly string[] = []): PutBody {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AiHttpError(400, 'INVALID_CONFIG', 'Provide AI config.');
   const body = input as Record<string, unknown>;
   knownKeys(body, ['expectedSettingsRevision', 'selected', 'provider', 'model', 'baseUrl', 'credential']);
@@ -182,7 +208,7 @@ function parsePut(input: unknown): PutBody {
   let baseUrl: string | undefined;
   if (provider === 'openrouter') {
     if (body.baseUrl !== undefined) throw new AiHttpError(400, 'INVALID_CONFIG', 'OpenRouter uses a fixed base URL.');
-  } else baseUrl = assertCloudBaseUrl(typeof body.baseUrl === 'string' ? body.baseUrl : '');
+  } else baseUrl = assertCloudBaseUrl(typeof body.baseUrl === 'string' ? body.baseUrl : '', allowlist);
   return {expectedSettingsRevision: body.expectedSettingsRevision as number, selected, provider, model, baseUrl, credential: parseCredential(body.credential)};
 }
 
@@ -590,7 +616,7 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     if (!entry.model) throw new AiHttpError(400, 'PROVIDER_CONFIG', 'Choose a model.');
     let baseUrl = OPENROUTER_BASE_URL;
     if (selected !== 'openrouter') {
-      try { baseUrl = assertCloudBaseUrl(entry.baseUrl ?? ''); }
+      try { baseUrl = assertCloudBaseUrl(entry.baseUrl ?? '', cloudBaseUrlAllowlist(env)); }
       catch (error) {
         if (error instanceof AiHttpError) throw new AiHttpError(400, 'PROVIDER_CONFIG', error.message);
         throw error;
@@ -607,7 +633,7 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
   }
 
   async function put(input: unknown): Promise<AiPublicConfig> {
-    const body = parsePut(input);
+    const body = parsePut(input, cloudBaseUrlAllowlist(env));
     return exclusive(async () => {
       const current = await readFileConfig();
       if (body.expectedSettingsRevision !== current.settingsRevision) throw new AiHttpError(409, 'SETTINGS_CHANGED', 'Settings changed in another session. Refresh and try again.');
@@ -699,7 +725,7 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     if (prepared.kind === 'stale') return {testId: body.testId, ok: false, code: 'SETTINGS_CHANGED', message: 'The saved API key changed. Refresh and try again.'};
     if (!prepared.apiKey) return {testId: body.testId, ok: false, code: 'AI_NOT_CONFIGURED', message: 'Add an API key.'};
     if (body.provider === 'openai-compatible') {
-      try { assertCloudBaseUrl(prepared.baseUrl); }
+      try { assertCloudBaseUrl(prepared.baseUrl, cloudBaseUrlAllowlist(env)); }
       catch (error) {
         if (error instanceof AiHttpError) return {testId: body.testId, ok: false, code: 'INVALID_CONFIG', message: error.message};
         throw error;
@@ -726,7 +752,7 @@ export function createAiConfig(deps: {root: string; env?: NodeJS.ProcessEnv; sec
     const provider = assertProviderId(providerName);
     const config = await readFileConfig();
     const entry = config.providers[provider];
-    const baseUrl = provider === 'openrouter' ? OPENROUTER_BASE_URL : assertCloudBaseUrl(entry.baseUrl ?? '');
+    const baseUrl = provider === 'openrouter' ? OPENROUTER_BASE_URL : assertCloudBaseUrl(entry.baseUrl ?? '', cloudBaseUrlAllowlist(env));
     const cacheKey = `${provider}\n${baseUrl}`;
     const cached = catalogCache.get(cacheKey);
     if (cached && now() - cached.at < CATALOG_TTL_MS) return {provider, models: cached.models};

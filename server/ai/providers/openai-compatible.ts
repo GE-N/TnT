@@ -2,7 +2,7 @@ import {CANT_READ_IMAGES, redactSecrets} from '../errors.js';
 import {DIAGRAM_IMAGE_BYTE_LIMIT} from '../diagram.js';
 import {appendSchemaInstruction} from '../prompt.js';
 import {OPENROUTER_BASE_URL} from '../probe.js';
-import {MAX_UPSTREAM_POSTS, ProviderRequestError, RESPONSE_BYTE_LIMIT, type FlowModelProvider, type ModelDone, type Msg, type UpstreamBudget, type Usage} from './types.js';
+import {MAX_ATTEMPT_POSTS, ProviderRequestError, RESPONSE_BYTE_LIMIT, type FlowModelProvider, type ModelDone, type Msg, type UpstreamBudget, type Usage} from './types.js';
 
 const SCHEMA_NAME = 'flow_draft';
 const OPENROUTER_REFERER = 'http://localhost';
@@ -161,6 +161,36 @@ function noVision() {
   return new ProviderRequestError({code: 'PROVIDER_REJECTED', message: CANT_READ_IMAGES, retryable: false, embeddedCode: 'no-vision'});
 }
 
+/**
+ * True when the model id is a known vision model, false when it is a known
+ * text-only model, and undefined when the id does not say. Unknown models are
+ * sent the image; only a known text-only model is refused before the network.
+ */
+export function modelCanReadImages(model: string): boolean | undefined {
+  const id = model.trim().toLowerCase();
+  const leaf = id.split('/').at(-1) ?? id;
+  if (!leaf) return undefined;
+  if (/^(?:text-embedding|whisper|tts-|dall-e|omni-moderation)/.test(leaf)) return false;
+  if (leaf === 'gpt-4' || leaf.startsWith('gpt-3.5')) return false;
+  if (/^o[134]-mini(?:$|[-.])/.test(leaf)) return false;
+  if (/^(?:deepseek-chat|deepseek-coder|codestral)(?:$|[-.])/.test(leaf)) return false;
+  if (/vision|gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|chatgpt-4o|claude|gemini|pixtral|llava|qwen[^\s]*vl|grok-2-vision/.test(id)) return true;
+  return undefined;
+}
+
+function acceptsImages(options: {model: string; vision?: boolean}) {
+  if (options.vision === false) return false;
+  if (options.vision === true) return true;
+  return modelCanReadImages(options.model) !== false;
+}
+
+function lacksVision(payload: unknown) {
+  const text = JSON.stringify(payload ?? {}).toLowerCase();
+  const aboutImages = text.includes('image') || text.includes('vision') || text.includes('multimodal');
+  const refused = text.includes('not support') || text.includes('does not') || text.includes("doesn't") || text.includes('cannot') || text.includes("can't") || text.includes('unsupported') || text.includes('only text');
+  return aboutImages && refused;
+}
+
 function withSchemaInstructions(messages: {role: string; content: string | ReturnType<typeof openAiMessageContent>}[], schema: object) {
   const first = messages[0];
   if (!first || first.role !== 'system' || typeof first.content !== 'string') return messages;
@@ -174,7 +204,7 @@ function withoutStreamOptions(body: Record<string, unknown>) {
 }
 
 function consumePost(shared: UpstreamBudget | undefined, used: {n: number}) {
-  if (used.n >= MAX_UPSTREAM_POSTS) return false;
+  if (used.n >= MAX_ATTEMPT_POSTS) return false;
   if (shared && !shared.tryConsume()) return false;
   used.n += 1;
   return true;
@@ -189,11 +219,14 @@ export function createOpenAiCompatibleProvider(options: {
   preset?: 'openrouter' | 'openai-compatible';
   /** Later capability flag. OpenRouter then also sends provider.require_parameters. */
   structuredOutput?: boolean;
+  /** Overrides the model-id check. False refuses an image before the network. */
+  vision?: boolean;
 }): FlowModelProvider {
   const fetchImpl = options.fetch ?? fetch;
   const openRouter = options.preset === 'openrouter';
   const baseUrl = openRouter ? OPENROUTER_BASE_URL : options.baseUrl;
   const secret = options.apiKey;
+  const seesImages = acceptsImages(options);
 
   function requestHeaders() {
     const result: Record<string, string> = {authorization: `Bearer ${secret}`};
@@ -230,7 +263,7 @@ export function createOpenAiCompatibleProvider(options: {
   return {
     id: openRouter ? 'openrouter' : 'openai-compatible',
     sendsJsonSchema: openRouter ? options.structuredOutput === true : true,
-    readsImages: openRouter ? false : true,
+    readsImages: seesImages,
     async check() {
       let response: Response;
       try {
@@ -254,7 +287,7 @@ export function createOpenAiCompatibleProvider(options: {
       return found ? {ok: true, model: options.model} : {ok: false, error: 'Unknown model.'};
     },
     async *generate(req) {
-      if (req.messages.some(message => message.image) && openRouter) throw noVision();
+      if (req.messages.some(message => message.image) && !seesImages) throw noVision();
       const messages = [{role: 'system', content: req.system}, ...req.messages.map(message => ({role: message.role, content: openAiMessageContent(message)}))];
       let body: Record<string, unknown> = {
         model: options.model,
@@ -280,6 +313,7 @@ export function createOpenAiCompatibleProvider(options: {
       if (!openRouter && response.status === 400) {
         const payload = await errorPayload(response);
         let nextBody: Record<string, unknown> | undefined;
+        if (lacksVision(payload)) throw noVision();
         if (structuredOutputRejected(payload)) nextBody = {...body, messages: withSchemaInstructions(messages, req.schema), response_format: {type: 'json_object'}};
         else if (streamOptionsRejected(payload)) nextBody = withoutStreamOptions(body);
         else throw failure(400, payload, undefined, secret);
@@ -289,6 +323,7 @@ export function createOpenAiCompatibleProvider(options: {
       }
       if (!response.ok) {
         const payload = await errorPayload(response);
+        if (response.status === 400 && lacksVision(payload)) throw noVision();
         throw failure(response.status, payload, parseRetryAfterMs(response.headers.get('retry-after')), secret);
       }
       yield* readCompletion(response, req.signal, secret);

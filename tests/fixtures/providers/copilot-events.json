@@ -1,0 +1,14 @@
+{
+  "events": [
+    {"type": "assistant.message_delta", "data": {"deltaContent": "{\"ok\":"}},
+    {"type": "assistant.usage", "data": {"model": "claude-sonnet", "inputTokens": 5, "outputTokens": 2, "copilotUsage": {"totalNanoAiu": 1000}, "quotaSnapshots": []}},
+    {"type": "session.error", "data": {"statusCode": 401, "errorType": "authentication", "message": "bad credentials"}},
+    {"type": "session.idle", "data": {}}
+  ],
+  "mapped": [
+    {"type": "delta", "text": "{\"ok\":"},
+    {"type": "usage", "model": "claude-sonnet", "inputTokens": 5, "outputTokens": 2, "nanoAiu": 1000},
+    {"type": "error", "kind": "not-signed-in", "message": "Copilot isn't signed in."},
+    {"type": "done", "text": "{\"ok\":"}
+  ]
+}

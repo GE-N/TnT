@@ -2,7 +2,7 @@
 
 export const NOT_A_PNG_OR_JPEG = "This file isn't a PNG or JPEG export.";
 export const IMAGE_TOO_LARGE = 'This image is too large.';
-export const CANT_READ_IMAGES = "This model can't read images.";
+export const CANT_READ_IMAGES = "This model can't read images. Pick a vision model, or switch provider in Settings.";
 export const CREATE_SCENARIO_PROMPT = 'Create a scenario from this diagram?';
 /** Same cap as the server. Image bytes, not the base64 length and not the text budget. */
 export const DIAGRAM_IMAGE_BYTE_LIMIT = 2_000_000;

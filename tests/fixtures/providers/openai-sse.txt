@@ -1,0 +1,6 @@
+data: {"choices":[{"delta":{"content":"{\"ok\":"}}]}
+
+data: {"choices":[{"delta":{"content":"true}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":4},"model":"gpt-4o"}
+
+data: [DONE]
+

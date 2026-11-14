@@ -148,6 +148,22 @@ test('TNT_AI_API_KEY is ignored when dev mode is off', async () => {
   } finally { await g.cleanup(); }
 });
 
+test('an allowlisted https host is accepted and plain http stays blocked', async () => {
+  const blocked = await configFixture();
+  try {
+    await assert.rejects(() => blocked.ai.putConfig(saveBody({baseUrl: 'https://llm.corp.internal/v1'})), (error: unknown) => (error as {status?: number; code?: string}).status === 400 && (error as {code?: string}).code === 'INVALID_CONFIG');
+  } finally { await blocked.cleanup(); }
+  const allowed = await configFixture({env: {TNT_AI_BASE_URL_ALLOWLIST: 'llm.corp.internal, https://10.8.0.4'}});
+  try {
+    const saved = await allowed.ai.putConfig(saveBody({baseUrl: 'https://llm.corp.internal/v1'}));
+    assert.equal(saved.providers['openai-compatible'].baseUrl, 'https://llm.corp.internal/v1');
+    await assert.rejects(() => allowed.ai.putConfig(saveBody({expectedSettingsRevision: 1, baseUrl: 'http://llm.corp.internal/v1', credential: {action: 'keep'}})), (error: unknown) => (error as {status?: number}).status === 400);
+    await assert.rejects(() => allowed.ai.putConfig(saveBody({expectedSettingsRevision: 1, baseUrl: 'https://other.corp.internal/v1', credential: {action: 'keep'}})), (error: unknown) => (error as {status?: number}).status === 400);
+    const addressed = await allowed.ai.putConfig(saveBody({expectedSettingsRevision: 1, baseUrl: 'https://10.8.0.4/v1', credential: {action: 'keep'}}));
+    assert.equal(addressed.providers['openai-compatible'].baseUrl, 'https://10.8.0.4/v1');
+  } finally { await allowed.cleanup(); }
+});
+
 test('local providers, Anthropic, and non-cloud base URLs are rejected', async () => {
   const g = await configFixture();
   try {

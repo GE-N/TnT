@@ -1,0 +1,19 @@
+{
+  "headers": {"HTTP-Referer": "http://localhost", "X-Title": "TnT"},
+  "body": {
+    "model": "anthropic/claude-sonnet-4.5",
+    "messages": [
+      {"role": "system", "content": "Return JSON."},
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "Read this"},
+          {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGk="}}
+        ]
+      }
+    ],
+    "stream": true,
+    "max_tokens": 32,
+    "usage": {"include": true}
+  }
+}
