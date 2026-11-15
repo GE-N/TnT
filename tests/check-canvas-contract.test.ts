@@ -211,3 +211,34 @@ test('a quoted path in the real diff with no exception patch fails and names the
   }finally{f.close();}
  }
 });
+
+test('an exception patch with trailing blank lines at end of file still passes',()=>{
+ const f=splitAcrossTwoPatches();try{
+  const file=join(f.root,exceptions,'a.patch');
+  const original=readFileSync(file);
+  assert.ok(original.subarray(-1)[0]===0x0a,'expected git diff to end with a newline');
+  writeFileSync(file,Buffer.concat([original,Buffer.from('\n\n')]));
+  f.commit('trailing blanks');
+  const result=f.run();
+  assert.equal(result.status,0,result.stderr);
+  assert.match(result.stdout,/canvas contract check passed \(2 exception patches\)/);
+ }finally{f.close();}
+});
+
+test('an exception patch with CRLF line endings fails and names the file',()=>{
+ const f=splitAcrossTwoPatches();try{
+  f.git('config','core.autocrlf','false');
+  const file=join(f.root,exceptions,'a.patch');
+  const original=readFileSync(file);
+  assert.ok(!original.includes(0x0d),'fixture patch should be LF');
+  writeFileSync(file,Buffer.from(original.toString('utf8').replaceAll('\n','\r\n')));
+  f.commit('crlf');
+  const result=f.run();
+  assert.notEqual(result.status,0);
+  assert.match(result.stderr,/CRLF line endings/);
+  assert.match(result.stderr,/a\.patch/);
+  assert.doesNotMatch(result.stderr,/the diff differs from its exception patch/);
+  assert.doesNotMatch(result.stderr,/in an exception patch but not in the diff/);
+  assert.doesNotMatch(result.stderr,/changed but not in any exception patch/);
+ }finally{f.close();}
+});
