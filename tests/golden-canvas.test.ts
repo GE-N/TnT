@@ -4,7 +4,7 @@ import {dirname,join} from 'node:path';
 import {describe,test} from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {buildGoldenFixtures} from './golden-canvas-fixtures.js';
-import {runUi} from './golden-canvas-ui.js';
+import {PUBLISHED_WAIT_MS,runUi} from './golden-canvas-ui.js';
 import {normalizeSnapshot,runPure,snapshotText,type GoldenFixture,type GoldenSnapshot} from './golden-canvas-runner.js';
 
 const root=dirname(fileURLToPath(import.meta.url));
@@ -154,4 +154,54 @@ test('linear-route ignores references from the editor before the workspace opens
     if(path.endsWith('/open'))await initialReferences;
   }});
   assert.equal(snapshotText(ui),snapshotText(runPure(fixture)));
+});
+
+const previousPublishedWaitMs=8_000;
+const delayPastPreviousLimitMs=previousPublishedWaitMs+1_000;
+const linearRoute=()=>buildGoldenFixtures().find(item=>item.id==='linear-route')!;
+
+function delayWorkspaceSaveAfterOpen(delayMs:number|null){
+  let opened=false;
+  let delayed=false;
+  let release=()=>{};
+  const hang=delayMs===null?new Promise<void>(resolve=>{release=resolve;}):undefined;
+  return {
+    delayed:()=>delayed,
+    release,
+    beforeRequest:async(path:string)=>{
+      if(path.endsWith('/open'))opened=true;
+      if(!opened||path!=='/api/workspaces'||delayed)return;
+      delayed=true;
+      if(delayMs===null)await hang;
+      else await new Promise(resolve=>setTimeout(resolve,delayMs));
+    },
+  };
+}
+
+// Mutation proof: delayPastPreviousLimitMs is 9s. Reverting PUBLISHED_WAIT_MS to 8000 fails this test.
+test('a workspace save just past the previous 8s published() limit is still acknowledged',{timeout:60_000},async()=>{
+  const injected=delayWorkspaceSaveAfterOpen(delayPastPreviousLimitMs);
+  const ui=await runUi(linearRoute(),{beforeRequest:injected.beforeRequest});
+  assert.equal(injected.delayed(),true,'the fixture must save after Open so the injected delay is exercised');
+  assert.equal(snapshotText(ui),snapshotText(runPure(linearRoute())));
+});
+
+test('published() times out with wait duration and save state when a save never acknowledges',{timeout:60_000},async()=>{
+  const injected=delayWorkspaceSaveAfterOpen(null);
+  try{
+    await assert.rejects(()=>runUi(linearRoute(),{beforeRequest:injected.beforeRequest}),(error:unknown)=>{
+      assert.ok(error instanceof Error);
+      assert.match(error.message,/The workspace page did not acknowledge a save after \d+ms \(/);
+      assert.match(error.message,/Saving…/);
+      assert.match(error.message,/pending=\d+/);
+      assert.match(error.message,/saveEpoch=\d+/);
+      assert.match(error.message,/refsAtSave=\d+/);
+      const waited=Number(/after (\d+)ms/.exec(error.message)?.[1]);
+      assert.ok(waited>=PUBLISHED_WAIT_MS,error.message);
+      assert.ok(waited<PUBLISHED_WAIT_MS+5_000,error.message);
+      return true;
+    });
+  }finally{
+    injected.release();
+  }
 });
