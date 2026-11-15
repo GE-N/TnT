@@ -6,14 +6,20 @@ import type {Workspace} from '../server/scenarios.js';
 import type {DraftOverlay} from './canvas.js';
 import type {DraftPositions} from './draft-placement.js';
 import {AI_POLL_MS, ANSWER_CHAR_LIMIT, AiFlowRequestError, createAiFlowClient, PROMPT_CHAR_LIMIT, PROMPT_COUNTER_AT, type AiPublicConfig, type ApplyResponse, type GenerationPhase, type GenerationView, type ProviderId} from './ai-flow-client.js';
-import {knowledgeClient, knowledgeFailureSentence, KnowledgeRequestError, type ScenarioContext} from './knowledge-client.js';
+import {knowledgeClient} from './knowledge-client.js';
 import type {KnowledgeDraftOffer} from './knowledge-sheet.js';
 import {DiagramCard} from './diagram-preview.js';
-import {attachmentFromBytes, CANT_READ_IMAGES, CREATE_SCENARIO_PROMPT, plainDiagramError, type DiagramAttachment} from './diagram-intake.js';
+import {attachmentFromBytes, CANT_READ_IMAGES, plainDiagramError, type DiagramAttachment} from './diagram-intake.js';
 import {subscribeAiConfig} from './ai-settings.js';
 import {VersionsSheet} from './ai-versions-sheet.js';
 import {closePanel as closeSidePanel, openPanel as openSidePanel, useSidePanels} from './side-panels.js';
-import {capsuleMode, makeVersion, readAiVersions, relativeVersionTime, sharedScreenIds, UNDO_WINDOW_MS, withPoppedVersion, withPushedVersion, type AiVersionsState, type FlowVersion, type VersionCanvasPreview} from './ai-versions.js';
+import {capsuleMode, makeVersion, readAiVersions, relativeVersionTime, sharedScreenIds, withPoppedVersion, withPushedVersion, type AiVersionsState, type FlowVersion, type VersionCanvasPreview} from './ai-versions.js';
+import {isFlowDraft, presentResult} from './ai-intent-router.js';
+import {persistedAiDraft, useUndoWindow, viewDraft, type UndoOffer} from './ai-draft-persistence.js';
+import {useKnowledgeDraft, type KnowledgeHost} from './ai-knowledge-draft.js';
+import {matchDiagramPath, useDiagramIntake, type DiagramHost} from './ai-diagram-draft.js';
+
+export {persistedAiDraft};
 
 export type AiDraftStatus = 'idle' | 'prompting' | 'generating' | 'pending' | 'needsInfo' | 'stale' | 'applying' | 'failed';
 
@@ -78,31 +84,6 @@ export type AiDraft = {
 
 export type PersistedAiDraft = {jobId: string; prompt: string; previewId?: string; baseRevision?: number; positions?: DraftPositions};
 
-function readPositions(value: unknown): DraftPositions | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
-  const positions: DraftPositions = {};
-  for (const [key, point] of Object.entries(value)) {
-    if (!key || !point || typeof point !== 'object' || Array.isArray(point)) continue;
-    const x = (point as {x?: unknown}).x;
-    const y = (point as {y?: unknown}).y;
-    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) continue;
-    positions[key] = {x: Math.max(0, Math.min(2400, x)), y: Math.max(0, Math.min(1400, y))};
-  }
-  return Object.keys(positions).length ? positions : undefined;
-}
-
-function viewDraft(draft: AiDraft): PersistedAiDraft | null {
-  if (!draft.jobId) return null;
-  const positions = readPositions(draft.positions);
-  return {
-    jobId: draft.jobId,
-    prompt: draft.prompt,
-    ...(draft.previewId ? {previewId: draft.previewId} : {}),
-    ...(typeof draft.baseRevision === 'number' ? {baseRevision: draft.baseRevision} : {}),
-    ...(positions ? {positions} : {}),
-  };
-}
-
 type LoadedWorkspace = Workspace & {view?: Record<string, unknown> | null};
 
 const PHASE_LABEL: Record<GenerationPhase, string> = {
@@ -122,27 +103,6 @@ function emptyDraft(prompt = ''): AiDraft {
 function viewWith(view: unknown, patch: Record<string, unknown>) {
   const base = view && typeof view === 'object' && !Array.isArray(view) ? {...view as Record<string, unknown>} : {format: 1};
   return {...base, ...patch};
-}
-
-export function persistedAiDraft(view: Record<string, unknown> | null | undefined): PersistedAiDraft | undefined {
-  const raw = view?.aiDraft;
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
-  const item = raw as Record<string, unknown>;
-  if (typeof item.jobId !== 'string' || !item.jobId || typeof item.prompt !== 'string') return;
-  const positions = readPositions(item.positions);
-  return {
-    jobId: item.jobId,
-    prompt: item.prompt,
-    ...(typeof item.previewId === 'string' ? {previewId: item.previewId} : {}),
-    ...(typeof item.baseRevision === 'number' ? {baseRevision: item.baseRevision} : {}),
-    ...(positions ? {positions} : {}),
-  };
-}
-
-function isFlowDraft(value: unknown): value is FlowDraft {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const draft = value as FlowDraft;
-  return draft.schemaVersion === 1 && draft.mode === 'createScenario' && Array.isArray(draft.screens) && Array.isArray(draft.visits);
 }
 
 function placeScreens(existing: {x: number; y: number}[], count: number) {
@@ -314,173 +274,12 @@ function errorOf(error: unknown, fallback: string): {code: string; message: stri
   return {code: 'REQUEST_FAILED', message: error instanceof Error ? error.message : fallback, retryable: true};
 }
 
-function fromView(current: AiDraft, view: GenerationView, revision: number): AiDraft {
-  const draft = isFlowDraft(view.draft) ? view.draft : current.draft;
-  const preview = view.preview;
-  const baseRevision = preview?.baseRevision ?? current.baseRevision;
-  const revisionStale = baseRevision !== undefined && revision !== baseRevision;
-  const terminal = view.state !== 'running';
-  const incomingPreviewId = view.previewId ?? preview?.previewId;
-  const previewReplaced = !!incomingPreviewId && incomingPreviewId !== current.previewId;
-  let status: AiDraftStatus = current.status;
-  if (view.state === 'running') status = revisionStale ? 'stale' : 'generating';
-  else if (view.state === 'failed') status = 'failed';
-  else if (view.state === 'cancelled') status = 'prompting';
-  else if (revisionStale || (current.status === 'stale' && !preview)) status = 'stale';
-  else if (view.state === 'needsInfo' || (preview && !preview.applicable)) status = 'needsInfo';
-  else status = 'pending';
-  return {
-    ...current,
-    status,
-    jobId: view.state === 'cancelled' ? undefined : view.id,
-    phase: view.state === 'running' ? view.phase : undefined,
-    ...(baseRevision !== undefined ? {baseRevision} : {}),
-    ...(incomingPreviewId ? {previewId: incomingPreviewId} : {}),
-    ...(previewReplaced ? {previewedPlacements: undefined, previewedReplaceId: undefined} : {}),
-    ...(preview ? {
-      applicable: preview.applicable,
-      diagnostics: preview.diagnostics,
-      requiredAssumptionKeys: preview.requiredAssumptionKeys,
-      expiresAt: preview.expiresAt,
-    } : {}),
-    ...(draft ? {draft} : {}),
-    ...(view.inputTokens !== undefined ? {inputTokens: view.inputTokens} : {}),
-    ...(view.outputTokens !== undefined ? {outputTokens: view.outputTokens} : {}),
-    ...(view.cost !== undefined ? {cost: view.cost} : {}),
-    ...(view.model ? {model: view.model} : {}),
-    ...(view.upstreamProvider ? {upstreamProvider: view.upstreamProvider} : {}),
-    ...(view.error ? {error: view.error} : terminal && view.state !== 'failed' ? {error: undefined} : {}),
-    questions: view.state === 'running' ? current.questions : (view.state === 'needsInfo' && view.questions?.length ? view.questions : undefined),
-  };
-}
-
-function isDiagnostic(value: unknown): value is Diagnostic {
-  if (!value || typeof value !== 'object') return false;
-  const item = value as Diagnostic;
-  return typeof item.code === 'string' && typeof item.path === 'string' && typeof item.message === 'string' && Array.isArray(item.blocks) && (item.severity === 'error' || item.severity === 'warning' || item.severity === 'info');
-}
-
-/** Diagnostics may sit on the preview or, for a failed job, directly on the generation. */
-function diagnosticsOn(view: GenerationView) {
-  const extra = (view as GenerationView & {diagnostics?: unknown}).diagnostics;
-  return Array.isArray(extra) ? extra.filter(isDiagnostic) : [];
-}
-
 function overlayRenders(draft: FlowDraft | undefined, canvas: CanvasGraph | undefined) {
   if (!draft) return false;
   const overlay = draftOverlayFor(draft, canvas);
   return overlay.nodes.length > 0 || overlay.existing.length > 0;
 }
 
-function isAskBack(view: GenerationView) {
-  if (view.state !== 'needsInfo' || !view.questions?.length) return false;
-  if (isFlowDraft(view.draft) || view.preview) return false;
-  if (view.intent === 'diagram' || view.kind === 'diagram') return !view.diagramDraft;
-  return view.intent === 'knowledge' || view.intent === 'unclear' || view.intent === 'mixed' || view.kind === 'knowledge';
-}
-
-function diagramReady(view: GenerationView) {
-  return view.state === 'pending' && !!view.diagramDraft && (view.intent === 'diagram' || view.kind === 'diagram');
-}
-
-function knowledgeReady(view: GenerationView) {
-  return view.state === 'pending' && !!view.knowledgeDraft && (view.intent === 'knowledge' || view.kind === 'knowledge');
-}
-
-function withIntent(next: AiDraft, view: GenerationView): AiDraft {
-  return {
-    ...next,
-    ...(view.intent ? {intent: view.intent} : {}),
-    ...(view.kind ? {kind: view.kind} : {}),
-    ...(view.scenarioId ? {scenarioId: view.scenarioId} : {}),
-    remainder: view.intent === 'mixed' ? view.remainder : undefined,
-  };
-}
-
-/**
- * A review status closes the composer only when the canvas can draw the draft.
- * needsInfo with a non-applicable, non-rendering preview (INVALID_DRAFT) and
- * failed AUTHORING_INVALID / INVALID_AI_OUTPUT stay in the composer with the prompt.
- * A knowledge draft and an ask-back with no flow draft stay in the capsule instead.
- */
-function presentResult(current: AiDraft, view: GenerationView, revision: number, canvas: CanvasGraph | undefined): AiDraft {
-  if (diagramReady(view)) {
-    const base = fromView({...current, baseRevision: undefined}, view, revision);
-    return {
-      ...withIntent(base, view),
-      status: 'pending',
-      diagramDraft: view.diagramDraft,
-      draft: undefined,
-      knowledgeDraft: undefined,
-      questions: undefined,
-      previewId: undefined,
-      applicable: undefined,
-      error: undefined,
-      phase: undefined,
-      attachment: undefined,
-      attachmentError: undefined,
-      quiet: undefined,
-      knowledgeHeld: false,
-      baseRevision: undefined,
-    };
-  }
-  if (knowledgeReady(view)) {
-    const base = fromView({...current, baseRevision: undefined}, view, revision);
-    return {
-      ...withIntent(base, view),
-      status: 'pending',
-      knowledgeDraft: view.knowledgeDraft,
-      draft: undefined,
-      previewId: undefined,
-      applicable: undefined,
-      questions: undefined,
-      error: undefined,
-      phase: undefined,
-      knowledgeHeld: false,
-      baseRevision: undefined,
-    };
-  }
-  if (isAskBack(view)) {
-    const base = fromView({...current, baseRevision: undefined}, view, revision);
-    return {
-      ...withIntent(base, view),
-      status: 'needsInfo',
-      knowledgeDraft: undefined,
-      draft: undefined,
-      previewId: undefined,
-      applicable: undefined,
-      questions: view.questions,
-      error: undefined,
-      phase: undefined,
-      attachment: undefined,
-      attachmentError: undefined,
-      diagramDraft: undefined,
-      quiet: undefined,
-      knowledgeHeld: false,
-      baseRevision: undefined,
-    };
-  }
-  const base = fromView(current, view, revision);
-  const diagnostics = base.diagnostics?.length ? base.diagnostics : diagnosticsOn(view);
-  const next = withIntent(diagnostics.length ? {...base, diagnostics} : base, view);
-  if (view.state === 'running' || view.state === 'cancelled') return {...next, knowledgeDraft: undefined};
-  if (view.state === 'failed') {
-    const line = plainDiagramError(view.error?.code, view.error?.message ?? '');
-    if (line === CANT_READ_IMAGES) return {...next, status: 'failed', knowledgeDraft: undefined, attachmentError: line, quiet: undefined};
-    if (line) return {...next, status: 'prompting', knowledgeDraft: undefined, attachment: undefined, attachmentError: line, error: undefined, quiet: undefined};
-    return {...next, status: 'failed', knowledgeDraft: undefined, quiet: undefined};
-  }
-  if (next.status !== 'pending' && next.status !== 'needsInfo' && next.status !== 'stale') return next;
-  if (overlayRenders(next.draft, canvas)) return {...next, knowledgeDraft: undefined, diagramDraft: undefined};
-  const blocking = (next.diagnostics ?? []).some(item => item.blocks.includes('apply') || item.severity === 'error');
-  if (!blocking && next.applicable !== false && view.state !== 'needsInfo') return {...next, knowledgeDraft: undefined};
-  return {
-    ...next,
-    status: 'failed',
-    knowledgeDraft: undefined,
-    error: next.error ?? {code: 'AUTHORING_INVALID', message: 'The reply didn’t fit TnT’s format, even after one repair.', retryable: false},
-  };
-}
 
 type Callbacks = {
   save: () => Promise<Workspace | undefined>;
@@ -522,15 +321,16 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const [submitting, setSubmitting] = useState(false);
   const [provenanceId, setProvenanceId] = useState('');
   const [provenanceName, setProvenanceName] = useState('');
-  const [undoOffer, setUndoOffer] = useState<{receiptId: string; revision: number; workspaceId: string; pops?: number; knowledge?: {scenarioId: string; contextRevision: number}}>();
+  const [undoOffer, setUndoOffer] = useState<UndoOffer>();
   const undoOfferRef = useRef(undoOffer);
   undoOfferRef.current = undoOffer;
   const [undoVisible, setUndoVisible] = useState(false);
   const [mixedFollowUp, setMixedFollowUp] = useState('');
-  const [knowledgeNotice, setKnowledgeNotice] = useState('');
-  const [knowledgePulse, setKnowledgePulse] = useState(0);
-  const [knowledgeFreshness, setKnowledgeFreshness] = useState<'updating' | null>(null);
-  const [knowledgeServerContext, setKnowledgeServerContext] = useState<ScenarioContext | null>(null);
+  const partsRef = useRef<(KnowledgeHost & DiagramHost) | null>(null);
+  const {
+    knowledgeNotice, setKnowledgeNotice, knowledgePulse, setKnowledgePulse, knowledgeFreshness, setKnowledgeFreshness, knowledgeServerContext, setKnowledgeServerContext,
+    confirmKnowledge, acknowledgeKnowledgeServer, undoKnowledge,
+  } = useKnowledgeDraft(partsRef);
   const [versionState, setVersionState] = useState<AiVersionsState>({format: 1, flows: {}});
   const versionStateRef = useRef(versionState);
   versionStateRef.current = versionState;
@@ -566,9 +366,10 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
   const workspaceRef = useRef(input.workspaceId);
   const pendingAnswers = useRef<{key: string; answer: string}[] | undefined>(undefined);
   const pendingAuthorPath = useRef<string | undefined>(undefined);
-  const diagramPaths = useRef<{id: string; title: string; labels: string[]}[]>([]);
+  const diagram = useDiagramIntake(partsRef);
+  const diagramPaths = diagram.paths;
   /** Bumped to drop a scheduled "create a scenario?" ask. */
-  const scenarioAsk = useRef(0);
+  const scenarioAsk = diagram.askToken;
   /** Revision written by the current refine's own save. That bump must not mark the kept draft stale. */
   const ownSaveRevision = useRef<number | undefined>(undefined);
   /** Server preview id we already tried to re-preview with drawn positions. Stops a failed sync from looping. */
@@ -643,11 +444,11 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
         failRefine(draftRef.current.prompt, view.error ?? {code: 'REQUEST_FAILED', message: 'Couldn’t generate.', retryable: false});
         return;
       }
-      if (view.diagramDraft?.paths) diagramPaths.current = view.diagramDraft.paths.map(path => ({id: path.id, title: path.title, labels: [...path.labels]}));
+      if (view.diagramDraft?.paths) diagram.rememberPaths(view.diagramDraft.paths);
       setDraft(current => {
         if (current.jobId !== id) return current;
         if (current.status !== 'generating' && current.status !== 'stale') return current;
-        const next = presentResult(current, view, revisionRef.current, canvasRef.current);
+        const next = presentResult(current, view, revisionRef.current, canvasRef.current, overlayRenders);
         if (view.state !== 'running') {
           if (next.baseRevision === revisionRef.current) ownSaveRevision.current = undefined;
           return {...next, refining: false, restoreStatus: undefined, previousJobId: undefined, quiet: undefined};
@@ -725,8 +526,8 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
           await repreview(view.draft, revision, currentId, false);
           return;
         }
-        if (view.diagramDraft?.paths) diagramPaths.current = view.diagramDraft.paths.map(path => ({id: path.id, title: path.title, labels: [...path.labels]}));
-        setDraft(current => current.jobId === stored.jobId ? presentResult({...current, prompt: stored.prompt, workspaceId: currentId}, view, revision, canvasRef.current) : current);
+        if (view.diagramDraft?.paths) diagram.rememberPaths(view.diagramDraft.paths);
+        setDraft(current => current.jobId === stored.jobId ? presentResult({...current, prompt: stored.prompt, workspaceId: currentId}, view, revision, canvasRef.current, overlayRenders) : current);
       } catch (error) {
         if (cancelled || hydrateToken.current !== token || jobGuard.current !== stored.jobId) return;
         setDraft(current => current.jobId === stored.jobId ? {...current, status: 'failed', prompt: stored.prompt, error: errorOf(error, 'The draft could not be restored.')} : current);
@@ -749,16 +550,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     }
   }, [input.contentKey, provenanceId]);
 
-  useEffect(() => {
-    setUndoOffer(current => current && input.revision !== current.revision ? undefined : current);
-  }, [input.revision]);
-
-  useEffect(() => {
-    if (!undoOffer) { setUndoVisible(false); return; }
-    setUndoVisible(true);
-    const timer = setTimeout(() => setUndoVisible(false), UNDO_WINDOW_MS);
-    return () => clearTimeout(timer);
-  }, [undoOffer]);
+  useUndoWindow(undoOffer, input.revision, setUndoOffer, setUndoVisible);
 
   useEffect(() => {
     const next = readAiVersions(callbacks.current.readView());
@@ -1195,133 +987,14 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     if (!text || text.length > ANSWER_CHAR_LIMIT) return;
     if (!draftRef.current.questions?.some(item => item.key === key)) return;
     const named = text === 'The path I named' ? '' : text;
-    const path = named ? diagramPaths.current.find(item => item.id === named || item.title === named || item.labels.join(' → ') === named || item.labels.join(' -> ') === named) : undefined;
-    pendingAuthorPath.current = path?.id;
+    pendingAuthorPath.current = named ? matchDiagramPath(diagramPaths.current, named) : undefined;
     beginRefine(text, [{key, answer: text}]);
-  }
-
-  async function confirmKnowledge() {
-    const current = draftRef.current;
-    const draft = current.knowledgeDraft;
-    const scenarioId = current.scenarioId;
-    if (!draft || !current.jobId || !scenarioId || !input.workspaceId || current.knowledgeHeld || current.status === 'applying') return;
-    if (input.running) return;
-    const workspaceId = input.workspaceId;
-    setKnowledgeNotice('');
-    setDraft(existing => ({...existing, status: 'applying', error: undefined}));
-    let key = idempotency.current.get('knowledge:' + current.jobId);
-    if (!key) { key = crypto.randomUUID(); idempotency.current.set('knowledge:' + current.jobId, key); }
-    try {
-      const applied = await knowledge.apply(workspaceId, scenarioId, {
-        jobId: current.jobId,
-        expectedContextRevision: draft.baseContextRevision,
-        idempotencyKey: key,
-      });
-      if (draftRef.current.jobId !== current.jobId) return;
-      jobGuard.current = undefined;
-      memory.current.delete(workspaceId);
-      clearPersisted();
-      setDraft(emptyDraft());
-      setOpen(false);
-      setKnowledgeFreshness('updating');
-      setKnowledgePulse(value => value + 1);
-      const revision = applied.detail?.context?.contextRevision;
-      if (applied.receipt?.receiptId && typeof revision === 'number') {
-        setUndoOffer({
-          receiptId: applied.receipt.receiptId,
-          revision: revisionRef.current,
-          workspaceId,
-          knowledge: {scenarioId, contextRevision: revision},
-        });
-      }
-    } catch (error) {
-      if (draftRef.current.jobId !== current.jobId) return;
-      const code = error instanceof KnowledgeRequestError ? error.code : undefined;
-      const sentence = knowledgeFailureSentence(code) ?? 'Scenario details aren\'t available right now. Nothing was changed.';
-      if (code === 'CONTEXT_REVISION_CONFLICT' && error instanceof KnowledgeRequestError && error.context && error.currentContextRevision !== undefined) {
-        const revision = error.currentContextRevision;
-        setDraft(existing => ({
-          ...existing,
-          status: 'pending',
-          knowledgeHeld: true,
-          knowledgeDraft: existing.knowledgeDraft ? {...existing.knowledgeDraft, baseContextRevision: revision} : existing.knowledgeDraft,
-        }));
-        setKnowledgeNotice(sentence);
-        setKnowledgeServerContext(error.context);
-        return;
-      }
-      setDraft(existing => ({...existing, status: 'pending'}));
-      setKnowledgeNotice(sentence);
-    }
-  }
-
-  function acknowledgeKnowledgeServer() {
-    setKnowledgeServerContext(null);
-    setDraft(current => current.knowledgeHeld ? {...current, knowledgeHeld: false} : current);
-  }
-
-  function rememberPaths(paths: {id: string; title: string; labels: string[]}[]) {
-    diagramPaths.current = paths.map(path => ({id: path.id, title: path.title, labels: [...path.labels]}));
-  }
-
-  function scheduleScenarioAsk() {
-    const token = ++scenarioAsk.current;
-    setTimeout(() => {
-      if (scenarioAsk.current !== token) return;
-      const current = draftRef.current;
-      if (current.jobId || current.prompt.trim() || current.draft || current.diagramDraft || current.questions?.length) return;
-      void generate(CREATE_SCENARIO_PROMPT, {quiet: true});
-    }, 400);
-  }
-
-  async function confirmDiagram() {
-    const current = draftRef.current;
-    const graph = current.diagramDraft;
-    const scenarioId = current.scenarioId;
-    if (!graph || !current.jobId || !scenarioId || !input.workspaceId || current.status === 'applying') return;
-    if (input.running) return;
-    const workspaceId = input.workspaceId;
-    const jobId = current.jobId;
-    setDraft(existing => ({...existing, status: 'applying', error: undefined}));
-    let key = idempotency.current.get('diagram:' + jobId);
-    if (!key) { key = crypto.randomUUID(); idempotency.current.set('diagram:' + jobId, key); }
-    try {
-      const detail = await knowledge.readContext(workspaceId, scenarioId);
-      const applied = await knowledge.applyDiagram(workspaceId, scenarioId, {
-        jobId,
-        expectedContextRevision: detail.context.contextRevision,
-        idempotencyKey: key,
-      });
-      if (draftRef.current.jobId !== jobId) return;
-      rememberPaths(graph.paths);
-      jobGuard.current = undefined;
-      memory.current.delete(workspaceId);
-      clearPersisted();
-      setDraft(emptyDraft());
-      setOpen(false);
-      setKnowledgePulse(value => value + 1);
-      const revision = applied.detail?.context?.contextRevision;
-      if (applied.receipt?.receiptId && typeof revision === 'number') {
-        setUndoOffer({
-          receiptId: applied.receipt.receiptId,
-          revision: revisionRef.current,
-          workspaceId,
-          knowledge: {scenarioId, contextRevision: revision},
-        });
-      }
-      scheduleScenarioAsk();
-    } catch (error) {
-      if (draftRef.current.jobId !== jobId) return;
-      const code = error instanceof KnowledgeRequestError ? error.code : undefined;
-      setDraft(existing => ({...existing, status: 'pending'}));
-      setKnowledgeNotice(knowledgeFailureSentence(code) ?? 'Scenario details aren\'t available right now. Nothing was changed.');
-    }
   }
 
   async function confirm() {
     const current = draftRef.current;
     if (current.diagramDraft && !current.draft) {
-      await confirmDiagram();
+      await diagram.confirmDiagram();
       return;
     }
     if (current.knowledgeDraft && !current.draft) {
@@ -1434,20 +1107,7 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     const offer = undoOfferRef.current;
     if (!offer) return;
     if (offer.knowledge) {
-      try {
-        await knowledge.undo(offer.workspaceId, offer.knowledge.scenarioId, {
-          receiptId: offer.receiptId,
-          expectedContextRevision: offer.knowledge.contextRevision,
-        });
-        setUndoOffer(undefined);
-        setUndoVisible(false);
-        setKnowledgeNotice('');
-        setKnowledgeFreshness('updating');
-        setKnowledgePulse(value => value + 1);
-      } catch (error) {
-        const code = error instanceof KnowledgeRequestError ? error.code : undefined;
-        setKnowledgeNotice(knowledgeFailureSentence(code) ?? 'Scenario details aren\'t available right now. Nothing was changed.');
-      }
+      await undoKnowledge(offer);
       return;
     }
     await restoreUndo(false);
@@ -1673,6 +1333,25 @@ export function useAiDraft(input: Callbacks & {token: string; workspaceId: strin
     viewingLabel: 'Viewing · ' + relativeVersionTime(previewing.createdAt),
     projection: previewing.projection,
   } : undefined;
+  partsRef.current = {
+    running: input.running,
+    workspaceId: input.workspaceId,
+    knowledge,
+    draftRef,
+    revisionRef,
+    idempotency,
+    jobGuard,
+    memory,
+    clearPersisted,
+    setDraft,
+    setOpen,
+    setUndoOffer,
+    setUndoVisible,
+    emptyDraft,
+    setKnowledgeNotice,
+    setKnowledgePulse,
+    generate,
+  };
   const reason = confirmReason(draft, input.running);
   const provider = config?.selected ?? 'openrouter';
   return {
