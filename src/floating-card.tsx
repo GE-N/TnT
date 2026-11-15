@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState,type KeyboardEvent as ReactKeyboardEvent,type PointerEvent as ReactPointerEvent,type ReactNode} from 'react';
+import {isEditableTarget} from './inspector-a11y.js';
 
 export type CardPosition={x:number;y:number};
 export const floatingCardSize={width:440,height:480};
@@ -10,10 +11,6 @@ export function clampCard(position:CardPosition,viewport={width:window.innerWidt
   const maxX=Math.max(0,viewport.width-floatingCardSize.width);
   const maxY=Math.max(0,viewport.height-floatingCardSize.height);
   return {x:Math.min(Math.max(0,position.x),maxX),y:Math.min(Math.max(0,position.y),maxY)};
-}
-
-function isTextField(target:EventTarget|null){
-  return target instanceof HTMLElement&&!!target.closest('input,textarea,select,[contenteditable="true"]');
 }
 
 export function FloatingCard({label,position,onPosition,opener,onClose,open=true,children}:{label:string;position?:CardPosition;onPosition?:(position:CardPosition)=>void;opener:HTMLElement|null;onClose:()=>void;open?:boolean;children:ReactNode}){
@@ -51,6 +48,7 @@ export function FloatingCard({label,position,onPosition,opener,onClose,open=true
     if(current?.moved)onPosition?.(posRef.current);
   }
   function onArrows(event:ReactKeyboardEvent){
+    if(isEditableTarget(event.target))return;
     const vectors:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
     const direction=vectors[event.key];if(!direction)return;
     event.preventDefault();
@@ -61,7 +59,7 @@ export function FloatingCard({label,position,onPosition,opener,onClose,open=true
   return <div role="dialog" aria-label={label} hidden={open?undefined:true} className="floating-card" style={{left:pos.x,top:pos.y,width:floatingCardSize.width,height:floatingCardSize.height}} onKeyDown={event=>{
     if(event.key!=='Escape')return;
     event.stopPropagation();
-    if(isTextField(event.target))return;
+    if(isEditableTarget(event.target))return;
     event.preventDefault();close();
   }}>
     <header className="floating-card-header">

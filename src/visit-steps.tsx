@@ -1,9 +1,10 @@
-import {useEffect,useId,useRef,useState} from 'react';
+import {useEffect,useId,useRef,useState,type KeyboardEvent as ReactKeyboardEvent} from 'react';
 import {createPortal} from 'react-dom';
 import {parseDocument} from 'yaml';
 import type {CanvasGraph,CanvasTest} from '../server/canvas.js';
 import {backControl,edgeActions,operationProblem,routeVisits,visitOperations} from '../shared/canvas-authoring.js';
 import {FloatingCard,type CardPosition} from './floating-card.js';
+import {isEditableTarget} from './inspector-a11y.js';
 import {StepActionsMenu} from './step-actions-menu.js';
 import {isCommittableSelector,navigationHint,stepRowLabel} from './inspector-operations.js';
 import {runStatusLabel,type InspectorStepStatus} from './inspector-run-state.js';
@@ -19,6 +20,16 @@ function pickedId(selector:string){
  if(!value||typeof value!=='object'||Array.isArray(value))return;
  const id=(value as {id?:unknown}).id;
  return typeof id==='string'&&id.trim()?id:undefined;
+}
+
+function stepSummaries(from:HTMLElement|null){
+ return Array.from(from?.closest('.visit-section-body')?.querySelectorAll<HTMLButtonElement>('.visit-step-summary')??[]);
+}
+
+function activateSummary(button:HTMLButtonElement){
+ for(const summary of stepSummaries(button))summary.tabIndex=-1;
+ button.tabIndex=0;
+ button.focus();
 }
 
 const NEW_SCREEN='__new_screen__';
@@ -42,7 +53,7 @@ export function AddStepMenu({disabled,onAdd,includeScript=true}:{disabled:boolea
  }}><label>Find a step<input ref={input} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={id} aria-activedescendant={filtered[active]?id+'-'+active:undefined} value={query} onChange={event=>{setQuery(event.target.value);setActive(0);}}/></label><div role="listbox" id={id} aria-label="Step commands">{['Actions','Checks','Script'].map(group=>filtered.some(item=>item.group===group)&&<div role="group" aria-label={group} key={group}><strong>{group}{group==='Script'&&<span className="add-step-new">New</span>}</strong>{filtered.map((item,index)=>item.group===group&&<button type="button" role="option" id={id+'-'+index} aria-selected={active===index} aria-label={item.label} tabIndex={-1} key={item.command} data-testid={item.command==='runScript'?'add-run-script':undefined} onClick={()=>{close();onAdd(item.command);}}>{item.command==='runScript'&&<span className="script-mark" aria-hidden="true">{'</>'}</span>}{item.command==='runScript'?' ':''}{item.label}{item.hint&&<> <span className="add-step-hint">{item.hint}</span></>}</button>)}</div>)}{!filtered.length&&<p>No matching steps</p>}</div><button ref={cancel} onClick={close}>Cancel</button></div>}</>;
 }
 
-export function VisitStep({graph,pathId,visitId,test,index,name,screenId,last,isNew,moveDisabled,editing,onEdit,onClose,onSave,onDestinationChange,onCreateDestination,onMoveAbove,onMove,onDelete,onDiscard,onDragStart,onDragOver,onDrop,onDragEnd,onDragLeave,dropPosition,picker,sourceYaml,cardPosition,onCardPosition,runLocked=false,runStatus,showDraftErrors=false}:{graph:CanvasGraph;pathId:string;visitId:string;test:CanvasTest;index:number;name:string;screenId:string;last:boolean;isNew:boolean;moveDisabled:boolean;editing:boolean;onEdit:()=>void;onClose:()=>void;onSave:(test:CanvasTest,to:string,connectionName?:string,newScreenTitle?:string)=>void;onDestinationChange:(to:string)=>void;onCreateDestination:(title:string)=>void;onMoveAbove:()=>void;onMove:(direction:number)=>void;onDelete:()=>void;onDiscard:()=>void;onDragStart:()=>void;onDragOver:(after:boolean)=>boolean;onDrop:(after:boolean)=>void;onDragEnd:()=>void;onDragLeave:()=>void;dropPosition?:'before'|'after';picker?:PickerSession;sourceYaml?:string;cardPosition?:CardPosition;onCardPosition?:(position:CardPosition)=>void;runLocked?:boolean;runStatus?:InspectorStepStatus;showDraftErrors?:boolean}){
+export function VisitStep({graph,pathId,visitId,test,index,name,screenId,last,isNew,moveDisabled,editing,onEdit,onClose,onSave,onDestinationChange,onCreateDestination,onMoveAbove,onMove,onDelete,onDiscard,onDragStart,onDragOver,onDrop,onDragEnd,onDragLeave,dropPosition,picker,sourceYaml,cardPosition,onCardPosition,runLocked=false,runStatus,showDraftErrors=false,listTabStop=false,onListFocus}:{graph:CanvasGraph;pathId:string;visitId:string;test:CanvasTest;index:number;name:string;screenId:string;last:boolean;isNew:boolean;moveDisabled:boolean;editing:boolean;onEdit:()=>void;onClose:()=>void;onSave:(test:CanvasTest,to:string,connectionName?:string,newScreenTitle?:string)=>void;onDestinationChange:(to:string)=>void;onCreateDestination:(title:string)=>void;onMoveAbove:()=>void;onMove:(direction:number)=>void;onDelete:()=>void;onDiscard:()=>void;onDragStart:()=>void;onDragOver:(after:boolean)=>boolean;onDrop:(after:boolean)=>void;onDragEnd:()=>void;onDragLeave:()=>void;dropPosition?:'before'|'after';picker?:PickerSession;sourceYaml?:string;cardPosition?:CardPosition;onCardPosition?:(position:CardPosition)=>void;runLocked?:boolean;runStatus?:InspectorStepStatus;showDraftErrors?:boolean;listTabStop?:boolean;onListFocus?:(id:string)=>void}){
  const [draft,setDraft]=useState(test);const row=useRef<HTMLDivElement>(null);const summary=useRef<HTMLButtonElement>(null);const cancelled=useRef(false);const wasEditing=useRef(false);const [invalid,setInvalid]=useState(false);const errorId=useId();const matchName=useId();
  const [kept,setKept]=useState<{text:string;id:string}>({text:'',id:''});const [pickerOpen,setPickerOpen]=useState(false);const pickerOpenRef=useRef(false);const pickButton=useRef<HTMLButtonElement>(null);const restorePickFocus=useRef(false);const [pickNotice,setPickNotice]=useState('');
  const edge=graph.edges.find(edge=>edge.from===screenId&&edgeActions(edge).includes(test.id));const destination=edge?.to??'';
@@ -56,6 +67,12 @@ export function VisitStep({graph,pathId,visitId,test,index,name,screenId,last,is
  },[editing,testKey]);
  useEffect(()=>{if(!editing||isNew)return;setTo(destination);setConnectionName(edge?.responseCondition);},[editing,isNew,destination,edge?.responseCondition]);
  useEffect(()=>{if(creating)titleField.current?.focus();},[creating]);
+ useEffect(()=>{
+  const button=summary.current;if(!button)return;
+  if(listTabStop)button.tabIndex=0;
+  else if(button.tabIndex!==0||document.activeElement===button)return;
+  else button.tabIndex=-1;
+ },[listTabStop,test.id]);
  const selector=draft.check??draft.tap??backControl(draft);
  const screenTitle=graph.screens.find(screen=>screen.id===screenId)?.title??'Missing screen';
  const destinationTitle=destination?(graph.screens.find(screen=>screen.id===destination)?.title??'Missing screen'):undefined;
@@ -67,16 +84,16 @@ export function VisitStep({graph,pathId,visitId,test,index,name,screenId,last,is
  const draftProblem=showDraftErrors?operationProblem(test):undefined;
  const fieldError=invalid?(draft.tap||draft.back?'✕ Enter an element to tap.':'✕ Enter text to look for.'):draftProblem?('✕ '+draftProblem):undefined;
  const pickLocked=runLocked||picker?.disabled;
- function cancel(){cancelled.current=true;if(isNew){onDiscard();onClose();return;}onClose();summary.current?.focus();}
+ function cancel(){cancelled.current=true;if(isNew){onDiscard();onClose();return;}onClose();if(summary.current)activateSummary(summary.current);}
  function save(restoreFocus=true){
   if(cancelled.current||runLocked)return;
   if(creating&&!isNew){
    const title=newTitle.trim();
    if(title)onCreateDestination(title);
-   setCreating(false);setNewTitle('');onClose();if(restoreFocus)summary.current?.focus();return;
+   setCreating(false);setNewTitle('');onClose();if(restoreFocus&&summary.current)activateSummary(summary.current);return;
   }
   if(selector&&!isCommittableSelector(selector.value)){setInvalid(true);return;}
-  onSave(draft,creating?'':to,connectionName,creating?newTitle:undefined);onClose();if(restoreFocus)summary.current?.focus();
+  onSave(draft,creating?'':to,connectionName,creating?newTitle:undefined);onClose();if(restoreFocus&&summary.current)activateSummary(summary.current);
  }
  function patchSelector(patch:Record<string,string>){if(patch.value!==undefined)setInvalid(false);setDraft(item=>item.check?{...item,check:{...item.check,...patch}}:item.tap?{...item,tap:{...item.tap,...patch}}:{...item,backSelector:{...backControl(item)!,...patch}});}
  function switchTarget(target:'text'|'id'){if(!selector||selector.target===target)return;const next={...kept,[selector.target]:selector.value};setKept(next);patchSelector({target,value:next[target]});}
@@ -98,16 +115,46 @@ export function VisitStep({graph,pathId,visitId,test,index,name,screenId,last,is
   if(isNew){save(true);return;}
   onCreateDestination(title);setCreating(false);setNewTitle('');
  }
+ function onSummaryKeyDown(event:ReactKeyboardEvent<HTMLButtonElement>){
+  if(editing||isEditableTarget(event.target))return;
+  const rows=stepSummaries(event.currentTarget);
+  const at=rows.indexOf(event.currentTarget);
+  if(at<0)return;
+  if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+   event.preventDefault();event.stopPropagation();
+   const next=rows[(at+(event.key==='ArrowDown'?1:-1)+rows.length)%rows.length];
+   if(next){activateSummary(next);onListFocus?.(next.closest<HTMLElement>('[data-operation-id]')?.dataset.operationId??'');}
+   return;
+  }
+  if(event.key==='Home'||event.key==='End'){
+   event.preventDefault();event.stopPropagation();
+   const next=rows[event.key==='Home'?0:rows.length-1];
+   if(next){activateSummary(next);onListFocus?.(next.closest<HTMLElement>('[data-operation-id]')?.dataset.operationId??'');}
+   return;
+  }
+  if(event.key==='ArrowRight'){
+   if(runLocked)return;
+   const menu=row.current?.querySelector<HTMLElement>('.step-actions-trigger');
+   if(!menu)return;
+   event.preventDefault();event.stopPropagation();
+   menu.focus();
+   return;
+  }
+  if(event.key==='Enter'||event.key===' '){
+   if(runLocked)return;
+   event.preventDefault();onEdit();
+  }
+ }
  useEffect(()=>{if(pickerOpen||!restorePickFocus.current)return;restorePickFocus.current=false;pickButton.current?.focus();},[pickerOpen]);
  useEffect(()=>{if(runLocked&&editing){cancelled.current=true;onClose();}},[runLocked,editing]);
  return <div ref={row} className={'canvas-operation visit-step'+(runStatus?.tone==='failed'?' visit-step-failed':'')+(runLocked?' visit-step-locked':'')} data-operation-id={test.id} data-drop-position={runLocked?undefined:dropPosition} onDragOver={event=>{if(runLocked)return;const rect=event.currentTarget.getBoundingClientRect();if(onDragOver(event.clientY>=rect.top+rect.height/2)){event.preventDefault();event.dataTransfer.dropEffect='move';}}} onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node))onDragLeave();}} onDrop={event=>{if(runLocked)return;event.preventDefault();const rect=event.currentTarget.getBoundingClientRect();onDrop(event.clientY>=rect.top+rect.height/2);}} onKeyDown={event=>{if(!editing||runLocked)return;if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(creating){setCreating(false);setNewTitle('');return;}cancel();}if(event.key==='Enter'&&event.target instanceof window.HTMLInputElement&&event.target.type!=='radio'){if(event.target===titleField.current){event.preventDefault();commitNewScreen();return;}event.preventDefault();save();}}} onBlur={event=>{if(pickerOpenRef.current||runLocked)return;const next=event.relatedTarget as Element|null;if(document.querySelector('[role=alertdialog]')||document.querySelector('.step-actions-menu')||(next&&(event.currentTarget.contains(next)||next.closest?.('[role=alertdialog]')||next.closest?.('.step-actions-menu'))))return;if(editing&&!cancelled.current)save(false);}}>
- {!runLocked&&<button className="visit-step-drag" aria-label={'Drag step '+(index+1)} title="Drag to reorder within this visit" disabled={moveDisabled||editing} draggable={!moveDisabled&&!editing} onDragStart={event=>{if(moveDisabled||editing){event.preventDefault();return;}event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',test.id);onDragStart();}} onDragEnd={onDragEnd}>⠿</button>}
- <button ref={summary} aria-label={runLocked?name:'Edit '+name} className="visit-step-summary" onClick={()=>{if(!runLocked)onEdit();}} aria-expanded={editing} aria-describedby={!editing&&fieldError?errorId:undefined}><span>{index+1}</span> <span className="step-command">{command}</span> <span>{remainder}</span>{runStatus&&<RunStatusBadge status={runStatus}/>}</button>
+ {!runLocked&&<button className="visit-step-drag" tabIndex={-1} aria-label={'Drag step '+(index+1)} title="Drag to reorder within this visit" disabled={moveDisabled||editing} draggable={!moveDisabled&&!editing} onDragStart={event=>{if(moveDisabled||editing){event.preventDefault();return;}event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',test.id);onDragStart();}} onDragEnd={onDragEnd}>⠿</button>}
+ <button ref={summary} tabIndex={listTabStop?0:-1} aria-label={runLocked?name:'Edit '+name} className="visit-step-summary" onClick={()=>{if(!runLocked)onEdit();}} onFocus={()=>onListFocus?.(test.id)} onKeyDown={onSummaryKeyDown} aria-expanded={editing} aria-describedby={!editing&&fieldError?errorId:undefined}><span>{index+1}</span> <span className="step-command">{command}</span> <span>{remainder}</span>{runStatus&&<RunStatusBadge status={runStatus}/>}</button>
  {runStatus?.tone==='failed'&&runStatus.detail&&<p className="visit-step-error" role="alert">{runStatus.detail}</p>}
- {<div hidden={!editing||runLocked} className="visit-inline-fields"><strong>{stepRowLabel(draft,index+1).split(' ')[1]}</strong>{edge&&edgeActions(edge)[0]===test.id&&<details className="connection-name"><summary>Connection name</summary><input aria-label={'Connection name '+edge.id} value={connectionName??''} maxLength={300} onChange={event=>setConnectionName(event.target.value)}/></details>}{selector&&<><div role="radiogroup" aria-label="Match by" className="match-by"><label><input type="radio" name={matchName} value="text" checked={selector.target==='text'} onChange={()=>switchTarget('text')}/>Text</label><label><input type="radio" name={matchName} value="id" checked={selector.target==='id'} onChange={()=>switchTarget('id')}/>Element</label></div><div className="element-field"><input aria-label={name+' selector'} aria-invalid={fieldError?true:undefined} aria-describedby={fieldError?errorId:undefined} placeholder={selector.target==='id'?'Enter element id':'Enter text'} maxLength={4000} value={selector.value} onChange={event=>{patchSelector({value:event.target.value});setKept(current=>({...current,[selector.target]:event.target.value}));}}/>{selector.target==='id'&&<button ref={pickButton} type="button" className="pick-from-screen" title={pickLocked?runLockReason:'Choose an element from the stored capture instead of typing its id.'} aria-disabled={pickLocked||undefined} onClick={openPicker}>Pick from screen</button>}</div>{editing&&fieldError&&<p id={errorId} className="visit-selector-error" role="alert">{fieldError}</p>}<select aria-label={name+' matching'} value={selector.match} onChange={event=>patchSelector({match:event.target.value})}><option value="exact">Exact</option><option value="contains">Contains</option><option value="regex">Regex</option></select></>}{draft.check&&<select aria-label={name+' visibility'} value={draft.check.visibility} onChange={event=>patchSelector({visibility:event.target.value})}><option value="visible">Visible</option><option value="absent">Absent</option></select>}{draft.input!==undefined&&<input aria-label={name+' text'} value={draft.input} maxLength={4000} onChange={event=>setDraft({...draft,input:event.target.value})}/>}{!draft.check&&<><select aria-label={name+' type'} value={draft.tap?'tap':draft.input!==undefined?'input':'back'} onChange={event=>{const kind=event.target.value;setKept({text:kind==='back'?'Back':'',id:''});setDraft({...draft,tap:kind==='tap'?{target:'text',match:'exact',value:''}:undefined,input:kind==='input'?'':undefined,back:kind==='back'?true:undefined,backSelector:kind==='back'?{target:'text',match:'exact',value:'Back'}:undefined});}}><option value="tap">Tap</option><option value="input">Input text</option><option value="back">Back</option></select><label>Destination<select aria-label={name+' destination'} value={selectValue} onChange={event=>chooseDestination(event.target.value)}><option value="">Stays on this screen</option>{graph.screens.map(screen=><option key={screen.id} value={screen.id}>{screen.title}</option>)}<option value={NEW_SCREEN}>+ New screen…</option></select></label>{creating&&<input ref={titleField} aria-label="New screen title" placeholder="Screen title" maxLength={120} value={newTitle} onChange={event=>setNewTitle(event.target.value)}/>}</>}<button onClick={()=>save()}>Done</button><button onPointerDown={()=>{cancelled.current=true;}} onClick={cancel}>Cancel</button></div>}
+ {<div hidden={!editing||runLocked} className="visit-inline-fields"><strong>{stepRowLabel(draft,index+1).split(' ')[1]}</strong>{edge&&edgeActions(edge)[0]===test.id&&<details className="connection-name"><summary>Connection name</summary><input aria-label={'Connection name '+edge.id} value={connectionName??''} maxLength={300} onChange={event=>setConnectionName(event.target.value)}/></details>}{selector&&<><div role="radiogroup" aria-label="Match by" className="match-by"><label><input type="radio" name={matchName} value="text" checked={selector.target==='text'} onChange={()=>switchTarget('text')}/>Text</label><label><input type="radio" name={matchName} value="id" checked={selector.target==='id'} onChange={()=>switchTarget('id')}/>Element</label></div><div className="element-field"><input aria-label={name+' selector'} aria-invalid={fieldError?true:undefined} aria-describedby={fieldError?errorId:undefined} placeholder={selector.target==='id'?'Enter element id':'Enter text'} maxLength={4000} value={selector.value} onChange={event=>{patchSelector({value:event.target.value});setKept(current=>({...current,[selector.target]:event.target.value}));}}/>{selector.target==='id'&&<button ref={pickButton} type="button" className="pick-from-screen" title={pickLocked?runLockReason:'Choose an element from the stored capture instead of typing its id.'} aria-disabled={pickLocked||undefined} onClick={openPicker}>Pick from screen</button>}</div>{editing&&fieldError&&<p id={errorId} className="visit-selector-error" role="alert">{fieldError}</p>}<select aria-label={name+' matching'} value={selector.match} onChange={event=>patchSelector({match:event.target.value})}><option value="exact">Exact</option><option value="contains">Contains</option><option value="regex">Regex</option></select></>}{draft.check&&<select aria-label={name+' visibility'} value={draft.check.visibility} onChange={event=>patchSelector({visibility:event.target.value})}><option value="visible">Visible</option><option value="absent">Absent</option></select>}{draft.input!==undefined&&<input aria-label={name+' text'} value={draft.input} maxLength={4000} onChange={event=>setDraft({...draft,input:event.target.value})}/>}{!draft.check&&<><select aria-label={name+' type'} value={draft.tap?'tap':draft.input!==undefined?'input':'back'} onChange={event=>{const kind=event.target.value;setKept({text:kind==='back'?'Back':'',id:''});setDraft({...draft,tap:kind==='tap'?{target:'text',match:'exact',value:''}:undefined,input:kind==='input'?'':undefined,back:kind==='back'?true:undefined,backSelector:kind==='back'?{target:'text',match:'exact',value:'Back'}:undefined});}}><option value="tap">Tap</option><option value="input">Input text</option><option value="back">Back</option></select><label className="visit-destination-field">Destination<select aria-label={name+' destination'} value={selectValue} onChange={event=>chooseDestination(event.target.value)}><option value="">Stays on this screen</option>{graph.screens.map(screen=><option key={screen.id} value={screen.id}>{screen.title}</option>)}<option value={NEW_SCREEN}>+ New screen…</option></select></label>{creating&&<input ref={titleField} aria-label="New screen title" placeholder="Screen title" maxLength={120} value={newTitle} onChange={event=>setNewTitle(event.target.value)}/>}</>}<button onClick={()=>save()}>Done</button><button onPointerDown={()=>{cancelled.current=true;}} onClick={cancel}>Cancel</button></div>}
  {!editing&&fieldError&&<p id={errorId} className="visit-selector-error" role="alert">{fieldError}</p>}
  {showHint&&!runLocked&&<div className="navigation-hint"><p title={'⚠ This step runs after navigation, on '+hint.destination}>⚠ This step runs after navigation, on {hint.destination}</p><button disabled={moveDisabled} onClick={onMoveAbove}>↑ Move above actions</button></div>}
- {!runLocked&&<StepActionsMenu label="Step actions" title={name+' actions'} items={[{label:'↑ Move up',ariaLabel:'Move '+name.toLowerCase()+' up',disabled:moveDisabled||index===0,onSelect:()=>onMove(-1)},{label:'↓ Move down',ariaLabel:'Move '+name.toLowerCase()+' down',disabled:moveDisabled||last,onSelect:()=>onMove(1)},{label:<><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg> Delete</>,ariaLabel:'Delete '+name.toLowerCase(),className:'visit-step-delete',onSelect:onDelete}]}/>}
+ {!runLocked&&<StepActionsMenu triggerTabIndex={-1} onTriggerKeyDown={event=>{if(event.key==='ArrowLeft'||event.key==='Escape'){event.preventDefault();if(summary.current)activateSummary(summary.current);}}} label="Step actions" title={name+' actions'} items={[{label:'↑ Move up',ariaLabel:'Move '+name.toLowerCase()+' up',disabled:moveDisabled||index===0,onSelect:()=>onMove(-1)},{label:'↓ Move down',ariaLabel:'Move '+name.toLowerCase()+' down',disabled:moveDisabled||last,onSelect:()=>onMove(1)},{label:<><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg> Delete</>,ariaLabel:'Delete '+name.toLowerCase(),className:'visit-step-delete',onSelect:onDelete}]}/>}
  {pickerOpen&&picker&&selector&&createPortal(<FloatingCard label="Pick from screen" position={cardPosition} onPosition={onCardPosition} opener={pickButton.current} onClose={()=>{pickerOpenRef.current=false;setPickerOpen(false);}}>{pickNotice&&<p className="notice error" role="alert">{pickNotice}</p>}<Picker token={picker.token} deviceId={picker.deviceId} yaml={sourceYaml??''} disabled={picker.disabled||runLocked} onBusy={picker.onBusy} onSave={async()=>{}} onExecute={async()=>{}} onCheckSelector={applyPick}/></FloatingCard>,document.body)}
  </div>;
 }
