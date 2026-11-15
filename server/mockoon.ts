@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { EnvironmentSchemaNoFix, type Environment } from '@mockoon/commons';
 import type { Cleanup } from './scenarios.js';
+import { groupAlive } from './owned-process.js';
 
 export type MockPlan = { environment: Environment; port: number; routeId: string; responseId: string; backendUrl: string; passthroughRouteIds: string[]; fromScreen: string; toScreen: string; failureSemantics: string };
 export type MockResult = {
@@ -60,10 +61,18 @@ export function createMockSession(plan: MockPlan, directory: string, options?:{o
   }
   async function stop(): Promise<boolean> {
     if (!child?.pid) return true;
+    const pid = child.pid;
     for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
-      try { process.kill(-child.pid, signal); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false; }
+      try { process.kill(-pid, signal); }
+      catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ESRCH') return true;
+        // macOS can refuse a signal to a group that is already dying. That is not proof the process is still owned.
+        if (code !== 'EPERM') return false;
+      }
       for (let attempt = 0; attempt < 40; attempt++) {
-        try { process.kill(-child.pid, 0); } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+        try { if (!(await groupAlive(pid))) return true; }
+        catch { return false; }
         await delay(50);
       }
     }

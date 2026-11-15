@@ -1,5 +1,6 @@
 import {useEffect, useId, type KeyboardEvent} from 'react';
 import {relativeVersionTime, type FlowVersion} from './ai-versions.js';
+import {Sheet} from './sheet.js';
 
 export function VersionsSheet({versions, nowId, selectedId, onSelect, onClose, onKeepCurrent, onRestore, restoreDisabled, restoreNote, restoreError}: {
   versions: FlowVersion[];
@@ -37,7 +38,7 @@ export function VersionsSheet({versions, nowId, selectedId, onSelect, onClose, o
     if (next) onSelect(next.id);
   }
 
-  return <aside className="ai-versions-sheet" id="ai-versions-sheet" role="dialog" aria-modal="true" aria-labelledby={labelId} data-testid="ai-versions-sheet" data-side-sheet="versions" onKeyDown={move}>
+  return <Sheet className="ai-versions-sheet" id="ai-versions-sheet" titleId={labelId} testId="ai-versions-sheet" side="versions" onKeyDown={move} onClose={onClose}>
     <header className="ai-versions-head">
       <h2 id={labelId}>Versions</h2>
       <button type="button" className="ai-versions-close" aria-label="Close" onClick={onClose}>✕</button>
@@ -61,7 +62,7 @@ export function VersionsSheet({versions, nowId, selectedId, onSelect, onClose, o
         {restoreError && <p className="ai-versions-error" role="alert" data-testid="ai-version-restore-error">{restoreError}</p>}
       </> : <p className="ai-versions-hint">Local on this Mac · kept with the workspace</p>}
     </footer>
-  </aside>;
+  </Sheet>;
 }
 
 function optionId(id: string) {

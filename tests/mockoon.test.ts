@@ -31,6 +31,28 @@ test('real Mockoon preserves all responses/rules/modes, defaults at launch, orig
   }
  }finally{await new Promise<void>(resolve=>backend.close(()=>resolve()));await rm(root,{recursive:true,force:true});}
 });
+test('a dying Mockoon group that reports EPERM is still verified once it disappears',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'tnt-mockoon-eperm-'));
+ const kill=process.kill;
+ const probes:number[]=[];
+ process.kill=((pid:number,signal?:NodeJS.Signals|number)=>{
+  if(signal===0||signal===undefined){
+   probes.push(pid);
+   const error=Object.assign(new Error(probes.length<2?'EPERM':'ESRCH'),{code:probes.length<2?'EPERM':'ESRCH'});
+   throw error;
+  }
+  return true;
+ }) as typeof process.kill;
+ try{
+  const plan=validateMock({environment,port:19876,routeId:environment.routes[0].uuid,responseId:environment.routes[0].responses[0].uuid,backendUrl:'http://127.0.0.1:9',passthroughRouteIds:[],fromScreen:'Home',toScreen:'Home',failureSemantics:'HTTP'})!;
+  const child=Object.assign(new EventEmitter(),{pid:424242});
+  const controller=new AbortController();
+  const mock=createMockSession(plan,root,{spawn:(()=>{controller.abort();return child;}) as unknown as typeof import('node:child_process').spawn});
+  await assert.rejects(mock.prepare(controller.signal));
+  assert.equal((await mock.cleanup()).verified,true);
+  assert.ok(probes.length>=2);
+ }finally{process.kill=kill;await rm(root,{recursive:true,force:true});}
+});
 test('Mockoon spawn records the owned pid',async()=>{
  const root=await mkdtemp(join(tmpdir(),'tnt-mockoon-note-'));
  try{
