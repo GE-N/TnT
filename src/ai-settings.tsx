@@ -1,6 +1,7 @@
 import {forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import {AiFlowRequestError, createAiFlowClient, type AiPublicConfig, type CatalogModel, type CopilotStatus, type ProviderId} from './ai-flow-client.js';
+import {Sheet} from './sheet.js';
 
 type KeyedProviderId = Exclude<ProviderId, 'copilot'>;
 const KEYED: KeyedProviderId[] = ['openrouter', 'openai-compatible'];
@@ -149,6 +150,7 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
   const touched = useRef(false);
   const refreshNext = useRef(false);
   const listId = useId();
+  const titleId = useId();
 
   function write(id: KeyedProviderId, patch: Partial<Slice>) {
     const next = {...forms.current[id], ...patch};
@@ -523,14 +525,9 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
   const hidden = matches.length - shown.length;
   const savedDetail = saved?.keySource === 'keychain' ? ' · macOS Keychain' : '';
 
-  const sheet = <aside className="knowledge-sheet settings-sheet" id="ai-settings" role="dialog" aria-label="Settings" data-testid="ai-settings" data-side-sheet="settings" onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    event.stopPropagation();
-    requestClose();
-  }}>
+  const sheet = <Sheet className="knowledge-sheet settings-sheet" id="ai-settings" titleId={titleId} testId="ai-settings" side="settings" onPointerDown={event => event.stopPropagation()} onClose={requestClose}>
     <header className="knowledge-sheet-head">
-      <div className="knowledge-sheet-heading"><h2>Settings</h2></div>
+      <div className="knowledge-sheet-heading"><h2 id={titleId}>Settings</h2></div>
       <button type="button" className="knowledge-sheet-close" aria-label="Close AI settings" data-testid="ai-settings-close" onClick={() => requestClose()}>✕</button>
     </header>
     <div className="knowledge-sheet-body">
@@ -625,7 +622,7 @@ export const AiSettings = forwardRef<AiSettingsHandle, {token: string; focusNonc
         </div>}
       </div>
     </div>
-  </aside>;
+  </Sheet>;
   return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body);
 });
 
