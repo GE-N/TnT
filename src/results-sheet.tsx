@@ -6,6 +6,7 @@ import type {BatchLine} from './run-script.js';
 import {batchReasonLabel, batchSummary} from './run-script.js';
 import {RedactedText} from './run-script-ui.js';
 import {knowledgeSheetTop} from './knowledge-sheet.js';
+import {Sheet, type SheetEscapeEvent} from './sheet.js';
 import {canvasTestLabel} from '../shared/canvas-authoring.js';
 import {dotKind, failingVisitId, formatClock, formatDuration, resultModel} from './results-view.js';
 
@@ -173,19 +174,12 @@ export function ResultsSheet({token, run, reports, batch, lines, mode, scenarios
     if (log) { log.open = true; log.querySelector('summary')?.focus(); log.scrollIntoView?.({block: 'nearest'}); }
     onFocusLogDone();
   }, [focusLog, run?.id]);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      if (enlarged) { setEnlarged(false); event.preventDefault(); event.stopPropagation(); return; }
-      if (picker) { setPicker(false); event.preventDefault(); event.stopPropagation(); return; }
-      if (selection || openVisit) { setSelection(undefined); setOpenVisit(''); event.preventDefault(); event.stopPropagation(); return; }
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [enlarged, picker, selection, openVisit, onClose]);
+  function dismissLayer(_event: SheetEscapeEvent) {
+    if (enlarged) { setEnlarged(false); return true; }
+    if (picker) { setPicker(false); return true; }
+    if (selection || openVisit) { setSelection(undefined); setOpenVisit(''); return true; }
+    return false;
+  }
   const scenarioId = run?.snapshot.scenario?.id;
   const known = !!scenarioId && definitions.some(item => item.id === scenarioId);
   const index = Math.max(0, session.findIndex(item => item.id === run?.id));
@@ -194,7 +188,7 @@ export function ResultsSheet({token, run, reports, batch, lines, mode, scenarios
   const summary = !lines?.length ? '' : failedLines.length ? `${failedLines.length} of ${lines.length} failed` : lines.every(entry => entry.status === 'passed') ? `All ${lines.length} passed` : batch?.status === 'running' ? `Running ${lines.filter(entry => entry.status === 'passed' || /fail|error/.test(entry.status)).length + 1} of ${lines.length}` : `${lines.filter(entry => entry.status === 'passed').length} of ${lines.length} passed`;
   const title = mode === 'batch' ? 'Run all' : (model?.title ?? fallbackTitle ?? 'Results');
   const filesBusy = running || run?.status === 'running';
-  return <aside ref={sheetRef} className="knowledge-sheet results-sheet" role="dialog" aria-labelledby={titleId} data-side-sheet="results" data-testid="results-sheet" tabIndex={-1} style={{top}}>
+  return <Sheet sheetRef={sheetRef} className="knowledge-sheet results-sheet" titleId={titleId} side="results" testId="results-sheet" tabIndex={-1} style={{top}} onEscape={dismissLayer} onClose={onClose}>
     <div className="knowledge-sheet-head">
       <div className="knowledge-sheet-heading">
         <h2 id={titleId} data-testid="results-title">{mode === 'batch' ? title : <RedactedText text={title}/>}</h2>
@@ -250,7 +244,7 @@ export function ResultsSheet({token, run, reports, batch, lines, mode, scenarios
         </details>
       </div>)}
     </div>
-  </aside>;
+  </Sheet>;
 }
 
 export {dotKind};

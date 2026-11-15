@@ -1,6 +1,7 @@
 import {createPortal} from 'react-dom';
 import {useEffect,useId,useLayoutEffect,useRef,useState} from 'react';
 import {knowledgeClient,knowledgeReaderPath,type ContextContent,type FlowStep,type Freshness,type ScenarioContext,type ScenarioDetail} from './knowledge-client.js';
+import {Sheet,type SheetEscapeEvent} from './sheet.js';
 
 /** Same shape as T1's `useSidePanels()` coordinator. */
 export type SidePanelKind = 'info' | 'versions' | 'nodeDetails' | 'settings' | 'results';
@@ -198,20 +199,12 @@ export function KnowledgeScenarioControl({token, workspaceId, scenarioId, scenar
     return () => { observer?.disconnect(); window.removeEventListener('resize', measure); };
   }, [infoOpen, scenariosOpen]);
 
-  useEffect(() => {
-    if (!infoOpen) return;
-    function onKey(event: KeyboardEvent) {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      const target = event.target as Node | null;
-      const element = target && target.nodeType === 1 ? target as Element : target?.parentElement ?? null;
-      if (element?.closest('.scenario-details-panel,.scenario-context-menu,[aria-label="Rename scenario"]')) return;
-      event.preventDefault();
-      event.stopPropagation();
-      closeLatest.current();
-    }
-    document.addEventListener('keydown', onKey, true);
-    return () => document.removeEventListener('keydown', onKey, true);
-  }, [infoOpen]);
+  function ignoreForeignEscape(event: SheetEscapeEvent) {
+    const target = event.target && typeof (event.target as Node).nodeType === 'number' ? event.target as Node : null;
+    const element = target && target.nodeType === 1 ? target as Element : target?.parentElement ?? null;
+    if (element?.closest('.scenario-details-panel,.scenario-context-menu,[aria-label="Rename scenario"]')) return 'ignore' as const;
+    return false;
+  }
 
   if (!scenarioId) return null;
 
@@ -230,7 +223,7 @@ export function KnowledgeScenarioControl({token, workspaceId, scenarioId, scenar
     return undefined;
   };
 
-  const sheet = infoOpen ? <aside className="knowledge-sheet" id={sheetId} role="dialog" aria-labelledby={titleId} data-testid="knowledge-sheet" data-side-sheet="info" style={{top: `${sheetTop}px`}} onPointerDown={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeInfo(); } }}>
+  const sheet = infoOpen ? <Sheet className="knowledge-sheet" id={sheetId} titleId={titleId} testId="knowledge-sheet" side="info" style={{top: `${sheetTop}px`}} onPointerDown={event => event.stopPropagation()} onEscape={ignoreForeignEscape} onClose={closeInfo}>
     <header className="knowledge-sheet-head">
       <div className="knowledge-sheet-heading">
         <h2 id={titleId}>{title}</h2>
@@ -261,7 +254,7 @@ export function KnowledgeScenarioControl({token, workspaceId, scenarioId, scenar
     <footer className="knowledge-sheet-foot">
       <a className="knowledge-reader" data-testid="knowledge-reader" href={readerHref} target="_blank" rel="noopener noreferrer">Open knowledge reader ↗</a>
     </footer>
-  </aside> : null;
+  </Sheet> : null;
 
   return <>
     <button type="button" className="knowledge-info-button" data-testid="knowledge-info-button" title="Scenario details" aria-label="Scenario details" aria-expanded={infoOpen} aria-controls={sheetId} aria-haspopup="dialog" onPointerDown={event => event.stopPropagation()} onClick={() => infoOpen ? closeInfo() : openInfo()}><InfoIcon/></button>
