@@ -403,7 +403,7 @@ function addEdgeTests(canvas: CanvasGraph, edgeId: string, ids: Set<string>) {
   if (!edge.assertionTestId.startsWith('pending:')) ids.add(edge.assertionTestId);
 }
 
-/** Drops the replaced path and the screens, tests, and edges only that flow used. */
+/** Drops the replaced path, the screens and tests only that flow used, and edges that path alone used or that pointed at a removed screen. */
 function stripReplacedFlow(canvas: CanvasGraph, scenario: ScenarioDefinition & {pathId: string}, keptScreenIds: ReadonlySet<string>) {
   const path = canvas.paths.find(item => item.id === scenario.pathId);
   if (!path) throw new Error('The scenario path is not on the canvas.');
@@ -470,9 +470,10 @@ function stripReplacedFlow(canvas: CanvasGraph, scenario: ScenarioDefinition & {
     });
     return [{...screen, tests}];
   });
+  const survivingScreens = new Set(screens.map(screen => screen.id));
   return {
     screens,
-    edges: canvas.edges.filter(edge => !removedEdgeIds.has(edge.id)),
+    edges: canvas.edges.filter(edge => !removedEdgeIds.has(edge.id) && survivingScreens.has(edge.from) && survivingScreens.has(edge.to)),
     paths: canvas.paths.filter(item => item.id !== path.id),
     removedTests,
   };
