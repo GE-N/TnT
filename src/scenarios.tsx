@@ -406,9 +406,13 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
     const path=canvas?.paths.find(path=>path.id===target.pathId);
     const pathPosition=path?canvas!.paths.indexOf(path):-1;
     const removedPath=path&&!definitions.some(item=>item.id!==targetId&&item.pathId===path.id)?structuredClone(path):undefined;
+    // Same rule as stripReplacedFlow: an edge leaves only when this path alone listed it. Screens stay.
+    const keptByOthers=new Set((canvas?.paths??[]).filter(item=>item.id!==removedPath?.id).flatMap(item=>item.edgeIds));
+    const removedEdges=removedPath?canvas!.edges.flatMap((edge,index)=>removedPath.edgeIds.includes(edge.id)&&!keptByOthers.has(edge.id)?[{edge:structuredClone(edge),index}]:[]):[];
+    const removedEdgeIds=new Set(removedEdges.map(item=>item.edge.id));
     const memberships=canvas?.screens.flatMap(screen=>screen.tests.filter(test=>test.scenarioIds?.includes(targetId)).map(test=>({screenId:screen.id,testId:test.id,position:test.scenarioIds!.indexOf(targetId)})))??[];
     setDefinitions(current=>current.filter(item=>item.id!==targetId));
-    setCanvas(current=>current&&({...current,screens:current.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.scenarioIds?{...test,scenarioIds:test.scenarioIds.filter(id=>id!==targetId)}:test)})),paths:current.paths.filter(path=>path.id!==removedPath?.id)}));
+    setCanvas(current=>current&&({...current,screens:current.screens.map(screen=>({...screen,tests:screen.tests.map(test=>test.scenarioIds?{...test,scenarioIds:test.scenarioIds.filter(id=>id!==targetId)}:test)})),edges:current.edges.filter(edge=>!removedEdgeIds.has(edge.id)),paths:current.paths.filter(path=>path.id!==removedPath?.id)}));
     if(scenarioId===targetId){const next=definitions[position+1]??definitions[position-1];setScenarioId(next?.id??'');setInputs('');setPathId(next?.pathId??'');rememberView({scenarioId:next?.id??'',scenarioName:next?.name??'',pathId:next?.pathId??''});}
     // Restoration only merges the references removed by this command.
     const restore=()=>{
@@ -417,7 +421,9 @@ export function Scenarios({ token, deviceId, bundleId, launchBusy, onRunning, re
       setCanvas(current=>{
         if(!current)return current;
         const paths=[...current.paths];if(removedPath&&!paths.some(path=>path.id===removedPath.id))paths.splice(pathPosition,0,removedPath);
-        return {...current,paths,screens:current.screens.map(screen=>({...screen,tests:screen.tests.map(test=>{
+        const edges=[...current.edges];
+        for(const removed of removedEdges)if(!edges.some(edge=>edge.id===removed.edge.id))edges.splice(Math.min(removed.index,edges.length),0,structuredClone(removed.edge));
+        return {...current,paths,edges,screens:current.screens.map(screen=>({...screen,tests:screen.tests.map(test=>{
           const membership=memberships.find(item=>item.screenId===screen.id&&item.testId===test.id);
           if(!membership||!test.scenarioIds||test.scenarioIds.includes(targetId))return test;
           const ids=[...test.scenarioIds];ids.splice(membership.position,0,targetId);return {...test,scenarioIds:ids};

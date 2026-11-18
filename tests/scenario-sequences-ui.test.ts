@@ -462,6 +462,38 @@ for(const mode of ['destination','node'] as const)test(mode+' cleanup preserves 
  else{assert.equal(after.paths[0].visits!.length,1);assert.ok(!after.screens.some(screen=>screen.title==='Details'));assert.equal(after.edges.length,0);}
 },true));
 
+test('deleting a scenario removes only the connections its path alone used, and undo plus save and reopen restore or keep them',()=>journey(async({document,click,fill,saved})=>{
+ await click('New scenario');await fill('Scenario name','Shared');await click('Use 1 as scenario start');await click('Append connection 1 → 2');
+ await click('New scenario');await fill('Scenario name','Exclusive');await click('Use 1 as scenario start');await click('Append connection 1 → 2');await click('Append connection 2 → 3');
+ await click('Save workspace');const before=await saved();
+ const shared=before.canvas!.edges.find(edge=>edge.id==='12')!;
+ const exclusive=before.canvas!.edges.find(edge=>edge.id==='23')!;
+ const unused=before.canvas!.edges.find(edge=>edge.id==='34')!;
+ assert.ok(document.querySelector('[data-edge-id="23"]'));
+ await click('Actions for Exclusive');await click('Delete');
+ assert.equal(document.querySelector('[data-edge-id="23"]'),null);
+ assert.ok(document.querySelector('[data-edge-id="12"]'));
+ assert.ok(document.querySelector('[data-edge-id="34"]'));
+ assert.ok(document.querySelector('[aria-label="Screen 3"]'));
+ assert.ok(document.querySelector('[aria-label="Screen 4"]'));
+ await click('Undo');
+ assert.ok(document.querySelector('[data-edge-id="23"]'));
+ await click('Save workspace');const restored=await saved();
+ assert.deepEqual(restored.canvas!.edges.find(edge=>edge.id==='23'),exclusive);
+ assert.deepEqual(restored.canvas!.edges.find(edge=>edge.id==='12'),shared);
+ assert.deepEqual(restored.canvas!.edges.map(edge=>edge.id),before.canvas!.edges.map(edge=>edge.id));
+ assert.deepEqual(restored.canvas!.screens.map(screen=>screen.id),before.canvas!.screens.map(screen=>screen.id));
+ await click('Open saved workspace');await click('Actions for Exclusive');await click('Delete');await click('Save workspace');await click('Open saved workspace');
+ const reloaded=await saved();
+ assert.equal(reloaded.canvas!.edges.some(edge=>edge.id==='23'),false);
+ assert.deepEqual(reloaded.canvas!.edges.find(edge=>edge.id==='12'),shared);
+ assert.deepEqual(reloaded.canvas!.edges.find(edge=>edge.id==='34'),unused);
+ assert.deepEqual(reloaded.canvas!.screens.map(screen=>screen.id),before.canvas!.screens.map(screen=>screen.id));
+ assert.equal(document.querySelector('[data-edge-id="23"]'),null);
+ assert.ok(document.querySelector('[data-edge-id="12"]'));
+ assert.ok(document.querySelector('[aria-label="Screen 3"]'));
+}));
+
 test('the workspace library remains browsable during a batch while switching, New and copy wait for cleanup',()=>journey(async({document,click,holdNext})=>{
  await click('New scenario');await click('Use 1 as scenario start');await click('Save workspace');holdNext();await click('Run all');
  await click('Manage workspace');

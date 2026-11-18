@@ -60,6 +60,11 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
     if (!(await realpath(path)).startsWith((await realpath(base)) + sep)) throw new Error('Workspace path escapes its root.');
     return realpath(path);
   }
+  function dropDanglingEdges(canvas:CanvasGraph):CanvasGraph {
+    const screens=new Set(canvas.screens.map(screen=>screen.id));
+    const edges=canvas.edges.filter(edge=>screens.has(edge.from)&&screens.has(edge.to));
+    return edges.length===canvas.edges.length?canvas:{...canvas,edges};
+  }
   function authoredWorkspace(input: {id?:string;name:string;yaml:string;flows?:Record<string,string>;mock?:unknown;canvas?:unknown;automation?:unknown;scenarios?:unknown;omittedValues?:unknown},unresolved?:string[]):Workspace {
       if (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 120 || typeof input.yaml !== 'string' || Buffer.byteLength(input.yaml) > 100_000) throw new Error('Provide a workspace title and YAML up to 100 KB.');
       assertAuthoredVariables(input.yaml);
@@ -69,7 +74,7 @@ export function createScenarios(options: { root: string; runner: ReturnType<type
       const flows = validateFlows(input.flows,unresolved);
       const mock = validateMock(input.mock);
       const rawCanvas=readCanvas(input.canvas);
-      const canvas=rawCanvas?refreshChecks(rawCanvas,input.yaml):undefined;
+      const canvas=rawCanvas?refreshChecks(dropDanglingEdges(rawCanvas),input.yaml):undefined;
 
       if (Buffer.byteLength(JSON.stringify({flows,mock,canvas,automation:input.automation,scenarios})) > 900_000) throw new Error('Combined reusable flows and mock environment exceed 900 KB.');
       const automation=readAutomation(input.automation,flows??{},input.yaml,unresolved);
