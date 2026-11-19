@@ -293,3 +293,17 @@ export function planCanvasDeletion(original:CanvasGraph,deletion:CanvasDeletion)
  const finalPaths=paths.map(path=>{const previous=original.paths.find(item=>item.id===path.id)!;if(previous.scenarioId||previous.visits?.some(visit=>visit.operationIds!==undefined))return path;return {...path,visits:path.visits?.map(visit=>{const prior=routeVisits(original,previous).find(item=>item.id===visit.id);const {operationIds,...legacy}=visit;return {...legacy,checkIds:prior?.checkIds?.filter(id=>operationIds?.includes(id)&&tests.has(id))};})};});
  return {graph:{...graph,screens,edges,paths:finalPaths,execution:undefined},warnings:warnings.length?warnings:['Remove this content and its related actions/checks.']};
 }
+
+// Leftovers from a scenario delete that predates edge cleanup. An edge is unused
+// only when both screens exist and no remaining path lists it. Screens, steps,
+// and paths stay. An edge with a missing screen stays too; load and save drop those.
+export function unusedConnections(canvas:CanvasGraph){
+ const screens=new Set(canvas.screens.map(screen=>screen.id));
+ const listed=new Set(canvas.paths.flatMap(path=>path.edgeIds));
+ return canvas.edges.filter(edge=>screens.has(edge.from)&&screens.has(edge.to)&&!listed.has(edge.id));
+}
+export function removeUnusedConnections(canvas:CanvasGraph):CanvasGraph{
+ const unused=new Set(unusedConnections(canvas).map(edge=>edge.id));
+ if(!unused.size)return canvas;
+ return {...canvas,screens:canvas.screens,paths:canvas.paths,edges:canvas.edges.filter(edge=>!unused.has(edge.id))};
+}

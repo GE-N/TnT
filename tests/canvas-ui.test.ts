@@ -234,9 +234,10 @@ test('canvas Run scenario uses the selected path and shows blocked runs in a dis
  const runFromMenu=async()=>{await context();await act(async()=>{const menu=document.querySelector('[role=menu]')!;menu.querySelectorAll<HTMLButtonElement>('button')[1].click();});};
  try{
   await render();await click('Open saved workspace');await showLegacyCanvasControls(document,act);
-  await context();assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(node=>node.textContent),['Add node','Run scenario','View YAML']);
+  await context();assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(node=>node.textContent),['Add node','Run scenario','View YAML','Unused connections…']);
   await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'Run scenario');
   await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'View YAML');
+  await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'Unused connections…');
   await act(async()=>document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));assert.equal(document.activeElement?.textContent,'Add node');
   await runFromMenu();assert.ok(!document.querySelector('[role=menu]'));assert.equal(requests[0].pathId,'');
   const toast=document.querySelector('.run-error-toast[role=alert]')!;assert.match(toast.textContent!,/Cannot run scenario.*Select a nonempty explicit scenario path/);assert.equal(document.querySelector('.scenario-editor [role=alert]'),null);
@@ -244,7 +245,7 @@ test('canvas Run scenario uses the selected path and shows blocked runs in a dis
   await runFromMenu();assert.ok(document.querySelector('.run-error-toast'));
   await act(async()=>{const label=[...document.querySelectorAll('label')].find(node=>node.textContent==='Scenario path')!;const select=document.getElementById(label.htmlFor) as HTMLSelectElement;select.value='route';select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});
   rejectRun=false;await runFromMenu();assert.equal(requests.at(-1)!.pathId,'route');assert.equal(requests.at(-1)!.deviceId,'device');assert.equal(document.querySelector('.run-error-toast'),null);assert.equal(document.querySelector('[data-testid="results-pill"]')!.getAttribute('data-status'),'passed');
-  await render('');await context();assert.deepEqual([...document.querySelectorAll('[role=menu] button')].map(node=>node.textContent),['Add node','View YAML'],'Offline canvas offers Add node and View YAML');assert.equal(document.querySelector('[aria-label="Run scenario"]'),null,'Offline work does not offer an enabled Run scenario control');assert.equal(requests.length,3,'Missing device does not submit a run');
+  await render('');await context();assert.deepEqual([...document.querySelectorAll('[role=menu] button')].map(node=>node.textContent),['Add node','View YAML','Unused connections…'],'Offline canvas offers Add node and View YAML');assert.equal(document.querySelector('[aria-label="Run scenario"]'),null,'Offline work does not offer an enabled Run scenario control');assert.equal(requests.length,3,'Missing device does not submit a run');
  }finally{await act(async()=>root.unmount());dom.window.close();for(const[key,descriptor]of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
 
@@ -315,8 +316,8 @@ test('View YAML on the empty-canvas menu opens the existing YAML card and return
    const surface=document.querySelector<HTMLElement>('.canvas-surface')!;
    await act(async()=>surface.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:80})));
    const items=[...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')];
-   assert.deepEqual(items.map(item=>item.textContent),['Add node','Run scenario','View YAML']);
-   const view=items.at(-1)!;
+   assert.deepEqual(items.map(item=>item.textContent),['Add node','Run scenario','View YAML','Unused connections…']);
+   const view=items.find(item=>item.textContent==='View YAML')!;
    assert.equal(view.className,items[0].className);
    assert.equal(view.disabled,false);
    assert.equal(view.getAttribute('title'),null);
@@ -342,9 +343,11 @@ test('View YAML is disabled with the run-lock reason and the menu still opens wh
    await act(async()=>root.render(createElement(Host)));
    await act(async()=>document.querySelector('.canvas-surface')!.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:90,clientY:90})));
    const items=[...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')];
-   assert.deepEqual(items.map(item=>item.textContent),['View YAML']);
+   assert.deepEqual(items.map(item=>item.textContent),['View YAML','Unused connections…']);
    assert.equal(items[0].disabled,true);
+   assert.equal(items[1].disabled,true);
    assert.equal(items[0].title,'Unavailable while the scenario is running.');
+   assert.equal(items[1].title,'Unavailable while the scenario is running.');
    await act(async()=>items[0].click());
    assert.equal(document.querySelector('[role="dialog"][aria-label="YAML"]'),null);
    await act(async()=>root.render(createElement(CanvasBoard,{graph:scenarioGraph,onViewYaml:()=>{}})));
