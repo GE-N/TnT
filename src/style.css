@@ -1221,3 +1221,14 @@ input:disabled,select:disabled,textarea:disabled{color:var(--muted);background:v
 .results-sheet .rr-spin{flex:none;width:16px;height:16px;border-radius:50%;border:2px solid #d6e4f7;border-top-color:#0a63d1;animation:rr-spin .8s linear infinite}
 .results-sheet [aria-label="Batch report"],.results-sheet [aria-label="Scenario reports"]{margin:0;padding:0;border:0;background:transparent}
 @keyframes rr-spin{to{transform:rotate(360deg)}}
+
+.unused-connections-sheet .unused-connections-foot{gap:8px}
+.unused-connections-sheet .unused-connections-remove,.unused-connections-sheet .unused-connections-cancel{min-height:44px;padding:0 8px;border:0;background:transparent;font-weight:600;box-shadow:none}
+.unused-connections-sheet .unused-connections-remove{color:#b3261e}
+.unused-connections-sheet .unused-connections-cancel{color:#0a63d1}
+.unused-connections-sheet .unused-connections-remove:disabled,.unused-connections-sheet .unused-connections-remove:disabled:hover{color:#9aa0a6;background:transparent;border:0;cursor:default}
+.unused-connections-list{margin:8px 0 0;padding:0;list-style:none}
+.unused-connections-row{padding:10px 0;border-bottom:1px solid #e2e5e9}
+.unused-connections-row strong{display:block;font-size:13px;font-weight:600;line-height:20px;color:#253041}
+.unused-connections-row span{display:block;margin-top:2px;color:#5f6368;font-size:12px;line-height:16px}
+.unused-connections-empty{margin:16px 0 0;color:#253041;font-size:13px;line-height:20px}

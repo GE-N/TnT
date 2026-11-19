@@ -5,10 +5,10 @@ import {useSyncExternalStore} from 'react';
  * The Scenarios panel is not one of these: it may stay open beside them,
  * and ND-11 still hides Node details while Scenarios is open.
  * T3 opens `info` through `useSidePanels()` the same way Versions and Node details do.
- * Settings and Results use the same slot, so opening one closes the others.
+ * Settings, Results, and Unused connections use the same slot, so opening one closes the others.
  * A right sheet should set `data-side-sheet` so canvas placement treats it as an obstacle.
  */
-export type SidePanel = 'info' | 'versions' | 'nodeDetails' | 'settings' | 'results';
+export type SidePanel = 'info' | 'versions' | 'nodeDetails' | 'settings' | 'results' | 'unused';
 
 let current: SidePanel | null = null;
 const listeners = new Set<() => void>();
