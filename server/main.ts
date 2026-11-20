@@ -48,6 +48,13 @@ const runner = createRunner({ artifactDirectory, execute, ownershipDirectory: ow
 const scenarios = createScenarios({ root: ownershipRoot, runner, maestro, prepareProcess: prepareProcess('mockoon'), cancelProcess: cancelProcess('mockoon'), noteProcess: noteProcess('mockoon') });
 const knowledge = createKnowledgeService({ root: ownershipRoot, guard: rootOwnership.guard, renderHtml: renderKnowledgeHtml });
 await knowledge.reconcile();
+// Test-only. `npm run test:e2e` sets this so the production server answers Ask AI
+// with createFakeProvider and never opens a live provider, keychain, or Copilot session.
+const e2eStub = process.env.TNT_E2E_STUB === '1';
+if (e2eStub && (process.env.TNT_LIVE_COPILOT || process.env.TNT_PROVIDER_SMOKE_KEY)) {
+  throw new Error('TNT_E2E_STUB does not run with a live AI provider.');
+}
+const e2eAi = e2eStub ? await (await import('../e2e/ai-stub.js')).createE2eAiOverrides(ownershipRoot) : {};
 const ai = createAi({
   root: ownershipRoot,
   authoring: scenarios.authoring,
@@ -58,6 +65,7 @@ const ai = createAi({
     readContext: (workspaceId, scenarioId) => knowledge.readContext(workspaceId, scenarioId),
   }),
   readDiagram: (workspaceId, scenarioId) => knowledge.readDiagram(workspaceId, scenarioId),
+  ...e2eAi,
 });
 await ai.ready;
 const production = process.argv.includes('--production');

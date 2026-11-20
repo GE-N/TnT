@@ -47,3 +47,37 @@ jobs:
         run: npm run typecheck
       - name: Test
         run: npm test
+
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        if: runner.os == 'Linux'
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+        if: runner.os == 'macOS'
+      - name: End-to-end
+        run: npm run test:e2e
+      - name: Playwright traces and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-${{ runner.os }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
