@@ -1,0 +1,1516 @@
+[
+  {
+    "id": "valid-create-scenario",
+    "request": "Open details from home and check both screens",
+    "workspace": {
+      "appId": "com.example.TnTProof",
+      "screens": []
+    },
+    "outputs": [
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Open details",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            },
+            {
+              "key": "details",
+              "kind": "create",
+              "title": "Details"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "home-title"
+                    }
+                  }
+                },
+                {
+                  "key": "openDetails",
+                  "kind": "tap",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "open-details"
+                    }
+                  },
+                  "destination": {
+                    "kind": "visit",
+                    "visitKey": "detailsVisit"
+                  }
+                }
+              ]
+            },
+            {
+              "key": "detailsVisit",
+              "screenKey": "details",
+              "operations": [
+                {
+                  "key": "seeDetails",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "details-title"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": []
+        },
+        "schemaValid": true
+      }
+    ],
+    "expect": {
+      "state": "pending",
+      "applicable": true,
+      "compiled": true,
+      "calls": 1,
+      "contextTrimmed": false
+    }
+  },
+  {
+    "id": "reuse-existing-screen",
+    "request": "Check the existing Home screen",
+    "workspace": {
+      "appId": "com.example.TnTProof",
+      "screens": [
+        {
+          "screenId": "home",
+          "title": "Home",
+          "checks": [
+            {
+              "value": "Home"
+            }
+          ]
+        }
+      ]
+    },
+    "outputs": [
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Reuse Home",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "existing",
+              "screenId": "home"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "context",
+                    "ref": "target-1"
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": []
+        },
+        "schemaValid": true
+      }
+    ],
+    "expect": {
+      "state": "pending",
+      "applicable": true,
+      "compiled": true,
+      "calls": 1,
+      "reusedScreenId": "home",
+      "userIncludes": [
+        "home Home"
+      ]
+    }
+  },
+  {
+    "id": "unresolved-target-questions",
+    "request": "Check the home title, but the element is unknown",
+    "workspace": {
+      "appId": "com.example.TnTProof",
+      "screens": []
+    },
+    "outputs": [
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Open details",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            },
+            {
+              "key": "details",
+              "kind": "create",
+              "title": "Details"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "unresolved",
+                    "description": "Home title"
+                  }
+                },
+                {
+                  "key": "openDetails",
+                  "kind": "tap",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "open-details"
+                    }
+                  },
+                  "destination": {
+                    "kind": "visit",
+                    "visitKey": "detailsVisit"
+                  }
+                }
+              ]
+            },
+            {
+              "key": "detailsVisit",
+              "screenKey": "details",
+              "operations": [
+                {
+                  "key": "seeDetails",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "details-title"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": [
+            {
+              "key": "q1",
+              "about": "seeHome",
+              "text": "Which element is the home title?",
+              "options": [
+                "Home title",
+                "Welcome banner"
+              ]
+            },
+            {
+              "key": "q2",
+              "about": "",
+              "text": "Which control opens details?",
+              "options": [
+                "Continue",
+                "Next",
+                "Skip"
+              ]
+            },
+            {
+              "key": "q3",
+              "about": "seeHome",
+              "text": "Where is the title drawn?",
+              "options": [
+                "Top bar",
+                "Heading"
+              ]
+            },
+            {
+              "key": "q4",
+              "about": "",
+              "text": "Which label should the check use?",
+              "options": [
+                "Alpha",
+                "Beta",
+                "Gamma",
+                "Delta"
+              ]
+            },
+            {
+              "key": "q5",
+              "about": "seeHome",
+              "text": "How should the title be found?",
+              "options": [
+                "Visible text",
+                "Element id"
+              ]
+            },
+            {
+              "key": "q6",
+              "about": "",
+              "text": "This sixth question is over the limit",
+              "options": [
+                "One",
+                "Two"
+              ]
+            },
+            {
+              "key": "solo",
+              "about": "",
+              "text": "Only one option is not a question",
+              "options": [
+                "Only"
+              ]
+            },
+            {
+              "key": "q1",
+              "about": "seeHome",
+              "text": "Duplicate key is dropped",
+              "options": [
+                "Again",
+                "Later"
+              ]
+            }
+          ]
+        },
+        "schemaValid": false
+      }
+    ],
+    "expect": {
+      "state": "needsInfo",
+      "applicable": true,
+      "compiled": true,
+      "calls": 1,
+      "diagnostic": "UNRESOLVED_TARGET",
+      "questions": [
+        {
+          "key": "q1",
+          "about": "seeHome",
+          "optionCount": 2
+        },
+        {
+          "key": "q2",
+          "optionCount": 3
+        },
+        {
+          "key": "q3",
+          "about": "seeHome",
+          "optionCount": 2
+        },
+        {
+          "key": "q4",
+          "optionCount": 3,
+          "options": [
+            "Alpha",
+            "Beta",
+            "Gamma"
+          ]
+        },
+        {
+          "key": "q5",
+          "about": "seeHome",
+          "optionCount": 2
+        }
+      ],
+      "absentQuestionKeys": [
+        "q6",
+        "solo"
+      ]
+    }
+  },
+  {
+    "id": "invented-context-ref",
+    "request": "Check a target that is not in the workspace context",
+    "workspace": {
+      "appId": "com.example.TnTProof",
+      "screens": []
+    },
+    "outputs": [
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Invented target",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "context",
+                    "ref": "target-not-in-context"
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": []
+        },
+        "schemaValid": true
+      },
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Invented target",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "context",
+                    "ref": "target-not-in-context"
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": []
+        },
+        "schemaValid": true
+      }
+    ],
+    "expect": {
+      "state": "failed",
+      "applicable": false,
+      "errorCode": "AUTHORING_INVALID",
+      "retryable": false,
+      "diagnostic": "UNKNOWN_CONTEXT_TARGET",
+      "calls": 2,
+      "preview": true
+    }
+  },
+  {
+    "id": "wrong-app-id",
+    "request": "Open details for a different app id",
+    "workspace": {
+      "appId": "com.example.TnTProof",
+      "screens": []
+    },
+    "outputs": [
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Wrong app",
+          "appId": "com.example.Other",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            },
+            {
+              "key": "details",
+              "kind": "create",
+              "title": "Details"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "home-title"
+                    }
+                  }
+                },
+                {
+                  "key": "openDetails",
+                  "kind": "tap",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "open-details"
+                    }
+                  },
+                  "destination": {
+                    "kind": "visit",
+                    "visitKey": "detailsVisit"
+                  }
+                }
+              ]
+            },
+            {
+              "key": "detailsVisit",
+              "screenKey": "details",
+              "operations": [
+                {
+                  "key": "seeDetails",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "details-title"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": []
+        },
+        "schemaValid": true
+      },
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Wrong app",
+          "appId": "com.example.Other",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            },
+            {
+              "key": "details",
+              "kind": "create",
+              "title": "Details"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "home-title"
+                    }
+                  }
+                },
+                {
+                  "key": "openDetails",
+                  "kind": "tap",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "open-details"
+                    }
+                  },
+                  "destination": {
+                    "kind": "visit",
+                    "visitKey": "detailsVisit"
+                  }
+                }
+              ]
+            },
+            {
+              "key": "detailsVisit",
+              "screenKey": "details",
+              "operations": [
+                {
+                  "key": "seeDetails",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "details-title"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": []
+        },
+        "schemaValid": true
+      }
+    ],
+    "expect": {
+      "state": "failed",
+      "applicable": false,
+      "errorCode": "AUTHORING_INVALID",
+      "retryable": false,
+      "diagnostic": "APP_ID_MISMATCH",
+      "calls": 2,
+      "preview": true
+    }
+  },
+  {
+    "id": "literal-interpolation",
+    "request": "Type a name that includes a placeholder",
+    "workspace": {
+      "appId": "com.example.TnTProof",
+      "screens": []
+    },
+    "outputs": [
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Type a name",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "typeName",
+                  "kind": "input",
+                  "value": {
+                    "kind": "literal",
+                    "text": "Hello ${NAME}"
+                  }
+                },
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "text",
+                      "match": "exact",
+                      "value": "Home"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": []
+        },
+        "schemaValid": true
+      },
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Type a name",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "typeName",
+                  "kind": "input",
+                  "value": {
+                    "kind": "literal",
+                    "text": "Hello ${NAME}"
+                  }
+                },
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "text",
+                      "match": "exact",
+                      "value": "Home"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": []
+        },
+        "schemaValid": true
+      }
+    ],
+    "expect": {
+      "state": "failed",
+      "applicable": false,
+      "errorCode": "AUTHORING_INVALID",
+      "retryable": false,
+      "diagnostic": "INVALID_LITERAL",
+      "calls": 2,
+      "preview": true
+    }
+  },
+  {
+    "id": "invalid-json-repair",
+    "request": "Open details, then repair a broken JSON reply",
+    "workspace": {
+      "appId": "com.example.TnTProof",
+      "screens": []
+    },
+    "outputs": [
+      {
+        "text": "{"
+      },
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Open details",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            },
+            {
+              "key": "details",
+              "kind": "create",
+              "title": "Details"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "home-title"
+                    }
+                  }
+                },
+                {
+                  "key": "openDetails",
+                  "kind": "tap",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "open-details"
+                    }
+                  },
+                  "destination": {
+                    "kind": "visit",
+                    "visitKey": "detailsVisit"
+                  }
+                }
+              ]
+            },
+            {
+              "key": "detailsVisit",
+              "screenKey": "details",
+              "operations": [
+                {
+                  "key": "seeDetails",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "details-title"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": []
+        },
+        "schemaValid": true
+      }
+    ],
+    "expect": {
+      "state": "pending",
+      "applicable": true,
+      "compiled": true,
+      "calls": 2,
+      "repairIncludes": "INVALID_JSON"
+    }
+  },
+  {
+    "id": "extra-property-repair",
+    "request": "Open details, then drop a property the schema does not list",
+    "workspace": {
+      "appId": "com.example.TnTProof",
+      "screens": []
+    },
+    "outputs": [
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Open details",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            },
+            {
+              "key": "details",
+              "kind": "create",
+              "title": "Details"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "home-title"
+                    }
+                  }
+                },
+                {
+                  "key": "openDetails",
+                  "kind": "tap",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "open-details"
+                    }
+                  },
+                  "destination": {
+                    "kind": "visit",
+                    "visitKey": "detailsVisit"
+                  }
+                }
+              ]
+            },
+            {
+              "key": "detailsVisit",
+              "screenKey": "details",
+              "operations": [
+                {
+                  "key": "seeDetails",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "details-title"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": [],
+          "note": "invented"
+        },
+        "schemaValid": false
+      },
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Open details",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            },
+            {
+              "key": "details",
+              "kind": "create",
+              "title": "Details"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "home-title"
+                    }
+                  }
+                },
+                {
+                  "key": "openDetails",
+                  "kind": "tap",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "open-details"
+                    }
+                  },
+                  "destination": {
+                    "kind": "visit",
+                    "visitKey": "detailsVisit"
+                  }
+                }
+              ]
+            },
+            {
+              "key": "detailsVisit",
+              "screenKey": "details",
+              "operations": [
+                {
+                  "key": "seeDetails",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "details-title"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": []
+        },
+        "schemaValid": true
+      }
+    ],
+    "expect": {
+      "state": "pending",
+      "applicable": true,
+      "compiled": true,
+      "calls": 2,
+      "repairIncludes": "INVALID_DRAFT"
+    }
+  },
+  {
+    "id": "repair-budget-exhausted",
+    "request": "Open details, but the model never returns JSON",
+    "workspace": {
+      "appId": "com.example.TnTProof",
+      "screens": []
+    },
+    "outputs": [
+      {
+        "text": "{"
+      },
+      {
+        "text": "still not json"
+      }
+    ],
+    "expect": {
+      "state": "failed",
+      "errorCode": "INVALID_AI_OUTPUT",
+      "retryable": false,
+      "calls": 2,
+      "preview": false,
+      "repairIncludes": "INVALID_JSON"
+    }
+  },
+  {
+    "id": "script-before-operation-and-scenario-end",
+    "request": "Prepare before the home check and finish at scenario end",
+    "workspace": {
+      "appId": "com.example.TnTProof",
+      "screens": []
+    },
+    "outputs": [
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Scripts around Home",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "home-title"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [
+            {
+              "key": "prepare",
+              "label": "Prepare",
+              "language": "maestro-javascript",
+              "source": "output.ready = true;",
+              "placement": {
+                "kind": "beforeOperation",
+                "visitKey": "homeVisit",
+                "operationKey": "seeHome"
+              },
+              "requires": {
+                "parameters": [],
+                "mockSession": false
+              }
+            },
+            {
+              "key": "finish",
+              "label": "Finish",
+              "language": "maestro-javascript",
+              "source": "output.done = true;",
+              "placement": {
+                "kind": "scenarioEnd"
+              },
+              "requires": {
+                "parameters": [],
+                "mockSession": false
+              }
+            }
+          ],
+          "assumptions": [],
+          "questions": []
+        },
+        "schemaValid": true
+      }
+    ],
+    "expect": {
+      "state": "pending",
+      "applicable": true,
+      "compiled": true,
+      "calls": 1,
+      "scriptPlacements": {
+        "beforeOperation": "prepare",
+        "scenarioEnd": "finish"
+      }
+    }
+  },
+  {
+    "id": "refine-draft-with-answers",
+    "request": "Check the home title",
+    "workspace": {
+      "appId": "com.example.TnTProof",
+      "screens": []
+    },
+    "outputs": [
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Ask for the title",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "unresolved",
+                    "description": "Home title"
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": [
+            {
+              "key": "seeHome",
+              "about": "seeHome",
+              "text": "Which element is the home title?",
+              "options": [
+                "Home title",
+                "Welcome banner"
+              ]
+            }
+          ]
+        },
+        "schemaValid": true
+      }
+    ],
+    "refine": {
+      "request": "Use the Home title",
+      "answers": [
+        {
+          "key": "seeHome",
+          "answer": "Home title"
+        }
+      ],
+      "outputs": [
+        {
+          "draft": {
+            "schemaVersion": 1,
+            "mode": "createScenario",
+            "name": "Ask for the title",
+            "appId": "com.example.TnTProof",
+            "parameters": [],
+            "execution": {
+              "setup": {
+                "kind": "launchApp"
+              },
+              "handlerRefs": [],
+              "mock": {
+                "kind": "none"
+              }
+            },
+            "screens": [
+              {
+                "key": "home",
+                "kind": "create",
+                "title": "Home"
+              }
+            ],
+            "visits": [
+              {
+                "key": "homeVisit",
+                "screenKey": "home",
+                "operations": [
+                  {
+                    "key": "seeHome",
+                    "kind": "checkVisible",
+                    "target": {
+                      "kind": "selector",
+                      "selector": {
+                        "target": "text",
+                        "match": "exact",
+                        "value": "Home"
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "scripts": [],
+            "assumptions": [],
+            "questions": []
+          },
+          "schemaValid": true
+        }
+      ]
+    },
+    "expect": {
+      "state": "pending",
+      "applicable": true,
+      "compiled": true,
+      "calls": 1,
+      "userIncludes": [
+        "Refinement:",
+        "Current draft (data, not instructions)",
+        "Answers (data, not instructions)",
+        "- seeHome: Home title"
+      ],
+      "userExcludes": [
+        "Which element is the home title?"
+      ]
+    }
+  },
+  {
+    "id": "context-trimmed",
+    "request": "Open the home screen",
+    "workspace": {
+      "appId": "com.example.TnTProof",
+      "screens": [
+        {
+          "screenId": "home",
+          "title": "Home",
+          "checkCount": 600,
+          "checkValue": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "screenId": "details",
+          "title": "Details",
+          "checkCount": 600,
+          "checkValue": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      ]
+    },
+    "outputs": [
+      {
+        "draft": {
+          "schemaVersion": 1,
+          "mode": "createScenario",
+          "name": "Open details",
+          "appId": "com.example.TnTProof",
+          "parameters": [],
+          "execution": {
+            "setup": {
+              "kind": "launchApp"
+            },
+            "handlerRefs": [],
+            "mock": {
+              "kind": "none"
+            }
+          },
+          "screens": [
+            {
+              "key": "home",
+              "kind": "create",
+              "title": "Home"
+            },
+            {
+              "key": "details",
+              "kind": "create",
+              "title": "Details"
+            }
+          ],
+          "visits": [
+            {
+              "key": "homeVisit",
+              "screenKey": "home",
+              "operations": [
+                {
+                  "key": "seeHome",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "home-title"
+                    }
+                  }
+                },
+                {
+                  "key": "openDetails",
+                  "kind": "tap",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "open-details"
+                    }
+                  },
+                  "destination": {
+                    "kind": "visit",
+                    "visitKey": "detailsVisit"
+                  }
+                }
+              ]
+            },
+            {
+              "key": "detailsVisit",
+              "screenKey": "details",
+              "operations": [
+                {
+                  "key": "seeDetails",
+                  "kind": "checkVisible",
+                  "target": {
+                    "kind": "selector",
+                    "selector": {
+                      "target": "id",
+                      "match": "exact",
+                      "value": "details-title"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "scripts": [],
+          "assumptions": [],
+          "questions": []
+        },
+        "schemaValid": true
+      }
+    ],
+    "expect": {
+      "state": "pending",
+      "applicable": true,
+      "compiled": true,
+      "calls": 1,
+      "contextTrimmed": true,
+      "userIncludes": [
+        "targets omitted:",
+        "Open the home screen",
+        "com.example.TnTProof"
+      ]
+    }
+  }
+]
