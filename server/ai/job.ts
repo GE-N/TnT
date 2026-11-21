@@ -1,5 +1,3 @@
-import {readFileSync} from 'node:fs';
-import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {parseAllDocuments} from 'yaml';
 import {AuthoringHttpError} from '../authoring/errors.js';
@@ -9,7 +7,7 @@ import {decodeDiagramImage, diagramUserMessage, isMermaidFlow, nextDiagramTurn, 
 import {AiHttpError, CANT_READ_IMAGES, canAutoRetry, mapProviderFailure} from './errors.js';
 import {formatAiLog, type AiLogEvent} from './log.js';
 import {assertUserPrompt, assembleCall, packPrompt, schemaAttachment, type PromptContext} from './prompt.js';
-import {assertAnswers, modelDraftSchema, sanitizeQuestions, splitModelDraft, type ClarifyingAnswer, type ClarifyingQuestion} from './questions.js';
+import {assertAnswers, sanitizeQuestions, splitModelDraft, type ClarifyingAnswer, type ClarifyingQuestion} from './questions.js';
 import {MAX_REPAIR_ROUNDS, repairDecision, repairNote} from './repair.js';
 import {abortError, isAbortError, MAX_ATTEMPT_POSTS, MAX_REPAIR_POSTS, MAX_UPSTREAM_POSTS, ProviderRequestError, RESPONSE_BYTE_LIMIT, type FlowModelProvider, type Msg, type UpstreamBudget, type Usage} from './providers/types.js';
 import {planAnswer, knowledgeUserMessage, proposeKnowledge} from './knowledge-update.js';
@@ -22,9 +20,6 @@ export const MAX_PROVIDER_RETRIES = 1;
 export const MAX_OUTPUT_TOKENS = 8_192;
 export {MAX_ATTEMPT_POSTS, MAX_REPAIR_POSTS, MAX_UPSTREAM_POSTS, RESPONSE_BYTE_LIMIT};
 
-const FLOW_SCHEMA = JSON.parse(readFileSync(fileURLToPath(new URL('../../docs/contracts/ai-flow-v1/flow-draft.schema.json', import.meta.url)), 'utf8')) as object;
-/** Contract schema plus clarifying questions. Sent to the model only; stripped before preview. */
-const MODEL_SCHEMA = modelDraftSchema(FLOW_SCHEMA);
 const APP_ID = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -243,7 +238,7 @@ export function createJobs(deps: {
   settingsRevision: () => Promise<number>;
   readCatalog?: (workspaceId: string) => Promise<ScenarioCatalog>;
   readDiagram?: (workspaceId: string, scenarioId: string) => Promise<StoredDiagram | null>;
-  skills?: {router: Skill; knowledgeUpdate: Skill; diagram: Skill};
+  skills?: {router: Skill; knowledgeUpdate: Skill; diagram: Skill; flow: Skill};
 }) {
   const skills = deps.skills ?? loadBundledSkills();
   const scheduler = deps.scheduler ?? realScheduler();
@@ -295,7 +290,7 @@ export function createJobs(deps: {
     return job;
   }
 
-  async function oneCall(job: StoredJob, resolved: ResolvedModel, system: string, messages: Msg[], parent: AbortSignal, budget: UpstreamBudget, schema: object = MODEL_SCHEMA) {
+  async function oneCall(job: StoredJob, resolved: ResolvedModel, system: string, messages: Msg[], parent: AbortSignal, budget: UpstreamBudget, schema: object = skills.flow.schema) {
     if (job.state !== 'running') return 'stopped' as const;
     const call = new AbortController();
     const onParent = () => call.abort();
@@ -339,7 +334,7 @@ export function createJobs(deps: {
     return {text};
   }
 
-  async function callWithRetries(job: StoredJob, resolved: ResolvedModel, system: string, messages: Msg[], parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number, schema: object = MODEL_SCHEMA) {
+  async function callWithRetries(job: StoredJob, resolved: ResolvedModel, system: string, messages: Msg[], parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number, schema: object = skills.flow.schema) {
     let retried = false;
     for (;;) {
       if (job.state !== 'running') return 'stopped' as const;
@@ -390,6 +385,8 @@ export function createJobs(deps: {
   }
 
   async function execute(job: StoredJob, resolved: ResolvedModel, prompt: string, draft: unknown, answers: ClarifyingAnswer[] | undefined, parent: AbortSignal, budget: ReturnType<typeof submissionBudget>, deadlineAt: number) {
+    job.skill = skills.flow.id;
+    job.skillHash = skills.flow.hash;
     job.phase = 'context';
     const context = await deps.authoring.context({workspaceId: job.workspaceId, expectedRevision: job.baseRevision});
     if (job.state !== 'running') return;
@@ -401,11 +398,11 @@ export function createJobs(deps: {
     if (typeof contextId !== 'string' || !contextId) { fail(job, 'AUTHORING_INVALID', 'The workspace could not be prepared for generation.', false); return; }
     const carriesSchema = resolved.provider.sendsJsonSchema === true;
     // response_format carries the schema, or the instructions do. Reserve whichever copy is not already in the prompt text.
-    const schemaReserve = carriesSchema ? Buffer.byteLength(schemaAttachment(MODEL_SCHEMA)) : 0;
+    const schemaReserve = carriesSchema ? Buffer.byteLength(schemaAttachment(skills.flow.schema)) : 0;
     const packed = packPrompt({
       prompt, appId, context: factsFrom(context), ...(draft !== undefined ? {draft} : {}),
       ...(answers?.length ? {answers} : {}),
-      ...(carriesSchema ? {} : {schema: MODEL_SCHEMA}),
+      ...(carriesSchema ? {} : {schema: skills.flow.schema}),
       extraBytes: schemaReserve,
     });
     if (packed.contextTrimmed) job.contextTrimmed = true;

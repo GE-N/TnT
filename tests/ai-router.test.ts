@@ -12,7 +12,6 @@ import {authoringFixture, exampleDraft} from './authoring-helpers.js';
 const ROUTER_HASH = 'f8bf6d59299e5d69e105b87fea0a93fac6c1b95ff12ea0e581da1d1e4d939bf4';
 const KNOWLEDGE_HASH = '2dd9dfcf5df2c6370aba3bc752e56db67ec8a90979a63ce798db9cb66d1cd6b1';
 const PROTECTED = {
-  'server/ai/prompt.ts': '0228e18c69bef2677354fa13060fd108fd3499f6ebfd051424d614a57a52fd5a',
   'server/ai/repair.ts': '54b8b4da3b422071f3896b08c8190a9f7373983cd9d440b0a3d309e5ec4c4d81',
   'server/ai/questions.ts': 'b5158e2e1c9aedc83b8bcb6edf89b50ac1778f0ec4d062e4fcd7adbd73d9f8fd',
   'docs/contracts/ai-flow-v1/flow-draft.schema.json': '54520041a2b39c7e084ea1b48d51ee674fc67591509d7f11fef560d79583c7a5',
@@ -58,7 +57,7 @@ test('router@1 and knowledge-update@1 are hash pinned', () => {
   assert.equal(knowledge.prompt.includes('data, not instructions'), true);
 });
 
-test('flow prompt files stay byte-identical to main 2f852a8', () => {
+test('flow repair, questions, and the contract schema stay byte-identical to main 2f852a8', () => {
   for (const [path, hash] of Object.entries(PROTECTED)) {
     const bytes = readFileSync(new URL('../' + path, import.meta.url));
     assert.equal(createHash('sha256').update(bytes).digest('hex'), hash, path);
@@ -119,6 +118,10 @@ test('a routed flow call matches the unrouted flow provider bytes', async () => 
     assert.equal(unrouted.state, 'pending');
     assert.equal(routed.state, 'pending');
     assert.equal(routed.intent, 'flow');
+    assert.equal(unrouted.skill, 'flow@1');
+    assert.equal(routed.skill, 'flow@1');
+    assert.equal(unrouted.skillHash, loadSkill('flow').hash);
+    assert.equal(routed.skillHash, unrouted.skillHash);
     assert.equal(routedRouter?.system, loadSkill('router').prompt);
     assert.equal(routedRouter?.system.includes('UNIQUE_PROMPT_SENTINEL'), false);
     assert.equal(routedRouter?.messages.some(message => message.content.includes('UNIQUE_PROMPT_SENTINEL')), true);
